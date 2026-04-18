@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "willow-mcp"
+version = "1.0.0"
+description = "Agent-neutral MCP server — SQLite store, Postgres knowledge base, Kart task queue"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Sean Campbell" }]
+requires-python = ">=3.11"
+keywords = ["mcp", "openclaw", "knowledge-base", "task-queue", "willow"]
+dependencies = [
+    "mcp>=1.0.0",
+    "psycopg2-binary>=2.9",
+    "openclaw-sap-gate>=1.0.0",
+]
+
+[project.scripts]
+willow-mcp = "willow_mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/rudi193-cmd/willow-mcp"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/willow_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
