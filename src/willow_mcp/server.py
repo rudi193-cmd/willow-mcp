@@ -246,9 +246,10 @@ async def _dispatch(name: str, args: dict) -> Any:
         if not pg:
             return {"error": "postgres_unavailable"}
         cur = pg.cursor()
-        query = f"%{args['query']}%"
-        sql = "SELECT id, content, domain, source FROM knowledge WHERE content ILIKE %s"
-        params = [query]
+        tokens = args["query"].split()
+        conditions = " AND ".join(["content ILIKE %s"] * len(tokens))
+        params = [f"%{t}%" for t in tokens]
+        sql = f"SELECT id, content, domain, source FROM knowledge WHERE {conditions}"
         if args.get("domain"):
             sql += " AND domain = %s"
             params.append(args["domain"])
