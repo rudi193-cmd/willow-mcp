@@ -48,66 +48,74 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="store_put",
-            description="Write a value to the local SQLite store.",
-            inputSchema={"type": "object", "required": ["app_id", "collection", "content"],
+            description="Write a record to a collection. Append-only.",
+            inputSchema={"type": "object", "required": ["app_id", "collection", "record"],
                          "properties": {
                              "app_id": {"type": "string"},
                              "collection": {"type": "string"},
-                             "content": {"type": "string"},
-                             "domain": {"type": "string", "default": "default"},
-                             "id": {"type": "string"},
+                             "record": {"type": "object"},
+                             "record_id": {"type": "string"},
+                             "deviation": {"type": "number", "default": 0},
                          }},
         ),
         types.Tool(
             name="store_get",
-            description="Read a value from the local SQLite store by ID.",
-            inputSchema={"type": "object", "required": ["app_id", "collection", "id"],
+            description="Read a single record by ID from a collection.",
+            inputSchema={"type": "object", "required": ["app_id", "collection", "record_id"],
                          "properties": {
                              "app_id": {"type": "string"},
                              "collection": {"type": "string"},
-                             "id": {"type": "string"},
+                             "record_id": {"type": "string"},
                          }},
         ),
         types.Tool(
             name="store_list",
-            description="List atoms in a collection.",
+            description="List all records in a collection.",
             inputSchema={"type": "object", "required": ["app_id", "collection"],
                          "properties": {
                              "app_id": {"type": "string"},
                              "collection": {"type": "string"},
-                             "domain": {"type": "string"},
-                             "limit": {"type": "integer", "default": 20},
+                         }},
+        ),
+        types.Tool(
+            name="store_update",
+            description="Update an existing record.",
+            inputSchema={"type": "object", "required": ["app_id", "collection", "record_id", "record"],
+                         "properties": {
+                             "app_id": {"type": "string"},
+                             "collection": {"type": "string"},
+                             "record_id": {"type": "string"},
+                             "record": {"type": "object"},
+                             "deviation": {"type": "number", "default": 0},
                          }},
         ),
         types.Tool(
             name="store_search",
-            description="Full-text search within a collection.",
+            description="Text search within a collection (all tokens must match).",
             inputSchema={"type": "object", "required": ["app_id", "collection", "query"],
                          "properties": {
                              "app_id": {"type": "string"},
                              "collection": {"type": "string"},
                              "query": {"type": "string"},
-                             "limit": {"type": "integer", "default": 10},
                          }},
         ),
         types.Tool(
             name="store_delete",
-            description="Delete an atom from the store.",
-            inputSchema={"type": "object", "required": ["app_id", "collection", "id"],
+            description="Soft-delete a record from the store.",
+            inputSchema={"type": "object", "required": ["app_id", "collection", "record_id"],
                          "properties": {
                              "app_id": {"type": "string"},
                              "collection": {"type": "string"},
-                             "id": {"type": "string"},
+                             "record_id": {"type": "string"},
                          }},
         ),
         types.Tool(
             name="store_search_all",
-            description="Search across all collections.",
+            description="Search across ALL collections.",
             inputSchema={"type": "object", "required": ["app_id", "query"],
                          "properties": {
                              "app_id": {"type": "string"},
                              "query": {"type": "string"},
-                             "limit": {"type": "integer", "default": 10},
                          }},
         ),
         types.Tool(
@@ -183,36 +191,39 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 async def _dispatch(name: str, args: dict) -> Any:
     # ── Store ──────────────────────────────────────────────────────────
     if name == "store_put":
-        atom_id = _store.put(
-            collection=args["collection"],
-            content=args["content"],
-            domain=args.get("domain", "default"),
-            atom_id=args.get("id"),
+        rid, action = _store.put(
+            args["collection"],
+            args["record"],
+            record_id=args.get("record_id"),
+            deviation=args.get("deviation", 0.0),
         )
-        return {"id": atom_id, "collection": args["collection"]}
+        return {"id": rid, "action": action}
 
     if name == "store_get":
-        item = _store.get(args["collection"], args["id"])
+        item = _store.get(args["collection"], args["record_id"])
         return item or {"error": "not_found"}
 
     if name == "store_list":
-        return {"items": _store.list_atoms(
+        return _store.all(args["collection"])
+
+    if name == "store_update":
+        rid = _store.update(
             args["collection"],
-            domain=args.get("domain"),
-            limit=args.get("limit", 20),
-        )}
+            args["record_id"],
+            args["record"],
+            deviation=args.get("deviation", 0.0),
+        )
+        return {"id": rid} if rid else {"error": "not_found"}
 
     if name == "store_search":
-        return {"results": _store.search(
-            args["collection"], args["query"], limit=args.get("limit", 10)
-        )}
+        return _store.search(args["collection"], args["query"])
 
     if name == "store_delete":
-        deleted = _store.delete(args["collection"], args["id"])
+        deleted = _store.delete(args["collection"], args["record_id"])
         return {"deleted": deleted}
 
     if name == "store_search_all":
-        return {"results": _store.search_all(args["query"], limit=args.get("limit", 10))}
+        return _store.search_all(args["query"])
 
     # ── Knowledge ──────────────────────────────────────────────────────
     if name == "knowledge_ingest":

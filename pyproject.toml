@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "willow-mcp"
-version = "1.0.0"
+version = "1.1.0"
 description = "Agent-neutral MCP server — SQLite store, Postgres knowledge base, Kart task queue"
 readme = "README.md"
 license = { text = "MIT" }
