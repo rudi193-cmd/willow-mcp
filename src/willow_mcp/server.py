@@ -48,126 +48,156 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="store_put",
-            description="Write a record to a collection. Append-only.",
+            description=(
+                "Write a record to a named collection. Append-only — every write gets a unique ID. "
+                "Returns the record ID and an action label (work_quiet/flag/stop) based on the angular "
+                "deviation rubric. High deviation (>0.6 rad) auto-flags the record for review."
+            ),
             inputSchema={"type": "object", "required": ["app_id", "collection", "record"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "collection": {"type": "string"},
-                             "record": {"type": "object"},
-                             "record_id": {"type": "string"},
-                             "deviation": {"type": "number", "default": 0},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier — must match your SAFE manifest app_id"},
+                             "collection": {"type": "string", "description": "Collection path, e.g. 'knowledge/atoms', 'agents/kart', 'feedback'"},
+                             "record": {"type": "object", "description": "Record data as a JSON object — any shape"},
+                             "record_id": {"type": "string", "description": "Optional custom ID. Auto-generated (BASE17) if omitted."},
+                             "deviation": {"type": "number", "default": 0, "description": "Angular deviation in radians: 0=routine, 0.785=significant, 1.571=major, 3.14=reversal"},
                          }},
         ),
         types.Tool(
             name="store_get",
-            description="Read a single record by ID from a collection.",
+            description="Read a single record by ID from a collection. Returns the full record object, or {error: not_found} if missing.",
             inputSchema={"type": "object", "required": ["app_id", "collection", "record_id"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "collection": {"type": "string"},
-                             "record_id": {"type": "string"},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier"},
+                             "collection": {"type": "string", "description": "Collection path the record lives in"},
+                             "record_id": {"type": "string", "description": "Record ID returned by store_put or store_search"},
                          }},
         ),
         types.Tool(
             name="store_list",
-            description="List all records in a collection.",
+            description=(
+                "Return every record in a collection. Use store_search for large collections — "
+                "store_list returns everything with no filtering."
+            ),
             inputSchema={"type": "object", "required": ["app_id", "collection"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "collection": {"type": "string"},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier"},
+                             "collection": {"type": "string", "description": "Collection path to enumerate, e.g. 'hanuman/flags'"},
                          }},
         ),
         types.Tool(
             name="store_update",
-            description="Update an existing record.",
+            description="Update an existing record in-place. Every update is audit-trailed with the previous value. Use store_put to create new records.",
             inputSchema={"type": "object", "required": ["app_id", "collection", "record_id", "record"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "collection": {"type": "string"},
-                             "record_id": {"type": "string"},
-                             "record": {"type": "object"},
-                             "deviation": {"type": "number", "default": 0},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier"},
+                             "collection": {"type": "string", "description": "Collection path containing the record"},
+                             "record_id": {"type": "string", "description": "ID of the record to update"},
+                             "record": {"type": "object", "description": "New record data — replaces the existing record entirely"},
+                             "deviation": {"type": "number", "default": 0, "description": "Angular deviation in radians for this change (default 0)"},
                          }},
         ),
         types.Tool(
             name="store_search",
-            description="Text search within a collection (all tokens must match).",
+            description=(
+                "Full-text search within a single collection. All query tokens must match (AND logic). "
+                "Use store_search_all to search across every collection at once."
+            ),
             inputSchema={"type": "object", "required": ["app_id", "collection", "query"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "collection": {"type": "string"},
-                             "query": {"type": "string"},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier"},
+                             "collection": {"type": "string", "description": "Collection path to search within"},
+                             "query": {"type": "string", "description": "Search terms — multiple words are ANDed together"},
                          }},
         ),
         types.Tool(
             name="store_delete",
-            description="Soft-delete a record from the store.",
+            description=(
+                "Soft-delete a record — it becomes invisible to store_get and store_search but is retained "
+                "in the audit trail. Not a hard delete; the record can be recovered. "
+                "To archive instead, use store_update with domain='archived'."
+            ),
             inputSchema={"type": "object", "required": ["app_id", "collection", "record_id"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "collection": {"type": "string"},
-                             "record_id": {"type": "string"},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier"},
+                             "collection": {"type": "string", "description": "Collection path containing the record"},
+                             "record_id": {"type": "string", "description": "ID of the record to soft-delete"},
                          }},
         ),
         types.Tool(
             name="store_search_all",
-            description="Search across ALL collections.",
+            description=(
+                "Search across ALL SOIL collections simultaneously. Use when you don't know which "
+                "collection holds the answer. Slower than store_search — prefer store_search when the "
+                "collection is known."
+            ),
             inputSchema={"type": "object", "required": ["app_id", "query"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "query": {"type": "string"},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier"},
+                             "query": {"type": "string", "description": "Search terms to match across every collection"},
                          }},
         ),
         types.Tool(
             name="knowledge_ingest",
-            description="Add a knowledge atom to the Postgres knowledge base.",
+            description=(
+                "Add a knowledge atom to the Postgres knowledge base (LOAM). "
+                "Writes to the knowledge table. Check for duplicates before ingesting. "
+                "Requires Postgres to be available."
+            ),
             inputSchema={"type": "object", "required": ["app_id", "content"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "content": {"type": "string"},
-                             "domain": {"type": "string", "default": "general"},
-                             "source": {"type": "string"},
-                             "tags": {"type": "array", "items": {"type": "string"}},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier"},
+                             "content": {"type": "string", "description": "Atom content or file path — for file-backed atoms, store the path here"},
+                             "domain": {"type": "string", "default": "general", "description": "Domain namespace: 'general', 'code', 'decision', 'reference', or a custom namespace"},
+                             "source": {"type": "string", "description": "Origin identifier, e.g. session ID, file path, or URL (optional)"},
+                             "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional list of tag strings for filtering"},
                          }},
         ),
         types.Tool(
             name="knowledge_search",
-            description="Search the Postgres knowledge base.",
+            description=(
+                "Search the Postgres knowledge base (LOAM) by content. "
+                "All query tokens must match. Filter by domain to narrow results. "
+                "Requires Postgres to be available."
+            ),
             inputSchema={"type": "object", "required": ["app_id", "query"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "query": {"type": "string"},
-                             "domain": {"type": "string"},
-                             "limit": {"type": "integer", "default": 10},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier"},
+                             "query": {"type": "string", "description": "Search terms — all tokens must appear in the content"},
+                             "domain": {"type": "string", "description": "Optional domain filter to restrict results to one namespace"},
+                             "limit": {"type": "integer", "default": 10, "description": "Maximum number of results to return (default 10)"},
                          }},
         ),
         types.Tool(
             name="task_submit",
-            description="Submit a task to the Kart execution queue.",
+            description=(
+                "Submit a task to the Kart sandboxed execution queue. Kart runs the task in a bubblewrap "
+                "sandbox (no network, isolated PID/filesystem). Returns a task_id for polling with task_status. "
+                "Requires Postgres to be available."
+            ),
             inputSchema={"type": "object", "required": ["app_id", "task"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "task": {"type": "string", "description": "Task text for Kart to execute"},
-                             "agent": {"type": "string", "default": "kart"},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier — also recorded as the submitting agent"},
+                             "task": {"type": "string", "description": "Shell command or task description for Kart to execute"},
+                             "agent": {"type": "string", "default": "kart", "description": "Target worker agent (default: 'kart')"},
                          }},
         ),
         types.Tool(
             name="task_status",
-            description="Check status of a submitted task.",
+            description="Poll the status of a submitted Kart task by task_id. Returns status, result, and completion time.",
             inputSchema={"type": "object", "required": ["app_id", "task_id"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "task_id": {"type": "string"},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier"},
+                             "task_id": {"type": "string", "description": "Task ID returned by task_submit"},
                          }},
         ),
         types.Tool(
             name="task_list",
-            description="List pending tasks in the queue.",
+            description="List pending tasks in the Kart queue. Use to inspect backlog before submitting new work.",
             inputSchema={"type": "object", "required": ["app_id"],
                          "properties": {
-                             "app_id": {"type": "string"},
-                             "agent": {"type": "string", "default": "kart"},
-                             "limit": {"type": "integer", "default": 10},
+                             "app_id": {"type": "string", "description": "SAP/1.0 app identifier"},
+                             "agent": {"type": "string", "default": "kart", "description": "Agent queue to inspect (default: 'kart')"},
+                             "limit": {"type": "integer", "default": 10, "description": "Maximum number of pending tasks to return (default 10)"},
                          }},
         ),
     ]
