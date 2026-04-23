@@ -1,21 +1,25 @@
 # willow-mcp
 
-Agent-neutral MCP server. SQLite store (aligned with willow-1.7 WillowStore schema), Postgres knowledge base, Kart task queue. SAP/1.0 authorization on every tool call.
+[![PyPI](https://img.shields.io/pypi/v/willow-mcp)](https://pypi.org/project/willow-mcp/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-1.0-blue)](https://modelcontextprotocol.io)
+
+Agent-neutral MCP server with persistent memory and task execution. Works with any MCP client: Claude Code, Claude Desktop, Cursor, or any custom agent that speaks stdio MCP.
+
+**Three storage backends in one server:**
+- **SOIL store** — SQLite-backed local key/value store with full-text search and soft delete
+- **Postgres knowledge base** — multi-keyword searchable knowledge graph
+- **Kart task queue** — sandboxed task executor for shell commands and scripts
+
+Every tool call is authorized via [SAP/1.0](https://github.com/rudi193-cmd/sap-rfc) — a filesystem-based identity gate with no ACL database.
+
+## Install
 
 ```bash
 pip install willow-mcp
 ```
 
-## v1.1.0 — Breaking changes
-
-Store API now matches willow-1.7 `sap_mcp.py` exactly:
-- `store_put`: takes `record` (JSON object) + optional `deviation` float — not `content` string
-- `store_get` / `store_delete`: use `record_id` not `id`
-- `store_list`: returns flat list, not `{items: [...]}`
-- `store_update`: new tool
-- `store_search`: multi-keyword AND (all tokens must match)
-- Schema: `records` table with JSON blob, soft delete, deviation scoring
-- `WILLOW_STORE_ROOT` shares SQLite files with willow-1.7 when set to the same path
+Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 
 ## Tools
 
@@ -49,7 +53,7 @@ Every tool requires an `app_id` param. Authorization is checked via [SAP/1.0](ht
 }
 ```
 
-On Sean's machine the global Claude Code config overrides this to `willow-1.7/sap_mcp.py` for full SAP access. The tool API is identical — apps work against both transparently.
+You can also run the full [willow-1.9](https://github.com/rudi193-cmd/willow-1.9) server directly — the tool API is identical, apps work against both transparently.
 
 ## Configuration
 
