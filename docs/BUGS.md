@@ -22,6 +22,9 @@ log carries a one-line entry and points there rather than duplicating.
 | B-14 | P0 | Fixed | Kart sandbox / trust root | Kart bwrap had R+W to `$WILLOW_HOME/mcp_apps` (manifests + identity bindings) — untrusted runtime could rewrite the ACLs that gate it. Fixed: `mcp_apps` now `bound_ro` in bwrap | FRANK `baf2f63a`, `293b2130`; willow-2.0#777; probe `MAGSU06N` |
 | B-15 | P3 | Open | knowledge / kb | `kb_startup_continuity` silently returns empty — keyed off a `tags`/continuity-domain shape the adopted DB doesn't have | issue #20 |
 | B-16 | P3 | Open | server pipeline | `_sanitize` fires before the permission gate on `store_put` — a denied caller can still trip sanitizer errors first (ordering nit) | FRANK `90960b8b` |
+| B-17 | P2 | Open | schema / tasks | `task_status` never surfaces completion time — `tasks.completed_at`/`steps` are unmapped, so `completed_at` is `null` even for `completed` tasks | this session |
+| B-18 | P3 | Open | diagnostics | `diagnostic_summary` returns verdict `degraded` when the caller merely omits `app_id` — conflates a missing argument with a broken install, diluting the signal | this session |
+| B-19 | P2 | Open | task interface / Kart | `task_submit` has no `allow_net` — willow-mcp's Kart lane is hardwired net-isolated, so a willow-mcp-only session cannot do git/push/`gh` work at all | this session |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -59,6 +62,48 @@ permission can still surface a sanitizer error instead of a clean permission
 denial. Minor ordering nit, not a security hole (the gate still denies dispatch);
 worth aligning so denial is the first signal. Note L-DOS-01's fix already
 reordered rate-check after gate for a different reason — same spirit.
+
+### B-17 · P2 · `task_status` never surfaces task completion time
+**Component:** schema mapping / `tasks` table
+**Found:** 2026-07-08, live boot + PR session (probes `MAGSU06N`, `E3BD68F7`).
+
+Against the adopted `willow_20` DB the `tasks` mapping leaves `completed_at` and
+`steps` **unmapped** — `diagnostic_summary` reports both under `unmapped`, and
+every `task_status` call returns `completed_at: null, steps: null,
+_unmapped: [steps, completed_at]`, even for a task whose `status` is `completed`.
+A caller can see *that* a task finished but not *when*, and can't compute elapsed
+time from the tool output. The underlying column exists in the adopted schema; it
+just isn't mapped. Fix is a one-line mapping addition (mirror the B-10/B-11
+confirm-with-evidence path) or a documented reason the column is intentionally
+dropped.
+
+### B-18 · P3 · `diagnostic_summary` verdict `degraded` on a missing `app_id` argument
+**Component:** `diagnostic_summary`
+
+Called with no `app_id`, `diagnostic_summary` returns verdict `degraded` whose
+sole `problem` is `"no app_id supplied"` — a caller omission, not an install
+defect. Store, Postgres, schema, and identity-binding checks were all `ok`. The
+verdict is the one field meant to answer "is this install wired correctly," so
+folding a missing-argument case into `degraded` dilutes it: a genuinely broken
+install and a forgotten parameter read the same. Fix: treat missing `app_id` as
+an `info`/`warn` on the manifest sub-check only, and keep the top-level verdict
+`ok` when every probed subsystem is healthy — or add a distinct
+`caller_input` verdict tier.
+
+### B-19 · P2 · `task_submit` has no `allow_net` — willow-mcp's Kart lane is hardwired isolated
+**Component:** `task_submit` / Kart execution lane
+
+willow-mcp's `task_submit(app_id, task, agent)` exposes no network control; its
+Kart tasks always run `allow_net: false` (verified: probe `MAGSU06N` ran with
+`network_mode: isolated`). The fleet `willow` server's `agent_task_submit`
+carries `allow_net`, but a session constrained to the willow-mcp server only —
+exactly the scope the 2026-07-08l handoff mandates — therefore cannot run any
+`git push`/`gh`/`curl` work. Landing PR #24 required falling back to the fleet
+`willow` server's net lane, breaking the willow-mcp-only constraint. Fix: add an
+`allow_net` (and `allow_localhost`) parameter to willow-mcp's `task_submit`,
+gated by manifest permission, so network-bearing execution is expressible within
+the willow-mcp scope. Cross-ref FRANK `188aefb9` (a net-dependent PR flow that
+this gap forces onto the fleet lane).
 
 ## Fixed
 
