@@ -1,4 +1,4 @@
-"""Tests for the SQLite Store — aligned with willow-1.7 WillowStore schema."""
+"""Tests for the SQLite Store — aligned with willow-2.0 WillowStore schema."""
 
 import pytest
 from willow_mcp.db import Store
