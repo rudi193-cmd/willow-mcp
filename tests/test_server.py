@@ -10,6 +10,7 @@ during that fix.
 import json
 
 import pytest
+from psycopg2.extras import Json
 from willow_mcp import server
 
 
@@ -127,6 +128,10 @@ class _FakePgCursor:
 
     def fetchone(self):
         return self._result[0] if self._result else None
+
+    @property
+    def rowcount(self):
+        return len(self._result)
 
     def close(self):
         pass
@@ -296,4 +301,138 @@ def test_kb_startup_continuity_schema_unusable_without_id_column(app_id, monkeyp
     fake = _FakePg(columns=[("domain", "text")])
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     result = server.kb_startup_continuity(app_id=app_id)
+    assert "schema_unusable" in result["error"]
+
+
+# ── schema_confirm_mapping and the write-path gate (docs/design/schema-adaptation.md §3.4/§9 step 3) ──
+#
+# knowledge_ingest / kb_journal / kb_promote must refuse to write until the
+# table's mapping is confirmed (schema_confirm_mapping). These tests use the
+# same _FakePg double as the read-path tests; confirming and then writing
+# against the *same* fake instance keeps db_fingerprint consistent between
+# the two calls, the way a real Postgres connection would.
+
+def test_schema_confirm_mapping_unknown_table(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.schema_confirm_mapping(app_id=app_id, table="not_a_real_table")
+    assert "unknown_table" in result["error"]
+
+
+def test_schema_confirm_mapping_postgres_unavailable(app_id, monkeypatch):
+    monkeypatch.setattr(server, "get_pg", lambda: None)
+    result = server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+    assert result == {"error": "postgres_unavailable"}
+
+
+def test_schema_confirm_mapping_marks_confirmed(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+    assert result["confirmed"] is True
+    assert result["fields"]["source"]["column"] == "source_type"
+
+
+def test_schema_confirm_mapping_applies_overrides(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.schema_confirm_mapping(app_id=app_id, table="knowledge", overrides={"tags": None})
+    assert result["fields"]["tags"] == {"column": None, "tier": "unmapped", "confidence": 0.0, "data_type": None}
+
+
+def test_schema_confirm_mapping_denied_without_schema_admin(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / "writer_only"
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(json.dumps({"permissions": ["knowledge_write"]}))
+
+    result = server.schema_confirm_mapping(app_id="writer_only", table="knowledge")
+    assert "denied" in result["error"]
+
+
+def test_knowledge_ingest_refuses_until_confirmed(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.knowledge_ingest(app_id=app_id, content="hello")
+
+    assert "unconfirmed_schema" in result["error"]
+    # nothing beyond the introspection query ran — no write attempted
+    assert len(fake.executed) == 1
+
+
+def test_knowledge_ingest_writes_mapped_columns_and_casts_jsonb_after_confirm(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+
+    result = server.knowledge_ingest(app_id=app_id, content="hello world", domain="general", source="session")
+
+    assert "id" in result
+    insert_sql, params = fake.executed[-1]
+    assert insert_sql.startswith("INSERT INTO knowledge")
+    assert '"source_type"' in insert_sql   # alias-mapped column used, not the canonical name
+    assert '"tags"' not in insert_sql      # never reference an unmapped column
+    # content targets a jsonb column -> must be wrapped for psycopg2 to adapt as JSON
+    content_param = params[1]
+    assert isinstance(content_param, Json)
+    assert content_param.adapted == "hello world"
+
+
+def test_knowledge_ingest_schema_unusable_when_content_unmapped_even_if_confirmed(app_id, monkeypatch):
+    fake = _FakePg(columns=[("id", "text"), ("domain", "text")])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")  # confirms with content unmapped
+
+    result = server.knowledge_ingest(app_id=app_id, content="hello")
+    assert "schema_unusable" in result["error"]
+
+
+def test_kb_journal_refuses_until_confirmed(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.kb_journal(app_id=app_id, content="note")
+    assert "unconfirmed_schema" in result["error"]
+
+
+def test_kb_journal_forces_domain_journal_and_unions_tags_after_confirm(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS + [("tags", "text")])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+
+    result = server.kb_journal(app_id=app_id, content="note", tags=["extra"])
+
+    assert result["domain"] == "journal"
+    insert_sql, params = fake.executed[-1]
+    assert '"tags"' in insert_sql
+    assert set(params[-1]) == {"journal", "extra"}
+
+
+def test_kb_promote_refuses_until_confirmed(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.kb_promote(app_id=app_id, atom_id="A1", domain="general")
+    assert "unconfirmed_schema" in result["error"]
+
+
+def test_kb_promote_updates_mapped_columns_after_confirm(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS, canned_rows=[("A1",)])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+
+    result = server.kb_promote(app_id=app_id, atom_id="A1", domain="archived")
+
+    assert result == {"id": "A1", "domain": "archived"}
+    update_sql, params = fake.executed[-1]
+    assert 'UPDATE knowledge SET "domain" = %s WHERE "id" = %s' in update_sql
+    assert params == ("archived", "A1")
+
+
+def test_kb_promote_schema_unusable_when_domain_unmapped_even_if_confirmed(app_id, monkeypatch):
+    fake = _FakePg(columns=[("id", "text"), ("content", "jsonb")])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+
+    result = server.kb_promote(app_id=app_id, atom_id="A1", domain="general")
     assert "schema_unusable" in result["error"]

@@ -64,6 +64,13 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "fleet_read": frozenset({
         "fleet_status", "fleet_health",
     }),
+    # Confirming a schema mapping unlocks write tools for a whole table — a
+    # more consequential act than any single write, so it's gated as its
+    # own group rather than folded into knowledge_write (docs/design/
+    # schema-adaptation.md §8 open question, resolved this way).
+    "schema_admin": frozenset({
+        "schema_confirm_mapping",
+    }),
     "full_access": frozenset({
         # Core store
         "store_put", "store_get", "store_list", "store_update",
@@ -78,6 +85,8 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "agent_route", "agent_dispatch_result",
         # Fleet (read-only)
         "fleet_status", "fleet_health",
+        # Schema admin
+        "schema_confirm_mapping",
     }),
 }
 

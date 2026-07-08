@@ -40,7 +40,13 @@ class _FakeConn:
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
+    """schema_profile._apps_root() checks WILLOW_MCP_APPS_ROOT before
+    WILLOW_HOME (same precedence as gate.py) — conftest.py sets
+    WILLOW_MCP_APPS_ROOT once for the whole session, so setting only
+    WILLOW_HOME here would NOT isolate mapping artifacts between tests.
+    Both must be pinned to this test's own tmp_path."""
     monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "mcp_apps"))
     return tmp_path
 
 
@@ -208,6 +214,77 @@ def test_resolve_unconfirmed_recomputes_without_error(home):
     second = sp.resolve(conn, "testapp", "knowledge", CANONICAL)
     assert first["fields"] == second["fields"]
     assert second["confirmed"] is False
+
+
+# ── confirm ─────────────────────────────────────────────────────────────
+
+def test_confirm_from_scratch_marks_confirmed_and_persists(home):
+    conn = _FakeConn(KNOWLEDGE_LIKE_COLUMNS)
+    record = sp.confirm(conn, "testapp", "knowledge", CANONICAL)
+    assert record["confirmed"] is True
+    assert "confirmed_at" in record
+    assert record["fields"]["source"]["column"] == "source_type"
+
+    fp = sp.db_fingerprint(conn)
+    on_disk = sp.load_mapping("testapp", fp, "knowledge")
+    assert on_disk == record
+
+
+def test_confirm_table_not_found(home):
+    conn = _FakeConn({})
+    record = sp.confirm(conn, "testapp", "ghost_table", CANONICAL)
+    assert record == {"error": "table_not_found", "table": "ghost_table"}
+
+
+def test_confirm_preserves_prior_unconfirmed_heuristic_as_base(home):
+    conn = _FakeConn(KNOWLEDGE_LIKE_COLUMNS)
+    heuristic = sp.resolve(conn, "testapp", "knowledge", CANONICAL)
+    assert heuristic["confirmed"] is False
+
+    confirmed = sp.confirm(conn, "testapp", "knowledge", CANONICAL)
+    assert confirmed["confirmed"] is True
+    assert confirmed["fields"] == heuristic["fields"]
+    assert confirmed["discovered_at"] == heuristic["discovered_at"]
+
+
+def test_confirm_applies_valid_override(home):
+    conn = _FakeConn(KNOWLEDGE_LIKE_COLUMNS)
+    record = sp.confirm(conn, "testapp2", "knowledge", CANONICAL, overrides={"source": "source_type"})
+    assert record["fields"]["source"] == {
+        "column": "source_type", "tier": "confirmed_override",
+        "confidence": 1.0, "data_type": "text",
+    }
+
+
+def test_confirm_override_to_none_marks_unmapped(home):
+    conn = _FakeConn(KNOWLEDGE_LIKE_COLUMNS)
+    record = sp.confirm(conn, "testapp3", "knowledge", CANONICAL, overrides={"domain": None})
+    assert record["fields"]["domain"] == {"column": None, "tier": "unmapped", "confidence": 0.0, "data_type": None}
+
+
+def test_confirm_rejects_override_to_nonexistent_column(home):
+    conn = _FakeConn(KNOWLEDGE_LIKE_COLUMNS)
+    record = sp.confirm(conn, "testapp4", "knowledge", CANONICAL, overrides={"tags": "no_such_column"})
+    assert record == {
+        "error": "override_invalid", "field": "tags", "column": "no_such_column", "table": "knowledge",
+    }
+
+
+def test_confirm_rejects_override_for_unknown_field(home):
+    conn = _FakeConn(KNOWLEDGE_LIKE_COLUMNS)
+    record = sp.confirm(conn, "testapp5", "knowledge", CANONICAL, overrides={"not_a_field": "id"})
+    assert record == {"error": "unknown_field", "field": "not_a_field", "table": "knowledge"}
+
+
+def test_confirm_is_idempotent_and_reconfirmable(home):
+    conn = _FakeConn(KNOWLEDGE_LIKE_COLUMNS)
+    first = sp.confirm(conn, "testapp6", "knowledge", CANONICAL)
+    second = sp.confirm(conn, "testapp6", "knowledge", CANONICAL, overrides={"tags": None})
+    assert first["confirmed"] is True
+    assert second["confirmed"] is True
+    assert second["fields"]["tags"]["tier"] == "unmapped"
+    # non-overridden fields carried forward unchanged
+    assert second["fields"]["id"] == first["fields"]["id"]
 
 
 # ── cast_for_ilike ──────────────────────────────────────────────────────
