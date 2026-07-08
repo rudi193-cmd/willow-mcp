@@ -1,8 +1,10 @@
 # Design: Schema Adaptation for External Data — Databases and Identity Claims
 
-Status: DRAFT — not yet implemented or ratified.
+Status: DRAFT — §§1–5, 7–9 not yet implemented or ratified. **§6.3's core
+binding mechanism (`identity_binding.py`) has since shipped** — see the
+correction note at the top of §6 before reading it as a problem statement.
 Author: Ada (fleet id: willow), 2026-07-08, following operator design conversation.
-Motivating incidents (two, same root cause):
+Motivating incidents (two, same root cause at the time this doc was drafted):
 
 1. PR #3 smoke test — `knowledge_search`, `kb_startup_continuity`, and `kb_at`
    crashed with `UndefinedColumn: "source"` against a real production `knowledge`
@@ -11,15 +13,17 @@ Motivating incidents (two, same root cause):
    own and never created. `fleet_status` succeeded in the same test, because it
    happened to match the real `agents` table by coincidence — proving the tool
    *can* usefully read a live host schema when the assumption is right, and
-   crashes hard when it isn't.
-2. OAuth review (this session, same day) — `oauth.py`'s Google and Apple
-   callbacks each verify identity, compute `(email, sub)`, and then discard it:
-   never attached to the issued access token, never passed to `gate.py`. The
-   operator's framing on hearing this: it's the same problem, because "each
-   OAuth input also has its own schema" — Google's `tokeninfo` response and
-   Apple's JWT payload are two different, divergent shapes for "who signed
-   in," exactly as two Postgres databases are two different shapes for "what
-   is a knowledge atom." See §6.
+   crashes hard when it isn't. **Still true as of 2026-07-08** — verified
+   against a live schema; see §1 (unchanged).
+2. OAuth review (earlier the same day this doc was drafted) — at the time,
+   `oauth.py`'s Google and Apple callbacks appeared to verify identity,
+   compute `(email, sub)`, and discard it. **This turned out to be wrong on
+   closer reading** — a later same-day code read found the identity *is*
+   attached to the issued token and *is* read by `gate.py`; see the
+   correction note at the top of §6. What's still true, and still motivates
+   §6 as a design: Google's `tokeninfo` response and Apple's JWT payload are
+   two different, divergent shapes for "who signed in" — that framing holds
+   independent of whether the binding code existed yet.
 
 See conversation log for the full reasoning trail on both.
 
@@ -143,6 +147,7 @@ Stored at `$WILLOW_HOME/mcp_apps/<app_id>/schema_maps/<db_fingerprint>__<table>.
 
 ```json
 {
+  "schema_version": 1,
   "database": "postgres://host/dbname",
   "table": "knowledge",
   "discovered_at": "2026-07-08T03:40:00Z",
@@ -156,6 +161,10 @@ Stored at `$WILLOW_HOME/mcp_apps/<app_id>/schema_maps/<db_fingerprint>__<table>.
   }
 }
 ```
+
+`schema_version` exists so a mapping artifact is legible as *which declared
+shape* produced it — required for alignment with the cross-project
+shape-projection contract; see §9.
 
 `confirmed` starts `false` (heuristic only). A human — or an explicit
 `schema_confirm_mapping` tool call gated the same way `knowledge_ingest` is
@@ -225,12 +234,31 @@ snapshot, tool called, confirmed-by (human/heuristic).
 
 ## 6. A second instance of the same problem: OAuth identity claims
 
-The operator's observation: this isn't two problems, it's one problem seen
-twice. A host Postgres database is an external schema willow-mcp must not
-assume it understands. An identity provider's claims are exactly the same
-thing — Google and Apple each hand back "who signed in" in a different shape,
-and §§1–5 above apply almost unchanged if "table" is read as "identity
-provider" and "column" as "claim."
+**Correction (2026-07-08, same day, later pass):** this section originally
+opened on the premise that identity binding didn't exist yet — verified
+false on a direct re-read of `oauth.py`, `identity_binding.py`, and
+`server.py`. **§6.3's binding mechanism is already built and wired**:
+`propose_binding` / `confirm_binding` / `resolve_app_id` in
+`identity_binding.py` implement steps 1–3 below exactly, and
+`server.py`'s `_resolve_serve_identity()` already calls `resolve_app_id`
+before `gate.permitted()` runs, fail-closed. See KB atom `E46DB231`
+(canonical, supersedes the stale claim that identity is "verified then
+discarded") for the full trace. What's still open, scoped down from the
+original problem statement: **§6.2's `email_basis`-aware canonical identity
+record does not exist** (today's code passes a raw `email` string with no
+provenance tag), and **§6.3 step 4's drift detection is not implemented**
+(a changed email for an existing `(issuer, subject_id)` is silently accepted
+rather than flagged). The rest of this section is kept for the parts still
+worth building, with each subsection marked done/open below.
+
+The operator's original observation still holds as the reason this section
+exists at all: a host Postgres database is an external schema willow-mcp
+must not assume it understands, and an identity provider's claims are the
+same kind of thing — Google and Apple each hand back "who signed in" in a
+different shape, and §§1–5 above apply almost unchanged if "table" is read
+as "identity provider" and "column" as "claim." That framing motivated
+building the binding mechanism that now exists; it was never wrong, only
+the "nothing has been built yet" framing around it was.
 
 ### 6.1 The two claim shapes, as they exist today
 
@@ -247,13 +275,16 @@ provider" and "column" as "claim."
   one, no `email_verified` claim at all (trust is implied entirely by
   signature verification against Apple's JWKS).
 
-Today's code calls both `(email, sub)` as if they were the same shape, then —
-per the finding this session — never uses either value again. Even fixing
-"use it" without first fixing "the two shapes aren't the same" would just
-relocate the bug: code written against Google's always-present `email` will
-silently misbehave the first time Apple omits it.
+**Status: partially open.** `sub` is used correctly today — it's attached to
+the issued token and drives the identity binding (§6.3, done). `email` is
+still handled as one undifferentiated shape: `oauth.py` passes it straight
+into `propose_binding(issuer, sub, email)` with no marker for how much it
+should be trusted. Code written against Google's always-present, IdP-asserted
+`email` will silently misbehave the first time Apple's is absent or a relay
+address — that specific risk (§6.2's `email_basis`) has not been fixed, only
+the larger "identity is discarded" claim was wrong.
 
-### 6.2 Canonical identity mapping
+### 6.2 Canonical identity mapping — **status: not built**
 
 Same move as §3.1, applied to identity instead of table columns. A canonical
 identity record:
@@ -276,40 +307,46 @@ Collapsing these into one `email: str` field, as today's code implicitly
 does, is the identity equivalent of assuming every database's `source` column
 is spelled the same way.
 
-### 6.3 The write path: binding identity to an app_id
+### 6.3 The write path: binding identity to an app_id — **status: built (steps 1–3), step 4 open**
 
 This is where §3.4's "reads may infer, writes may not guess" rule matters
 most, because the "write" here is not a database row — it's **granting a
-human standing under `gate.py`**. That is a more consequential action than
-any single `knowledge_ingest` call, and today it doesn't happen at all: a
-verified Google or Apple sign-in produces an OAuth token, and that token is
-never connected to an `app_id` or a manifest. The token is real; the
-authorization it should carry does not exist.
+human standing under `gate.py`**, a more consequential action than any single
+`knowledge_ingest` call. This is now implemented: `identity_binding.py`'s
+docstring cites this section directly, and `_resolve_serve_identity()` in
+`server.py` calls `resolve_app_id()` before any tool dispatch, fail-closed.
 
-Proposed flow, mirroring §3.2–§3.4 exactly:
+Flow as built, mirroring §3.2–§3.4:
 
-1. First sign-in for a given `(issuer, subject_id)` produces a canonical
-   identity record (§6.2) but **no standing** — the access token is issued
-   (transport-layer OAuth still completes, per spec) but every subsequent
-   tool call gates as unauthenticated until a binding is confirmed.
-2. The proposed binding — "`(google, 10983...)` → `app_id=sean-personal`,
-   permissions=`[...]`" — is written to a reviewable artifact, same shape as
-   the schema mapping file: `$WILLOW_HOME/mcp_apps/_identity_bindings/
-   <issuer>__<subject_id>.json`, `confirmed: false` until a human (or an
-   explicit `identity_confirm_binding` call, gated at least as strictly as
-   `schema_confirm_mapping`) approves it.
-3. Only a `confirmed: true` binding lets `_gate()` resolve an OAuth-session
-   token to an `app_id`. Until then, an authenticated-but-unbound caller gets
-   the same fail-closed denial an unmanifested stdio `app_id` gets today —
-   consistent behavior across both auth modes, which today's code does not
-   have (stdio fails closed by design; serve mode doesn't fail at all, it
-   just never checks).
-4. Re-authentication by the same `(issuer, subject_id)` reuses the confirmed
-   binding. If Apple's `email` disappears on a later login (expected — see
-   §6.1) that is **not** drift in the identity itself (`subject_id` is
-   unchanged) and must not re-trigger confirmation. If `subject_id` maps to a
-   *different* email than the bound record shows, that **is** drift — same
-   `schema_drift` treatment as §4, surfaced rather than silently accepted.
+1. **Done.** First sign-in for a given `(issuer, subject_id)` calls
+   `propose_binding(issuer, subject_id, email)` — a record with `app_id:
+   null, confirmed: false` is written, but no standing is granted. The access
+   token is still issued (transport-layer OAuth completes, per spec); every
+   subsequent tool call gates as unauthenticated until a binding is
+   confirmed. (Gap: the record stores raw `email`, not the §6.2 canonical
+   form with `email_basis` — see §6.2.)
+2. **Done.** The proposed binding is written to a reviewable artifact:
+   `$WILLOW_HOME/mcp_apps/_identity_bindings/<issuer>__<subject_id>.json`,
+   `confirmed: false` until the operator runs `willow-mcp confirm-binding`
+   (local, stdio-only CLI subcommand — intentionally **not** an MCP tool, so
+   a remote serve-mode caller can never confirm their own binding; stricter
+   than the `identity_confirm_binding` MCP-tool shape originally proposed
+   here, and better for it).
+3. **Done.** Only a `confirmed: true` binding lets `_gate()` resolve an
+   OAuth-session token to an `app_id` — `resolve_app_id()` returns `None`
+   (fail-closed) for anything unconfirmed. Stdio and serve mode now behave
+   consistently: both fail closed on missing standing, where serve mode
+   previously didn't check at all.
+4. **Not implemented.** `propose_binding` returns the existing record
+   untouched on a repeat sign-in (correct — a human's prior decision must
+   never be silently overwritten), but nothing compares the incoming
+   `email` against the bound record's stored `email` to detect drift. If
+   `subject_id` later maps to a *different* email than the bound record
+   shows, that should be surfaced the same way §4 surfaces `schema_drift` —
+   today it's silently accepted. If Apple's `email` disappears on a later
+   login (expected — see §6.1) that is correctly *not* drift (`subject_id` is
+   unchanged), so this needs to check "email present and different," not
+   "email present and different-from-null."
 
 ### 6.4 Relationship to §3.5 and to OAuth scope
 
@@ -323,7 +360,93 @@ improvement but a distinct piece of work from binding — a token could have a
 correctly narrow scope and still be bound to nobody, which is exactly
 today's state.
 
-## 7. Open questions (for next pass, not blocking the write-up)
+## 7. Cross-project alignment: the shape-projection contract (ledger `0ba6a33f`)
+
+A separate project (shape-projection / consent-lease design, ledger
+`0ba6a33f`) defines a 4-point contract for how a per-source field shape gets
+turned into a consent-scoped release of data. willow-mcp's schema layer
+(§§1–5) is a sibling of that contract, not an independent design — the same
+primitives should hold in both, because both are answering the same
+question: "given a real-world source with a real shape, what may leave, in
+what form, and how do we prove later that it was permitted." This section
+maps the contract onto what's already specified above and flags the deltas.
+
+The 4 points, and where each lands:
+
+1. **Declarative per-source field schema, versioned. Not inferred at
+   runtime, not an LLM guess.**
+   This is the `SchemaProfile` mapping artifact (§3.1–§3.2) — the `SCHEMA`
+   object. It already matches the spirit: introspected once via
+   `information_schema`, written to a reviewable file, never re-guessed
+   silently on a later run once confirmed. The delta: it needed an explicit
+   version marker to be legible as "which declared shape produced this," so
+   `schema_version` was added to the mapping artifact JSON in §3.2. A schema
+   is versioned by table+database (`db_fingerprint`, §3.1), same unit the
+   contract calls a "source."
+
+2. **Projection = allow-listed field subset + per-field transform level. An
+   allow-list, never a deny-list. Kept as a separate object from the
+   schema.**
+   This is **not yet modeled** in §§1–5 and must not be collapsed into the
+   `SchemaProfile` mapping. The mapping answers "what does this table's
+   column called `X` actually mean" (what exists). A `PROJECTION` answers a
+   different question: "of the fields this SCHEMA says exist, which ones may
+   this particular caller/destination/purpose see, and at what
+   transform level (`full` | a named transform, e.g. `first-name-only` |
+   `DROP`)." A `PROJECTION` is defined *against* a confirmed `SCHEMA` (§3.2's
+   `confirmed: true`) — it can only allow-list fields the schema already
+   knows about; see point 4. Concretely, this becomes a second artifact type
+   alongside the mapping file:
+   `$WILLOW_HOME/mcp_apps/<app_id>/schema_maps/<db_fingerprint>__<table>__projection__<purpose>.json`,
+   `{schema_version, fields: {field: "full"|"<transform-name>"|"DROP"}, destination, purpose}`.
+   Read/write tools in §§3.3–3.4 operate against the `SCHEMA`; anything that
+   *leaves* willow-mcp's boundary (a future export, a federation grant, a
+   response handed to a different agent than the one that authored the
+   mapping) must additionally pass through the relevant `PROJECTION` for that
+   destination+purpose. Nothing in §§1–6 currently leaves the boundary this
+   way, so no code changes are required yet — but any future tool that does
+   (e.g. a federation-facing read, or willow-mcp fronting Gmail/Calendar/Drive
+   as described in the shape-projection project) must be built with a
+   `PROJECTION` object from day one, not retrofitted.
+
+3. **Deterministic signature hash = the shape id. Hash over (source,
+   projection, destination, purpose). Same shape → same hash → the lease
+   keeps muting the same ask.**
+   willow-mcp does not yet issue or check consent leases — that machinery
+   lives in the other project. The alignment obligation here is narrower:
+   when a `PROJECTION` artifact (point 2) is created, it must be hashable
+   into the same shape-id form the other project expects, so a consent lease
+   minted there can bind to a projection defined here. Concretely: `shape_id
+   = sha256(canonical_json({source: db_fingerprint+table+schema_version,
+   projection: projection_fields, destination, purpose}))`. This is a pure
+   function of the artifact's own fields — no willow-mcp-internal state (no
+   timestamps, no row data) may enter the hash, or the "same shape → same
+   hash" property breaks.
+
+4. **Fail-closed on any field absent from the declared schema. A field not
+   in SCHEMA is dropped / re-asks by default, because PROJECTION is an
+   allow-list.**
+   This is already the load-bearing rule of §3.4 (writes refuse on
+   unconfirmed mapping) and §4 (schema drift downgrades `confirmed` to
+   `false` rather than trusting stale columns) — extend it explicitly to
+   `PROJECTION` once that object exists: a `PROJECTION` may only name fields
+   present in its `SCHEMA`'s `fields` map at the `SCHEMA`'s current
+   `schema_version`. A column that shows up in a live introspection but
+   isn't yet in the confirmed `SCHEMA` is invisible to every `PROJECTION` —
+   it cannot be allow-listed by omission, accident, or a projection author
+   assuming a field exists. This is the same posture as §4's
+   `schema_drift`: a new column widens what *could* be mapped, never what
+   *is* released, until a human confirms it into the `SCHEMA` first.
+
+**Cross-cutting rule, restated for this codebase:** `SchemaProfile` /
+mapping artifact (§3.2) and any future `PROJECTION` artifact (point 2 above)
+are separate files with separate confirmation gates — a `schema_confirm_mapping`
+call (§8) changes only what willow-mcp believes a table means; it never
+implicitly grants a projection. Collapsing them (e.g. treating "column is
+mapped" as "column may leave") would silently reintroduce a deny-list-shaped
+bug into an allow-list-shaped design.
+
+## 8. Open questions (for next pass, not blocking the write-up)
 
 - **Aliasing dictionary scope.** Should common aliases (`source`/`source_type`/
   `origin`) ship as a static built-in list, or be per-deployment configurable?
@@ -358,8 +481,13 @@ today's state.
   `(issuer, apple_team_id, apple_client_id, sub)` for Apple specifically, not
   just `(issuer, sub)`, or a legitimate re-registration will look like a new
   identity.
+- **`PROJECTION` object build order.** (§7) Not scheduled in §9's rollout
+  because nothing in scope yet leaves willow-mcp's boundary — but the first
+  tool that does (federation-facing read, or a future Gmail/Calendar/Drive
+  connector) must not ship without one. Track as a prerequisite gate on that
+  work, not as its own standalone rollout step here.
 
-## 8. Rollout shape (sketch, not committed)
+## 9. Rollout shape (sketch, not committed)
 
 1. `schema_profile.py` — introspection + heuristic mapping + artifact
    read/write, unit-tested against a handful of synthetic schemas (matching
@@ -376,20 +504,31 @@ today's state.
    decision on whether willow-mcp should be allowed to *create* a task queue
    table when none exists (a write-time question, not a read-time one, and
    arguably its own consent gate distinct from schema confirmation).
-6. Identity side (§6), independent of 1–5 and can proceed in parallel: build
-   the canonical identity extractor for Google and Apple (§6.1–§6.2), the
-   identity-binding artifact and `identity_confirm_binding` tool (§6.3), and
-   wire `_gate()` to actually resolve an OAuth session to a bound `app_id`
-   instead of trusting a caller-supplied one in serve mode — this is the fix
-   for the gap found this session, where `gate.py`'s own docstring describes
-   behavior that was never implemented.
-7. Only after 6: widen OAuth scope past the single flat `"willow"` value
-   (§6.4) to mirror `PERMISSION_GROUPS`, so a client can request narrower
-   access than "everything this human is bound to." Sequenced last because a
-   finer-grained scope on top of a binding that doesn't exist yet is polish
-   on a foundation that isn't there.
+6. **Done, independently of 1–5.** The identity-binding artifact and gate
+   wiring (§6.3 steps 1–3) shipped: `identity_binding.py` implements
+   `propose_binding` / `confirm_binding` / `resolve_app_id`, and
+   `server.py`'s `_resolve_serve_identity()` calls `resolve_app_id()` before
+   `gate.permitted()` — a serve-mode caller with no confirmed binding is
+   denied the same as an unmanifested stdio `app_id`. Confirmation is the
+   local-only `willow-mcp confirm-binding` CLI subcommand, not an MCP tool
+   (stricter than this doc's original `identity_confirm_binding` MCP-tool
+   proposal). **Remaining, not yet built:** the §6.2 canonical identity
+   record (`email_basis` tracking — Google vs Apple email trust differs and
+   today's code doesn't distinguish them) and §6.3 step 4 (drift detection
+   when a `(issuer, subject_id)` binding's email changes between sign-ins).
+   Both are small, scoped additions to the existing `identity_binding.py`,
+   not new architecture.
+7. Only after 6's remaining pieces: widen OAuth scope past the single flat
+   `"willow"` value (§6.4) to mirror `PERMISSION_GROUPS`, so a client can
+   request narrower access than "everything this human is bound to."
+   Sequenced last because a finer-grained scope on top of drift-blind
+   binding is polish on a foundation with a known gap, not a foundation
+   that isn't there — the ordering rationale changed, the ordering itself
+   didn't.
 
-4d (PyPI publish) should wait on at least step 2 (read-path schema fix) and
-step 6 (identity binding) — publishing with OAuth login that authenticates
-a real human and then silently fails to authorize them as anyone is a worse
-public posture than not offering OAuth at all.
+4d (PyPI publish) should wait on step 2 (read-path schema fix, still open)
+and on closing 6's remaining email-drift gap — publishing with OAuth login
+that authenticates a real human and then silently accepts a changed email
+on an existing binding is a smaller but still real gap to ship with, not
+the "silently fails to authorize anyone" gap originally described here
+(that part is already fixed).
