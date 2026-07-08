@@ -8,8 +8,11 @@ Modes:
 Tools:
   Store (SQLite):  store_put, store_get, store_list, store_update, store_search,
                    store_delete, store_search_all
-  Knowledge (PG):  knowledge_search, knowledge_ingest
+  Knowledge (PG):  knowledge_ingest, knowledge_search,
+                   kb_at, kb_promote, kb_journal, kb_startup_continuity
   Tasks (PG):      task_submit, task_status, task_list
+  Agent (PG):      agent_route, agent_dispatch_result
+  Fleet (PG):      fleet_status, fleet_health
 
 Auth (stdio): manifest-based per-tool ACL — app_id required on every call.
 Auth (serve): OAuth 2.0 PKCE (Google / Apple) + per-tool ACL gate.
@@ -293,6 +296,204 @@ def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
     return {"pending": [{"task_id": r[0], "task": r[1][:80],
                           "submitted_by": r[2], "created_at": str(r[3])}
                          for r in rows]}
+
+
+# ── Knowledge extension tools ──────────────────────────────────────────────────
+
+@mcp.tool()
+def kb_at(app_id: str, atom_id: str) -> dict:
+    """Fetch a single knowledge atom by ID. Returns the full atom or {error: not_found}."""
+    if err := _gate(app_id, "kb_at"):
+        return err
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    cur = pg.cursor()
+    cur.execute(
+        "SELECT id, content, domain, source, tags FROM knowledge WHERE id = %s",
+        (atom_id,)
+    )
+    row = cur.fetchone()
+    cur.close()
+    if not row:
+        return {"error": "not_found"}
+    return {"id": row[0], "content": row[1], "domain": row[2],
+            "source": row[3], "tags": json.loads(row[4] or "[]")}
+
+
+@mcp.tool()
+def kb_promote(app_id: str, atom_id: str, domain: str) -> dict:
+    """Change the domain of an existing knowledge atom."""
+    if err := _gate(app_id, "kb_promote"):
+        return err
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    cur = pg.cursor()
+    cur.execute(
+        "UPDATE knowledge SET domain = %s WHERE id = %s",
+        (domain, atom_id)
+    )
+    updated = cur.rowcount
+    cur.close()
+    return {"id": atom_id, "domain": domain} if updated else {"error": "not_found"}
+
+
+@mcp.tool()
+def kb_journal(
+    app_id: str,
+    content: str,
+    source: str = "",
+    tags: Optional[list] = None,
+) -> dict:
+    """Add a journal entry to the knowledge base (domain='journal')."""
+    if err := _gate(app_id, "kb_journal"):
+        return err
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    kid = str(uuid.uuid4())[:8].upper()
+    all_tags = list(set(["journal"] + (tags or [])))
+    cur = pg.cursor()
+    cur.execute(
+        "INSERT INTO knowledge (id, content, domain, source, tags) "
+        "VALUES (%s, %s, 'journal', %s, %s) ON CONFLICT DO NOTHING",
+        (kid, content, source, json.dumps(all_tags))
+    )
+    cur.close()
+    return {"id": kid, "domain": "journal"}
+
+
+@mcp.tool()
+def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
+    """Fetch knowledge atoms tagged or domained for startup continuity."""
+    if err := _gate(app_id, "kb_startup_continuity"):
+        return err
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    cur = pg.cursor()
+    cur.execute(
+        "SELECT id, content, domain, source FROM knowledge "
+        "WHERE domain = 'continuity' OR tags LIKE %s "
+        "ORDER BY id DESC LIMIT %s",
+        ('%"continuity"%', limit)
+    )
+    rows = cur.fetchall()
+    cur.close()
+    return {"atoms": [{"id": r[0], "content": r[1], "domain": r[2], "source": r[3]}
+                       for r in rows]}
+
+
+# ── Agent dispatch tools ───────────────────────────────────────────────────────
+
+@mcp.tool()
+def agent_route(
+    app_id: str,
+    task: str,
+    target_agent: str,
+    context: Optional[dict] = None,
+) -> dict:
+    """Route a task to a target agent. Records in routing_decisions and returns a routing_id."""
+    if err := _gate(app_id, "agent_route"):
+        return err
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    import hashlib
+    routing_id = str(uuid.uuid4())[:8].upper()
+    prompt_hash = hashlib.sha256(task.encode()).hexdigest()[:16]
+    decision = {"task": task, "target": target_agent, "context": context or {}}
+    try:
+        cur = pg.cursor()
+        cur.execute(
+            "INSERT INTO routing_decisions "
+            "(id, prompt_hash, session_id, rule_id, confidence, decision, kind) "
+            "VALUES (%s, %s, %s, %s, %s, %s, 'agent_route')",
+            (routing_id, prompt_hash, app_id, target_agent, 1.0, json.dumps(decision))
+        )
+        cur.close()
+    except Exception as e:
+        return {"error": f"routing_unavailable: {e}"}
+    return {"routing_id": routing_id, "target": target_agent, "status": "routed"}
+
+
+@mcp.tool()
+def agent_dispatch_result(
+    app_id: str,
+    routing_id: str,
+    result: str,
+    status: str = "done",
+) -> dict:
+    """Record the result of a dispatched agent task."""
+    if err := _gate(app_id, "agent_dispatch_result"):
+        return err
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    try:
+        cur = pg.cursor()
+        cur.execute(
+            "UPDATE routing_decisions "
+            "SET decision = decision || %s::jsonb "
+            "WHERE id = %s",
+            (json.dumps({"result": result, "dispatch_status": status}), routing_id)
+        )
+        updated = cur.rowcount
+        cur.close()
+    except Exception as e:
+        return {"error": f"routing_unavailable: {e}"}
+    return {"routing_id": routing_id, "status": status} if updated else {"error": "not_found"}
+
+
+# ── Fleet read tools ───────────────────────────────────────────────────────────
+
+@mcp.tool()
+def fleet_status(app_id: str) -> dict:
+    """List agents registered in the fleet (public.agents table)."""
+    if err := _gate(app_id, "fleet_status"):
+        return err
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    try:
+        cur = pg.cursor()
+        cur.execute(
+            "SELECT id, name, role, trust, created_at FROM agents ORDER BY name"
+        )
+        rows = cur.fetchall()
+        cur.close()
+    except Exception as e:
+        return {"error": f"fleet_unavailable: {e}"}
+    return {"agents": [{"id": r[0], "name": r[1], "role": r[2],
+                         "trust": r[3], "since": str(r[4])} for r in rows]}
+
+
+@mcp.tool()
+def fleet_health(app_id: str) -> dict:
+    """Fleet health — task queue counts by status across all agents."""
+    if err := _gate(app_id, "fleet_health"):
+        return err
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    try:
+        cur = pg.cursor()
+        cur.execute(
+            "SELECT status, COUNT(*) FROM kart_task_queue GROUP BY status"
+        )
+        rows = cur.fetchall()
+        cur.close()
+    except Exception as e:
+        return {"error": f"fleet_unavailable: {e}"}
+    counts = {r[0]: r[1] for r in rows}
+    return {
+        "pending":   counts.get("pending", 0),
+        "running":   counts.get("running", 0),
+        "completed": counts.get("completed", 0),
+        "failed":    counts.get("failed", 0),
+        "total":     sum(counts.values()),
+    }
 
 
 # ── Entry points ───────────────────────────────────────────────────────────────
