@@ -1494,6 +1494,30 @@ def _cmd_confirm_binding(args) -> None:
               f"before confirming.")
 
 
+def _cmd_worker(args) -> None:
+    """Drain the Kart queue via the kartikeya worker (CLI: `willow-mcp worker`)."""
+    try:
+        import kartikeya
+    except ModuleNotFoundError:
+        print(
+            "willow-mcp worker requires the 'kartikeya' package — "
+            "install it with `pip install willow-mcp[worker]`.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    from .task_queue import build_task_queue
+
+    try:
+        queue = build_task_queue(args.app_id or _DEFAULT_APP_ID)
+    except RuntimeError as e:
+        print(f"willow-mcp worker: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    kartikeya.run_worker(
+        queue, lane=args.lane, slots=args.slots, interval=args.interval, once=args.once
+    )
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(prog="willow-mcp")
@@ -1518,6 +1542,17 @@ def main():
     confirm_p.add_argument("--subject", required=True, help="The IdP 'sub' claim for this identity")
     confirm_p.add_argument("--app-id", required=True, dest="app_id")
 
+    worker_p = subparsers.add_parser(
+        "worker",
+        help="Run the Kart task worker (drains the queue; requires willow-mcp[worker])",
+    )
+    worker_p.add_argument("--lane", default="fast", choices=["fast", "batch"])
+    worker_p.add_argument("--slots", type=int, default=None)
+    worker_p.add_argument("--interval", type=float, default=5.0)
+    worker_p.add_argument("--once", action="store_true", help="drain the queue and exit")
+    worker_p.add_argument("--app-id", dest="app_id", default=os.environ.get("WILLOW_APP_ID", ""),
+                          help="app_id whose confirmed 'tasks' mapping to use (default $WILLOW_APP_ID)")
+
     args, _ = parser.parse_known_args()
 
     if args.command == "setup":
@@ -1525,6 +1560,9 @@ def main():
         return
     if args.command == "confirm-binding":
         _cmd_confirm_binding(args)
+        return
+    if args.command == "worker":
+        _cmd_worker(args)
         return
 
     if args.serve or _SERVE_MODE:

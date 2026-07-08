@@ -58,6 +58,17 @@ log carries a one-line entry and points there rather than duplicating.
   `docs/design/kart-productionization.md`. Stays Open until a `willow-mcp worker`
   ships and a clean install can execute a task end-to-end. Surfaced by PR #31 §1
   (filed there as a diagnostics gap; the real severity is packaging/DOA).
+  **Progress (2026-07-08):** the executor was extracted as a standalone package
+  — **`kartikeya`** (github.com/rudi193-cmd/kartikeya, private) — with the
+  sandbox/worker/execute core decoupled and a `TaskQueue` backend seam
+  (SQLite + Postgres). willow-mcp stage 2 landed: `WillowMcpTaskQueue` (Postgres
+  over the adopted `tasks` table + SQLite fallback), the `willow-mcp worker`
+  subcommand, `docs/schema/tasks.postgres.sql`, and a `willow-mcp[worker]` extra.
+  kartikeya is an **optional** import (CI has no access to it → integration tests
+  `importorskip`; suite stays green). **Remaining to close B-22:** publish
+  `kartikeya` (operator-gated) so it becomes a hard dependency `pip install`
+  resolves, then a clean-install + real-bwrap end-to-end (submit → worker →
+  completed, egress on/off). Spec: `docs/design/kart-lift-spec.md`.
 
 ## Fixed
 
