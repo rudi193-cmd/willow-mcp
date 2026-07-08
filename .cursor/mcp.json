@@ -2,7 +2,7 @@
   "mcpServers": {
     "willow-mcp": {
       "type": "stdio",
-      "command": "/home/sean-campbell/github/willow-mcp/.venv/bin/python3",
+      "command": ".venv/bin/python3",
       "args": ["-m", "willow_mcp"]
     },
     "codebase-memory-mcp": {
