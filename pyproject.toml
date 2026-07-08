@@ -17,13 +17,11 @@ dependencies = [
     "cryptography>=42.0,<50.0",
     "starlette>=0.36,<1.0",
     "uvicorn>=0.29,<1.0",
+    # Kart task executor (the `willow-mcp worker` engine + task-queue backends).
+    # Hard dependency as of B-22 close-out — kartikeya is published on PyPI, so a
+    # base `pip install willow-mcp` now ships a working queue drainer.
+    "kartikeya>=0.0.1,<0.1.0",
 ]
-
-[project.optional-dependencies]
-# The Kart task executor. Optional so a base install (and CI) needs no access to
-# the kartikeya package; `willow-mcp worker` and the Postgres/SQLite task-queue
-# backends require it. Becomes a hard dependency once kartikeya is published.
-worker = ["kartikeya"]
 
 [project.scripts]
 willow-mcp = "willow_mcp.server:main"
