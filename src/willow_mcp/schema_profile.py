@@ -1,11 +1,11 @@
 """willow_mcp/schema_profile.py — introspect a host table, map it to canonical
 fields, and persist the result as a reviewable artifact.
 
-Implements docs/design/schema-adaptation.md §3.1-§3.4. Scope for this pass:
-read-path only (§9 rollout step 2) — a mapping is used to build safe SELECTs
-against whatever columns really exist; write-path confirmation gating
-(schema_confirm_mapping, §3.4/§9 step 3) is not implemented yet, so nothing
-here unlocks a write.
+Implements docs/design/schema-adaptation.md §3.1-§3.4: introspection +
+heuristic mapping for the read path (§9 step 2), and confirm() for the
+write-path gate (§9 step 3) — a table's mapping must be explicitly
+confirmed (optionally with human-supplied column overrides) before any
+write tool may use it.
 
 Design principles this module exists to satisfy (see doc §2):
   1. Discover, don't assume — introspect() is the only source of column
@@ -199,6 +199,62 @@ def resolve(conn, app_id: str, table: str, canonical_fields: list[str]) -> dict:
         "discovered_at": datetime.now(timezone.utc).isoformat(),
         "confirmed": False,
         "fields": fresh_fields,
+    }
+    save_mapping(app_id, fingerprint, table, record)
+    return record
+
+
+def confirm(
+    conn, app_id: str, table: str, canonical_fields: list[str],
+    overrides: Optional[dict] = None,
+) -> dict:
+    """Confirm a table's mapping, unlocking write tools for it (§3.4).
+
+    Starts from whatever's already on disk (preserving any prior human
+    corrections), or a fresh heuristic proposal if nothing was ever
+    computed. `overrides` lets a human correct individual
+    canonical-field -> real-column assignments before confirming — pass
+    `{"field": "real_column"}` to point a field at a specific column, or
+    `{"field": None}` to explicitly mark it unmapped (DROP). An override
+    column must exist in a *fresh* introspection or the whole call is
+    refused — a confirmed mapping must never point at a column that isn't
+    actually there (doc §2 principle 3: writes may not guess).
+
+    Returns the saved, confirmed mapping record, or {"error":
+    "table_not_found"|"unknown_field"|"override_invalid", ...}.
+    """
+    columns = introspect(conn, table)
+    if not columns:
+        return {"error": "table_not_found", "table": table}
+    by_name = {c.name: c for c in columns}
+
+    fingerprint = db_fingerprint(conn)
+    existing = load_mapping(app_id, fingerprint, table)
+    base_fields = (existing or {}).get("fields") or propose_mapping(columns, canonical_fields)
+    fields = {f: dict(v) for f, v in base_fields.items()}
+
+    if overrides:
+        for field, col in overrides.items():
+            if field not in canonical_fields:
+                return {"error": "unknown_field", "field": field, "table": table}
+            if col is None:
+                fields[field] = {"column": None, "tier": "unmapped", "confidence": 0.0, "data_type": None}
+            elif col not in by_name:
+                return {"error": "override_invalid", "field": field, "column": col, "table": table}
+            else:
+                fields[field] = {
+                    "column": col, "tier": "confirmed_override",
+                    "confidence": 1.0, "data_type": by_name[col].data_type,
+                }
+
+    record = {
+        "schema_version": SCHEMA_VERSION,
+        "database": fingerprint,
+        "table": table,
+        "discovered_at": (existing or {}).get("discovered_at") or datetime.now(timezone.utc).isoformat(),
+        "confirmed": True,
+        "confirmed_at": datetime.now(timezone.utc).isoformat(),
+        "fields": fields,
     }
     save_mapping(app_id, fingerprint, table, record)
     return record

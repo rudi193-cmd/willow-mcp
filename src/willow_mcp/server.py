@@ -37,6 +37,7 @@ from functools import wraps
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
+from psycopg2.extras import Json
 
 from .db import Store, get_pg
 from .gate import permitted
@@ -175,6 +176,13 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
 # unmapped ones are simply omitted from results (§3.3), never crash a read.
 _KNOWLEDGE_FIELDS = ["id", "content", "domain", "source", "tags"]
 
+# Registry of tables schema_confirm_mapping knows how to confirm, and the
+# canonical fields each one speaks in. Extend this when a new table gets a
+# schema-adapted write path (§9 step 5 will add task_*/agent_* here later).
+_CONFIRMABLE_TABLES: dict[str, list[str]] = {
+    "knowledge": _KNOWLEDGE_FIELDS,
+}
+
 
 def _build_select(fields_wanted: list[str], mapping_fields: dict) -> tuple[str, list[str], list[str]]:
     """From a resolved mapping, build a SELECT column list using only real,
@@ -198,6 +206,29 @@ def _row_to_dict(row: tuple, present_fields: list[str], unmapped_fields: list[st
     for field in unmapped_fields:
         rec[field] = None
     return rec
+
+
+def _require_confirmed(mapping: dict) -> Optional[dict]:
+    """§3.4: writes may not guess. A mapping's heuristic fields are fine for
+    reads but must be explicitly confirmed (schema_confirm_mapping) before
+    any write tool may use them."""
+    if not mapping.get("confirmed"):
+        return {
+            "error": (
+                f"unconfirmed_schema: table '{mapping.get('table')}' has not been confirmed "
+                "for this database — call schema_confirm_mapping, or edit the mapping file "
+                "directly, then retry"
+            )
+        }
+    return None
+
+
+def _write_param(field_mapping: dict, value):
+    """jsonb/json target columns need their Python value wrapped so psycopg2
+    adapts it as JSON rather than a plain string."""
+    if field_mapping.get("data_type") in ("jsonb", "json"):
+        return Json(value)
+    return value
 
 
 # ── Sanitizer (Phase 4a) ─────────────────────────────────────────────────────
@@ -438,12 +469,33 @@ def knowledge_ingest(
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
+    if "error" in mapping:
+        return mapping
+    unconfirmed = _require_confirmed(mapping)
+    if unconfirmed:
+        return unconfirmed
+    fields = mapping["fields"]
+    if fields["id"]["column"] is None or fields["content"]["column"] is None:
+        return {"error": "schema_unusable: 'knowledge' table has no mappable 'id' or 'content' column"}
+
     kid = str(uuid.uuid4())[:8].upper()
+    values = {"id": kid, "content": content}
+    if fields["domain"]["column"]:
+        values["domain"] = domain
+    if fields["source"]["column"]:
+        values["source"] = source
+    if fields["tags"]["column"]:
+        values["tags"] = tags or []
+
+    cols = ", ".join(f'"{fields[f]["column"]}"' for f in values)
+    placeholders = ", ".join(["%s"] * len(values))
+    params = [_write_param(fields[f], v) for f, v in values.items()]
     cur = pg.cursor()
     cur.execute(
-        "INSERT INTO knowledge (id, content, domain, source, tags) "
-        "VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
-        (kid, content, domain, source, json.dumps(tags or []))
+        f"INSERT INTO knowledge ({cols}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
+        params,
     )
     cur.close()
     return {"id": kid}
@@ -595,11 +647,20 @@ def kb_promote(app_id: str, atom_id: str, domain: str) -> dict:
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
+    if "error" in mapping:
+        return mapping
+    unconfirmed = _require_confirmed(mapping)
+    if unconfirmed:
+        return unconfirmed
+    fields = mapping["fields"]
+    id_col, domain_col = fields["id"]["column"], fields["domain"]["column"]
+    if id_col is None or domain_col is None:
+        return {"error": "schema_unusable: 'knowledge' table has no mappable 'id' or 'domain' column"}
+
     cur = pg.cursor()
-    cur.execute(
-        "UPDATE knowledge SET domain = %s WHERE id = %s",
-        (domain, atom_id)
-    )
+    cur.execute(f'UPDATE knowledge SET "{domain_col}" = %s WHERE "{id_col}" = %s', (domain, atom_id))
     updated = cur.rowcount
     cur.close()
     return {"id": atom_id, "domain": domain} if updated else {"error": "not_found"}
@@ -617,16 +678,58 @@ def kb_journal(
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
+    if "error" in mapping:
+        return mapping
+    unconfirmed = _require_confirmed(mapping)
+    if unconfirmed:
+        return unconfirmed
+    fields = mapping["fields"]
+    if fields["id"]["column"] is None or fields["content"]["column"] is None:
+        return {"error": "schema_unusable: 'knowledge' table has no mappable 'id' or 'content' column"}
+
     kid = str(uuid.uuid4())[:8].upper()
     all_tags = list(set(["journal"] + (tags or [])))
+    values = {"id": kid, "content": content}
+    if fields["domain"]["column"]:
+        values["domain"] = "journal"
+    if fields["source"]["column"]:
+        values["source"] = source
+    if fields["tags"]["column"]:
+        values["tags"] = all_tags
+
+    cols = ", ".join(f'"{fields[f]["column"]}"' for f in values)
+    placeholders = ", ".join(["%s"] * len(values))
+    params = [_write_param(fields[f], v) for f, v in values.items()]
     cur = pg.cursor()
     cur.execute(
-        "INSERT INTO knowledge (id, content, domain, source, tags) "
-        "VALUES (%s, %s, 'journal', %s, %s) ON CONFLICT DO NOTHING",
-        (kid, content, source, json.dumps(all_tags))
+        f"INSERT INTO knowledge ({cols}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
+        params,
     )
     cur.close()
     return {"id": kid, "domain": "journal"}
+
+
+@mcp.tool()
+@_guarded("schema_confirm_mapping")
+def schema_confirm_mapping(app_id: str, table: str, overrides: Optional[dict] = None) -> dict:
+    """Confirm a table's schema mapping, unlocking write tools for it (knowledge_ingest,
+    kb_journal, kb_promote today). `overrides` lets you correct individual
+    canonical-field -> real-column assignments before confirming, e.g.
+    {"source": "origin_ref"} or {"tags": null} to explicitly mark a field
+    unmapped. Gated separately from knowledge_write — confirming a mapping
+    is a more consequential act than a single write."""
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    canonical_fields = _CONFIRMABLE_TABLES.get(table)
+    if canonical_fields is None:
+        return {
+            "error": f"unknown_table: '{table}' is not a table willow-mcp knows how to map "
+                     f"(known: {sorted(_CONFIRMABLE_TABLES)})"
+        }
+    return sp.confirm(pg, app_id, table, canonical_fields, overrides=overrides)
 
 
 @mcp.tool()
