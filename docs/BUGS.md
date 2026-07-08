@@ -24,7 +24,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-16 | P3 | Fixed | server pipeline | `_sanitize` fired before the permission gate — a denied caller could trip sanitizer errors first. Fixed: `_guarded` now runs gate → sanitize → rate | FRANK `90960b8b`; probe `4D9139B8` |
 | B-17 | P2 | Open | schema / tasks | `task_status` never surfaces completion time — `tasks.completed_at`/`steps` are unmapped, so `completed_at` is `null` even for `completed` tasks | this session |
 | B-18 | P3 | Fixed | diagnostics | `diagnostic_summary` returned verdict `degraded` when the caller merely omitted `app_id`. Fixed: missing `app_id` is a `caller_input` warn (surfaced in `problems` + manifest sub-check) that no longer degrades the verdict | this session; probe `E3265B66` |
-| B-19 | P2 | Open | task interface / Kart | `task_submit` has no `allow_net` — willow-mcp's Kart lane is hardwired net-isolated, so a willow-mcp-only session cannot do git/push/`gh` work at all | this session |
+| B-19 | P2 | Fixed | task interface / Kart | `task_submit` had no `allow_net`. Fixed: `allow_net=True` gated by a new `task_net` manifest permission (not in full_access) appends the worker's `# allow_net` directive | this session; probe `5H1M355V` |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -60,23 +60,20 @@ isn't there to surface. Real options: (a) accept the null and document it, or
 candidate to P3 given there's no local defect to fix. (My original filing that
 "the column exists, just isn't mapped" was wrong.)
 
-### B-19 · P2 · `task_submit` has no `allow_net` — willow-mcp's Kart lane is hardwired isolated
-**Component:** `task_submit` / Kart execution lane
-
-willow-mcp's `task_submit(app_id, task, agent)` exposes no network control; its
-Kart tasks always run `allow_net: false` (verified: probe `MAGSU06N` ran with
-`network_mode: isolated`). The fleet `willow` server's `agent_task_submit`
-carries `allow_net`, but a session constrained to the willow-mcp server only —
-exactly the scope the 2026-07-08l handoff mandates — therefore cannot run any
-`git push`/`gh`/`curl` work. Landing PR #24 required falling back to the fleet
-`willow` server's net lane, breaking the willow-mcp-only constraint. Fix: add an
-`allow_net` (and `allow_localhost`) parameter to willow-mcp's `task_submit`,
-gated by manifest permission, so network-bearing execution is expressible within
-the willow-mcp scope. Cross-ref FRANK `188aefb9` (a net-dependent PR flow that
-this gap forces onto the fleet lane).
-
 ## Fixed
 
+- **B-19 · P2 (this session)** — `task_submit` can now run network-bearing
+  tasks. It gained an `allow_net` parameter gated by a new `task_net` capability
+  permission in `gate.py` — deliberately **not** part of `task_queue` or
+  `full_access`, so a broad grant never silently carries sandbox network egress
+  (same separation spirit as B-14). When granted, `task_submit` appends the Kart
+  worker's `# allow_net` directive (`core/kart_sandbox.py task_allows_network`)
+  to the task text, so the willow-2.0 worker builds the sandbox with egress
+  enabled. Without the permission, `allow_net=True` returns `net_denied` before
+  any write. **Verified** end-to-end: probe `5H1M355V` (task_net app,
+  `allow_net=True`) ran with `network_mode: full`; control `TNH4B9FQ`
+  (`allow_net=False`) ran `isolated`; a `full_access`-only app was denied.
+  Operator note: grant `task_net` host-side only, never via the sandbox (B-14).
 - **B-18 · P3 (this session)** — `diagnostic_summary` no longer returns verdict
   `degraded` just because the caller omitted `app_id`. That case was a caller
   omission, not an install defect (store/Postgres/schema/bindings all `ok`), yet

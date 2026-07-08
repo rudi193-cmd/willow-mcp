@@ -101,6 +101,17 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
 }
 
 
+# Capability permissions — privilege flags a manifest may list to unlock an
+# extra capability on a tool it already holds, rather than a tool name of their
+# own. Checked explicitly by the tool (task_submit checks NET_PERMISSION before
+# honoring allow_net). Deliberately NOT folded into full_access or task_queue:
+# network egress from the Kart sandbox is an escalated privilege that must be
+# granted on its own line, so a broad task_queue/full_access grant never
+# silently carries net access with it (B-19; same spirit as B-14's trust-root
+# separation).
+NET_PERMISSION = "task_net"
+
+
 def _load_manifest(app_id: str) -> Optional[dict]:
     root = _apps_root()
     manifest_path = root / app_id / "manifest.json"
