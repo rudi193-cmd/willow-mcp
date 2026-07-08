@@ -25,6 +25,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-17 | P2 | Fixed | schema / tasks | `task_status` never surfaced completion time — the adopted `tasks` table had no `completed_at` column. Fixed: added the column + a self-populating trigger on the shared DB, and mapped it; `steps` stays unmapped (still no such column) | this session; probe `R2BSZ9FZ` |
 | B-18 | P3 | Fixed | diagnostics | `diagnostic_summary` returned verdict `degraded` when the caller merely omitted `app_id`. Fixed: missing `app_id` is a `caller_input` warn (surfaced in `problems` + manifest sub-check) that no longer degrades the verdict | this session; probe `E3265B66` |
 | B-19 | P2 | Fixed | task interface / Kart | `task_submit` had no `allow_net`. Fixed: `allow_net=True` gated by a new `task_net` manifest permission (not in full_access) appends the worker's `# allow_net` directive | this session; probe `5H1M355V` |
+| B-20 | P3 | Fixed | repo metadata / docs | GitHub "About" description read "Superseded by Willow 2.0 … now live in the monorepo" — stale, contradicting the active 2.0.0 repo; visible to anyone (surfaced in an external review). Fixed via `gh repo edit --description`; repo confirmed not archived | this session; DeepSeek review |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -45,6 +46,18 @@ _None — all tracked bugs are Fixed, Documented, or Stale._
 
 ## Fixed
 
+- **B-20 · P3 (this session)** — the GitHub repo "About" description read
+  *"Superseded by Willow 2.0 — MCP, SOIL, Postgres KB, and Kart now live in the
+  monorepo."* That was true when willow-mcp was being folded in, but is now
+  stale and contradicts reality: this repo is the active 2.0.0 home (README
+  presents it as a live standalone tool, PRs landing). It lives in GitHub repo
+  metadata, not the git tree, so a file grep misses it — it surfaced only via an
+  external review (DeepSeek) reading the repo page. Fixed with
+  `gh repo edit --description "Agent-neutral MCP server with persistent memory
+  (SOIL + Postgres KB) and a sandboxed task queue. Manifest-based ACL; works
+  with any stdio MCP client."` Repo confirmed **not archived** (`isArchived=false`).
+  Note: the published PyPI 1.2.0 description is separate (release held) and does
+  not carry this note.
 - **B-17 · P2 (this session)** — `task_status` now surfaces task completion
   time. Root cause: the adopted `tasks` table genuinely had **no**
   `completed_at` column (the null was not an unmapped-but-present column — the
