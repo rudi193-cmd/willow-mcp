@@ -72,7 +72,9 @@ class Store:
         ))
         self.root.mkdir(parents=True, exist_ok=True)
         self._conns: dict[str, sqlite3.Connection] = {}
-        self._lock = threading.Lock()
+        # RLock (not Lock): _conn() is called from within an already-locked
+        # method body below, and a plain Lock would deadlock on re-entry.
+        self._lock = threading.RLock()
 
     def _conn(self, collection: str) -> sqlite3.Connection:
         with self._lock:
@@ -90,22 +92,24 @@ class Store:
         rid = record_id or str(uuid.uuid4())[:8].lower()
         action = _action_for(deviation)
         now = datetime.now(timezone.utc).isoformat()
-        conn = self._conn(collection)
-        conn.execute(
-            "INSERT OR REPLACE INTO records (id, data, created_at, updated_at, deviation, action) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (rid, json.dumps(record), now, now, deviation, action)
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._conn(collection)
+            conn.execute(
+                "INSERT OR REPLACE INTO records (id, data, created_at, updated_at, deviation, action) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (rid, json.dumps(record), now, now, deviation, action)
+            )
+            conn.commit()
         return rid, action
 
     def get(self, collection: str, record_id: str) -> Optional[dict]:
-        conn = self._conn(collection)
-        row = conn.execute(
-            "SELECT data, created_at, updated_at, deviation, action "
-            "FROM records WHERE id = ? AND deleted = 0",
-            (record_id,)
-        ).fetchone()
+        with self._lock:
+            conn = self._conn(collection)
+            row = conn.execute(
+                "SELECT data, created_at, updated_at, deviation, action "
+                "FROM records WHERE id = ? AND deleted = 0",
+                (record_id,)
+            ).fetchone()
         if not row:
             return None
         record = json.loads(row[0])
@@ -117,11 +121,12 @@ class Store:
         return record
 
     def all(self, collection: str) -> list[dict]:
-        conn = self._conn(collection)
-        rows = conn.execute(
-            "SELECT id, data, created_at, updated_at, deviation, action "
-            "FROM records WHERE deleted = 0 ORDER BY created_at"
-        ).fetchall()
+        with self._lock:
+            conn = self._conn(collection)
+            rows = conn.execute(
+                "SELECT id, data, created_at, updated_at, deviation, action "
+                "FROM records WHERE deleted = 0 ORDER BY created_at"
+            ).fetchall()
         results = []
         for row in rows:
             record = json.loads(row[1])
@@ -135,28 +140,32 @@ class Store:
 
     def update(self, collection: str, record_id: str, record: dict,
                deviation: float = 0.0) -> Optional[str]:
-        conn = self._conn(collection)
         now = datetime.now(timezone.utc).isoformat()
         action = _action_for(deviation)
-        result = conn.execute(
-            "UPDATE records SET data = ?, updated_at = ?, deviation = ?, action = ? "
-            "WHERE id = ? AND deleted = 0",
-            (json.dumps(record), now, deviation, action, record_id)
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._conn(collection)
+            result = conn.execute(
+                "UPDATE records SET data = ?, updated_at = ?, deviation = ?, action = ? "
+                "WHERE id = ? AND deleted = 0",
+                (json.dumps(record), now, deviation, action, record_id)
+            )
+            conn.commit()
         return record_id if result.rowcount > 0 else None
 
     def search(self, collection: str, query: str) -> list[dict]:
         """Multi-keyword AND search (all tokens must appear in JSON data)."""
-        conn = self._conn(collection)
         tokens = query.split()
+        if not tokens:
+            return []
         conditions = " AND ".join(["data LIKE ?"] * len(tokens))
         params = tuple(f"%{t}%" for t in tokens)
-        rows = conn.execute(
-            f"SELECT id, data, deviation, action FROM records "
-            f"WHERE deleted = 0 AND {conditions}",
-            params
-        ).fetchall()
+        with self._lock:
+            conn = self._conn(collection)
+            rows = conn.execute(
+                f"SELECT id, data, deviation, action FROM records "
+                f"WHERE deleted = 0 AND {conditions}",
+                params
+            ).fetchall()
         results = []
         for row in rows:
             record = json.loads(row[1])
@@ -178,11 +187,12 @@ class Store:
         return results
 
     def delete(self, collection: str, record_id: str) -> bool:
-        conn = self._conn(collection)
         now = datetime.now(timezone.utc).isoformat()
-        result = conn.execute(
-            "UPDATE records SET deleted = 1, updated_at = ? WHERE id = ? AND deleted = 0",
-            (now, record_id)
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._conn(collection)
+            result = conn.execute(
+                "UPDATE records SET deleted = 1, updated_at = ? WHERE id = ? AND deleted = 0",
+                (now, record_id)
+            )
+            conn.commit()
         return result.rowcount > 0

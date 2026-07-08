@@ -1,5 +1,7 @@
 """Tests for the SQLite Store — aligned with willow-2.0 WillowStore schema."""
 
+import threading
+
 import pytest
 from willow_mcp.db import Store
 
@@ -76,6 +78,20 @@ def test_delete_missing(store):
     assert store.delete("col", "GHOST") is False
 
 
+def test_search_empty_query_returns_empty_not_crash(store):
+    """Regression for L-AUTH-02 audit sibling L-BUG-01: an empty/whitespace
+    query used to build a malformed SQL WHERE clause and raise instead of
+    returning results."""
+    store.put("col", {"content": "anything"})
+    assert store.search("col", "") == []
+    assert store.search("col", "   ") == []
+
+
+def test_search_all_empty_query_returns_empty_not_crash(store):
+    store.put("col_a", {"content": "anything"})
+    assert store.search_all("") == []
+
+
 def test_search_all(store):
     store.put("col_a", {"content": "willow is a system"})
     store.put("col_b", {"content": "willow runs on linux"})
@@ -85,3 +101,26 @@ def test_search_all(store):
     collections = {r["_collection"] for r in results}
     assert "col_a" in collections
     assert "col_b" in collections
+
+
+def test_concurrent_put_does_not_raise(store):
+    """Regression for L-CONC-01: concurrent calls against the same collection
+    used to share a sqlite3 connection with unsynchronized execute/commit,
+    risking 'database is locked' errors under real concurrency."""
+    errors = []
+
+    def worker(n):
+        try:
+            for i in range(20):
+                store.put("concurrent", {"n": n, "i": i})
+        except Exception as e:  # noqa: BLE001 - we want to see any exception at all
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    assert len(store.all("concurrent")) == 8 * 20
