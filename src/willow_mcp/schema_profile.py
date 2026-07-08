@@ -38,6 +38,7 @@ CANONICAL_ALIASES: dict[str, tuple[str, ...]] = {
     "source": ("source_type", "origin", "origin_ref"),
     "content": ("content", "body", "text"),
     "tags": ("tags", "labels"),
+    "task_id": ("id",),
 }
 
 # Column data types that must be cast to text before use in an ILIKE
