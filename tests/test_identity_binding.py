@@ -55,3 +55,16 @@ def test_bindings_are_scoped_per_issuer(home):
 def test_unsafe_subject_id_rejected(home):
     with pytest.raises(ValueError):
         ib.propose_binding("google", "../../etc/passwd", "a@b.com")
+
+
+def test_writes_are_atomic_no_leftover_tmp(home):
+    """Regression: binding writes must go through a temp file + rename, not
+    a direct write_text — a crash mid-write must never leave a corrupt or
+    half-written binding file behind."""
+    ib.propose_binding("google", "sub123", "a@b.com")
+    ib.confirm_binding("google", "sub123", "myapp")
+
+    bindings_dir = ib.binding_path("google", "sub123").parent
+    leftover = list(bindings_dir.glob("*.tmp-*"))
+    assert leftover == []
+    assert ib.resolve_app_id("google", "sub123") == "myapp"

@@ -20,6 +20,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+
+def _write_json_atomic(path: Path, record: dict) -> None:
+    """Write via a temp file + atomic rename so a crash mid-write can never
+    leave a half-written binding file — which load_binding would then either
+    fail to parse (fine, treated as absent) or, worse, parse as valid JSON
+    with a truncated/wrong 'confirmed' value."""
+    tmp = path.with_suffix(path.suffix + f".tmp-{os.getpid()}")
+    tmp.write_text(json.dumps(record, indent=2))
+    os.replace(tmp, path)
+
 # Subject/issuer values come from a verified IdP (Google tokeninfo / Apple JWT),
 # not raw user input, but they still become filesystem path components here —
 # refuse anything that isn't a plain token before touching the filesystem.
@@ -73,7 +83,7 @@ def propose_binding(issuer: str, subject_id: str, email: Optional[str]) -> dict:
         "confirmed": False,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    binding_path(issuer, subject_id).write_text(json.dumps(record, indent=2))
+    _write_json_atomic(binding_path(issuer, subject_id), record)
     return record
 
 
@@ -91,7 +101,7 @@ def confirm_binding(issuer: str, subject_id: str, app_id: str) -> dict:
     record["app_id"] = app_id
     record["confirmed"] = True
     record["confirmed_at"] = datetime.now(timezone.utc).isoformat()
-    binding_path(issuer, subject_id).write_text(json.dumps(record, indent=2))
+    _write_json_atomic(binding_path(issuer, subject_id), record)
     return record
 
 
