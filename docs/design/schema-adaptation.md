@@ -284,7 +284,7 @@ should be trusted. Code written against Google's always-present, IdP-asserted
 address — that specific risk (§6.2's `email_basis`) has not been fixed, only
 the larger "identity is discarded" claim was wrong.
 
-### 6.2 Canonical identity mapping — **status: not built**
+### 6.2 Canonical identity mapping — **status: done, 2026-07-08**
 
 Same move as §3.1, applied to identity instead of table columns. A canonical
 identity record:
@@ -306,6 +306,16 @@ relay address that silently stops forwarding if the user revokes it later.
 Collapsing these into one `email: str` field, as today's code implicitly
 does, is the identity equivalent of assuming every database's `source` column
 is spelled the same way.
+
+**Built as of 2026-07-08:** `identity_binding.compute_email_basis(issuer, email)`
+returns `"asserted"` (Google), `"first_auth_only"` / `"relay"` (Apple, based
+on the `@privaterelay.appleid.com` suffix), or `"unavailable"` (no email).
+`propose_binding` stores `email_basis` and `verified_at` on every binding
+record. As part of this, `oauth.py`'s `_apple_verify_id_token` no longer
+falls back to `sub` when Apple omits `email` on a repeat sign-in — it now
+returns `None`, so `compute_email_basis` can correctly report
+`"unavailable"` instead of a caller silently treating `sub` as an email
+address.
 
 ### 6.3 The write path: binding identity to an app_id — **status: built (steps 1–3), step 4 open**
 
@@ -337,16 +347,18 @@ Flow as built, mirroring §3.2–§3.4:
    (fail-closed) for anything unconfirmed. Stdio and serve mode now behave
    consistently: both fail closed on missing standing, where serve mode
    previously didn't check at all.
-4. **Not implemented.** `propose_binding` returns the existing record
-   untouched on a repeat sign-in (correct — a human's prior decision must
-   never be silently overwritten), but nothing compares the incoming
-   `email` against the bound record's stored `email` to detect drift. If
-   `subject_id` later maps to a *different* email than the bound record
-   shows, that should be surfaced the same way §4 surfaces `schema_drift` —
-   today it's silently accepted. If Apple's `email` disappears on a later
-   login (expected — see §6.1) that is correctly *not* drift (`subject_id` is
-   unchanged), so this needs to check "email present and different," not
-   "email present and different-from-null."
+4. **Done, 2026-07-08.** `propose_binding` still returns the existing record
+   untouched on a repeat sign-in with the same identity decision (`app_id`/
+   `confirmed` never silently overwritten), but now calls
+   `identity_binding._note_email_drift`, which compares the incoming email
+   against the stored one and — only when both are present and differ —
+   sets `email_drift: true`, `email_drift_detected_at`, `drift_from_email`,
+   `drift_to_email` on the record in place. Apple's email disappearing on a
+   later login (expected, §6.1) does not trigger this: the check requires
+   both values present, so `subject_id` staying the same with `email` going
+   present→absent is correctly not drift. `willow-mcp confirm-binding`'s CLI
+   output now prints a warning when confirming a binding that has an
+   unresolved drift flag, so the operator sees it before granting standing.
 
 ### 6.4 Relationship to §3.5 and to OAuth scope
 
