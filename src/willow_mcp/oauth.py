@@ -24,6 +24,7 @@
 import asyncio
 import base64
 import json
+import os
 import secrets
 import time
 import urllib.parse
@@ -82,8 +83,31 @@ class GroveOAuthProvider:
         return {"clients": {}, "access_tokens": {}, "refresh_tokens": {}}
 
     def _save_state(self) -> None:
+        self._prune_expired()
         self._token_path.parent.mkdir(parents=True, exist_ok=True)
-        self._token_path.write_text(json.dumps(self._state, indent=2))
+        # Atomic write (temp file + rename): a crash mid-write must never
+        # leave a half-written token store — the next load would either
+        # silently fall back to an empty store (data loss) or, worse, load
+        # truncated-but-parseable JSON.
+        tmp = self._token_path.with_suffix(self._token_path.suffix + f".tmp-{os.getpid()}")
+        tmp.write_text(json.dumps(self._state, indent=2))
+        os.replace(tmp, self._token_path)
+
+    def _prune_expired(self) -> None:
+        """Drop expired codes/tokens so a long-running serve-mode process
+        doesn't accumulate dead entries forever — previously these were only
+        ever removed lazily, if that exact code/token happened to be looked
+        up again after expiring."""
+        now = time.time()
+        for code, record in list(self._codes.items()):
+            if record.expires_at < now:
+                del self._codes[code]
+                self._code_identity.pop(code, None)
+        for bucket in ("access_tokens", "refresh_tokens"):
+            for token, data in list(self._state[bucket].items()):
+                exp = data.get("expires_at")
+                if exp and exp < now:
+                    del self._state[bucket][token]
 
     def pop_pending(self, key: str):
         return self._pending.pop(key, None)
@@ -94,6 +118,7 @@ class GroveOAuthProvider:
         params: AuthorizationParams,
         identity: Optional[dict] = None,
     ) -> str:
+        self._prune_expired()
         code_str = _tok()
         self._codes[code_str] = AuthorizationCode(
             code=code_str,

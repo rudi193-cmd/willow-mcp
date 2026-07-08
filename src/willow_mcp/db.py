@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import uuid
@@ -14,6 +15,19 @@ import psycopg2.extras
 
 _pg_conn = None
 _pg_lock = threading.Lock()
+
+# server.py's _sanitize() already rejects a path-traversal collection before
+# a tool call reaches Store — this is a second, independent check inside
+# Store itself, so a future direct caller (a script, a test, a new code
+# path) can't reach the filesystem with an unsanitized collection name just
+# because it bypassed the MCP guard pipeline.
+_COLLECTION_RE = re.compile(r"^[A-Za-z0-9_\-]{1,128}$")
+
+
+def _validate_collection(collection: str) -> str:
+    if not collection or not _COLLECTION_RE.match(collection):
+        raise ValueError(f"invalid collection name: {collection!r}")
+    return collection
 
 
 def get_pg() -> Optional[psycopg2.extensions.connection]:
@@ -47,9 +61,6 @@ CREATE TABLE IF NOT EXISTS records (
 CREATE INDEX IF NOT EXISTS idx_deleted ON records(deleted);
 """
 
-_ACTIONS = {0.0: "work_quiet", 0.785: "flag", 1.571: "stop"}
-
-
 def _action_for(deviation: float) -> str:
     if deviation >= 1.571:
         return "stop"
@@ -77,6 +88,7 @@ class Store:
         self._lock = threading.RLock()
 
     def _conn(self, collection: str) -> sqlite3.Connection:
+        _validate_collection(collection)
         with self._lock:
             if collection not in self._conns:
                 db_path = self.root / collection / "store.db"
@@ -180,6 +192,13 @@ class Store:
         for db_file in sorted(self.root.rglob("store.db")):
             col = str(db_file.parent.relative_to(self.root))
             if col.startswith("."):
+                continue
+            try:
+                _validate_collection(col)
+            except ValueError:
+                # An on-disk directory that predates _validate_collection or
+                # was created outside this class — skip it rather than let
+                # one bad entry crash the whole search_all call.
                 continue
             for record in self.search(col, query):
                 record["_collection"] = col

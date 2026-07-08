@@ -103,6 +103,18 @@ def test_search_all(store):
     assert "col_b" in collections
 
 
+def test_put_rejects_path_traversal_collection(store):
+    """Regression: Store itself must reject an unsafe collection name,
+    independent of server.py's _sanitize() — defense in depth."""
+    with pytest.raises(ValueError):
+        store.put("../../etc", {"v": 1})
+
+
+def test_put_rejects_collection_with_slash(store):
+    with pytest.raises(ValueError):
+        store.put("a/b", {"v": 1})
+
+
 def test_concurrent_put_does_not_raise(store):
     """Regression for L-CONC-01: concurrent calls against the same collection
     used to share a sqlite3 connection with unsynchronized execute/commit,

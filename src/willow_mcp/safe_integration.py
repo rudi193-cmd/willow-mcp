@@ -7,9 +7,13 @@ lifecycle as a fleet member. status() is that channel.
 from . import __version__
 from .db import get_pg
 
-# Kept in sync by hand with the @mcp.tool() definitions in server.py — update
-# this count when tools are added or removed.
-_TOOLS_REGISTERED = 20
+
+def _tools_registered() -> int:
+    """Count of live @mcp.tool() registrations — read from the actual
+    FastMCP tool manager rather than a hand-maintained constant, so this
+    number can't silently drift when tools are added or removed."""
+    from .server import mcp
+    return len(mcp._tool_manager.list_tools())
 
 
 def status() -> dict:
@@ -19,6 +23,6 @@ def status() -> dict:
         "app_id": "willow-mcp",
         "version": __version__,
         "status": "running",
-        "tools_registered": _TOOLS_REGISTERED,
+        "tools_registered": _tools_registered(),
         "postgres_reachable": pg is not None,
     }
