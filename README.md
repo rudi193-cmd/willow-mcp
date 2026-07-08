@@ -38,7 +38,7 @@ Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 | `kb_promote` | Change an atom's domain (requires a confirmed schema mapping) |
 | `kb_journal` | Add a journal-domain knowledge atom (requires a confirmed schema mapping) |
 | `kb_startup_continuity` | Fetch atoms tagged/domained for startup continuity |
-| `schema_confirm_mapping` | Confirm (optionally correct) a table's column mapping, unlocking its write tools — see [docs/design/schema-adaptation.md](docs/design/schema-adaptation.md) |
+| `schema_confirm_mapping` | Confirm (optionally correct) a table's column mapping, unlocking its write tools. `preview=True` dry-runs it and renders a **sample row** so you can see what each field actually resolves to before trusting a name match — see [docs/design/schema-adaptation.md](docs/design/schema-adaptation.md) |
 | `task_submit` | Submit task to Kart queue |
 | `task_status` | Check task status |
 | `task_list` | List pending tasks |

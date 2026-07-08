@@ -199,6 +199,17 @@ No silent best-effort writes, ever. This is the tier-2/tier-3 safety
 boundary: reads can be helpful-and-approximate, writes must be
 correct-or-refused.
 
+**Confirmation requires evidence, not just a name.** A name match is an
+assertion — `content → content` looks right even when the host `content`
+column is a provenance blob and the real text lives in `title`/`summary`.
+`schema_confirm_mapping(preview=True)` therefore returns the proposed mapping
+*plus* a rendered `sample` row (real values, projected through the mapping,
+truncated) and writes nothing; a real confirm includes the same `sample`.
+Confirming without looking at the sample is the failure this closes — reads
+otherwise return the wrong column while every gate reports green (issue #20).
+`diagnostic_summary` surfaces each table's field→column map (names only) so a
+confirmed-but-wrong mapping is visible without a write.
+
 ### 3.5 Relationship to `gate.py`
 
 `gate.py`'s manifest ACL answers "may this `app_id` call this *tool*."

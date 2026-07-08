@@ -786,13 +786,22 @@ def kb_journal(
 
 @mcp.tool()
 @_guarded("schema_confirm_mapping")
-def schema_confirm_mapping(app_id: str, table: str, overrides: Optional[dict] = None) -> dict:
+def schema_confirm_mapping(app_id: str, table: str, overrides: Optional[dict] = None,
+                           preview: bool = False) -> dict:
     """Confirm a table's schema mapping, unlocking write tools for it (knowledge_ingest,
     kb_journal, kb_promote today). `overrides` lets you correct individual
     canonical-field -> real-column assignments before confirming, e.g.
     {"source": "origin_ref"} or {"tags": null} to explicitly mark a field
     unmapped. Gated separately from knowledge_write — confirming a mapping
-    is a more consequential act than a single write."""
+    is a more consequential act than a single write.
+
+    preview=True: dry-run — return the proposed mapping AND a rendered `sample`
+    row (what each canonical field actually resolves to) WITHOUT confirming or
+    writing. Review the sample first: a column that name-matches but holds the
+    wrong data — e.g. a `content` column that is really a provenance blob, with
+    the real text in `title`/`summary` — reveals itself in the sample where a
+    name match cannot. preview=False (default): confirm, and include the sample
+    in the response so the confirmation is never blind."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -802,7 +811,12 @@ def schema_confirm_mapping(app_id: str, table: str, overrides: Optional[dict] = 
             "error": f"unknown_table: '{table}' is not a table willow-mcp knows how to map "
                      f"(known: {sorted(_CONFIRMABLE_TABLES)})"
         }
-    return sp.confirm(pg, app_id, table, canonical_fields, overrides=overrides)
+    if preview:
+        return sp.preview(pg, app_id, table, canonical_fields, overrides=overrides)
+    result = sp.confirm(pg, app_id, table, canonical_fields, overrides=overrides)
+    if isinstance(result, dict) and "error" not in result:
+        result["sample"] = sp.render_sample(pg, table, result.get("fields", {}))
+    return result
 
 
 @mcp.tool()
@@ -1158,6 +1172,11 @@ def _diag_schema(app_id: str) -> dict:
             check["tables"][table] = {
                 "present": True,
                 "confirmed": bool(m.get("confirmed")),
+                # field -> real column (names only, no row data) so a
+                # confirmed-but-wrong mapping like content->content is visible
+                # here; run schema_confirm_mapping(preview=True) to see the
+                # rendered values that prove or disprove it.
+                "columns": {f: v["column"] for f, v in m["fields"].items()},
                 "unmapped": [f for f, v in m["fields"].items() if v["column"] is None],
                 "drift": bool(m.get("schema_drift")),
             }

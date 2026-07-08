@@ -205,6 +205,95 @@ def resolve(conn, app_id: str, table: str, canonical_fields: list[str]) -> dict:
     return record
 
 
+def _apply_overrides(base_fields: dict, overrides: Optional[dict],
+                     by_name: dict, canonical_fields: list[str]) -> tuple[Optional[dict], Optional[dict]]:
+    """Apply human column overrides to a base mapping (§3.4). Returns
+    (fields, None) on success or (None, error) on a bad override — the error
+    lacks a "table" key; the caller adds it. Shared by confirm() and preview()
+    so both apply overrides identically. A None col explicitly unmaps a field;
+    a non-null col must exist in a fresh introspection or the apply is refused
+    (principle 3: writes may not guess)."""
+    fields = {f: dict(v) for f, v in base_fields.items()}
+    for field, col in (overrides or {}).items():
+        if field not in canonical_fields:
+            return None, {"error": "unknown_field", "field": field}
+        if col is None:
+            fields[field] = {"column": None, "tier": "unmapped", "confidence": 0.0, "data_type": None}
+        elif col not in by_name:
+            return None, {"error": "override_invalid", "field": field, "column": col}
+        else:
+            fields[field] = {"column": col, "tier": "confirmed_override",
+                             "confidence": 1.0, "data_type": by_name[col].data_type}
+    return fields, None
+
+
+def render_sample(conn, table: str, fields: dict, limit: int = 3) -> list[dict]:
+    """SELECT up to `limit` real rows, projected through the mapping, so a
+    reviewer can see what each canonical field ACTUALLY resolves to. This is
+    the evidence a name match alone can't give: a `content` column that is
+    really a provenance blob — with the real knowledge in `title`/`summary` —
+    reveals itself here. Long values are truncated; a query error is returned
+    inline rather than raised (a diagnostic must not crash)."""
+    _validate_table(table)
+    cols, present = [], []
+    for field, m in fields.items():
+        col = m.get("column")
+        if col:
+            cols.append(f'"{col}" AS "{field}"')
+            present.append(field)
+    if not cols:
+        return []
+    limit = max(1, min(int(limit), 10))
+    cur = conn.cursor()
+    try:
+        cur.execute(f'SELECT {", ".join(cols)} FROM "{table}" LIMIT %s', (limit,))
+        rows = cur.fetchall()
+    except Exception as e:  # noqa: BLE001 — evidence tool must degrade, not raise
+        return [{"_sample_error": str(e)[:160]}]
+    finally:
+        cur.close()
+    out = []
+    for row in rows:
+        rec = {}
+        for field, val in zip(present, row):
+            if val is None or isinstance(val, (int, float, bool)):
+                rec[field] = val
+            else:
+                s = str(val)
+                rec[field] = (s[:200] + "…") if len(s) > 200 else s
+        out.append(rec)
+    return out
+
+
+def preview(conn, app_id: str, table: str, canonical_fields: list[str],
+            overrides: Optional[dict] = None) -> dict:
+    """Dry-run: return the proposed mapping (base heuristic or prior artifact,
+    with `overrides` applied in memory) plus a rendered sample row — WITHOUT
+    confirming or writing anything. The review step the confirm gate needs:
+    look at `sample` before trusting `fields`, because a name match is an
+    assertion, not evidence."""
+    columns = introspect(conn, table)
+    if not columns:
+        return {"error": "table_not_found", "table": table}
+    by_name = {c.name: c for c in columns}
+    fingerprint = db_fingerprint(conn)
+    existing = load_mapping(app_id, fingerprint, table)
+    base_fields = (existing or {}).get("fields") or propose_mapping(columns, canonical_fields)
+    fields, err = _apply_overrides(base_fields, overrides, by_name, canonical_fields)
+    if err:
+        err["table"] = table
+        return err
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "database": fingerprint,
+        "table": table,
+        "confirmed": False,
+        "preview": True,
+        "fields": fields,
+        "sample": render_sample(conn, table, fields),
+    }
+
+
 def confirm(
     conn, app_id: str, table: str, canonical_fields: list[str],
     overrides: Optional[dict] = None,
@@ -232,21 +321,10 @@ def confirm(
     fingerprint = db_fingerprint(conn)
     existing = load_mapping(app_id, fingerprint, table)
     base_fields = (existing or {}).get("fields") or propose_mapping(columns, canonical_fields)
-    fields = {f: dict(v) for f, v in base_fields.items()}
-
-    if overrides:
-        for field, col in overrides.items():
-            if field not in canonical_fields:
-                return {"error": "unknown_field", "field": field, "table": table}
-            if col is None:
-                fields[field] = {"column": None, "tier": "unmapped", "confidence": 0.0, "data_type": None}
-            elif col not in by_name:
-                return {"error": "override_invalid", "field": field, "column": col, "table": table}
-            else:
-                fields[field] = {
-                    "column": col, "tier": "confirmed_override",
-                    "confidence": 1.0, "data_type": by_name[col].data_type,
-                }
+    fields, err = _apply_overrides(base_fields, overrides, by_name, canonical_fields)
+    if err:
+        err["table"] = table
+        return err
 
     record = {
         "schema_version": SCHEMA_VERSION,

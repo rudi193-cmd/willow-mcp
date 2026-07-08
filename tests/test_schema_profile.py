@@ -304,3 +304,99 @@ def test_cast_for_ilike_no_cast_for_text():
 def test_mapping_path_rejects_unsafe_table_name(home):
     with pytest.raises(ValueError):
         sp.mapping_path("testapp", "fingerprint123", "../../etc/passwd")
+
+
+# ── render_sample / preview: evidence, not assertion ────────────────────
+
+class _DataCursor:
+    """Distinguishes introspection (information_schema) queries — which return
+    the column list — from data SELECTs, which return canned rows."""
+
+    def __init__(self, columns, data_rows):
+        self._columns = columns
+        self._data_rows = data_rows
+        self._introspecting = False
+
+    def execute(self, sql, params=None):
+        self._introspecting = "information_schema" in sql
+
+    def fetchall(self):
+        return list(self._columns.items()) if self._introspecting else self._data_rows
+
+    def close(self):
+        pass
+
+
+class _DataConn:
+    def __init__(self, columns, data_rows, host="localhost", dbname="testdb"):
+        self._columns = columns
+        self._data_rows = data_rows
+        self._host = host
+        self._dbname = dbname
+
+    def cursor(self):
+        return _DataCursor(self._columns, self._data_rows)
+
+    def get_dsn_parameters(self):
+        return {"host": self._host, "dbname": self._dbname}
+
+
+# The false-friend row: `content` is a provenance blob, the real knowledge is
+# in title/summary — the exact schema that fooled a name-match confirm.
+_BLOB_ROW = ("A1", {"tags": ["identity"], "source_id": "mcp:willow:..."}, "willow", "mcp")
+
+
+def test_render_sample_projects_real_values_through_mapping():
+    conn = _DataConn(KNOWLEDGE_LIKE_COLUMNS, [_BLOB_ROW])
+    fields = sp.propose_mapping(sp.introspect(conn, "knowledge"), CANONICAL)
+    sample = sp.render_sample(conn, "knowledge", fields)
+    # content resolves to the provenance blob — the evidence a name match hides
+    assert "source_id" in sample[0]["content"]
+    # tags is unmapped, so it is not selected at all
+    assert "tags" not in sample[0]
+    assert sample[0]["id"] == "A1"
+
+
+def test_render_sample_empty_when_nothing_mapped():
+    conn = _DataConn(KNOWLEDGE_LIKE_COLUMNS, [_BLOB_ROW])
+    all_unmapped = {f: {"column": None} for f in CANONICAL}
+    assert sp.render_sample(conn, "knowledge", all_unmapped) == []
+
+
+def test_render_sample_truncates_long_values():
+    long_val = "x" * 500
+    conn = _DataConn(KNOWLEDGE_LIKE_COLUMNS, [("A1", long_val, "willow", "mcp")])
+    fields = sp.propose_mapping(sp.introspect(conn, "knowledge"), CANONICAL)
+    sample = sp.render_sample(conn, "knowledge", fields)
+    assert sample[0]["content"].endswith("…")
+    assert len(sample[0]["content"]) <= 201
+
+
+def test_preview_returns_sample_and_writes_nothing(home):
+    conn = _DataConn(KNOWLEDGE_LIKE_COLUMNS, [_BLOB_ROW])
+    res = sp.preview(conn, "app", "knowledge", CANONICAL)
+    assert res["preview"] is True
+    assert res["confirmed"] is False
+    assert "source_id" in res["sample"][0]["content"]
+    # dry run: no artifact persisted
+    fp = sp.db_fingerprint(conn)
+    assert sp.load_mapping("app", fp, "knowledge") is None
+
+
+def test_preview_applies_overrides_in_memory(home):
+    conn = _DataConn(KNOWLEDGE_LIKE_COLUMNS, [_BLOB_ROW])
+    res = sp.preview(conn, "app", "knowledge", CANONICAL, overrides={"source": "source_type"})
+    assert res["fields"]["source"]["tier"] == "confirmed_override"
+    assert sp.load_mapping("app", sp.db_fingerprint(conn), "knowledge") is None
+
+
+def test_preview_bad_override_reports_table(home):
+    conn = _DataConn(KNOWLEDGE_LIKE_COLUMNS, [_BLOB_ROW])
+    res = sp.preview(conn, "app", "knowledge", CANONICAL, overrides={"tags": "no_such_col"})
+    assert res == {"error": "override_invalid", "field": "tags",
+                   "column": "no_such_col", "table": "knowledge"}
+
+
+def test_preview_table_not_found():
+    conn = _DataConn({}, [])
+    assert sp.preview(conn, "app", "ghost", CANONICAL) == {"error": "table_not_found", "table": "ghost"}

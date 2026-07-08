@@ -340,6 +340,25 @@ def test_schema_confirm_mapping_applies_overrides(app_id, monkeypatch):
     assert result["fields"]["tags"] == {"column": None, "tier": "unmapped", "confidence": 0.0, "data_type": None}
 
 
+def test_schema_confirm_mapping_confirm_includes_sample(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS,
+                   canned_rows=[("A1", {"blob": 1}, "general", "session")])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+    assert result["confirmed"] is True
+    assert "sample" in result  # confirmation is never blind
+
+
+def test_schema_confirm_mapping_preview_does_not_confirm(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS,
+                   canned_rows=[("A1", {"blob": 1}, "general", "session")])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.schema_confirm_mapping(app_id=app_id, table="knowledge", preview=True)
+    assert result["preview"] is True
+    assert result["confirmed"] is False
+    assert "sample" in result
+
+
 def test_schema_confirm_mapping_denied_without_schema_admin(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
