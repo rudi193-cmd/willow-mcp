@@ -48,8 +48,24 @@ from . import schema_profile as sp
 _store = Store()
 _receipt_log = ReceiptLog()
 
-_PORT = int(os.getenv("WILLOW_MCP_PORT", "8765"))
-_HOST = os.getenv("WILLOW_MCP_HOST", "127.0.0.1")
+def _argv_opt(flag: str) -> Optional[str]:
+    """Read `--flag value` or `--flag=value` from sys.argv at import time.
+
+    The FastMCP object, base URL, and OAuth issuer are all built at import —
+    before main()'s argparse runs — so the CLI host/port must be resolved here
+    or the flags are silently ignored (only the env vars would take effect).
+    """
+    for i, arg in enumerate(sys.argv):
+        if arg == flag and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+        if arg.startswith(flag + "="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+# Precedence: CLI flag > env var > default.
+_PORT = int(_argv_opt("--port") or os.getenv("WILLOW_MCP_PORT", "8765"))
+_HOST = _argv_opt("--host") or os.getenv("WILLOW_MCP_HOST", "127.0.0.1")
 _DEFAULT_APP_ID = os.environ.get("WILLOW_APP_ID", "")
 
 _SERVE_MODE = "--serve" in sys.argv
