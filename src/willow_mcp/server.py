@@ -6,12 +6,13 @@ Tools:
   Knowledge (PG):  knowledge_search, knowledge_ingest
   Tasks (PG):      task_submit, task_status, task_list
 
-Auth: SAP/1.0 — app_id required on every call. Set SAP_PGP_FINGERPRINT to pin your key.
+Auth: manifest-based per-tool ACL. Each caller supplies an app_id; a manifest
+JSON file at $WILLOW_HOME/mcp_apps/<app_id>/manifest.json lists which tool
+groups the app may call. Fail-closed: no manifest = all calls denied.
 """
 
 import json
 import os
-import sys
 import uuid
 from typing import Any
 
@@ -20,27 +21,11 @@ import mcp.types as types
 from mcp.server import Server
 
 from .db import Store, get_pg
-
-try:
-    from openclaw_sap_gate import authorized as _sap_authorized
-    _SAP_AVAILABLE = True
-except ImportError:
-    _SAP_AVAILABLE = False
+from .gate import permitted
 
 _store = Store()
 _server = Server("willow-mcp")
-_DEFAULT_APP_ID = os.environ.get("WILLOW_APP_ID", "willow-mcp")
-
-
-def _auth(app_id: str) -> tuple[bool, str]:
-    """Check SAP authorization. Returns (ok, error_message)."""
-    if not _SAP_AVAILABLE:
-        return True, ""
-    if not app_id:
-        return False, "app_id is required"
-    if not _sap_authorized(app_id):
-        return False, f"SAP gate denied: '{app_id}' not authorized"
-    return True, ""
+_DEFAULT_APP_ID = os.environ.get("WILLOW_APP_ID", "")
 
 
 @_server.list_tools()
@@ -205,9 +190,13 @@ async def list_tools() -> list[types.Tool]:
 
 @_server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
-    app_id = arguments.get("app_id", _DEFAULT_APP_ID)
-    ok, err = _auth(app_id)
-    if not ok:
+    app_id = arguments.get("app_id") or _DEFAULT_APP_ID
+    if not permitted(app_id, name):
+        err = (
+            f"gate denied: '{app_id}' not permitted for '{name}'. "
+            f"Ensure a manifest exists at $WILLOW_HOME/mcp_apps/{app_id}/manifest.json "
+            f"and lists this tool or a group that includes it."
+        )
         return [types.TextContent(type="text", text=json.dumps({"error": err}))]
 
     try:
