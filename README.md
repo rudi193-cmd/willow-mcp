@@ -11,7 +11,7 @@ Agent-neutral MCP server with persistent memory and task execution. Works with a
 - **Postgres knowledge base** — multi-keyword searchable knowledge graph
 - **Kart task queue** — sandboxed task executor for shell commands and scripts
 
-Every tool call is authorized via [SAP/1.0](https://github.com/rudi193-cmd/sap-rfc) — a filesystem-based identity gate with no ACL database.
+Every tool call is authorized via a filesystem-based manifest ACL — no ACL database, no external auth service. See [Authorization](#authorization).
 
 ## Install
 
@@ -32,13 +32,31 @@ Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 | `store_search` | Multi-keyword AND search in a collection |
 | `store_delete` | Soft-delete a record by `record_id` |
 | `store_search_all` | Search across all collections |
-| `knowledge_ingest` | Add to Postgres knowledge base |
-| `knowledge_search` | Multi-keyword search in Postgres knowledge base |
+| `knowledge_ingest` | Add a knowledge atom (requires a confirmed schema mapping — see `schema_confirm_mapping`) |
+| `knowledge_search` | Multi-keyword search in the Postgres knowledge base |
+| `kb_at` | Fetch a single knowledge atom by ID |
+| `kb_promote` | Change an atom's domain (requires a confirmed schema mapping) |
+| `kb_journal` | Add a journal-domain knowledge atom (requires a confirmed schema mapping) |
+| `kb_startup_continuity` | Fetch atoms tagged/domained for startup continuity |
+| `schema_confirm_mapping` | Confirm (optionally correct) a table's column mapping, unlocking its write tools — see [docs/design/schema-adaptation.md](docs/design/schema-adaptation.md) |
 | `task_submit` | Submit task to Kart queue |
 | `task_status` | Check task status |
 | `task_list` | List pending tasks |
+| `agent_route` | Route a task to a target agent, recording the decision |
+| `agent_dispatch_result` | Record the result of a dispatched agent task |
+| `fleet_status` | List agents registered in the fleet |
+| `fleet_health` | Task queue counts by status |
 
-Every tool requires an `app_id` param. Authorization is checked via [SAP/1.0](https://github.com/rudi193-cmd/sap-rfc).
+`knowledge_search`/`kb_at`/`kb_startup_continuity` and `fleet_status` adapt to
+whatever your host database's real columns are named — see
+[docs/design/schema-adaptation.md](docs/design/schema-adaptation.md).
+`knowledge_ingest`/`kb_journal`/`kb_promote` refuse to write
+(`unconfirmed_schema`) until you've reviewed and confirmed that mapping via
+`schema_confirm_mapping` — the [`schema-confirm` skill](skills/schema-confirm.md)
+walks through that.
+
+Every tool requires an `app_id` param, checked against a manifest at
+`$WILLOW_HOME/mcp_apps/<app_id>/manifest.json` — see [Authorization](#authorization).
 
 ## MCP config
 
@@ -95,7 +113,35 @@ You can also run the full [willow-2.0](https://github.com/rudi193-cmd/willow-2.0
 
 ## Authorization
 
-Uses [openclaw-sap-gate](https://github.com/rudi193-cmd/openclaw-sap-gate) (SAP/1.0). If `openclaw-sap-gate` is not installed, all calls are permitted (open mode).
+Manifest-based ACL, no external service or ACL database. Each `app_id`
+needs a manifest at `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json`:
+
+```json
+{"permissions": ["store_read", "knowledge_write"]}
+```
+
+`permissions` is a list of group names and/or literal tool names —
+see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the full set
+(`store_read`, `store_write`, `knowledge_read`, `knowledge_write`,
+`schema_admin`, `task_queue`, `agent_dispatch`, `fleet_read`,
+`full_access`). Fail-closed: no manifest, or an empty `permissions` list,
+denies every call for that `app_id`.
+
+## Hooks and skills (Claude Code)
+
+`.claude-plugin/plugin.json` registers a `PreToolUse` hook and a skill for
+Claude Code users — install this package as a plugin to get both alongside
+the MCP server itself:
+
+- **`hooks/pre_tool_use.py`** blocks `Bash` commands that reach for raw
+  `psql`/`psycopg2`/`sqlite3` against a database or store willow-mcp owns,
+  redirecting to the matching MCP tool instead.
+- **[`skills/schema-confirm.md`](skills/schema-confirm.md)** walks through
+  reviewing and confirming a table's schema mapping before writing to it.
+
+See [docs/design/hooks-and-skills.md](docs/design/hooks-and-skills.md) for
+the design and the reasoning behind shipping these alongside tools rather
+than as a later add-on.
 
 ## License
 

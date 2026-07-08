@@ -1,0 +1,21 @@
+{
+  "name": "willow-mcp",
+  "description": "Willow sovereign agent platform — SQLite store, Postgres knowledge base, Kart task queue, plus the hooks and skills that keep them used correctly.",
+  "version": "2.0.0",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pre_tool_use.py"
+          }
+        ]
+      }
+    ]
+  },
+  "skills": [
+    "skills/schema-confirm.md"
+  ]
+}
