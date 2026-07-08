@@ -325,8 +325,12 @@ def _jwk_to_rsa_pub(n_b64: str, e_b64: str):
     return RSAPublicNumbers(_b64url_to_int(e_b64), _b64url_to_int(n_b64)).public_key(default_backend())
 
 
-def _apple_verify_id_token(id_token: str, client_id: str) -> tuple[str, str]:
-    """Verify Apple id_token (RS256). Returns (email or sub, sub)."""
+def _apple_verify_id_token(id_token: str, client_id: str) -> tuple[Optional[str], str]:
+    """Verify Apple id_token (RS256). Returns (email, sub) — email is None
+    on a repeat sign-in with no cached email (§6.1: Apple only includes it
+    on the *first* authorization). Callers must not substitute `sub` for a
+    missing email — that conflates two different kinds of identifier and
+    defeats compute_email_basis's 'unavailable' signal (§6.2)."""
     from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
     from cryptography.hazmat.primitives.hashes import SHA256
 
@@ -358,7 +362,7 @@ def _apple_verify_id_token(id_token: str, client_id: str) -> tuple[str, str]:
         raise ValueError("Apple id_token expired")
 
     sub = payload["sub"]
-    email = payload.get("email", sub)
+    email = payload.get("email")
     return email, sub
 
 

@@ -1001,7 +1001,12 @@ def _cmd_confirm_binding(args) -> None:
         print(f"Error: {e}")
         raise SystemExit(1)
     print(f"Bound ({record['issuer']}, {record['subject_id']}) -> app_id={record['app_id']!r} "
-          f"(email: {record.get('email')})")
+          f"(email: {record.get('email')}, basis: {record.get('email_basis', 'unknown')})")
+    if record.get("email_drift"):
+        print(f"  WARNING: email changed since this binding was first proposed "
+              f"({record.get('drift_from_email')} -> {record.get('drift_to_email')}) "
+              f"at {record.get('email_drift_detected_at')} — verify this is still the same person "
+              f"before confirming.")
 
 
 def main():

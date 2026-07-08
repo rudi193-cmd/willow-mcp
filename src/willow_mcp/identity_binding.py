@@ -65,23 +65,63 @@ def load_binding(issuer: str, subject_id: str) -> Optional[dict]:
         return None
 
 
+def compute_email_basis(issuer: str, email: Optional[str]) -> str:
+    """§6.2: 'do we have an email' is not the interesting question — 'how
+    much should anything downstream trust it' is. Google's tokeninfo email
+    is IdP-asserted on every sign-in. Apple's may be a one-time snapshot
+    (present only on the *first* authorization, silently absent after) or a
+    private relay address that silently stops forwarding if the user
+    revokes it later — either is a materially weaker guarantee than
+    Google's, and code written against Google's always-present email will
+    silently misbehave the first time it sees one of these."""
+    if not email:
+        return "unavailable"
+    if issuer == "apple":
+        if email.endswith("@privaterelay.appleid.com"):
+            return "relay"
+        return "first_auth_only"
+    return "asserted"
+
+
+def _note_email_drift(existing: dict, incoming_email: Optional[str]) -> None:
+    """§6.3 step 4: if a bound identity's email changes between sign-ins,
+    surface it (like §4's schema_drift) rather than silently accepting it.
+    Only 'present and different' counts as drift — Apple's email correctly
+    disappearing on a later login (subject_id unchanged, see §6.1) must NOT
+    be flagged, since that's expected behavior, not an identity change."""
+    stored = existing.get("email")
+    if not incoming_email or not stored or incoming_email == stored:
+        return
+    existing["email_drift"] = True
+    existing["email_drift_detected_at"] = datetime.now(timezone.utc).isoformat()
+    existing["drift_from_email"] = stored
+    existing["drift_to_email"] = incoming_email
+    _write_json_atomic(binding_path(existing["issuer"], existing["subject_id"]), existing)
+
+
 def propose_binding(issuer: str, subject_id: str, email: Optional[str]) -> dict:
     """Create an unconfirmed binding artifact on first sign-in.
 
     Returns the existing record untouched if one is already on disk — a
     repeat sign-in must never silently overwrite a human's prior decision
-    (confirmed or not).
+    (confirmed or not). It may still be annotated in place with an
+    email-drift flag (§6.3 step 4) if the incoming email differs from what
+    was stored — that's an audit note, not a decision change.
     """
     existing = load_binding(issuer, subject_id)
     if existing is not None:
+        _note_email_drift(existing, email)
         return existing
+    now = datetime.now(timezone.utc).isoformat()
     record = {
         "issuer": issuer,
         "subject_id": subject_id,
         "email": email,
+        "email_basis": compute_email_basis(issuer, email),
+        "verified_at": now,
         "app_id": None,
         "confirmed": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now,
     }
     _write_json_atomic(binding_path(issuer, subject_id), record)
     return record
