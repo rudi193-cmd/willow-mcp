@@ -96,16 +96,17 @@ actually needs them:
 A guided walkthrough for the human/agent workflow the design doc's §3.2
 mapping artifact implies but doesn't script:
 
-1. Read the current (possibly unconfirmed) mapping for a table — either
-   from the `_unmapped` field on a read tool's response, or by calling
-   `schema_confirm_mapping` read-only... except the tool has no read-only
-   mode (it always confirms). The skill's first step is calling the
-   read-path tools (`knowledge_search`, `kb_at`, etc.) to surface the
-   *current* heuristic mapping's `_unmapped` list and any visible
-   `tier: "alias"` guesses, without side effects — confirmation only
-   happens at the end, once a human has seen what it would do.
-2. Show the heuristic guesses field-by-field: which are `exact`, which are
-   `alias` (name the aliased column), which are `unmapped`.
+1. Preview the mapping with `schema_confirm_mapping(table=..., preview=True)`
+   — a read-only dry-run (added for issue #20) that returns the proposed
+   mapping *and* a rendered `sample` row showing what each canonical field
+   actually resolves to, writing nothing. Reviewing the sample is the whole
+   point: a name match is an assertion, not evidence — a `content` column
+   that is really a provenance blob (with the real text in `title`/`summary`)
+   only reveals itself in the sample, not in the field names.
+2. Show the guesses field-by-field *against the sample values*: which are
+   `exact`, which are `alias` (name the aliased column), which are
+   `unmapped` — and flag any field whose sample value is clearly the wrong
+   data as an override to correct, not a mapping to accept.
 3. Ask the human to accept each guess or supply a correction (or explicit
    "leave unmapped").
 4. Call `schema_confirm_mapping` once with the accumulated overrides.
