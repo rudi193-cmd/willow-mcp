@@ -1,0 +1,559 @@
+<title>Willow — a tree that keeps track of things for you</title>
+<!-- three taps on the tree, and it tells you the truth -->
+<style>
+  :root {
+    --sky-a: #eef4ec;
+    --sky-b: #d7e8d3;
+    --card: #fffaf0;
+    --card-line: #e3d9c2;
+    --ink: #2c2a22;
+    --ink-dim: #736f5e;
+    --sap: #c97f22;
+    --moss: #4f7a3c;
+    --rust: #b1503a;
+    --bark: #6b4a2a;
+    --bark-dark: #4a331d;
+    --radius: 14px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --sky-a: #14110d;
+      --sky-b: #1b2116;
+      --card: #1c170f;
+      --card-line: #392d1c;
+      --ink: #ecdfc4;
+      --ink-dim: #a89a7c;
+      --sap: #d99a3d;
+      --moss: #8aab63;
+      --rust: #d17558;
+      --bark: #8a6528;
+      --bark-dark: #4a3a22;
+    }
+  }
+  :root[data-theme="dark"] {
+    --sky-a: #14110d; --sky-b: #1b2116; --card: #1c170f; --card-line: #392d1c;
+    --ink: #ecdfc4; --ink-dim: #a89a7c; --sap: #d99a3d; --moss: #8aab63;
+    --rust: #d17558; --bark: #8a6528; --bark-dark: #4a3a22;
+  }
+  :root[data-theme="light"] {
+    --sky-a: #eef4ec; --sky-b: #d7e8d3; --card: #fffaf0; --card-line: #e3d9c2;
+    --ink: #2c2a22; --ink-dim: #736f5e; --sap: #c97f22; --moss: #4f7a3c;
+    --rust: #b1503a; --bark: #6b4a2a; --bark-dark: #4a331d;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--sky-a);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+  }
+
+  ::selection { background: var(--sap); color: #fffaf0; }
+  a { color: var(--sap); }
+
+  .serif {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  }
+
+  .page { max-width: 980px; margin: 0 auto; padding: 0 24px 100px; }
+
+  /* ================= hero ================= */
+
+  .hero {
+    position: relative;
+    overflow: hidden;
+    min-height: 72vh;
+    background: linear-gradient(180deg, var(--sky-a) 0%, var(--sky-b) 100%);
+    border-bottom: 1px solid var(--card-line);
+  }
+
+  #tree-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: pointer; }
+
+  .hero-inner {
+    position: relative;
+    z-index: 2;
+    max-width: 980px;
+    margin: 0 auto;
+    min-height: 72vh;
+    padding: 48px 24px 34px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+  .hero-inner > * { pointer-events: auto; }
+
+  .brand {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: clamp(44px, 8vw, 76px);
+    font-weight: 400;
+    color: var(--ink);
+    margin: 0;
+    transform: rotate(-0.5deg);
+    transform-origin: left bottom;
+    text-shadow: 0 1px 0 rgba(255,255,255,0.25);
+  }
+  @media (prefers-color-scheme: dark) { .brand { text-shadow: none; } }
+  :root[data-theme="dark"] .brand { text-shadow: none; }
+
+  .tagline {
+    max-width: 30ch;
+    font-size: 18px;
+    color: var(--ink-dim);
+    margin: 10px 0 0;
+  }
+
+  .status-card {
+    align-self: flex-start;
+    margin-top: 30px;
+    background: var(--card);
+    border: 1px solid var(--card-line);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    max-width: 380px;
+    box-shadow: 0 18px 40px -24px rgba(60,45,20,0.35);
+  }
+  .status-card .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 11px;
+    color: var(--ink-dim);
+  }
+  .status-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--sap); flex: none; }
+  .status-dot.pulse { animation: dotpulse 2s ease-in-out infinite; }
+  @keyframes dotpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) { .status-dot.pulse { animation: none; } }
+  .status-title { font-size: 16px; font-weight: 600; color: var(--ink); }
+  .status-detail { font-size: 13.5px; color: var(--ink-dim); margin-top: 6px; }
+
+  .scroll-cue {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--ink-dim);
+    text-decoration: none;
+    margin-top: 28px;
+    width: fit-content;
+  }
+  .scroll-cue svg { width: 14px; height: 14px; }
+
+  .tree-tip {
+    position: absolute;
+    z-index: 3;
+    right: 6%;
+    top: 20%;
+    max-width: 240px;
+    background: var(--card);
+    border: 1px solid var(--sap);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 13.5px;
+    color: var(--ink);
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+    pointer-events: none;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    box-shadow: 0 12px 30px -14px rgba(0,0,0,0.35);
+  }
+  .tree-tip.show { opacity: 1; transform: none; }
+  .tree-hint {
+    position: absolute; left: 24px; bottom: 26px; z-index: 3;
+    font-size: 12.5px; color: var(--ink-dim);
+    background: var(--card); border: 1px solid var(--card-line);
+    padding: 6px 12px; border-radius: 20px;
+    opacity: 0.9;
+  }
+
+  /* ================= sections ================= */
+
+  section.block { margin-top: 58px; }
+  .block-head { margin-bottom: 20px; }
+  .block-title {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 26px; font-weight: 400; color: var(--ink); margin: 0 0 6px;
+  }
+  .block-sub { color: var(--ink-dim); font-size: 14.5px; max-width: 52ch; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-line);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+  }
+
+  /* helpers */
+  .helper {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+  .helper-badge {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: linear-gradient(160deg, var(--sap), var(--bark));
+    flex: none;
+    display: flex; align-items: center; justify-content: center;
+    color: #fffaf0; font-weight: 700; font-size: 15px;
+    font-family: "Iowan Old Style", Georgia, serif;
+  }
+  .helper h4 { margin: 0 0 3px; font-size: 15.5px; color: var(--ink); }
+  .helper p { margin: 0; font-size: 13.5px; color: var(--ink-dim); }
+  .helper .role-tag {
+    display: inline-block; margin-top: 6px; font-size: 11px;
+    color: var(--moss); background: color-mix(in srgb, var(--moss) 14%, transparent);
+    padding: 2px 8px; border-radius: 20px;
+  }
+
+  /* right now */
+  .task-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 0; border-bottom: 1px solid var(--card-line);
+  }
+  .task-row:last-child { border-bottom: none; }
+  .task-pip { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .task-pip.wait { background: var(--sap); }
+  .task-pip.stuck { background: var(--rust); }
+  .task-body { flex: 1; }
+  .task-title { font-size: 14.5px; color: var(--ink); }
+  .task-note { font-size: 12.5px; color: var(--ink-dim); margin-top: 2px; }
+  .nudge-btn {
+    font-size: 12.5px; color: var(--sap); background: none;
+    border: 1px solid var(--sap); border-radius: 20px; padding: 5px 12px;
+    cursor: pointer; font-family: inherit; flex: none;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .nudge-btn:hover, .nudge-btn:focus-visible { background: var(--sap); color: #fffaf0; }
+  .nudge-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  .summary-line {
+    margin-top: 6px;
+    font-size: 13px;
+    color: var(--ink-dim);
+    background: color-mix(in srgb, var(--rust) 10%, transparent);
+    border-left: 3px solid var(--rust);
+    padding: 10px 14px;
+    border-radius: 0 8px 8px 0;
+  }
+
+  /* memories */
+  .memory {
+    font-size: 13.5px;
+    padding: 12px 14px;
+    background: color-mix(in srgb, var(--moss) 8%, var(--card));
+    border-radius: 10px;
+    margin-bottom: 8px;
+  }
+  .memory:last-child { margin-bottom: 0; }
+  .memory .m-title { color: var(--ink); }
+  .memory .m-meta { color: var(--ink-dim); font-size: 12px; margin-top: 2px; }
+
+  /* recently */
+  .feed { display: flex; flex-direction: column; gap: 2px; }
+  .feed-row { display: flex; gap: 12px; padding: 8px 0; font-size: 13.5px; border-bottom: 1px solid var(--card-line); }
+  .feed-row:last-child { border-bottom: none; }
+  .feed-time { color: var(--ink-dim); flex: none; width: 76px; font-size: 12.5px; }
+  .feed-text { color: var(--ink); }
+
+  footer {
+    margin-top: 70px; padding-top: 22px; border-top: 1px solid var(--card-line);
+    color: var(--ink-dim); font-size: 13px; max-width: 60ch;
+  }
+</style>
+
+<div class="hero">
+  <canvas id="tree-canvas" aria-hidden="true"></canvas>
+
+  <div class="hero-inner">
+    <div>
+      <h1 class="brand">Willow</h1>
+      <p class="tagline">The tree that remembers things for you, and tells you the truth about what it's actually gotten done.</p>
+
+      <div class="status-card">
+        <div class="eyebrow">Right now</div>
+        <div class="status-row">
+          <span class="status-dot pulse"></span>
+          <span class="status-title">Mostly good — one thing needs a look</span>
+        </div>
+        <div class="status-detail">A couple of things you asked for are still waiting. Nobody's picked them up yet.</div>
+      </div>
+
+      <a class="scroll-cue" href="#helpers">
+        see what's going on
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+      </a>
+    </div>
+
+    <span class="tree-hint">psst — try tapping the tree</span>
+  </div>
+
+  <div class="tree-tip" id="tree-tip">
+    Willow's handled 369 things so far — but 357 of them got stuck because nobody was around to actually do them. That's the sort of thing worth fixing.
+  </div>
+</div>
+
+<div class="page">
+
+  <section class="block" id="helpers">
+    <div class="block-head">
+      <h2 class="block-title serif">Your helpers</h2>
+      <p class="block-sub">Willow doesn't do everything alone — it's got a small team, each good at one thing.</p>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <div class="helper">
+          <div class="helper-badge">S</div>
+          <div>
+            <h4>Skirnir</h4>
+            <p>Makes sure things actually get finished, not just started.</p>
+            <span class="role-tag">closes the loop</span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="helper">
+          <div class="helper-badge">A</div>
+          <div>
+            <h4>Auto</h4>
+            <p>Lives inside your code editor, jumps in the moment you need a hand there.</p>
+            <span class="role-tag">right where you're working</span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="helper">
+          <div class="helper-badge">G1</div>
+          <div>
+            <h4>The Sorter</h4>
+            <p>Quietly tidies up new files as they come in, so you don't have to.</p>
+            <span class="role-tag">keeps things organized</span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="helper">
+          <div class="helper-badge">G2</div>
+          <div>
+            <h4>The Quick One</h4>
+            <p>A small, fast helper for simple questions that don't need much thought.</p>
+            <span class="role-tag">handles the easy stuff</span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="helper">
+          <div class="helper-badge">G3</div>
+          <div>
+            <h4>The Illustrator</h4>
+            <p>Makes pictures whenever you ask for one.</p>
+            <span class="role-tag">draws things up</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <h2 class="block-title serif">What Willow's doing for you</h2>
+      <p class="block-sub">Some things you've asked for are done. A couple are just... waiting.</p>
+    </div>
+    <div class="card">
+      <div class="task-row">
+        <span class="task-pip wait"></span>
+        <div class="task-body">
+          <div class="task-title">Say hello — a quick test</div>
+          <div class="task-note">Asked a few minutes ago, still waiting</div>
+        </div>
+        <button class="nudge-btn">Nudge</button>
+      </div>
+      <div class="task-row">
+        <span class="task-pip stuck"></span>
+        <div class="task-body">
+          <div class="task-title">Sort through the May files</div>
+          <div class="task-note">Asked back in May — still nobody's picked it up</div>
+        </div>
+        <button class="nudge-btn">Nudge</button>
+      </div>
+      <div class="summary-line">
+        Over time, 357 things you asked Willow to do never got finished — mostly because the instructions weren't clear enough for whoever was supposed to do them. Worth a look.
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <h2 class="block-title serif">What Willow remembers</h2>
+      <p class="block-sub">Notes, messages, and things it's picked up along the way.</p>
+    </div>
+    <div class="card">
+      <div class="memory">
+        <div class="m-title">A quick test note, saved just now</div>
+        <div class="m-meta">added a few minutes ago</div>
+      </div>
+      <div class="memory">
+        <div class="m-title">A message that came in from GitHub</div>
+        <div class="m-meta">saved automatically</div>
+      </div>
+      <div class="memory">
+        <div class="m-title">Something carried over from an older version of Willow</div>
+        <div class="m-meta">moved over during an upgrade</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <h2 class="block-title serif">Recently</h2>
+      <p class="block-sub">Everything Willow's done in the last little while.</p>
+    </div>
+    <div class="card">
+      <div class="feed">
+        <div class="feed-row"><span class="feed-time">Just now</span><span class="feed-text">Saved a note for later.</span></div>
+        <div class="feed-row"><span class="feed-time">1 min ago</span><span class="feed-text">Looked something up in what it remembers.</span></div>
+        <div class="feed-row"><span class="feed-time">1 min ago</span><span class="feed-text">Was asked to do something new — it's in the queue.</span></div>
+        <div class="feed-row"><span class="feed-time">2 min ago</span><span class="feed-text">Double-checked a setting before saving anything.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Willow's colors follow the sky it's drawn against — soft daylight green by default,
+    a quieter dusk if that's what your device prefers. No terminal, no jargon: if
+    something needs your attention, it says so in a sentence, not a status code.
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  var canvas = document.getElementById("tree-canvas");
+  var ctx = canvas.getContext("2d");
+  var hero = document.querySelector(".hero");
+  var W = 0, H = 0, fronds = [], t0 = null;
+
+  var TRUNK_X_FRAC = 0.74;
+  var CANOPY_Y_FRAC = 0.34;
+  var TRUNK_BASE_FRAC = 0.9;
+
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function resize() {
+    W = hero.clientWidth; H = hero.clientHeight;
+    canvas.width = W; canvas.height = H;
+    buildFronds();
+  }
+
+  function buildFronds() {
+    fronds = [];
+    var cx = W * TRUNK_X_FRAC, cy = H * CANOPY_Y_FRAC;
+    var canopyWidth = Math.min(300, W * 0.3), bulge = 50, n = 26;
+    for (var i = 0; i < n; i++) {
+      var t = i / (n - 1);
+      fronds.push({
+        ax: cx + (t - 0.5) * canopyWidth,
+        ay: cy - Math.sin(t * Math.PI) * bulge,
+        droop: 80 + ((i * 37) % 100),
+        drift: (t - 0.5) * 55 + (((i * 13) % 20) - 10),
+        phase: i * 0.7,
+        speed: 0.5 + (i % 5) * 0.05,
+        seed: i
+      });
+    }
+  }
+
+  function drawSun() {
+    var sx = W * 0.16, sy = H * 0.18;
+    var grad = ctx.createRadialGradient(sx, sy, 4, sx, sy, 120);
+    grad.addColorStop(0, "rgba(255,235,180,0.55)");
+    grad.addColorStop(1, "rgba(255,235,180,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(sx, sy, 120, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function drawTrunk() {
+    var x = W * TRUNK_X_FRAC, topY = H * CANOPY_Y_FRAC, baseY = H * TRUNK_BASE_FRAC;
+    var baseHalf = 16, topHalf = 6;
+    var grad = ctx.createLinearGradient(0, topY, 0, baseY);
+    grad.addColorStop(0, cssVar("--bark"));
+    grad.addColorStop(1, cssVar("--bark-dark"));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(x - baseHalf, baseY);
+    ctx.quadraticCurveTo(x - baseHalf * 0.7, (topY + baseY) / 2, x - topHalf, topY);
+    ctx.lineTo(x + topHalf, topY);
+    ctx.quadraticCurveTo(x + baseHalf * 0.7, (topY + baseY) / 2, x + baseHalf, baseY);
+    ctx.closePath(); ctx.fill();
+
+    ctx.strokeStyle = cssVar("--bark");
+    ctx.lineWidth = 5; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(x, topY + 4); ctx.quadraticCurveTo(x - 46, topY - 6, x - 78, topY + 14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, topY + 4); ctx.quadraticCurveTo(x + 46, topY - 6, x + 78, topY + 14); ctx.stroke();
+  }
+
+  function drawFronds(time) {
+    var moss = cssVar("--moss"), sap = cssVar("--sap");
+    for (var i = 0; i < fronds.length; i++) {
+      var f = fronds[i];
+      var sway = reduceMotion ? 0 : Math.sin(time * 0.001 * f.speed + f.phase) * 6;
+      var ex = f.ax + f.drift + sway, ey = f.ay + f.droop;
+      var cx = f.ax + f.drift * 0.35 + sway * 0.5, cy = f.ay + f.droop * 0.55;
+
+      ctx.strokeStyle = moss; ctx.globalAlpha = 0.55; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(f.ax, f.ay); ctx.quadraticCurveTo(cx, cy, ex, ey); ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      for (var j = 0; j < 3; j++) {
+        var lt = 0.55 + j * 0.16;
+        var lx = f.ax + (ex - f.ax) * lt + (((f.seed + j) * 17) % 7 - 3);
+        var ly = f.ay + (ey - f.ay) * lt + (((f.seed + j) * 11) % 7 - 3);
+        ctx.fillStyle = (f.seed + j) % 4 === 0 ? sap : moss;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath(); ctx.arc(lx, ly, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  function frame(time) {
+    if (t0 === null) t0 = time;
+    ctx.clearRect(0, 0, W, H);
+    drawSun();
+    drawTrunk();
+    drawFronds(time - t0);
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener("resize", resize);
+  resize();
+  requestAnimationFrame(frame);
+
+  /* tap-the-tree easter egg */
+  var taps = 0, tapTimer = null;
+  var tip = document.getElementById("tree-tip");
+  var hint = document.querySelector(".tree-hint");
+  canvas.addEventListener("click", function () {
+    taps++;
+    clearTimeout(tapTimer);
+    tapTimer = setTimeout(function () { taps = 0; }, 1400);
+    if (taps >= 3) {
+      taps = 0;
+      tip.classList.add("show");
+      if (hint) hint.style.display = "none";
+      setTimeout(function () { tip.classList.remove("show"); }, 5000);
+    }
+  });
+})();
+</script>
