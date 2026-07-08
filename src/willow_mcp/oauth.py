@@ -29,7 +29,7 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from mcp.server.auth.provider import (
     AccessToken,
@@ -39,6 +39,7 @@ from mcp.server.auth.provider import (
 )
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
+from .identity_binding import propose_binding
 from .vault import Vault
 
 if TYPE_CHECKING:
@@ -64,6 +65,12 @@ class GroveOAuthProvider:
         self._base_url   = base_url.rstrip("/")
         self._pending: dict[str, tuple[OAuthClientInformationFull, AuthorizationParams]] = {}
         self._codes:   dict[str, AuthorizationCode] = {}
+        # code -> {"issuer": ..., "subject": ...} — the verified IdP identity
+        # for this authorization code, consumed (and persisted onto the
+        # issued access/refresh token) in exchange_authorization_code. Not
+        # part of self._state: it only needs to survive the short _CODE_TTL
+        # window between issue_code() and the client's token exchange.
+        self._code_identity: dict[str, dict] = {}
         self._state: dict = self._load_state()
 
     def _load_state(self) -> dict:
@@ -81,7 +88,12 @@ class GroveOAuthProvider:
     def pop_pending(self, key: str):
         return self._pending.pop(key, None)
 
-    def issue_code(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> str:
+    def issue_code(
+        self,
+        client: OAuthClientInformationFull,
+        params: AuthorizationParams,
+        identity: Optional[dict] = None,
+    ) -> str:
         code_str = _tok()
         self._codes[code_str] = AuthorizationCode(
             code=code_str,
@@ -92,6 +104,8 @@ class GroveOAuthProvider:
             redirect_uri=params.redirect_uri,
             redirect_uri_provided_explicitly=params.redirect_uri_provided_explicitly,
         )
+        if identity is not None:
+            self._code_identity[code_str] = identity
         return code_str
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
@@ -124,16 +138,19 @@ class GroveOAuthProvider:
         self, client: OAuthClientInformationFull, authorization_code: AuthorizationCode,
     ) -> OAuthToken:
         self._codes.pop(authorization_code.code, None)
+        identity = self._code_identity.pop(authorization_code.code, None) or {}
         access_tok  = _tok()
         refresh_tok = _tok()
         now = int(time.time())
         self._state["access_tokens"][access_tok] = {
             "token": access_tok, "client_id": client.client_id,
             "scopes": authorization_code.scopes, "expires_at": now + _ACCESS_TTL,
+            "issuer": identity.get("issuer"), "subject": identity.get("subject"),
         }
         self._state["refresh_tokens"][refresh_tok] = {
             "token": refresh_tok, "client_id": client.client_id,
             "scopes": authorization_code.scopes, "expires_at": now + _REFRESH_TTL,
+            "issuer": identity.get("issuer"), "subject": identity.get("subject"),
         }
         self._save_state()
         return OAuthToken(
@@ -160,7 +177,7 @@ class GroveOAuthProvider:
         self, client: OAuthClientInformationFull,
         refresh_token: RefreshToken, scopes: list[str],
     ) -> OAuthToken:
-        self._state["refresh_tokens"].pop(refresh_token.token, None)
+        old_data = self._state["refresh_tokens"].pop(refresh_token.token, None) or {}
         effective_scopes = scopes or refresh_token.scopes
         access_tok  = _tok()
         new_refresh = _tok()
@@ -168,10 +185,12 @@ class GroveOAuthProvider:
         self._state["access_tokens"][access_tok] = {
             "token": access_tok, "client_id": client.client_id,
             "scopes": effective_scopes, "expires_at": now + _ACCESS_TTL,
+            "issuer": old_data.get("issuer"), "subject": old_data.get("subject"),
         }
         self._state["refresh_tokens"][new_refresh] = {
             "token": new_refresh, "client_id": client.client_id,
             "scopes": effective_scopes, "expires_at": now + _REFRESH_TTL,
+            "issuer": old_data.get("issuer"), "subject": old_data.get("subject"),
         }
         self._save_state()
         return OAuthToken(
@@ -188,7 +207,14 @@ class GroveOAuthProvider:
             del self._state["access_tokens"][token]
             self._save_state()
             return None
-        return AccessToken(**data)
+        return AccessToken(
+            token=data["token"],
+            client_id=data["client_id"],
+            scopes=data["scopes"],
+            expires_at=data.get("expires_at"),
+            subject=data.get("subject"),
+            claims={"iss": data["issuer"]} if data.get("issuer") else None,
+        )
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
         if isinstance(token, AccessToken):
@@ -517,8 +543,9 @@ class WillowOAuthProvider(GroveOAuthProvider):
             except Exception as exc:
                 return HTMLResponse(f"<h2>Google sign-in failed.</h2><p>{exc}</p>", status_code=400)
 
+            propose_binding("google", sub, email)
             client, params = entry
-            auth_code = provider.issue_code(client, params)
+            auth_code = provider.issue_code(client, params, identity={"issuer": "google", "subject": sub})
             redirect = str(params.redirect_uri)
             sep = "&" if "?" in redirect else "?"
             url = f"{redirect}{sep}code={auth_code}"
@@ -574,8 +601,9 @@ class WillowOAuthProvider(GroveOAuthProvider):
             except Exception as exc:
                 return HTMLResponse(f"<h2>Apple sign-in failed.</h2><p>{exc}</p>", status_code=400)
 
+            propose_binding("apple", sub, email)
             client, params = entry
-            auth_code = provider.issue_code(client, params)
+            auth_code = provider.issue_code(client, params, identity={"issuer": "apple", "subject": sub})
             redirect = str(params.redirect_uri)
             sep = "&" if "?" in redirect else "?"
             url = f"{redirect}{sep}code={auth_code}"

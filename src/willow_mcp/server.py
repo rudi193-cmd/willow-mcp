@@ -40,6 +40,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .db import Store, get_pg
 from .gate import permitted
+from .identity_binding import resolve_app_id
 from .receipts import ReceiptLog
 
 _store = Store()
@@ -100,18 +101,70 @@ else:
 
 # ── Gate helper ────────────────────────────────────────────────────────────────
 
-def _gate(app_id: str, tool_name: str) -> dict | None:
-    """Return an error dict if the call is denied, else None."""
-    effective = app_id or _DEFAULT_APP_ID
+def _resolve_serve_identity() -> tuple[Optional[str], Optional[dict]]:
+    """Resolve the caller's bound app_id from the authenticated OAuth session.
+
+    Serve-mode identity binding (L-AUTH-02): a Google/Apple sign-in alone
+    grants no standing. This reads the session's verified (issuer, subject)
+    via the MCP SDK's contextvar-based get_access_token() — never from a
+    tool-call argument — and only returns an app_id if a human has separately
+    confirmed a binding for that identity (identity_binding.confirm_binding,
+    CLI-only). Returns (app_id, None) on success, (None, error_dict) on any
+    failure — fail closed at every step, matching an unmanifested app_id's
+    behavior in stdio mode.
+    """
+    from mcp.server.auth.middleware.auth_context import get_access_token
+
+    token = get_access_token()
+    if token is None:
+        return None, {"error": "gate denied: no authenticated session (serve mode requires OAuth sign-in)"}
+
+    issuer = (token.claims or {}).get("iss")
+    subject = token.subject
+    if not issuer or not subject:
+        return None, {"error": "gate denied: authenticated session carries no bound identity"}
+
+    bound_app_id = resolve_app_id(issuer, subject)
+    if not bound_app_id:
+        return None, {
+            "error": (
+                f"gate denied: identity ({issuer}, {subject}) is signed in but not yet bound to an "
+                "app_id — ask the operator to run `willow-mcp confirm-binding` for this identity"
+            )
+        }
+    return bound_app_id, None
+
+
+def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
+    """Resolve the effective app_id and check permission.
+
+    Returns (effective_app_id, None) on success, (None, error_dict) on denial.
+
+    Serve mode (HTTP + OAuth): the effective app_id comes ONLY from the
+    authenticated session's confirmed identity binding — the tool call's own
+    app_id argument is never trusted for authorization purposes here (that
+    was L-AUTH-02: previously any signed-in caller could self-declare any
+    app_id and get whatever that manifest permitted).
+
+    Stdio mode (default): unchanged — app_id comes from the tool call, same
+    single-operator trust model as before.
+    """
+    if _SERVE_MODE:
+        effective, err = _resolve_serve_identity()
+        if err:
+            return None, err
+    else:
+        effective = app_id or _DEFAULT_APP_ID
+
     if not permitted(effective, tool_name):
-        return {
+        return None, {
             "error": (
                 f"gate denied: '{effective}' not permitted for '{tool_name}'. "
                 f"Ensure a manifest exists at $WILLOW_HOME/mcp_apps/{effective}/manifest.json "
                 f"and lists this tool or a group that includes it."
             )
         }
-    return None
+    return effective, None
 
 
 # ── Sanitizer (Phase 4a) ─────────────────────────────────────────────────────
@@ -203,7 +256,13 @@ def _check_rate(app_id: str) -> tuple[bool, int]:
 # ── Guarded dispatch (Phase 4a+4b+4c combined) ───────────────────────────────
 
 def _guarded(tool_name: str, *, list_error: bool = False):
-    """Central pipeline: sanitize -> rate check -> gate -> dispatch -> receipt.
+    """Central pipeline: sanitize -> gate -> rate check -> dispatch -> receipt.
+
+    Gate runs before the rate check specifically so an invalid/unmanifested
+    app_id is rejected (via gate.permitted -> _validate_app_id) before it can
+    ever be used as a _buckets dict key — an unvalidated app_id string must
+    never reach _check_rate, or a caller can grow _buckets unbounded with
+    arbitrary strings (L-DOS-01).
 
     list_error=True for tools whose declared return type is list (store_list,
     store_search, store_search_all) so a denial comes back list-wrapped,
@@ -228,28 +287,35 @@ def _guarded(tool_name: str, *, list_error: bool = False):
                 return _shape({"error": f"sanitize: {problem}"})
             call_kwargs = cleaned
 
-            allowed, retry_after = _check_rate(app_id)
-            if not allowed:
-                _receipt_log.record(app_id, tool_name, "rate_limited", f"retry_after={retry_after}")
-                return _shape({"error": "rate_limited", "retry_after": retry_after})
-
-            gate_err = _gate(app_id, tool_name)
+            # effective_app_id is the identity gate actually authorized this
+            # call under — in serve mode this is the bound identity, NOT
+            # necessarily call_kwargs["app_id"] (see _gate / L-AUTH-02). Every
+            # downstream step (rate limit, dispatch, receipt) uses it instead
+            # of the raw caller-supplied app_id.
+            effective_app_id, gate_err = _gate(app_id, tool_name)
             if gate_err:
                 _receipt_log.record(app_id, tool_name, "denied", gate_err.get("error"))
                 return _shape(gate_err)
+            if "app_id" in call_kwargs:
+                call_kwargs["app_id"] = effective_app_id
+
+            allowed, retry_after = _check_rate(effective_app_id)
+            if not allowed:
+                _receipt_log.record(effective_app_id, tool_name, "rate_limited", f"retry_after={retry_after}")
+                return _shape({"error": "rate_limited", "retry_after": retry_after})
 
             try:
                 result = fn(**call_kwargs)
             except Exception as e:
-                _receipt_log.record(app_id, tool_name, "error", f"{type(e).__name__}: {e}")
+                _receipt_log.record(effective_app_id, tool_name, "error", f"{type(e).__name__}: {e}")
                 raise
 
             probe = (result[0] if (isinstance(result, list) and result
                                     and isinstance(result[0], dict)) else result)
             if isinstance(probe, dict) and "error" in probe:
-                _receipt_log.record(app_id, tool_name, "error", str(probe["error"]))
+                _receipt_log.record(effective_app_id, tool_name, "error", str(probe["error"]))
             else:
-                _receipt_log.record(app_id, tool_name, "ok", None)
+                _receipt_log.record(effective_app_id, tool_name, "ok", None)
 
             return result
 
@@ -359,11 +425,13 @@ def knowledge_search(
     limit: int = 10,
 ) -> dict:
     """Search the Postgres knowledge base by content (AND logic). Filter by domain to narrow results."""
+    tokens = query.split()
+    if not tokens:
+        return {"results": []}
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
     cur = pg.cursor()
-    tokens = query.split()
     conditions = " AND ".join(["content ILIKE %s"] * len(tokens))
     params: list = [f"%{t}%" for t in tokens]
     sql = f"SELECT id, content, domain, source FROM knowledge WHERE {conditions}"
@@ -633,13 +701,97 @@ def fleet_health(app_id: str) -> dict:
 
 # ── Entry points ───────────────────────────────────────────────────────────────
 
+def _cmd_setup(args) -> None:
+    """`willow-mcp setup` — write OAuth provider credentials to the vault.
+
+    Secrets are only ever accepted via getpass/stdin prompt when the
+    corresponding CLI flag is omitted, so a client-secret or private key
+    never has to appear in shell history or a process listing.
+    """
+    import getpass
+    import sys
+
+    from .vault import default_vault
+
+    vault = default_vault()
+    did_anything = False
+
+    if args.google_client_id:
+        did_anything = True
+        vault.write("google.client_id", args.google_client_id)
+        secret = args.google_client_secret or getpass.getpass("Google client secret: ")
+        vault.write("google.client_secret", secret)
+        print("Google credentials written to vault.")
+
+    if args.apple_team_id:
+        did_anything = True
+        vault.write("apple.team_id", args.apple_team_id)
+        vault.write("apple.client_id", args.apple_client_id or "")
+        vault.write("apple.key_id", args.apple_key_id or "")
+        if args.apple_p8_key_path:
+            with open(args.apple_p8_key_path) as f:
+                p8_key = f.read()
+        else:
+            print("Paste the Apple .p8 private key contents, then press Ctrl-D:")
+            p8_key = sys.stdin.read()
+        vault.write("apple.p8_key", p8_key)
+        print("Apple credentials written to vault.")
+
+    if not did_anything:
+        print("Nothing to do — pass --google-client-id and/or --apple-team-id.")
+
+
+def _cmd_confirm_binding(args) -> None:
+    """`willow-mcp confirm-binding` — bind a signed-in OAuth identity to an app_id.
+
+    Local/stdio-only by design (L-AUTH-02): this is never reachable as an MCP
+    tool, so a remote serve-mode caller can never confirm their own binding.
+    Run this on the host after the person has signed in once via the OAuth
+    approval page (which creates the unconfirmed binding record).
+    """
+    from .identity_binding import confirm_binding
+
+    try:
+        record = confirm_binding(args.issuer, args.subject, args.app_id)
+    except ValueError as e:
+        print(f"Error: {e}")
+        raise SystemExit(1)
+    print(f"Bound ({record['issuer']}, {record['subject_id']}) -> app_id={record['app_id']!r} "
+          f"(email: {record.get('email')})")
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(prog="willow-mcp")
     parser.add_argument("--serve", action="store_true", help="Run as HTTP server with OAuth")
     parser.add_argument("--port", type=int, default=_PORT)
     parser.add_argument("--host", default=_HOST)
+    subparsers = parser.add_subparsers(dest="command")
+
+    setup_p = subparsers.add_parser("setup", help="Write OAuth provider credentials to the vault")
+    setup_p.add_argument("--google-client-id")
+    setup_p.add_argument("--google-client-secret", help="Omit to be prompted (recommended)")
+    setup_p.add_argument("--apple-team-id")
+    setup_p.add_argument("--apple-client-id")
+    setup_p.add_argument("--apple-key-id")
+    setup_p.add_argument("--apple-p8-key-path", help="Path to the .p8 private key file; omit to paste via stdin")
+
+    confirm_p = subparsers.add_parser(
+        "confirm-binding",
+        help="Bind a signed-in OAuth identity to an app_id (local, stdio-only — never an MCP tool)",
+    )
+    confirm_p.add_argument("--issuer", required=True, choices=["google", "apple"])
+    confirm_p.add_argument("--subject", required=True, help="The IdP 'sub' claim for this identity")
+    confirm_p.add_argument("--app-id", required=True, dest="app_id")
+
     args, _ = parser.parse_known_args()
+
+    if args.command == "setup":
+        _cmd_setup(args)
+        return
+    if args.command == "confirm-binding":
+        _cmd_confirm_binding(args)
+        return
 
     if args.serve or _SERVE_MODE:
         mcp.run(transport="streamable-http")
