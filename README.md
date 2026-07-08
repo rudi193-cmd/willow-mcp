@@ -42,16 +42,36 @@ Every tool requires an `app_id` param. Authorization is checked via [SAP/1.0](ht
 
 ## MCP config
 
+Repo-local configs (`.cursor/mcp.json`, `.mcp.json`) wire **willow-mcp** plus
+**codebase-memory-mcp** for graph-augmented code search while developing this
+package. Install the CBM binary to `~/.local/bin/codebase-memory-mcp`, then
+index this repo (`project: home-sean-campbell-github-willow-mcp`).
+
+Minimal single-server config:
+
 ```json
 {
   "mcpServers": {
-    "willow": {
+    "willow-mcp": {
+      "type": "stdio",
       "command": "python3",
-      "args": ["-m", "willow_mcp"]
+      "args": ["-m", "willow_mcp"],
+      "env": {
+        "PYTHONPATH": "src"
+      }
+    },
+    "codebase-memory-mcp": {
+      "type": "stdio",
+      "command": "codebase-memory-mcp",
+      "args": []
     }
   }
 }
 ```
+
+After `pip install -e .`, drop `PYTHONPATH` and use `python3 -m willow_mcp`
+from any cwd. Point `WILLOW_PG_DB` / `WILLOW_STORE_ROOT` at your host fleet
+store when you need Postgres knowledge or shared SOIL data.
 
 You can also run the full [willow-1.9](https://github.com/rudi193-cmd/willow-1.9) server directly — the tool API is identical, apps work against both transparently.
 

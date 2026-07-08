@@ -1,15 +1,27 @@
-# Design: Schema Adaptation for Host Databases
+# Design: Schema Adaptation for External Data — Databases and Identity Claims
 
 Status: DRAFT — not yet implemented or ratified.
 Author: Ada (fleet id: willow), 2026-07-08, following operator design conversation.
-Motivating incident: PR #3 smoke test — `knowledge_search`, `kb_startup_continuity`,
-and `kb_at` crashed with `UndefinedColumn: "source"` against a real production
-`knowledge` table; `fleet_health` crashed with `UndefinedTable: "kart_task_queue"`.
-Root cause: `server.py` hardcodes column/table names for tables it does not own
-and never created. `fleet_status` succeeded in the same test, because it happened
-to match the real `agents` table by coincidence — proving the tool *can* usefully
-read a live host schema when the assumption is right, and crashes hard when it
-isn't. See conversation log for the full reasoning trail.
+Motivating incidents (two, same root cause):
+
+1. PR #3 smoke test — `knowledge_search`, `kb_startup_continuity`, and `kb_at`
+   crashed with `UndefinedColumn: "source"` against a real production `knowledge`
+   table; `fleet_health` crashed with `UndefinedTable: "kart_task_queue"`.
+   Root cause: `server.py` hardcodes column/table names for tables it does not
+   own and never created. `fleet_status` succeeded in the same test, because it
+   happened to match the real `agents` table by coincidence — proving the tool
+   *can* usefully read a live host schema when the assumption is right, and
+   crashes hard when it isn't.
+2. OAuth review (this session, same day) — `oauth.py`'s Google and Apple
+   callbacks each verify identity, compute `(email, sub)`, and then discard it:
+   never attached to the issued access token, never passed to `gate.py`. The
+   operator's framing on hearing this: it's the same problem, because "each
+   OAuth input also has its own schema" — Google's `tokeninfo` response and
+   Apple's JWT payload are two different, divergent shapes for "who signed
+   in," exactly as two Postgres databases are two different shapes for "what
+   is a knowledge atom." See §6.
+
+See conversation log for the full reasoning trail on both.
 
 ## 1. Problem statement
 
@@ -211,7 +223,107 @@ schema_audit.jsonl` if willow-mcp shouldn't depend on FRANK directly for a
 public-facing package). Minimum fields: timestamp, app_id, table, mapping
 snapshot, tool called, confirmed-by (human/heuristic).
 
-## 6. Open questions (for next pass, not blocking the write-up)
+## 6. A second instance of the same problem: OAuth identity claims
+
+The operator's observation: this isn't two problems, it's one problem seen
+twice. A host Postgres database is an external schema willow-mcp must not
+assume it understands. An identity provider's claims are exactly the same
+thing — Google and Apple each hand back "who signed in" in a different shape,
+and §§1–5 above apply almost unchanged if "table" is read as "identity
+provider" and "column" as "claim."
+
+### 6.1 The two claim shapes, as they exist today
+
+- **Google** (`_google_verify_id_token`, `oauth.py:237`): calls the
+  `tokeninfo` endpoint, gets back flat JSON — `email` (string),
+  `email_verified` (the *string* `"true"`/`"false"`, not a bool — a schema
+  wrinkle in its own right), `sub` (stable per-account id), `aud`. Email is
+  always present if the scope was granted.
+- **Apple** (`_apple_verify_id_token`, `oauth.py:277`): a self-verified JWT —
+  `sub` (stable per-app-and-account id, *not* stable across different client
+  apps for the same person), `email` (present only on the *first*
+  authorization ever, silently absent on every subsequent one unless the
+  client cached it), optionally a private relay address instead of a real
+  one, no `email_verified` claim at all (trust is implied entirely by
+  signature verification against Apple's JWKS).
+
+Today's code calls both `(email, sub)` as if they were the same shape, then —
+per the finding this session — never uses either value again. Even fixing
+"use it" without first fixing "the two shapes aren't the same" would just
+relocate the bug: code written against Google's always-present `email` will
+silently misbehave the first time Apple omits it.
+
+### 6.2 Canonical identity mapping
+
+Same move as §3.1, applied to identity instead of table columns. A canonical
+identity record:
+
+```json
+{
+  "issuer": "google" | "apple",
+  "subject_id": "<sub, stable per issuer+client>",
+  "email": "<string or null>",
+  "email_basis": "asserted" | "first_auth_only" | "relay" | "unavailable",
+  "verified_at": "2026-07-08T04:00:00Z"
+}
+```
+
+`email_basis` exists because "do we have an email" is not the interesting
+question — "how much should anything downstream trust this email" is.
+Google's is IdP-asserted every time; Apple's may be a one-time snapshot or a
+relay address that silently stops forwarding if the user revokes it later.
+Collapsing these into one `email: str` field, as today's code implicitly
+does, is the identity equivalent of assuming every database's `source` column
+is spelled the same way.
+
+### 6.3 The write path: binding identity to an app_id
+
+This is where §3.4's "reads may infer, writes may not guess" rule matters
+most, because the "write" here is not a database row — it's **granting a
+human standing under `gate.py`**. That is a more consequential action than
+any single `knowledge_ingest` call, and today it doesn't happen at all: a
+verified Google or Apple sign-in produces an OAuth token, and that token is
+never connected to an `app_id` or a manifest. The token is real; the
+authorization it should carry does not exist.
+
+Proposed flow, mirroring §3.2–§3.4 exactly:
+
+1. First sign-in for a given `(issuer, subject_id)` produces a canonical
+   identity record (§6.2) but **no standing** — the access token is issued
+   (transport-layer OAuth still completes, per spec) but every subsequent
+   tool call gates as unauthenticated until a binding is confirmed.
+2. The proposed binding — "`(google, 10983...)` → `app_id=sean-personal`,
+   permissions=`[...]`" — is written to a reviewable artifact, same shape as
+   the schema mapping file: `$WILLOW_HOME/mcp_apps/_identity_bindings/
+   <issuer>__<subject_id>.json`, `confirmed: false` until a human (or an
+   explicit `identity_confirm_binding` call, gated at least as strictly as
+   `schema_confirm_mapping`) approves it.
+3. Only a `confirmed: true` binding lets `_gate()` resolve an OAuth-session
+   token to an `app_id`. Until then, an authenticated-but-unbound caller gets
+   the same fail-closed denial an unmanifested stdio `app_id` gets today —
+   consistent behavior across both auth modes, which today's code does not
+   have (stdio fails closed by design; serve mode doesn't fail at all, it
+   just never checks).
+4. Re-authentication by the same `(issuer, subject_id)` reuses the confirmed
+   binding. If Apple's `email` disappears on a later login (expected — see
+   §6.1) that is **not** drift in the identity itself (`subject_id` is
+   unchanged) and must not re-trigger confirmation. If `subject_id` maps to a
+   *different* email than the bound record shows, that **is** drift — same
+   `schema_drift` treatment as §4, surfaced rather than silently accepted.
+
+### 6.4 Relationship to §3.5 and to OAuth scope
+
+Two independent gates compose here, same as §3.5: the OAuth `scope` (today a
+single flat `"willow"` — see conversation log) says what a *token* is allowed
+to request; the identity binding (§6.3) says what *human* the token speaks
+for and what `app_id` standing that grants. Widening scope past the single
+flat value (e.g. per-`PERMISSION_GROUPS` scopes, so a client can request
+`knowledge_read` specifically rather than blanket `willow`) is a real
+improvement but a distinct piece of work from binding — a token could have a
+correctly narrow scope and still be bound to nobody, which is exactly
+today's state.
+
+## 7. Open questions (for next pass, not blocking the write-up)
 
 - **Aliasing dictionary scope.** Should common aliases (`source`/`source_type`/
   `origin`) ship as a static built-in list, or be per-deployment configurable?
@@ -229,8 +341,25 @@ snapshot, tool called, confirmed-by (human/heuristic).
 - **Performance** — introspection + mapping resolution should be cached per
   connection/process lifetime (not re-queried per call), invalidated only on
   detected schema drift (§4) or explicit cache-bust.
+- **Who can call `identity_confirm_binding`?** (§6.3) Almost certainly a
+  narrower circle than `schema_confirm_mapping` — binding a human to
+  standing is closer to an admin action than a data-schema decision. Possibly
+  restricted to stdio-mode, local-filesystem confirmation only, so a serve-mode
+  remote caller can never confirm their own binding.
+- **First-run bootstrap.** If `--serve` mode's very first user has no bindings
+  file at all, how does *anyone* get bound without a chicken-and-egg problem?
+  Likely answer: the operator pre-seeds one binding for themselves via stdio
+  before ever exposing `--serve`, same way the very first `mcp_apps/<app_id>/
+  manifest.json` had to be hand-written this session (§3.2's `willow` manifest).
+- **Apple `sub` non-portability.** Apple's `sub` is scoped per (team_id,
+  client_id) pair by design — the same person signing in through two
+  different registered Apple apps gets two different `sub` values. The
+  canonical identity record's `subject_id` should probably be namespaced as
+  `(issuer, apple_team_id, apple_client_id, sub)` for Apple specifically, not
+  just `(issuer, sub)`, or a legitimate re-registration will look like a new
+  identity.
 
-## 7. Rollout shape (sketch, not committed)
+## 8. Rollout shape (sketch, not committed)
 
 1. `schema_profile.py` — introspection + heuristic mapping + artifact
    read/write, unit-tested against a handful of synthetic schemas (matching
@@ -247,3 +376,20 @@ snapshot, tool called, confirmed-by (human/heuristic).
    decision on whether willow-mcp should be allowed to *create* a task queue
    table when none exists (a write-time question, not a read-time one, and
    arguably its own consent gate distinct from schema confirmation).
+6. Identity side (§6), independent of 1–5 and can proceed in parallel: build
+   the canonical identity extractor for Google and Apple (§6.1–§6.2), the
+   identity-binding artifact and `identity_confirm_binding` tool (§6.3), and
+   wire `_gate()` to actually resolve an OAuth session to a bound `app_id`
+   instead of trusting a caller-supplied one in serve mode — this is the fix
+   for the gap found this session, where `gate.py`'s own docstring describes
+   behavior that was never implemented.
+7. Only after 6: widen OAuth scope past the single flat `"willow"` value
+   (§6.4) to mirror `PERMISSION_GROUPS`, so a client can request narrower
+   access than "everything this human is bound to." Sequenced last because a
+   finer-grained scope on top of a binding that doesn't exist yet is polish
+   on a foundation that isn't there.
+
+4d (PyPI publish) should wait on at least step 2 (read-path schema fix) and
+step 6 (identity binding) — publishing with OAuth login that authenticates
+a real human and then silently fails to authorize them as anyone is a worse
+public posture than not offering OAuth at all.

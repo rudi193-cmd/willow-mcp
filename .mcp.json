@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "willow-mcp": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["-m", "willow_mcp"],
+      "env": {
+        "PYTHONPATH": "src"
+      }
+    },
+    "codebase-memory-mcp": {
+      "type": "stdio",
+      "command": "codebase-memory-mcp",
+      "args": []
+    }
+  }
+}
