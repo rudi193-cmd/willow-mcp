@@ -47,18 +47,26 @@ Repo-local configs (`.cursor/mcp.json`, `.mcp.json`) wire **willow-mcp** plus
 package. Install the CBM binary to `~/.local/bin/codebase-memory-mcp`, then
 index this repo (`project: home-sean-campbell-github-willow-mcp`).
 
-Minimal single-server config:
+`willow-mcp`'s entry points at a repo-local venv rather than a bare `python3` —
+your host interpreter may not have `pip` or the `mcp` package installed (a
+missing import here crashes the stdio server before the handshake, which
+shows up as a client-side reconnect failure). Set it up once per clone:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python3 -m pip install -e .
+```
+
+Minimal single-server config (path is relative to the repo root, so this
+works unmodified on any clone once the venv above exists):
 
 ```json
 {
   "mcpServers": {
     "willow-mcp": {
       "type": "stdio",
-      "command": "python3",
-      "args": ["-m", "willow_mcp"],
-      "env": {
-        "PYTHONPATH": "src"
-      }
+      "command": ".venv/bin/python3",
+      "args": ["-m", "willow_mcp"]
     },
     "codebase-memory-mcp": {
       "type": "stdio",
@@ -69,11 +77,10 @@ Minimal single-server config:
 }
 ```
 
-After `pip install -e .`, drop `PYTHONPATH` and use `python3 -m willow_mcp`
-from any cwd. Point `WILLOW_PG_DB` / `WILLOW_STORE_ROOT` at your host fleet
-store when you need Postgres knowledge or shared SOIL data.
+Point `WILLOW_PG_DB` / `WILLOW_STORE_ROOT` at your host fleet store when you
+need Postgres knowledge or shared SOIL data.
 
-You can also run the full [willow-1.9](https://github.com/rudi193-cmd/willow-1.9) server directly — the tool API is identical, apps work against both transparently.
+You can also run the full [willow-2.0](https://github.com/rudi193-cmd/willow-2.0) server directly — the tool API is identical, apps work against both transparently.
 
 ## Configuration
 
