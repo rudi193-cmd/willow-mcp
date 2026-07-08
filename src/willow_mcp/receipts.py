@@ -48,3 +48,19 @@ class ReceiptLog:
                 (ts, app_id, tool, outcome, detail)
             )
             self._conn.commit()
+
+    def tail(self, app_id: str, limit: int = 20) -> list[dict]:
+        """Return this app_id's own most-recent receipts, newest first.
+
+        Scoped to the single app_id on purpose — the audit trail is a
+        self-legibility feature ('what did I just do?'), never a way to read
+        another identity's calls. A caller only ever sees its own rows.
+        """
+        limit = max(1, min(int(limit), 200))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT ts, tool, outcome, detail FROM receipts "
+                "WHERE app_id = ? ORDER BY id DESC LIMIT ?",
+                (app_id, limit),
+            ).fetchall()
+        return [{"ts": r[0], "tool": r[1], "outcome": r[2], "detail": r[3]} for r in rows]

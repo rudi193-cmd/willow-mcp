@@ -23,11 +23,28 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json` — no ACL database, no external
   auth service. Permission groups: `store_read`, `store_write`, `knowledge_read`,
   `knowledge_write`, `schema_admin`, `task_queue`, `agent_dispatch`, `fleet_read`,
-  `full_access`.
+  `context`, `audit`, `full_access`.
+- **`diagnostic_summary`** — a self-check that answers "is this install wired
+  correctly?": SOIL store (path/writable/collections), Postgres (reachable +
+  which database + whether willow-mcp's tables are present), schema-confirmation
+  state, your `app_id`'s manifest + resolved permissions, identity bindings, and
+  the config environment — then a verdict (ok/degraded/broken) with named
+  problems and fixes. Deliberately ungated (it must answer even when the manifest
+  or database is misconfigured); reveals only the caller's own config, never
+  fleet rows or vault secrets; serve mode requires a confirmed identity and
+  redacts absolute paths. Its headline case is the empty-DB / wrong-`WILLOW_PG_DB`
+  footgun (Postgres connects but points at a database without the tables).
+- **Session context** (`context_save` / `context_get` / `context_list` /
+  `context_expire`) — ephemeral, per-identity working state that survives across
+  sessions, with an optional TTL. SOIL-backed (no Postgres needed); reads
+  transparently skip and purge expired entries; scoped to your `app_id`.
+- **`receipts_tail`** — read your own most-recent tool-call receipts (a
+  self-audit trail); scoped to your `app_id`, never another identity's calls.
 - **Schema adaptation**: read tools adapt to the host database's real column
   names; write tools refuse (`unconfirmed_schema`) until the mapping is reviewed
   and confirmed via `schema_confirm_mapping`.
-- Tool set expanded 11 → 21 (`kb_*`, `agent_*`, `fleet_*`, `schema_confirm_mapping`).
+- Tool set expanded 11 → 27 (`kb_*`, `agent_*`, `fleet_*`, `schema_confirm_mapping`,
+  `diagnostic_summary`, `context_*`, `receipts_tail`).
 - Input sanitizer, per-caller rate limiter, and a receipt log.
 - Claude Code plugin: a `PreToolUse` hook that redirects raw `psql`/`sqlite3`
   access to the matching MCP tool, and `schema-confirm` / `willow-serve` skills.

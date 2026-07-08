@@ -46,6 +46,12 @@ Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 | `agent_dispatch_result` | Record the result of a dispatched agent task |
 | `fleet_status` | List agents registered in the fleet |
 | `fleet_health` | Task queue counts by status |
+| `context_save` | Save ephemeral per-identity working state under a key, with an optional TTL (SOIL-backed, no Postgres) |
+| `context_get` | Read a saved context; `expired` (and purged) once its TTL passes |
+| `context_list` | List your saved context keys and expiry times (expired ones skipped) |
+| `context_expire` | Delete a saved context before its TTL |
+| `receipts_tail` | Read your own most-recent tool-call receipts — a self-audit trail scoped to your `app_id` |
+| `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/env health, with a verdict and named fixes. Ungated — see below |
 
 `knowledge_search`/`kb_at`/`kb_startup_continuity` and `fleet_status` adapt to
 whatever your host database's real columns are named — see
@@ -57,6 +63,12 @@ walks through that.
 
 Every tool requires an `app_id` param, checked against a manifest at
 `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json` — see [Authorization](#authorization).
+The one exception is **`diagnostic_summary`**, which is intentionally ungated: it
+is the tool you reach for when your manifest or database is misconfigured, so
+gating it behind a permission would make the diagnostic itself undiagnosable. It
+discloses only the caller's own configuration — never fleet rows or vault
+secrets — and in serve mode still requires a confirmed identity and redacts
+absolute filesystem paths.
 
 ## MCP config
 
@@ -231,9 +243,9 @@ needs a manifest at `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json`:
 `permissions` is a list of group names and/or literal tool names —
 see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the full set
 (`store_read`, `store_write`, `knowledge_read`, `knowledge_write`,
-`schema_admin`, `task_queue`, `agent_dispatch`, `fleet_read`,
-`full_access`). Fail-closed: no manifest, or an empty `permissions` list,
-denies every call for that `app_id`.
+`schema_admin`, `task_queue`, `agent_dispatch`, `fleet_read`, `context`,
+`audit`, `full_access`). Fail-closed: no manifest, or an empty `permissions`
+list, denies every call for that `app_id`.
 
 In [HTTP serve mode](#http-serve-mode-oauth), the `app_id` is not taken from
 the call — it is resolved from the caller's confirmed OAuth identity binding,

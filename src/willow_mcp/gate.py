@@ -64,6 +64,12 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "fleet_read": frozenset({
         "fleet_status", "fleet_health",
     }),
+    "context": frozenset({
+        "context_save", "context_get", "context_list", "context_expire",
+    }),
+    "audit": frozenset({
+        "receipts_tail",
+    }),
     # Confirming a schema mapping unlocks write tools for a whole table — a
     # more consequential act than any single write, so it's gated as its
     # own group rather than folded into knowledge_write (docs/design/
@@ -87,6 +93,10 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "fleet_status", "fleet_health",
         # Schema admin
         "schema_confirm_mapping",
+        # Session context
+        "context_save", "context_get", "context_list", "context_expire",
+        # Self-audit
+        "receipts_tail",
     }),
 }
 
