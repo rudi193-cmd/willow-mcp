@@ -42,6 +42,11 @@ def _manifest_ok():
     return {"status": "ok", "app_id": "willow", "apps_root": "/x", "permissions": ["fleet_read"]}
 
 
+def _manifest_no_app_id():
+    return {"status": "warn", "reason": "no_app_id", "app_id": "", "apps_root": "/x",
+            "detail": "no app_id supplied — pass the app_id you call willow-mcp with"}
+
+
 def test_empty_db_is_flagged_as_error():
     problems = server._derive_problems(_store_ok(), _pg_empty(), _manifest_ok(), "stdio")
     pg_problems = [p for p in problems if p["check"] == "postgres"]
@@ -106,6 +111,47 @@ def test_manifest_empty_permissions_is_warn(tmp_path, monkeypatch):
     (app_dir / "manifest.json").write_text(json.dumps({"permissions": []}))
     check = server._diag_manifest("demo")
     assert check["status"] == "warn"
+
+
+# ── B-18: missing app_id is a caller-input warn, not a degraded verdict ───────
+
+def test_diag_manifest_no_app_id_is_caller_input_warn(tmp_path, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path))
+    check = server._diag_manifest("")
+    assert check["status"] == "warn"
+    assert check["reason"] == "no_app_id"
+
+
+def test_verdict_ok_when_only_caller_input_warn():
+    assert server._derive_verdict([{"severity": "warn", "caller_input": True}]) == "ok"
+
+
+def test_verdict_degraded_when_caller_input_plus_real_warn():
+    problems = [{"severity": "warn", "caller_input": True}, {"severity": "warn"}]
+    assert server._derive_verdict(problems) == "degraded"
+
+
+def test_missing_app_id_warns_but_verdict_stays_ok():
+    # all subsystems healthy, caller just passed no app_id -> manifest surfaces
+    # a caller_input warn, but the overall verdict is still ok.
+    problems = server._derive_problems(_store_ok(), _pg_ok(), _manifest_no_app_id(), "stdio")
+    mp = [p for p in problems if p["check"] == "manifest"]
+    assert len(mp) == 1
+    assert mp[0]["severity"] == "warn"
+    assert mp[0]["caller_input"] is True
+    assert server._derive_verdict(problems) == "ok"
+
+
+def test_empty_permissions_warn_still_degrades():
+    # a real manifest warn (empty permissions -> every call denied) is NOT
+    # caller_input and must still degrade the verdict.
+    manifest = {"status": "warn", "app_id": "demo", "apps_root": "/x",
+                "detail": "manifest present but permissions empty — every call is denied"}
+    problems = server._derive_problems(_store_ok(), _pg_ok(), manifest, "stdio")
+    mp = [p for p in problems if p["check"] == "manifest"][0]
+    assert mp["severity"] == "warn"
+    assert "caller_input" not in mp
+    assert server._derive_verdict(problems) == "degraded"
 
 
 # ── serve-mode redaction ─────────────────────────────────────────────────────
