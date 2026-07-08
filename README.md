@@ -184,11 +184,31 @@ just ask to turn serve mode on or off.
 > If you already signed in once, `on` reuses your cached credential — no OAuth
 > screen reappears unless it was cleared. That's expected, not a failure.
 
+> **Serve mode does not inherit your shell environment.** The `systemd --user`
+> unit is started by systemd, not by your interactive shell, so a `WILLOW_PG_DB`
+> (or `WILLOW_STORE_ROOT`, `WILLOW_HOME`, …) you `export` in `.bashrc`/`.zshrc`
+> **will not reach the serve process** — it falls back to the defaults in the
+> [Configuration](#configuration) table. This bites env-based, non-default
+> setups: the stdio server (launched from your shell) reads `willow_20`, say,
+> while serve silently reads the default `willow`. Make the config reachable by
+> the unit before `on`:
+>
+> ```bash
+> # one-time: import current shell values into the systemd --user manager
+> systemctl --user import-environment WILLOW_PG_DB WILLOW_STORE_ROOT WILLOW_HOME
+> # …or, durably, drop them in a file systemd --user reads at login:
+> #   ~/.config/environment.d/willow-mcp.conf  →  WILLOW_PG_DB=willow_20
+> ```
+>
+> Then `scripts/willow-serve install` (regenerate) and `on`. Verify with a read
+> tool over the serve endpoint: a `table_not_found` / `relation … does not
+> exist` on data that stdio can see is the signature of this env gap.
+
 ## Configuration
 
 | Env var | Default | Description |
 |---------|---------|-------------|
-| `WILLOW_PG_DB` | `willow` | Postgres database name |
+| `WILLOW_PG_DB` | `willow` | Postgres database name (serve mode won't see a shell `export` — see [serve env note](#turning-serve-mode-on-and-off)) |
 | `WILLOW_PG_USER` | `$USER` | Postgres user (Unix socket auth) |
 | `WILLOW_STORE_ROOT` | `~/.willow/store` | SQLite store directory — set to willow-2.0's store root to share data |
 | `WILLOW_APP_ID` | `willow-mcp` | Default app_id if not passed per-call |
