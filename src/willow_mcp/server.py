@@ -13,8 +13,12 @@ Tools:
   Tasks (PG):      task_submit, task_status, task_list
   Agent (PG):      agent_route, agent_dispatch_result
   Fleet (PG):      fleet_status, fleet_health
+  Context (SQLite):context_save, context_get, context_list, context_expire
+  Audit (SQLite):  receipts_tail
+  Diagnostic:      diagnostic_summary (ungated self-check)
 
 Auth (stdio): manifest-based per-tool ACL — app_id required on every call.
+  Exception: diagnostic_summary is ungated (must answer when a manifest is broken).
 Auth (serve): OAuth 2.0 PKCE (Google / Apple) + per-tool ACL gate.
 Fail-closed: no manifest = all calls denied.
 
@@ -33,6 +37,7 @@ import sys
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Optional
 
@@ -272,7 +277,7 @@ def _sanitize(kwargs: dict) -> tuple[dict, Optional[str]]:
     Returns (cleaned_kwargs, None) on success, or (kwargs, error_message) if a
     field fails validation outright (caller denies the call — no partial writes).
     """
-    for key in ("record", "context"):
+    for key in ("record", "context", "value"):
         val = kwargs.get(key)
         if isinstance(val, dict):
             size = len(json.dumps(val))
@@ -957,6 +962,367 @@ def fleet_health(app_id: str) -> dict:
         "failed":    counts.get("failed", 0),
         "total":     sum(counts.values()),
     }
+
+
+# ── Session context tools ────────────────────────────────────────────────────
+#
+# Ephemeral, per-identity working state that survives across sessions — a
+# to-do note, a cursor, a scratch value — with an optional TTL. Distinct from
+# store_* in exactly that: contexts can expire, and reads transparently skip
+# (and lazily purge) expired entries. Backed by the SOIL store, so this works
+# with no Postgres — matching the README's "SOIL store works standalone."
+# Scoped to the caller's app_id (the bound identity in serve mode), so one
+# identity never reads another's context.
+
+def _ctx_collection(app_id: str) -> str:
+    return f"ctx__{app_id}"
+
+
+def _ctx_expired(rec: dict) -> bool:
+    exp = rec.get("_ctx_expires_epoch")
+    return bool(exp) and time.time() > exp
+
+
+@mcp.tool()
+@_guarded("context_save")
+def context_save(app_id: str, key: str, value: dict, ttl_seconds: int = 0) -> dict:
+    """Save ephemeral working state under `key`, optionally expiring after
+    ttl_seconds (0 = never). Overwrites an existing key. Per-identity — scoped
+    to your app_id. Backed by the SOIL store, so no Postgres is required."""
+    expires_epoch = (time.time() + ttl_seconds) if ttl_seconds and ttl_seconds > 0 else None
+    expires_at = (datetime.fromtimestamp(expires_epoch, timezone.utc).isoformat()
+                  if expires_epoch else None)
+    record = {
+        "value": value,
+        "_ctx_key": key,
+        "_ctx_saved_at": datetime.now(timezone.utc).isoformat(),
+        "_ctx_expires_epoch": expires_epoch,
+        "_ctx_expires_at": expires_at,
+    }
+    _store.put(_ctx_collection(app_id), record, record_id=key)
+    return {"key": key, "expires_at": expires_at}
+
+
+@mcp.tool()
+@_guarded("context_get")
+def context_get(app_id: str, key: str) -> dict:
+    """Read a saved context by key. Returns {error: not_found} if absent, or
+    {error: expired} (and purges it) if its TTL has passed."""
+    coll = _ctx_collection(app_id)
+    rec = _store.get(coll, key)
+    if not rec:
+        return {"error": "not_found"}
+    if _ctx_expired(rec):
+        _store.delete(coll, key)
+        return {"error": "expired"}
+    return {"key": key, "value": rec.get("value"),
+            "saved_at": rec.get("_ctx_saved_at"),
+            "expires_at": rec.get("_ctx_expires_at")}
+
+
+@mcp.tool()
+@_guarded("context_list")
+def context_list(app_id: str) -> dict:
+    """List your saved context keys with save/expiry times (values omitted —
+    use context_get). Expired entries are skipped and purged."""
+    coll = _ctx_collection(app_id)
+    out = []
+    for rec in _store.all(coll):
+        key = rec.get("_ctx_key") or rec.get("_id")
+        if _ctx_expired(rec):
+            _store.delete(coll, key)
+            continue
+        out.append({"key": key, "saved_at": rec.get("_ctx_saved_at"),
+                    "expires_at": rec.get("_ctx_expires_at")})
+    return {"contexts": out}
+
+
+@mcp.tool()
+@_guarded("context_expire")
+def context_expire(app_id: str, key: str) -> dict:
+    """Delete a saved context now, before its TTL. Returns {expired: bool}."""
+    return {"expired": _store.delete(_ctx_collection(app_id), key)}
+
+
+# ── Self-audit ───────────────────────────────────────────────────────────────
+
+@mcp.tool()
+@_guarded("receipts_tail")
+def receipts_tail(app_id: str, limit: int = 20) -> dict:
+    """Return your own most-recent tool-call receipts, newest first: ts, tool,
+    outcome (ok/denied/rate_limited/error), detail. Scoped to your app_id — a
+    self-audit trail, never another identity's calls."""
+    return {"receipts": _receipt_log.tail(app_id, limit)}
+
+
+# ── Self-diagnostic ──────────────────────────────────────────────────────────
+#
+# "Is this willow-mcp install wired correctly?" — the one tool a user reaches
+# for when nothing else works, so it must run even when the manifest is missing
+# or the database is empty. It is therefore NOT wrapped in _guarded (a broken
+# manifest would make the diagnostic itself undiagnosable). It reveals only the
+# caller's own environment/config — no fleet rows, no vault secrets. In serve
+# mode it still requires a confirmed identity, so an unbound remote caller never
+# reads local internals; local filesystem paths are collapsed to ~ for a remote
+# (bound) caller.
+#
+# Its headline job is catching the empty-DB / wrong-env failure: Postgres
+# connects fine, but WILLOW_PG_DB points at a database without willow-mcp's
+# tables (e.g. serve mode under systemd --user not inheriting a shell export).
+
+_EXPECTED_PG_TABLES = {
+    "knowledge":         "knowledge_* / kb_*",
+    "tasks":             "task_* / fleet_health",
+    "agents":            "fleet_status",
+    "routing_decisions": "agent_route / agent_dispatch_result",
+}
+
+
+def _diag_store() -> dict:
+    check: dict = {"backend": "soil-sqlite", "root": None, "exists": False,
+                   "writable": False, "collections": 0, "names": []}
+    try:
+        root = _store.root
+        check["root"] = str(root)
+        check["exists"] = root.exists()
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            probe = root / ".diag_write_probe"
+            probe.write_text("ok")
+            probe.unlink()
+            check["writable"] = True
+        except Exception as e:
+            check["write_error"] = str(e)[:120]
+        names = sorted(p.parent.name for p in root.glob("*/store.db")) if root.exists() else []
+        check["collections"] = len(names)
+        check["names"] = names[:20]
+        check["status"] = "ok" if check["writable"] else "fail"
+    except Exception as e:
+        check["status"] = "fail"
+        check["error"] = str(e)[:160]
+    return check
+
+
+def _diag_postgres() -> dict:
+    check: dict = {"backend": "postgres", "reachable": False,
+                   "dbname": os.environ.get("WILLOW_PG_DB", "willow"),
+                   "user": os.environ.get("WILLOW_PG_USER", os.environ.get("USER", "")),
+                   "tables": {}}
+    pg = get_pg()
+    if not pg:
+        check["status"] = "fail"
+        check["detail"] = "postgres_unavailable — not reachable via unix socket (knowledge_*, task_*, fleet_* degrade)"
+        return check
+    check["reachable"] = True
+    try:
+        dsn = pg.get_dsn_parameters()
+        check["dbname"] = dsn.get("dbname", check["dbname"])
+        check["host"] = dsn.get("host") or "local-socket"
+        wanted = list(_EXPECTED_PG_TABLES)
+        cur = pg.cursor()
+        cur.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema='public' AND table_name = ANY(%s)", (wanted,))
+        present = {r[0] for r in cur.fetchall()}
+        est: dict = {}
+        if present:
+            cur.execute("SELECT relname, reltuples::bigint FROM pg_class WHERE relname = ANY(%s)",
+                        (list(present),))
+            est = {r[0]: int(r[1]) for r in cur.fetchall()}
+        cur.close()
+        for t in wanted:
+            check["tables"][t] = {"present": t in present, "rows_est": est.get(t),
+                                   "backs": _EXPECTED_PG_TABLES[t]}
+        check["missing"] = [t for t in wanted if t not in present]
+        check["status"] = "ok" if not check["missing"] else "warn"
+    except Exception as e:
+        check["status"] = "fail"
+        check["error"] = str(e)[:160]
+    return check
+
+
+def _diag_schema(app_id: str) -> dict:
+    check: dict = {"tables": {}}
+    pg = get_pg()
+    if not pg:
+        check["status"] = "skip"
+        check["detail"] = "postgres unavailable"
+        return check
+    try:
+        eff = app_id or "willow-mcp"
+        for table, fields in _CONFIRMABLE_TABLES.items():
+            m = sp.resolve(pg, eff, table, fields)
+            if "error" in m:
+                check["tables"][table] = {"present": False, "confirmed": False, "note": m["error"]}
+                continue
+            check["tables"][table] = {
+                "present": True,
+                "confirmed": bool(m.get("confirmed")),
+                "unmapped": [f for f, v in m["fields"].items() if v["column"] is None],
+                "drift": bool(m.get("schema_drift")),
+            }
+        check["status"] = "ok"
+    except Exception as e:
+        check["status"] = "fail"
+        check["error"] = str(e)[:160]
+    return check
+
+
+def _diag_manifest(app_id: str) -> dict:
+    from . import gate
+    check: dict = {"app_id": app_id, "apps_root": str(gate._apps_root())}
+    if not app_id:
+        check["status"] = "warn"
+        check["detail"] = "no app_id supplied — pass the app_id you call willow-mcp with"
+        return check
+    manifest = gate._load_manifest(app_id)
+    if manifest is None:
+        check["status"] = "fail"
+        check["detail"] = f"no manifest at {gate._apps_root()}/{app_id}/manifest.json — every call is denied"
+        return check
+    perms = manifest.get("permissions", [])
+    allowed: set = set()
+    for p in perms:
+        g = gate.PERMISSION_GROUPS.get(p)
+        allowed.update(g if g is not None else {p})
+    check["permissions"] = perms
+    check["tools_allowed"] = sorted(allowed)
+    if not perms:
+        check["status"] = "warn"
+        check["detail"] = "manifest present but permissions empty — every call is denied"
+    else:
+        check["status"] = "ok"
+    return check
+
+
+def _diag_bindings() -> dict:
+    from . import gate
+    root = gate._apps_root() / "_identity_bindings"
+    check: dict = {"dir": str(root), "total": 0, "confirmed": 0}
+    try:
+        if root.exists():
+            files = list(root.glob("*.json"))
+            check["total"] = len(files)
+            for f in files:
+                try:
+                    if json.loads(f.read_text()).get("confirmed"):
+                        check["confirmed"] += 1
+                except Exception:
+                    pass
+        check["status"] = "ok"
+    except Exception as e:
+        check["status"] = "fail"
+        check["error"] = str(e)[:160]
+    return check
+
+
+def _diag_env() -> dict:
+    # Config-bearing env, set-or-None. A var showing None here (its default in
+    # effect) while data lives elsewhere is the serve-mode env footgun: the
+    # systemd --user unit does not inherit a shell `export`.
+    keys = ["WILLOW_HOME", "WILLOW_PG_DB", "WILLOW_PG_USER", "WILLOW_STORE_ROOT",
+            "WILLOW_APP_ID", "WILLOW_MCP_APPS_ROOT", "WILLOW_MCP_HOST", "WILLOW_MCP_PORT"]
+    return {k: os.environ.get(k) for k in keys}
+
+
+def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str) -> list[dict]:
+    """Pure: turn raw check dicts into actionable problems. Unit-tested without
+    a live DB — this is where the empty-DB footgun becomes a named diagnosis."""
+    problems: list[dict] = []
+    if store.get("status") == "fail":
+        problems.append({"severity": "error", "check": "store",
+                         "detail": store.get("write_error") or store.get("error") or "SOIL store not writable",
+                         "fix": f"ensure {store.get('root')} exists and is writable (WILLOW_STORE_ROOT)"})
+    if postgres.get("status") == "fail":
+        problems.append({"severity": "warn", "check": "postgres",
+                         "detail": "Postgres unreachable — knowledge_*, task_*, fleet_* will return postgres_unavailable",
+                         "fix": "start Postgres and confirm unix-socket peer auth for WILLOW_PG_USER, or ignore if you only use the SOIL store"})
+    elif postgres.get("missing"):
+        env_note = (" Serve mode (systemd --user) does not inherit a shell `export WILLOW_PG_DB` — "
+                    "see README 'Turning serve mode on and off'.") if mode == "serve" else ""
+        problems.append({"severity": "error", "check": "postgres",
+                         "detail": (f"Postgres connected to database '{postgres.get('dbname')}' but "
+                                    f"expected tables are missing: {postgres['missing']}. "
+                                    f"If your data lives in another database, WILLOW_PG_DB is wrong." + env_note),
+                         "fix": f"set WILLOW_PG_DB to the database that actually holds these tables (currently '{postgres.get('dbname')}')"})
+    if manifest.get("status") in ("fail", "warn"):
+        problems.append({"severity": "error" if manifest.get("status") == "fail" else "warn",
+                         "check": "manifest", "detail": manifest.get("detail"),
+                         "fix": f"create/populate {manifest.get('apps_root')}/{manifest.get('app_id')}/manifest.json with a \"permissions\" list"})
+    return problems
+
+
+def _derive_verdict(problems: list[dict]) -> str:
+    if any(p["severity"] == "error" for p in problems):
+        return "broken"
+    if problems:
+        return "degraded"
+    return "ok"
+
+
+def _collapse_home(obj):
+    """Replace the home-dir prefix with ~ in any string values (serve-mode
+    redaction for a remote bound caller — no absolute host paths leak)."""
+    home = str(os.path.expanduser("~"))
+    if isinstance(obj, str):
+        return obj.replace(home, "~")
+    if isinstance(obj, dict):
+        return {k: _collapse_home(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_collapse_home(v) for v in obj]
+    return obj
+
+
+@mcp.tool()
+def diagnostic_summary(app_id: str = "") -> dict:
+    """Self-check: is this willow-mcp install wired correctly? Reports the SOIL
+    store (path/writable/collections), Postgres (reachable + which database +
+    whether willow-mcp's tables are present), schema-mapping confirmation state,
+    your app_id's manifest + resolved permissions, identity bindings, and the
+    config-bearing environment — then a verdict (ok/degraded/broken) with named
+    problems and fixes. Ungated on purpose: it must answer even when your
+    manifest or database is misconfigured. Reveals only your own config, never
+    fleet rows or vault secrets."""
+    mode = "serve" if _SERVE_MODE else "stdio"
+    redact = False
+    if _SERVE_MODE:
+        bound, err = _resolve_serve_identity()
+        if err:
+            return {"verdict": "unauthenticated", "mode": mode, "detail": err["error"],
+                    "hint": "sign in and have the operator confirm your binding, then call diagnostic_summary again"}
+        app_id = bound
+        redact = True
+        allowed, retry_after = _check_rate(app_id)
+        if not allowed:
+            return {"error": "rate_limited", "retry_after": retry_after}
+
+    eff = app_id or _DEFAULT_APP_ID
+    store = _diag_store()
+    postgres = _diag_postgres()
+    schema = _diag_schema(eff)
+    manifest = _diag_manifest(eff)
+    bindings = _diag_bindings()
+    env = _diag_env()
+
+    problems = _derive_problems(store, postgres, manifest, mode)
+    verdict = _derive_verdict(problems)
+
+    report = {
+        "verdict": verdict,
+        "mode": mode,
+        "serve": {"host": _HOST, "port": _PORT, "base_url": _BASE_URL} if _SERVE_MODE else None,
+        "app_id": eff or None,
+        "checks": {"store": store, "postgres": postgres, "schema": schema,
+                   "manifest": manifest, "identity_bindings": bindings, "env": env},
+        "problems": problems,
+    }
+    if redact:
+        report = _collapse_home(report)
+    try:
+        _receipt_log.record(eff or "-", "diagnostic_summary", "ok" if verdict == "ok" else "warn", verdict)
+    except Exception:
+        pass
+    return report
 
 
 # ── Entry points ───────────────────────────────────────────────────────────────
