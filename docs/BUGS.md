@@ -19,7 +19,7 @@ log carries a one-line entry and points there rather than duplicating.
 
 | ID | Sev | Status | Component | One-line | Ref |
 |----|-----|--------|-----------|----------|-----|
-| B-14 | P0 | **Open** | Kart sandbox / trust root | Kart bwrap has R+W to `$WILLOW_HOME/mcp_apps` (manifests + identity bindings) — untrusted runtime can rewrite the ACLs that gate it | FRANK `baf2f63a`, `293b2130`; willow-2.0#777 |
+| B-14 | P0 | Fixed | Kart sandbox / trust root | Kart bwrap had R+W to `$WILLOW_HOME/mcp_apps` (manifests + identity bindings) — untrusted runtime could rewrite the ACLs that gate it. Fixed: `mcp_apps` now `bound_ro` in bwrap | FRANK `baf2f63a`, `293b2130`; willow-2.0#777; probe `MAGSU06N` |
 | B-15 | P3 | Open | knowledge / kb | `kb_startup_continuity` silently returns empty — keyed off a `tags`/continuity-domain shape the adopted DB doesn't have | issue #20 |
 | B-16 | P3 | Open | server pipeline | `_sanitize` fires before the permission gate on `store_put` — a denied caller can still trip sanitizer errors first (ordering nit) | FRANK `90960b8b` |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
@@ -37,35 +37,6 @@ log carries a one-line entry and points there rather than duplicating.
 | B-09 | P2 | Stale | gate | Silent fallback on missing SAP gate — `openclaw_sap_gate` gone in rewritten `gate.py` | L-AUTH-01 |
 
 ## Open
-
-### B-14 · P0 · Kart bwrap sandbox has R+W to willow-mcp's on-disk trust root
-**Component:** Kart sandbox mount config (willow-2.0) × willow-mcp `gate.py` trust root
-**Found:** 2026-07-08 (sessions `6386031b`, `c700ed9d`), live-testing operator-granted `confirm-binding`.
-**Ref:** FRANK `baf2f63a` (+ corroboration `293b2130`), GitHub **willow-2.0#777**, memory `project_willow_mcp_confirm_binding_cross_runtime_leak`.
-
-The host stdio willow-mcp server and the Kart bwrap sandbox share
-`$WILLOW_HOME=/home/sean-campbell/github/.willow`. willow-mcp's entire on-disk
-trust root — `mcp_apps/` (per-app `manifest.json` ACLs **and** `_identity_bindings/`
-confirmed OAuth bindings) — sits inside the sandbox's read-write mount. Verified
-from inside a Kart task (`W_OK` stat only, no writes): `mcp_apps/`,
-`mcp_apps/willow/manifest.json`, `_identity_bindings/`, and the confirmed
-binding file are all writable; the confirmed binding (identity + email) is
-readable.
-
-**Impact:** the untrusted execution runtime can (a) rewrite its own manifest to
-`full_access` and self-escalate stdio permissions past `gate.py`; (b) mint/flip
-a `confirmed:true` identity binding for any `(issuer, subject) → any app_id`,
-which the host serve process honors via `resolve_app_id` — defeating the
-"confirmation is stdio/host-only, never an MCP tool" control (L-AUTH-02); (c)
-read bound identity + email. Not a logic bug in `confirm_binding`/`_gate` (those
-are correct) — the sandbox boundary and the ACL boundary are not separated.
-
-**Fix (owner: willow-2.0):** Kart bwrap must not mount `$WILLOW_HOME/mcp_apps`
-read-write into the sandbox — at minimum `_identity_bindings/` and every
-`*/manifest.json` read-only, ideally not mounted at all. Alternatively move
-willow-mcp's trust root outside any sandbox-writable path. Load-bearing for the
-fetch-scope gating layer: a scope gate is worthless if the sandboxed fetcher can
-rewrite the scope file that gates it.
 
 ### B-15 · P3 · `kb_startup_continuity` silently returns empty
 **Component:** knowledge / kb
@@ -91,6 +62,22 @@ reordered rate-check after gate for a different reason — same spirit.
 
 ## Fixed
 
+- **B-14 · P0 (FRANK `baf2f63a`/`293b2130`, willow-2.0#777)** — Kart bwrap
+  sandbox no longer has R+W to willow-mcp's on-disk trust root. The host stdio
+  server and the Kart sandbox share `$WILLOW_HOME`, and `mcp_apps/` (per-app
+  `manifest.json` ACLs **and** `_identity_bindings/` confirmed OAuth bindings)
+  used to sit inside the sandbox's read-write mount — so an untrusted runtime
+  could rewrite its own manifest to self-escalate past `gate.py`, or mint/flip a
+  `confirmed:true` identity binding the host serve process would honor
+  (defeating L-AUTH-02's "confirmation is stdio/host-only" control). Fixed on
+  the willow-2.0 side: `$WILLOW_HOME/mcp_apps` is now an explicit `bound_ro`
+  mount nested inside the `bound_rw` `.willow` parent, so the trust root is
+  read-only even though its parent is writable. **Verified** 2026-07-08 via Kart
+  probe `MAGSU06N`: `touch mcp_apps/_b14_probe` → `Read-only file system`;
+  sandbox manifest shows `mcp_apps` under `bound_ro`. Load-bearing for the
+  fetch-scope gating layer (a scope gate is worthless if the sandboxed fetcher
+  can rewrite the scope file). Never author manifests/bindings via the sandbox —
+  host-side only.
 - **B-01 · L-AUTH-02 (P0)** — serve-mode identity binding implemented
   (`identity_binding.py` + `oauth.py`/`gate.py`/`server.py` wiring +
   `willow-mcp confirm-binding` CLI); `app_id` now resolved from the confirmed
