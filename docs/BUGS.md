@@ -26,7 +26,9 @@ log carries a one-line entry and points there rather than duplicating.
 | B-18 | P3 | Fixed | diagnostics | `diagnostic_summary` returned verdict `degraded` when the caller merely omitted `app_id`. Fixed: missing `app_id` is a `caller_input` warn (surfaced in `problems` + manifest sub-check) that no longer degrades the verdict | this session; probe `E3265B66` |
 | B-19 | P2 | Fixed | task interface / Kart | `task_submit` had no `allow_net`. Fixed: `allow_net=True` gated by a new `task_net` manifest permission (not in full_access) appends the worker's `# allow_net` directive | this session; probe `5H1M355V` |
 | B-20 | P3 | Fixed | repo metadata / docs | GitHub "About" description read "Superseded by Willow 2.0 … now live in the monorepo" — stale, contradicting the active 2.0.0 repo; visible to anyone (surfaced in an external review). Fixed via `gh repo edit --description`; repo confirmed not archived | this session; DeepSeek review |
-| B-21 | P0 | Fixed | task interface / Kart | `task_net` gate bypassable via task text — the worker reads egress policy from a `# allow_net` line in the stored task, but `task_submit` gated & appended that line only behind `if allow_net:`, so a `task_queue`-only caller could embed the directive with `allow_net=False` and get ungated egress (also `# allow_localhost`). Fixed: strip caller-supplied directive lines unconditionally before the gated append | this session; L-NET-01; PR #31 review §2a |
+| B-21 | P0 | Fixed | task interface / Kart | `task_net` gate bypassable via task text — the worker reads egress policy from a `# allow_net` line in the stored task, but `task_submit` gated & appended that line only behind `if allow_net:`, so a `task_queue`-only caller could embed the directive with `allow_net=False` and get ungated egress (also `# allow_localhost`). Fixed: strip caller-supplied directive lines unconditionally before the gated append | this session; L-NET-01; PR #32; PR #31 review §2a |
+| B-22 | P1 | Open | packaging / Kart | Product ships **no task executor** — `pyproject` advertises a "Kart task queue" and ships `task_submit`/`task_status`, but no worker/sandbox is in the package (`find -iname '*kart*'` empty); a clean `pip install` leaves every task `pending` forever. Ran only because a stale out-of-repo willow-2.0 Kart was present. Direction set: productionize 2.0's Kart into willow-mcp | this session; `docs/design/kart-productionization.md`; PR #31 review §1 |
+| B-23 | P3 | Fixed | process / skills+hooks | Task-queue surface (`task_submit`/`task_net`, B-19; `# allow_net` footgun, B-21) shipped with no skill or hook, violating the "hooks/skills ship with the tool" rule (`docs/design/hooks-and-skills.md` §2). Fixed: added `skills/kart-tasks.md` + a `task_submit` matcher on `pre_tool_use.py` warning on hand-embedded net directives | this session; operator-caught |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -43,10 +45,33 @@ log carries a one-line entry and points there rather than duplicating.
 
 ## Open
 
-_None — all tracked bugs are Fixed, Documented, or Stale._
+- **B-22 · P1 (this session)** — willow-mcp ships **no Kart executor**. The
+  package advertises a "Kart task queue" and exposes `task_submit`/`task_status`/
+  `task_list`/`fleet_health`, but there is no worker, sandbox, or queue-drainer
+  anywhere in the repo (`find -iname '*kart*'` is empty) and `[project.scripts]`
+  registers only the MCP server. On a clean `pip install willow-mcp`, submitted
+  tasks sit `pending` forever with nothing to run them — the tools only ever
+  executed because an out-of-repo (often stale) willow-2.0 Kart was present on
+  the operator's machines. **Direction set** (operator, 2026-07-08): productionize
+  the mature willow-2.0 Kart *into* willow-mcp as shipped code — a staged
+  decouple→vendor→entry-point migration, plan in
+  `docs/design/kart-productionization.md`. Stays Open until a `willow-mcp worker`
+  ships and a clean install can execute a task end-to-end. Surfaced by PR #31 §1
+  (filed there as a diagnostics gap; the real severity is packaging/DOA).
 
 ## Fixed
 
+- **B-23 · P3 (this session)** — the task-queue tool surface shipped without
+  its companion skill/hook, breaking the standing rule that a footgun/workflow
+  tool ships its skill+hook in the *same* PR (`docs/design/hooks-and-skills.md`
+  §2). `task_submit` + the `task_net` capability (B-19) and the `# allow_net`
+  directive footgun (B-21) are exactly that case and had neither. **Fix:** added
+  `skills/kart-tasks.md` (submit/poll workflow, the `allow_net`/`task_net`
+  permission model, and the worker-liveness caveat that a submission ≠ an
+  execution) and extended `hooks/pre_tool_use.py` with a `task_submit` matcher
+  that *warns* when a caller hand-embeds a `# allow_net`/`# allow_localhost` line
+  (a no-op post-B-21) and points them at the real path. Registered both in
+  `.claude-plugin/plugin.json`. Operator-caught, not review-caught.
 - **B-21 · P0 (this session)** — `task_net` capability gate was bypassable via
   the task text itself, defeating the separation B-19 established. The Kart
   worker (`willow-2.0/core/kart_sandbox.py`) decides network policy purely by
