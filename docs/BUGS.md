@@ -22,7 +22,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-14 | P0 | Fixed | Kart sandbox / trust root | Kart bwrap had R+W to `$WILLOW_HOME/mcp_apps` (manifests + identity bindings) — untrusted runtime could rewrite the ACLs that gate it. Fixed: `mcp_apps` now `bound_ro` in bwrap | FRANK `baf2f63a`, `293b2130`; willow-2.0#777; probe `MAGSU06N` |
 | B-15 | P3 | Fixed | knowledge / kb | `kb_startup_continuity` silently returned empty — filtered on a `tags`/`domain='continuity'` shape the adopted DB lacks. Fixed: read tags from the jsonb `content->'tags'` blob + always emit `_continuity_filter` | issue #20; probe `707E561A` |
 | B-16 | P3 | Fixed | server pipeline | `_sanitize` fired before the permission gate — a denied caller could trip sanitizer errors first. Fixed: `_guarded` now runs gate → sanitize → rate | FRANK `90960b8b`; probe `4D9139B8` |
-| B-17 | P2 | Open | schema / tasks | `task_status` never surfaces completion time — `tasks.completed_at`/`steps` are unmapped, so `completed_at` is `null` even for `completed` tasks | this session |
+| B-17 | P2 | Fixed | schema / tasks | `task_status` never surfaced completion time — the adopted `tasks` table had no `completed_at` column. Fixed: added the column + a self-populating trigger on the shared DB, and mapped it; `steps` stays unmapped (still no such column) | this session; probe `R2BSZ9FZ` |
 | B-18 | P3 | Fixed | diagnostics | `diagnostic_summary` returned verdict `degraded` when the caller merely omitted `app_id`. Fixed: missing `app_id` is a `caller_input` warn (surfaced in `problems` + manifest sub-check) that no longer degrades the verdict | this session; probe `E3265B66` |
 | B-19 | P2 | Fixed | task interface / Kart | `task_submit` had no `allow_net`. Fixed: `allow_net=True` gated by a new `task_net` manifest permission (not in full_access) appends the worker's `# allow_net` directive | this session; probe `5H1M355V` |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
@@ -41,27 +41,35 @@ log carries a one-line entry and points there rather than duplicating.
 
 ## Open
 
-### B-17 · P2 · `task_status` never surfaces task completion time
-**Component:** schema mapping / `tasks` table
-**Found:** 2026-07-08, live boot + PR session (probes `MAGSU06N`, `E3BD68F7`).
-
-Against the adopted `willow_20` DB the `tasks` mapping leaves `completed_at` and
-`steps` **unmapped** — `diagnostic_summary` reports both under `unmapped`, and
-every `task_status` call returns `completed_at: null, steps: null,
-_unmapped: [steps, completed_at]`, even for a task whose `status` is `completed`.
-A caller can see *that* a task finished but not *when*, and can't compute elapsed
-time from the tool output. **Correction (verified via live introspection
-2026-07-08):** the adopted `tasks` table has **no** `completed_at` or `steps`
-column at all — the null is a deliberate "don't guess a substitute like
-`updated_at`" choice (see the `_TASK_FIELDS` note in `server.py`), not an
-unmapped-but-present column. So this is not a one-line mapping fix; the data
-isn't there to surface. Real options: (a) accept the null and document it, or
-(b) add a real completion-time column upstream in the adopted schema. Downgrade
-candidate to P3 given there's no local defect to fix. (My original filing that
-"the column exists, just isn't mapped" was wrong.)
+_None — all tracked bugs are Fixed, Documented, or Stale._
 
 ## Fixed
 
+- **B-17 · P2 (this session)** — `task_status` now surfaces task completion
+  time. Root cause: the adopted `tasks` table genuinely had **no**
+  `completed_at` column (the null was not an unmapped-but-present column — the
+  data wasn't there). Fix (operator chose the upstream option): added the column
+  and a self-populating trigger on the shared fleet DB, then mapped the field.
+  ```sql
+  ALTER TABLE tasks ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+  CREATE OR REPLACE FUNCTION set_task_completed_at() RETURNS trigger AS $$
+  BEGIN
+    IF NEW.status = 'completed' AND NEW.completed_at IS NULL
+       AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'completed') THEN
+      NEW.completed_at := now();
+    END IF;
+    RETURN NEW;
+  END; $$ LANGUAGE plpgsql;
+  CREATE TRIGGER trg_task_completed_at BEFORE INSERT OR UPDATE ON tasks
+    FOR EACH ROW EXECUTE FUNCTION set_task_completed_at();
+  ```
+  willow-mcp itself needed no code change (`completed_at` was already a canonical
+  `_TASK_FIELDS` entry); the confirmed tasks mapping artifact was updated to map
+  it. `steps` stays unmapped — that column still doesn't exist, which is correct.
+  Forward-only: pre-existing completed rows keep `completed_at` null (their true
+  completion time is unknown; no backfill from `updated_at`, which fires on any
+  update). **Verified**: probe `R2BSZ9FZ` completed with
+  `completed_at: 2026-07-08T12:12:41`, and `_unmapped` is now just `["steps"]`.
 - **B-19 · P2 (this session)** — `task_submit` can now run network-bearing
   tasks. It gained an `allow_net` parameter gated by a new `task_net` capability
   permission in `gate.py` — deliberately **not** part of `task_queue` or
