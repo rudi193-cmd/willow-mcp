@@ -35,6 +35,15 @@ neither; PR #11's `schema_confirm_mapping` needed a skill and didn't get
 one). This doc and its companion PR close that gap once, and the rule
 applies from here on.
 
+**Addendum (2026-07-08):** the rule then broke again — the task-queue surface
+(`task_submit` + the `task_net` capability, B-19; the `# allow_net` directive
+footgun, B-21/L-NET-01) shipped with neither skill nor hook, exactly the
+footgun-plus-workflow case §2 describes. Closed retroactively: `skills/kart-tasks.md`
+(submit/poll workflow, the `task_net`/`allow_net` model, the worker-liveness
+caveat) and a `task_submit` matcher on `pre_tool_use.py` that warns when a
+caller hand-embeds a stripped network directive. Logged as B-23. The lesson
+stands: the rule is only real if it's checked at PR time, not remembered.
+
 ## 3. Packaging shape
 
 Bundled inside `willow-mcp` itself (not a separate plugin repo) — one

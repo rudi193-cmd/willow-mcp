@@ -99,6 +99,64 @@ def test_main_ignores_non_bash_tools():
     assert stdout == ""
 
 
+# ── check_task_submit: warns on embedded net directives ─────────────────
+
+@pytest.mark.parametrize("task", [
+    "echo hi\n# allow_net",
+    "curl https://x\n  # allow_net  ",          # worker strips().== matches, so must we
+    "echo hi\n# allow_localhost",
+    "a\n# allow_net\nb\n# allow_localhost",
+])
+def test_check_task_submit_warns_on_embedded_directive(task):
+    reason = pre_tool_use.check_task_submit({"task": task})
+    assert reason is not None
+    assert "task_net" in reason
+
+
+@pytest.mark.parametrize("task", [
+    "echo hi",
+    "curl https://example.com",
+    "python3 -c 'print(1)  # allow_net in a comment, not its own line'",  # not a bare directive line
+    "",
+])
+def test_check_task_submit_allows_clean_tasks(task):
+    assert pre_tool_use.check_task_submit({"task": task}) is None
+
+
+def test_check_task_submit_handles_missing_task_key():
+    assert pre_tool_use.check_task_submit({}) is None
+
+
+def test_is_task_submit_matches_bare_and_mcp_qualified():
+    assert pre_tool_use._is_task_submit("task_submit")
+    assert pre_tool_use._is_task_submit("mcp__willow-mcp__task_submit")
+    assert pre_tool_use._is_task_submit("mcp__willow-mcp-serve__task_submit")
+    assert not pre_tool_use._is_task_submit("task_status")
+    assert not pre_tool_use._is_task_submit("Bash")
+
+
+def test_main_warns_on_task_submit_with_directive():
+    code, stdout = _run_hook({
+        "tool_name": "mcp__willow-mcp__task_submit",
+        "tool_input": {"app_id": "x", "task": "echo hi\n# allow_net"},
+        "session_id": "s1",
+    })
+    assert code == 0
+    decision = json.loads(stdout)
+    assert decision["decision"] == "warn"
+    assert "task_net" in decision["reason"]
+
+
+def test_main_silent_on_clean_task_submit():
+    code, stdout = _run_hook({
+        "tool_name": "mcp__willow-mcp__task_submit",
+        "tool_input": {"app_id": "x", "task": "echo hi"},
+        "session_id": "s1",
+    })
+    assert code == 0
+    assert stdout == ""
+
+
 def test_main_handles_empty_and_malformed_stdin_without_crashing():
     for raw in ("", "not json", "{}"):
         proc = subprocess.run(
