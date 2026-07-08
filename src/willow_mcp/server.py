@@ -1227,6 +1227,7 @@ def _diag_manifest(app_id: str) -> dict:
     check: dict = {"app_id": app_id, "apps_root": str(gate._apps_root())}
     if not app_id:
         check["status"] = "warn"
+        check["reason"] = "no_app_id"
         check["detail"] = "no app_id supplied — pass the app_id you call willow-mcp with"
         return check
     manifest = gate._load_manifest(app_id)
@@ -1299,17 +1300,34 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str) -> 
                                     f"expected tables are missing: {postgres['missing']}. "
                                     f"If your data lives in another database, WILLOW_PG_DB is wrong." + env_note),
                          "fix": f"set WILLOW_PG_DB to the database that actually holds these tables (currently '{postgres.get('dbname')}')"})
-    if manifest.get("status") in ("fail", "warn"):
-        problems.append({"severity": "error" if manifest.get("status") == "fail" else "warn",
-                         "check": "manifest", "detail": manifest.get("detail"),
+    if manifest.get("status") == "fail":
+        problems.append({"severity": "error", "check": "manifest",
+                         "detail": manifest.get("detail"),
                          "fix": f"create/populate {manifest.get('apps_root')}/{manifest.get('app_id')}/manifest.json with a \"permissions\" list"})
+    elif manifest.get("status") == "warn":
+        p = {"severity": "warn", "check": "manifest", "detail": manifest.get("detail")}
+        if manifest.get("reason") == "no_app_id":
+            # Caller omission, not an install defect: the caller didn't pass an
+            # app_id to this self-check. Surfaced here (and in checks.manifest)
+            # but flagged caller_input so it does NOT drag the verdict off "ok"
+            # when every probed subsystem is healthy (B-18).
+            p["caller_input"] = True
+            p["fix"] = "pass app_id=<the id you call willow-mcp with> to diagnostic_summary"
+        else:
+            p["fix"] = (f"populate {manifest.get('apps_root')}/{manifest.get('app_id')}"
+                        "/manifest.json with a non-empty \"permissions\" list")
+        problems.append(p)
     return problems
 
 
 def _derive_verdict(problems: list[dict]) -> str:
     if any(p["severity"] == "error" for p in problems):
         return "broken"
-    if problems:
+    # caller_input problems (e.g. no app_id passed to this self-check) are warns
+    # that describe the CALL, not the install — they surface in `problems` and
+    # the relevant sub-check, but must not drag the verdict off "ok" when every
+    # probed subsystem is healthy (B-18).
+    if any(not p.get("caller_input") for p in problems):
         return "degraded"
     return "ok"
 

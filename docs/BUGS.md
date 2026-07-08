@@ -23,7 +23,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-15 | P3 | Fixed | knowledge / kb | `kb_startup_continuity` silently returned empty — filtered on a `tags`/`domain='continuity'` shape the adopted DB lacks. Fixed: read tags from the jsonb `content->'tags'` blob + always emit `_continuity_filter` | issue #20; probe `707E561A` |
 | B-16 | P3 | Fixed | server pipeline | `_sanitize` fired before the permission gate — a denied caller could trip sanitizer errors first. Fixed: `_guarded` now runs gate → sanitize → rate | FRANK `90960b8b`; probe `4D9139B8` |
 | B-17 | P2 | Open | schema / tasks | `task_status` never surfaces completion time — `tasks.completed_at`/`steps` are unmapped, so `completed_at` is `null` even for `completed` tasks | this session |
-| B-18 | P3 | Open | diagnostics | `diagnostic_summary` returns verdict `degraded` when the caller merely omits `app_id` — conflates a missing argument with a broken install, diluting the signal | this session |
+| B-18 | P3 | Fixed | diagnostics | `diagnostic_summary` returned verdict `degraded` when the caller merely omitted `app_id`. Fixed: missing `app_id` is a `caller_input` warn (surfaced in `problems` + manifest sub-check) that no longer degrades the verdict | this session; probe `E3265B66` |
 | B-19 | P2 | Open | task interface / Kart | `task_submit` has no `allow_net` — willow-mcp's Kart lane is hardwired net-isolated, so a willow-mcp-only session cannot do git/push/`gh` work at all | this session |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
@@ -60,19 +60,6 @@ isn't there to surface. Real options: (a) accept the null and document it, or
 candidate to P3 given there's no local defect to fix. (My original filing that
 "the column exists, just isn't mapped" was wrong.)
 
-### B-18 · P3 · `diagnostic_summary` verdict `degraded` on a missing `app_id` argument
-**Component:** `diagnostic_summary`
-
-Called with no `app_id`, `diagnostic_summary` returns verdict `degraded` whose
-sole `problem` is `"no app_id supplied"` — a caller omission, not an install
-defect. Store, Postgres, schema, and identity-binding checks were all `ok`. The
-verdict is the one field meant to answer "is this install wired correctly," so
-folding a missing-argument case into `degraded` dilutes it: a genuinely broken
-install and a forgotten parameter read the same. Fix: treat missing `app_id` as
-an `info`/`warn` on the manifest sub-check only, and keep the top-level verdict
-`ok` when every probed subsystem is healthy — or add a distinct
-`caller_input` verdict tier.
-
 ### B-19 · P2 · `task_submit` has no `allow_net` — willow-mcp's Kart lane is hardwired isolated
 **Component:** `task_submit` / Kart execution lane
 
@@ -90,6 +77,17 @@ this gap forces onto the fleet lane).
 
 ## Fixed
 
+- **B-18 · P3 (this session)** — `diagnostic_summary` no longer returns verdict
+  `degraded` just because the caller omitted `app_id`. That case was a caller
+  omission, not an install defect (store/Postgres/schema/bindings all `ok`), yet
+  it folded into the one field meant to answer "is this install wired
+  correctly." Fix: the missing-`app_id` manifest warn is tagged `caller_input`;
+  it still surfaces in `problems` and the `manifest` sub-check (`status: warn`,
+  `reason: no_app_id`), but `_derive_verdict` ignores caller-input warns, so the
+  verdict stays `ok` when every probed subsystem is healthy. A real manifest
+  warn (empty permissions → every call denied) is not `caller_input` and still
+  degrades. **Verified** via probe `E3265B66`: `diagnostic_summary(app_id="")` →
+  `verdict: ok`, `manifest.status: warn`, `problems: [(manifest, warn, caller_input=True)]`.
 - **B-15 · P3 (issue #20)** — `kb_startup_continuity` no longer silently
   returns empty on the adopted `willow_20` DB. The old filter keyed off a
   `domain='continuity'` value (the `domain`/`project` column is ~all-null — no
