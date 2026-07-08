@@ -54,6 +54,17 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 - Dockerfile and GitHub Actions test workflow (runs against a Postgres service).
 
 ### Fixed
+- **Schema confirmation could accept a name match as truth (#20).**
+  `schema_confirm_mapping` mapped canonical fields to real columns by name and
+  confirmed without ever showing the data — so a `content` column that actually
+  holds a provenance blob (with the real text in `title`/`summary`) would be
+  confirmed as canonical `content`, and reads returned metadata instead of
+  knowledge. `schema_confirm_mapping` now takes `preview=True` (dry-run:
+  proposed mapping **plus** a rendered `sample` row, nothing written) and, on a
+  real confirm, includes the same `sample` — confirmation is never blind. The
+  `schema-confirm` skill requires reviewing the sample before confirming, and
+  `diagnostic_summary` reports each table's field→column map so a
+  confirmed-but-wrong mapping is visible in the self-check.
 - `--port` / `--host` CLI flags were silently ignored in serve mode — the
   FastMCP object, base URL, and OAuth issuer are built at import time and never
   saw the argparse values. Resolved at import with precedence CLI > env > default.

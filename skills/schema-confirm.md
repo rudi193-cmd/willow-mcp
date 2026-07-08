@@ -20,25 +20,37 @@ it (`schema_confirm_mapping`) — the write-path gate described in
 
 ## Steps
 
-**1. Surface the current heuristic mapping, read-only.**
+**1. Preview the mapping with a rendered sample row — do not confirm yet.**
 
-Call a read tool against the target table first — `knowledge_search` with
-any query, or `kb_startup_continuity` — and look at its `_unmapped` field.
-This reflects `schema_profile.resolve()`'s heuristic guess without writing
-anything. Do not call `schema_confirm_mapping` yet.
+Call `schema_confirm_mapping(table=..., preview=True)`. This returns the
+proposed mapping **and** a `sample` — up to a few real rows projected through
+that mapping, showing what each canonical field *actually* resolves to. It
+writes nothing. Read the `sample` before anything else: a name match is an
+assertion, not evidence, and the sample is the evidence.
 
-**2. Show the guesses field by field.**
+> **Why this step is not optional.** On a real host schema, a `content` column
+> can hold a *provenance blob* (tags, keywords, source ids) while the actual
+> knowledge lives in `title`/`summary`. The heuristic maps `content → content`
+> by name and looks correct; the `sample` is the only thing that shows the
+> mapped `content` is metadata, not knowledge. Confirming on the name alone
+> ships a mapping whose reads return the wrong column.
 
-For each canonical field (`id`, `content`, `domain`, `source`, `tags` for
-the `knowledge` table today), state what the heuristic found:
+**2. Show the guesses field by field, against the sample.**
 
-- `exact` — the real column has the same name as the canonical field. Low
-  risk, usually fine to accept as-is.
+For each canonical field, state what the heuristic found **and what its sample
+value actually looks like**:
+
+- `exact` — the real column has the same name as the canonical field. Still
+  check the sample value: an exact *name* match can be a wrong *content* match.
 - `alias` — matched via the built-in alias list (e.g. `source_type` →
   `source`). State the real column name explicitly so the human can verify
   it's the right one, not just a plausible-sounding one.
 - `unmapped` — no real column found. State this plainly; don't imply a
   fallback exists.
+
+If a field's sample value is clearly the wrong data (metadata where you expected
+content, an id where you expected text), that's an override to correct in
+step 4, not a mapping to accept.
 
 **3. Ask for confirmation or correction, per field.**
 
