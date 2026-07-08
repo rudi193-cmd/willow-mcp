@@ -1,4 +1,4 @@
-"""Database — Postgres (Unix socket) and SQLite store aligned with willow-1.7 WillowStore."""
+"""Database — Postgres (Unix socket) and SQLite store aligned with willow-2.0 WillowStore."""
 
 import json
 import os
@@ -59,10 +59,10 @@ def _action_for(deviation: float) -> str:
 
 
 class Store:
-    """SQLite-backed store aligned with willow-1.7 WillowStore.
+    """SQLite-backed store aligned with willow-2.0 WillowStore.
 
     Schema: one records table per collection, data stored as JSON blob.
-    Shares WILLOW_STORE_ROOT with willow-1.7 when set to the same path.
+    Shares WILLOW_STORE_ROOT with willow-2.0 when set to the same path.
     """
 
     def __init__(self, store_root: Optional[str] = None):

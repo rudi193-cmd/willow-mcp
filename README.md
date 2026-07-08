@@ -88,7 +88,7 @@ You can also run the full [willow-2.0](https://github.com/rudi193-cmd/willow-2.0
 |---------|---------|-------------|
 | `WILLOW_PG_DB` | `willow` | Postgres database name |
 | `WILLOW_PG_USER` | `$USER` | Postgres user (Unix socket auth) |
-| `WILLOW_STORE_ROOT` | `~/.willow/store` | SQLite store directory — set to willow-1.7's store root to share data |
+| `WILLOW_STORE_ROOT` | `~/.willow/store` | SQLite store directory — set to willow-2.0's store root to share data |
 | `WILLOW_APP_ID` | `willow-mcp` | Default app_id if not passed per-call |
 | `SAP_SAFE_ROOT` | `~/.sap/Applications` | SAFE folder root |
 | `SAP_PGP_FINGERPRINT` | *(empty)* | Pinned GPG fingerprint |
