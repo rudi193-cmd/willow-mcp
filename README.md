@@ -247,6 +247,12 @@ see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the full set
 `audit`, `full_access`). Fail-closed: no manifest, or an empty `permissions`
 list, denies every call for that `app_id`.
 
+There is also one **capability permission**, `task_net`, which is not a tool
+name but a privilege flag: it lets `task_submit(allow_net=True)` run a Kart
+task with network access. It is deliberately excluded from `task_queue` and
+`full_access` — network egress from the sandbox must be granted explicitly, on
+its own line, and only host-side (never authored from inside the sandbox).
+
 In [HTTP serve mode](#http-serve-mode-oauth), the `app_id` is not taken from
 the call — it is resolved from the caller's confirmed OAuth identity binding,
 then checked against that same manifest ACL.

@@ -587,11 +587,26 @@ def knowledge_search(
 
 @mcp.tool()
 @_guarded("task_submit")
-def task_submit(app_id: str, task: str, agent: str = "kart") -> dict:
-    """Submit a task to the Kart sandboxed execution queue. Returns task_id for polling."""
+def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = False) -> dict:
+    """Submit a task to the Kart sandboxed execution queue. Returns task_id for polling.
+
+    Tasks run network-isolated by default. Pass allow_net=True to run with
+    network access — this requires the 'task_net' capability permission in the
+    app's manifest (it is NOT included in task_queue or full_access; grant it
+    explicitly). When granted, the Kart worker's `# allow_net` directive is
+    appended to the task so the sandbox is created with egress enabled.
+    """
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
+
+    if allow_net:
+        from . import gate
+        if not gate.permitted(app_id, gate.NET_PERMISSION):
+            return {"error": (
+                f"net_denied: allow_net requires the '{gate.NET_PERMISSION}' permission in "
+                f"this app's manifest ($WILLOW_HOME/mcp_apps/{app_id or '<app_id>'}/manifest.json). "
+                "It is not granted by task_queue or full_access — add it explicitly.")}
 
     mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
     if "error" in mapping:
@@ -602,6 +617,12 @@ def task_submit(app_id: str, task: str, agent: str = "kart") -> dict:
     fields = mapping["fields"]
     if fields["task_id"]["column"] is None or fields["task"]["column"] is None:
         return {"error": "schema_unusable: 'tasks' table has no mappable 'task_id' or 'task' column"}
+
+    # The Kart worker (willow-2.0) reads network policy from a `# allow_net`
+    # directive line in the task text (core/kart_sandbox.py task_allows_network);
+    # append it only when allow_net was granted above.
+    if allow_net:
+        task = task.rstrip("\n") + "\n# allow_net"
 
     import random
     task_id = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789", k=8))

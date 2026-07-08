@@ -545,6 +545,57 @@ def test_task_submit_writes_mapped_columns_after_confirm(app_id, monkeypatch):
     assert params[0] == result["task_id"]
 
 
+def _app_with_perms(tmp_path, monkeypatch, name, perms):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / name
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(json.dumps({"permissions": perms}))
+    return name
+
+
+def test_task_submit_allow_net_denied_without_task_net_permission(tmp_path, monkeypatch):
+    # B-19: full_access grants task_submit but NOT the escalated net capability.
+    app = _app_with_perms(tmp_path, monkeypatch, "netless", ["full_access"])
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+
+    assert "net_denied" in result["error"]
+    # denied before any write — no INSERT issued
+    assert not any("INSERT" in sql for sql, _ in fake.executed)
+
+
+def test_task_submit_allow_net_appends_directive_with_permission(tmp_path, monkeypatch):
+    # B-19: an app that holds task_net may run with network; the Kart worker's
+    # `# allow_net` directive is appended to the task text.
+    app = _app_with_perms(tmp_path, monkeypatch, "netapp", ["full_access", "task_net"])
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+
+    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+
+    assert result["status"] == "pending"
+    insert_sql, params = fake.executed[-1]
+    assert insert_sql.startswith("INSERT INTO tasks")
+    # values dict order is task_id, task, ... so the task column value is params[1]
+    assert params[1] == "curl https://example.com\n# allow_net"
+
+
+def test_task_submit_no_net_directive_by_default(tmp_path, monkeypatch):
+    app = _app_with_perms(tmp_path, monkeypatch, "plainapp", ["full_access", "task_net"])
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+
+    server.task_submit(app_id=app, task="echo hi")  # allow_net defaults to False
+
+    insert_sql, params = fake.executed[-1]
+    assert "# allow_net" not in params[1]
+
+
 def test_task_status_not_found(app_id, monkeypatch):
     fake = _FakePg(columns=_TASKS_COLUMNS, canned_rows=[])
     monkeypatch.setattr(server, "get_pg", lambda: fake)
