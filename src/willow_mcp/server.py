@@ -17,21 +17,33 @@ Tools:
 Auth (stdio): manifest-based per-tool ACL — app_id required on every call.
 Auth (serve): OAuth 2.0 PKCE (Google / Apple) + per-tool ACL gate.
 Fail-closed: no manifest = all calls denied.
+
+Security (Phase 4): every tool call runs sanitize -> rate-check -> gate ->
+dispatch -> receipt, via the _guarded() decorator. See _sanitize, _check_rate,
+and receipts.ReceiptLog.
 """
 # b17: WLWMCP  ΔΣ=42
 
+import inspect
 import json
+import math
 import os
+import re
 import sys
+import threading
+import time
 import uuid
+from functools import wraps
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
 from .db import Store, get_pg
 from .gate import permitted
+from .receipts import ReceiptLog
 
 _store = Store()
+_receipt_log = ReceiptLog()
 
 _PORT = int(os.getenv("WILLOW_MCP_PORT", "8765"))
 _HOST = os.getenv("WILLOW_MCP_HOST", "127.0.0.1")
@@ -102,9 +114,153 @@ def _gate(app_id: str, tool_name: str) -> dict | None:
     return None
 
 
+# ── Sanitizer (Phase 4a) ─────────────────────────────────────────────────────
+
+_MAX_BLOB_BYTES = 512 * 1024   # record / context dicts
+_MAX_STR_BYTES = 64 * 1024     # content / task / query strings
+_MAX_TAGS = 32
+_MAX_TAG_LEN = 128
+_PATH_TRAVERSAL_RE = re.compile(r"\.\.|[/\\]")
+
+
+def _sanitize(kwargs: dict) -> tuple[dict, Optional[str]]:
+    """Clean known-risky fields by name, regardless of which tool they belong to.
+
+    Returns (cleaned_kwargs, None) on success, or (kwargs, error_message) if a
+    field fails validation outright (caller denies the call — no partial writes).
+    """
+    for key in ("record", "context"):
+        val = kwargs.get(key)
+        if isinstance(val, dict):
+            size = len(json.dumps(val))
+            if size > _MAX_BLOB_BYTES:
+                return kwargs, f"'{key}' exceeds 512KB limit ({size} bytes)"
+
+    for key in ("content", "task", "query"):
+        val = kwargs.get(key)
+        if isinstance(val, str):
+            cleaned = val.replace("\x00", "")
+            encoded = cleaned.encode("utf-8")
+            if len(encoded) > _MAX_STR_BYTES:
+                cleaned = encoded[:_MAX_STR_BYTES].decode("utf-8", errors="ignore")
+            kwargs[key] = cleaned
+
+    collection = kwargs.get("collection")
+    if isinstance(collection, str) and _PATH_TRAVERSAL_RE.search(collection):
+        return kwargs, "'collection' contains illegal path characters"
+
+    tags = kwargs.get("tags")
+    if isinstance(tags, list):
+        if len(tags) > _MAX_TAGS:
+            return kwargs, f"'tags' exceeds max {_MAX_TAGS} items"
+        for t in tags:
+            if isinstance(t, str) and len(t) > _MAX_TAG_LEN:
+                return kwargs, f"tag exceeds max {_MAX_TAG_LEN} chars"
+
+    return kwargs, None
+
+
+# ── Rate limiter (Phase 4b) ──────────────────────────────────────────────────
+
+class _Bucket:
+    __slots__ = ("tokens", "last_refill")
+
+    def __init__(self, tokens: float, last_refill: float):
+        self.tokens = tokens
+        self.last_refill = last_refill
+
+
+_buckets: dict[str, _Bucket] = {}
+_buckets_lock = threading.Lock()
+_RATE = 60.0    # tokens per minute
+_BURST = 10.0   # bucket capacity
+
+
+def _check_rate(app_id: str) -> tuple[bool, int]:
+    """Token bucket, in-process, no external dependency.
+
+    Single-operator assumption matches the rest of the package — a
+    multi-process deploy can swap this for a pluggable backend later.
+    Returns (allowed, retry_after_seconds).
+    """
+    now = time.monotonic()
+    with _buckets_lock:
+        bucket = _buckets.get(app_id)
+        if bucket is None:
+            bucket = _Bucket(tokens=_BURST, last_refill=now)
+            _buckets[app_id] = bucket
+        elapsed = now - bucket.last_refill
+        bucket.tokens = min(_BURST, bucket.tokens + elapsed * (_RATE / 60.0))
+        bucket.last_refill = now
+        if bucket.tokens < 1.0:
+            deficit = 1.0 - bucket.tokens
+            retry_after = max(1, math.ceil(deficit / (_RATE / 60.0)))
+            return False, retry_after
+        bucket.tokens -= 1.0
+        return True, 0
+
+
+# ── Guarded dispatch (Phase 4a+4b+4c combined) ───────────────────────────────
+
+def _guarded(tool_name: str, *, list_error: bool = False):
+    """Central pipeline: sanitize -> rate check -> gate -> dispatch -> receipt.
+
+    list_error=True for tools whose declared return type is list (store_list,
+    store_search, store_search_all) so a denial comes back list-wrapped,
+    matching that tool's own success-path shape.
+    """
+    def decorator(fn):
+        sig = inspect.signature(fn)
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            bound = sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+            call_kwargs = dict(bound.arguments)
+            app_id = call_kwargs.get("app_id", "") or _DEFAULT_APP_ID
+
+            def _shape(err: dict):
+                return [err] if list_error else err
+
+            cleaned, problem = _sanitize(call_kwargs)
+            if problem:
+                _receipt_log.record(app_id, tool_name, "error", f"sanitize: {problem}")
+                return _shape({"error": f"sanitize: {problem}"})
+            call_kwargs = cleaned
+
+            allowed, retry_after = _check_rate(app_id)
+            if not allowed:
+                _receipt_log.record(app_id, tool_name, "rate_limited", f"retry_after={retry_after}")
+                return _shape({"error": "rate_limited", "retry_after": retry_after})
+
+            gate_err = _gate(app_id, tool_name)
+            if gate_err:
+                _receipt_log.record(app_id, tool_name, "denied", gate_err.get("error"))
+                return _shape(gate_err)
+
+            try:
+                result = fn(**call_kwargs)
+            except Exception as e:
+                _receipt_log.record(app_id, tool_name, "error", f"{type(e).__name__}: {e}")
+                raise
+
+            probe = (result[0] if (isinstance(result, list) and result
+                                    and isinstance(result[0], dict)) else result)
+            if isinstance(probe, dict) and "error" in probe:
+                _receipt_log.record(app_id, tool_name, "error", str(probe["error"]))
+            else:
+                _receipt_log.record(app_id, tool_name, "ok", None)
+
+            return result
+
+        return wrapper
+    return decorator
+
+
 # ── Store tools ────────────────────────────────────────────────────────────────
 
 @mcp.tool()
+@_guarded("store_put")
 def store_put(
     app_id: str,
     collection: str,
@@ -113,30 +269,27 @@ def store_put(
     deviation: float = 0.0,
 ) -> dict:
     """Write a record to a named collection. Returns {id, action}. High deviation (>0.6 rad) auto-flags."""
-    if err := _gate(app_id, "store_put"):
-        return err
     rid, action = _store.put(collection, record, record_id=record_id, deviation=deviation)
     return {"id": rid, "action": action}
 
 
 @mcp.tool()
+@_guarded("store_get")
 def store_get(app_id: str, collection: str, record_id: str) -> dict:
     """Read a single record by ID. Returns the record or {error: not_found}."""
-    if err := _gate(app_id, "store_get"):
-        return err
     item = _store.get(collection, record_id)
     return item or {"error": "not_found"}
 
 
 @mcp.tool()
+@_guarded("store_list", list_error=True)
 def store_list(app_id: str, collection: str) -> list:
     """Return every record in a collection (unfiltered). Prefer store_search for large collections."""
-    if err := _gate(app_id, "store_list"):
-        return [err]
     return _store.all(collection)
 
 
 @mcp.tool()
+@_guarded("store_update")
 def store_update(
     app_id: str,
     collection: str,
@@ -145,40 +298,36 @@ def store_update(
     deviation: float = 0.0,
 ) -> dict:
     """Update an existing record in-place with audit trail. Use store_put to create."""
-    if err := _gate(app_id, "store_update"):
-        return err
     rid = _store.update(collection, record_id, record, deviation=deviation)
     return {"id": rid} if rid else {"error": "not_found"}
 
 
 @mcp.tool()
+@_guarded("store_search", list_error=True)
 def store_search(app_id: str, collection: str, query: str) -> list:
     """Full-text search within a single collection (AND logic across tokens)."""
-    if err := _gate(app_id, "store_search"):
-        return [err]
     return _store.search(collection, query)
 
 
 @mcp.tool()
+@_guarded("store_delete")
 def store_delete(app_id: str, collection: str, record_id: str) -> dict:
     """Soft-delete a record — invisible to get/search but retained in audit trail."""
-    if err := _gate(app_id, "store_delete"):
-        return err
     deleted = _store.delete(collection, record_id)
     return {"deleted": deleted}
 
 
 @mcp.tool()
+@_guarded("store_search_all", list_error=True)
 def store_search_all(app_id: str, query: str) -> list:
     """Search across ALL SOIL collections. Use when the collection is unknown."""
-    if err := _gate(app_id, "store_search_all"):
-        return [err]
     return _store.search_all(query)
 
 
 # ── Knowledge tools ────────────────────────────────────────────────────────────
 
 @mcp.tool()
+@_guarded("knowledge_ingest")
 def knowledge_ingest(
     app_id: str,
     content: str,
@@ -187,8 +336,6 @@ def knowledge_ingest(
     tags: Optional[list] = None,
 ) -> dict:
     """Add a knowledge atom to the Postgres knowledge base. Check for duplicates first."""
-    if err := _gate(app_id, "knowledge_ingest"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -204,6 +351,7 @@ def knowledge_ingest(
 
 
 @mcp.tool()
+@_guarded("knowledge_search")
 def knowledge_search(
     app_id: str,
     query: str,
@@ -211,8 +359,6 @@ def knowledge_search(
     limit: int = 10,
 ) -> dict:
     """Search the Postgres knowledge base by content (AND logic). Filter by domain to narrow results."""
-    if err := _gate(app_id, "knowledge_search"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -236,10 +382,9 @@ def knowledge_search(
 # ── Task queue tools ───────────────────────────────────────────────────────────
 
 @mcp.tool()
+@_guarded("task_submit")
 def task_submit(app_id: str, task: str, agent: str = "kart") -> dict:
     """Submit a task to the Kart sandboxed execution queue. Returns task_id for polling."""
-    if err := _gate(app_id, "task_submit"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -256,10 +401,9 @@ def task_submit(app_id: str, task: str, agent: str = "kart") -> dict:
 
 
 @mcp.tool()
+@_guarded("task_status")
 def task_status(app_id: str, task_id: str) -> dict:
     """Poll the status of a submitted Kart task. Returns status, result, and completion time."""
-    if err := _gate(app_id, "task_status"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -278,10 +422,9 @@ def task_status(app_id: str, task_id: str) -> dict:
 
 
 @mcp.tool()
+@_guarded("task_list")
 def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
     """List pending tasks in the Kart queue."""
-    if err := _gate(app_id, "task_list"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -301,10 +444,9 @@ def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
 # ── Knowledge extension tools ──────────────────────────────────────────────────
 
 @mcp.tool()
+@_guarded("kb_at")
 def kb_at(app_id: str, atom_id: str) -> dict:
     """Fetch a single knowledge atom by ID. Returns the full atom or {error: not_found}."""
-    if err := _gate(app_id, "kb_at"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -322,10 +464,9 @@ def kb_at(app_id: str, atom_id: str) -> dict:
 
 
 @mcp.tool()
+@_guarded("kb_promote")
 def kb_promote(app_id: str, atom_id: str, domain: str) -> dict:
     """Change the domain of an existing knowledge atom."""
-    if err := _gate(app_id, "kb_promote"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -340,6 +481,7 @@ def kb_promote(app_id: str, atom_id: str, domain: str) -> dict:
 
 
 @mcp.tool()
+@_guarded("kb_journal")
 def kb_journal(
     app_id: str,
     content: str,
@@ -347,8 +489,6 @@ def kb_journal(
     tags: Optional[list] = None,
 ) -> dict:
     """Add a journal entry to the knowledge base (domain='journal')."""
-    if err := _gate(app_id, "kb_journal"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -365,10 +505,9 @@ def kb_journal(
 
 
 @mcp.tool()
+@_guarded("kb_startup_continuity")
 def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
     """Fetch knowledge atoms tagged or domained for startup continuity."""
-    if err := _gate(app_id, "kb_startup_continuity"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -388,6 +527,7 @@ def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
 # ── Agent dispatch tools ───────────────────────────────────────────────────────
 
 @mcp.tool()
+@_guarded("agent_route")
 def agent_route(
     app_id: str,
     task: str,
@@ -395,8 +535,6 @@ def agent_route(
     context: Optional[dict] = None,
 ) -> dict:
     """Route a task to a target agent. Records in routing_decisions and returns a routing_id."""
-    if err := _gate(app_id, "agent_route"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -419,6 +557,7 @@ def agent_route(
 
 
 @mcp.tool()
+@_guarded("agent_dispatch_result")
 def agent_dispatch_result(
     app_id: str,
     routing_id: str,
@@ -426,8 +565,6 @@ def agent_dispatch_result(
     status: str = "done",
 ) -> dict:
     """Record the result of a dispatched agent task."""
-    if err := _gate(app_id, "agent_dispatch_result"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -449,10 +586,9 @@ def agent_dispatch_result(
 # ── Fleet read tools ───────────────────────────────────────────────────────────
 
 @mcp.tool()
+@_guarded("fleet_status")
 def fleet_status(app_id: str) -> dict:
     """List agents registered in the fleet (public.agents table)."""
-    if err := _gate(app_id, "fleet_status"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -470,10 +606,9 @@ def fleet_status(app_id: str) -> dict:
 
 
 @mcp.tool()
+@_guarded("fleet_health")
 def fleet_health(app_id: str) -> dict:
     """Fleet health — task queue counts by status across all agents."""
-    if err := _gate(app_id, "fleet_health"):
-        return err
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
