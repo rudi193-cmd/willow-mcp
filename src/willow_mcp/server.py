@@ -22,9 +22,9 @@ Auth (stdio): manifest-based per-tool ACL — app_id required on every call.
 Auth (serve): OAuth 2.0 PKCE (Google / Apple) + per-tool ACL gate.
 Fail-closed: no manifest = all calls denied.
 
-Security (Phase 4): every tool call runs sanitize -> rate-check -> gate ->
-dispatch -> receipt, via the _guarded() decorator. See _sanitize, _check_rate,
-and receipts.ReceiptLog.
+Security (Phase 4): every tool call runs gate -> sanitize -> rate-check ->
+dispatch -> receipt, via the _guarded() decorator. See _gate, _sanitize,
+_check_rate, and receipts.ReceiptLog.
 """
 # b17: WLWMCP  ΔΣ=42
 
@@ -351,13 +351,15 @@ def _check_rate(app_id: str) -> tuple[bool, int]:
 # ── Guarded dispatch (Phase 4a+4b+4c combined) ───────────────────────────────
 
 def _guarded(tool_name: str, *, list_error: bool = False):
-    """Central pipeline: sanitize -> gate -> rate check -> dispatch -> receipt.
+    """Central pipeline: gate -> sanitize -> rate check -> dispatch -> receipt.
 
-    Gate runs before the rate check specifically so an invalid/unmanifested
-    app_id is rejected (via gate.permitted -> _validate_app_id) before it can
-    ever be used as a _buckets dict key — an unvalidated app_id string must
-    never reach _check_rate, or a caller can grow _buckets unbounded with
-    arbitrary strings (L-DOS-01).
+    Gate runs first (B-16) so an unpermitted caller gets a clean permission
+    denial as the very first signal, rather than a sanitizer error for a call
+    it was never allowed to make. Gate also validates the app_id shape (via
+    gate.permitted -> _validate_app_id), so an invalid/unmanifested app_id is
+    rejected before it can reach _sanitize or ever be used as a _buckets dict
+    key — an unvalidated app_id string must never reach _check_rate, or a
+    caller can grow _buckets unbounded with arbitrary strings (L-DOS-01).
 
     list_error=True for tools whose declared return type is list (store_list,
     store_search, store_search_all) so a denial comes back list-wrapped,
@@ -376,23 +378,27 @@ def _guarded(tool_name: str, *, list_error: bool = False):
             def _shape(err: dict):
                 return [err] if list_error else err
 
-            cleaned, problem = _sanitize(call_kwargs)
-            if problem:
-                _receipt_log.record(app_id, tool_name, "error", f"sanitize: {problem}")
-                return _shape({"error": f"sanitize: {problem}"})
-            call_kwargs = cleaned
-
             # effective_app_id is the identity gate actually authorized this
             # call under — in serve mode this is the bound identity, NOT
             # necessarily call_kwargs["app_id"] (see _gate / L-AUTH-02). Every
-            # downstream step (rate limit, dispatch, receipt) uses it instead
-            # of the raw caller-supplied app_id.
+            # downstream step (sanitize, rate limit, dispatch, receipt) uses it
+            # instead of the raw caller-supplied app_id.
+            #
+            # Gate runs BEFORE sanitize (B-16): an unpermitted caller is denied
+            # up front, so it never reaches the sanitizer. A denial is the first
+            # signal, not a sanitize error for a call that was never allowed.
             effective_app_id, gate_err = _gate(app_id, tool_name)
             if gate_err:
                 _receipt_log.record(app_id, tool_name, "denied", gate_err.get("error"))
                 return _shape(gate_err)
             if "app_id" in call_kwargs:
                 call_kwargs["app_id"] = effective_app_id
+
+            cleaned, problem = _sanitize(call_kwargs)
+            if problem:
+                _receipt_log.record(effective_app_id, tool_name, "error", f"sanitize: {problem}")
+                return _shape({"error": f"sanitize: {problem}"})
+            call_kwargs = cleaned
 
             allowed, retry_after = _check_rate(effective_app_id)
             if not allowed:
@@ -831,25 +837,50 @@ def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
     if "error" in mapping:
         return mapping
     fields = mapping["fields"]
-    id_col, domain_col, tags_col = (fields["id"]["column"], fields["domain"]["column"],
-                                     fields["tags"]["column"])
+    id_col = fields["id"]["column"]
+    domain_col = fields["domain"]["column"]
+    tags_col = fields["tags"]["column"]
     if id_col is None:
         return {"error": "schema_unusable: 'knowledge' table has no mappable 'id' column"}
 
+    # 'tags' often has no top-level column: on willow-style schemas the tags
+    # live inside a jsonb metadata/provenance blob physically named 'content'
+    # — which is NOT the canonical 'content' field (that maps to the
+    # human-readable 'summary'; the jsonb blob is deliberately unmapped, B-10).
+    # Discover a jsonb 'content' column by introspection rather than assuming
+    # one, and read continuity tags from content->'tags' (a string array,
+    # e.g. ["release-process","ci"]). Only consulted when there is no
+    # top-level tags column to filter on.
+    tags_jsonb_col = None
+    if tags_col is None:
+        jsonb_cols = {c.name for c in sp.introspect(pg, "knowledge")
+                      if c.data_type in ("jsonb", "json")}
+        if "content" in jsonb_cols:
+            tags_jsonb_col = "content"
+
     select_clause, present, unmapped = _build_select(_KNOWLEDGE_FIELDS, fields)
-    where_parts, params = [], []
+    where_parts, params, filters = [], [], []
     if domain_col:
         where_parts.append(f'"{domain_col}" = %s')
         params.append("continuity")
+        filters.append(f"{domain_col}='continuity'")
     if tags_col:
         where_parts.append(f'"{tags_col}" LIKE %s')
         params.append('%"continuity"%')
-    # No 'domain' or 'tags' mapping at all -> nothing to filter continuity by;
-    # fail closed to an empty set rather than silently returning every atom.
+        filters.append(f"{tags_col} LIKE '\"continuity\"'")
+    elif tags_jsonb_col:
+        where_parts.append(f'"{tags_jsonb_col}"->\'tags\' @> %s::jsonb')
+        params.append('["continuity"]')
+        filters.append(f'{tags_jsonb_col}->tags @> ["continuity"]')
+
+    # No way to identify continuity atoms on this schema (no domain, no tags
+    # column, no jsonb content blob) -> fail loud with an explanatory empty
+    # rather than a silent [] that reads as "nothing to continue".
     if not where_parts:
         return {"atoms": [], "_unmapped": unmapped,
-                "_note": "neither 'domain' nor 'tags' is mapped on this table — "
-                         "cannot identify continuity atoms"}
+                "_note": "cannot identify continuity atoms on this schema — none of "
+                         "'domain', a top-level 'tags' column, or a jsonb 'content' "
+                         "blob is available to filter on"}
     where_sql = " OR ".join(where_parts)
     params.append(limit)
 
@@ -859,7 +890,11 @@ def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
     rows = cur.fetchall()
     cur.close()
 
-    result = {"atoms": [_row_to_dict(r, present, unmapped) for r in rows]}
+    # _continuity_filter is always present so an empty result is legible: it
+    # says exactly WHAT was searched, distinguishing "genuinely nothing to
+    # continue" from "the query couldn't target this schema" (B-15 fail-loud).
+    result = {"atoms": [_row_to_dict(r, present, unmapped) for r in rows],
+              "_continuity_filter": filters}
     if unmapped:
         result["_unmapped"] = unmapped
     return result
