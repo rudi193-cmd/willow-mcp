@@ -618,9 +618,19 @@ def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = F
     if fields["task_id"]["column"] is None or fields["task"]["column"] is None:
         return {"error": "schema_unusable: 'tasks' table has no mappable 'task_id' or 'task' column"}
 
-    # The Kart worker (willow-2.0) reads network policy from a `# allow_net`
-    # directive line in the task text (core/kart_sandbox.py task_allows_network);
-    # append it only when allow_net was granted above.
+    # The Kart worker (willow-2.0) reads network policy from directive lines
+    # (`# allow_net` / `# allow_localhost`) in the stored task text
+    # (core/kart_sandbox.py task_allows_network / task_allows_localhost, which
+    # match on `line.strip() == <directive>`). Strip any such caller-supplied
+    # line UNCONDITIONALLY first, then re-append `# allow_net` only when the
+    # permission check above passed. Otherwise a caller holding only task_queue
+    # could grant itself egress by embedding the directive in `task` text with
+    # allow_net=False — the gate is keyed off the argument, not the text (B-21;
+    # B-19 closed only the allow_net=True path).
+    _NET_DIRECTIVES = {"# allow_net", "# allow_localhost"}
+    task = "\n".join(
+        line for line in task.splitlines() if line.strip() not in _NET_DIRECTIVES
+    )
     if allow_net:
         task = task.rstrip("\n") + "\n# allow_net"
 

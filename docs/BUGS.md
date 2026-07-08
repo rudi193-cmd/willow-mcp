@@ -26,6 +26,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-18 | P3 | Fixed | diagnostics | `diagnostic_summary` returned verdict `degraded` when the caller merely omitted `app_id`. Fixed: missing `app_id` is a `caller_input` warn (surfaced in `problems` + manifest sub-check) that no longer degrades the verdict | this session; probe `E3265B66` |
 | B-19 | P2 | Fixed | task interface / Kart | `task_submit` had no `allow_net`. Fixed: `allow_net=True` gated by a new `task_net` manifest permission (not in full_access) appends the worker's `# allow_net` directive | this session; probe `5H1M355V` |
 | B-20 | P3 | Fixed | repo metadata / docs | GitHub "About" description read "Superseded by Willow 2.0 … now live in the monorepo" — stale, contradicting the active 2.0.0 repo; visible to anyone (surfaced in an external review). Fixed via `gh repo edit --description`; repo confirmed not archived | this session; DeepSeek review |
+| B-21 | P0 | Fixed | task interface / Kart | `task_net` gate bypassable via task text — the worker reads egress policy from a `# allow_net` line in the stored task, but `task_submit` gated & appended that line only behind `if allow_net:`, so a `task_queue`-only caller could embed the directive with `allow_net=False` and get ungated egress (also `# allow_localhost`). Fixed: strip caller-supplied directive lines unconditionally before the gated append | this session; L-NET-01; PR #31 review §2a |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -46,6 +47,26 @@ _None — all tracked bugs are Fixed, Documented, or Stale._
 
 ## Fixed
 
+- **B-21 · P0 (this session)** — `task_net` capability gate was bypassable via
+  the task text itself, defeating the separation B-19 established. The Kart
+  worker (`willow-2.0/core/kart_sandbox.py`) decides network policy purely by
+  scanning the *stored task text* for a directive line — egress on any
+  `line.strip() == "# allow_net"`, loopback on `"# allow_localhost"`. In
+  `task_submit`, both the `task_net` permission check **and** the `# allow_net`
+  append lived behind the same `if allow_net:` guard, and nothing inspected
+  caller-supplied `task` text. So a caller holding only `task_queue` could
+  submit `task="curl …\n# allow_net"` with the default `allow_net=False`: the
+  gate never fired (it's keyed off the *argument*, not the *text*), the
+  directive was stored verbatim, and the worker granted egress. `# allow_localhost`
+  was never gated at all. **Fix:** strip any caller-supplied line matching
+  either directive (worker's exact `line.strip() ==` semantics) from `task`
+  **unconditionally**, before the permission-gated append — so `# allow_net` can
+  only ever enter through the path that already checked `task_net`, and
+  `# allow_localhost` can never be self-granted. Full detail in
+  `SECURITY_AUDIT.md` (L-NET-01). Regression tests in `tests/test_server.py`
+  (`…strips_caller_supplied_net_directive_when_denied`,
+  `…strips_caller_supplied_localhost_directive`,
+  `…permitted_net_survives_caller_directive_dedup`); full suite 205→208.
 - **B-20 · P3 (this session)** — the GitHub repo "About" description read
   *"Superseded by Willow 2.0 — MCP, SOIL, Postgres KB, and Kart now live in the
   monorepo."* That was true when willow-mcp was being folded in, but is now
