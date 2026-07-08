@@ -100,6 +100,29 @@ def test_guarded_denies_missing_manifest():
     assert "denied" in result["error"]
 
 
+def test_guarded_gate_precedes_sanitize(tmp_path, monkeypatch):
+    """B-16: an unpermitted caller gets a permission denial as the FIRST signal,
+    not a sanitizer error for a call it was never allowed to make. The illegal
+    collection here would trip _sanitize; the unpermitted app would trip _gate.
+    Gate runs first, so the denial wins."""
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / "readonly"
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(json.dumps({"permissions": ["store_read"]}))
+
+    result = server.store_put(app_id="readonly", collection="../evil", record={"v": 1})
+    assert "denied" in result["error"]
+    assert "sanitize" not in result["error"]
+
+
+def test_guarded_sanitize_runs_after_gate_for_permitted_app(app_id):
+    """B-16 control: a permitted caller with an illegal payload still reaches
+    the sanitizer — gate-first must not skip sanitization for allowed calls."""
+    result = server.store_put(app_id=app_id, collection="../evil", record={"v": 1})
+    assert "sanitize" in result["error"]
+
+
 # ── knowledge_search / kb_at / kb_startup_continuity (schema-adapted, docs/design/schema-adaptation.md §9 step 2) ──
 #
 # These tools build their SQL from a schema_profile mapping instead of
@@ -258,20 +281,43 @@ def test_kb_at_schema_unusable_without_id_column(app_id, monkeypatch):
     assert "schema_unusable" in result["error"]
 
 
-def test_kb_startup_continuity_uses_domain_only_when_tags_unmapped(app_id, monkeypatch):
+def test_kb_startup_continuity_uses_domain_only_when_no_tags_and_no_jsonb_content(app_id, monkeypatch):
+    # domain mapped, tags unmapped, and NO jsonb column to hold tags in
+    # (content maps to a text column here) -> domain filter only, no tags path.
+    fake = _FakePg(columns=[("id", "text"), ("body", "text"), ("domain", "text"),
+                            ("source_type", "text")], canned_rows=[])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.kb_startup_continuity(app_id=app_id, limit=5)
+
+    assert result["_continuity_filter"] == ["domain='continuity'"]
+    where_sql, params = fake.executed[-1]
+    assert '"domain" = %s' in where_sql
+    assert "->'tags'" not in where_sql
+    assert " OR " not in where_sql
+
+
+def test_kb_startup_continuity_reads_jsonb_content_tags_when_tags_column_unmapped(app_id, monkeypatch):
+    # B-15: no top-level tags column, but a jsonb 'content' blob holds tags.
+    # Continuity atoms must be read from content->'tags' rather than silently
+    # missed. Domain is mapped too, so the two conditions are OR'd.
     fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS, canned_rows=[])
     monkeypatch.setattr(server, "get_pg", lambda: fake)
 
     result = server.kb_startup_continuity(app_id=app_id, limit=5)
 
     assert result["_unmapped"] == ["tags"]
+    assert 'content->tags @> ["continuity"]' in result["_continuity_filter"]
     where_sql, params = fake.executed[-1]
     assert '"domain" = %s' in where_sql
-    assert "tags" not in where_sql
-    assert " OR " not in where_sql
+    assert '"content"->\'tags\' @> %s::jsonb' in where_sql
+    assert " OR " in where_sql
+    # the jsonb-array param and the limit are the trailing bind params
+    assert params[-2:] == ['["continuity"]', 5]
 
 
-def test_kb_startup_continuity_ors_domain_and_tags_when_both_mapped(app_id, monkeypatch):
+def test_kb_startup_continuity_prefers_top_level_tags_column_over_jsonb(app_id, monkeypatch):
+    # a real top-level tags column wins; the jsonb blob path is not consulted.
     fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS + [("tags", "text")], canned_rows=[])
     monkeypatch.setattr(server, "get_pg", lambda: fake)
 
@@ -280,21 +326,23 @@ def test_kb_startup_continuity_ors_domain_and_tags_when_both_mapped(app_id, monk
     where_sql, params = fake.executed[-1]
     assert '"domain" = %s' in where_sql
     assert '"tags" LIKE %s' in where_sql
+    assert "->'tags'" not in where_sql   # jsonb path skipped when a tags column exists
     assert " OR " in where_sql
 
 
-def test_kb_startup_continuity_fails_closed_when_neither_domain_nor_tags_mapped(app_id, monkeypatch):
-    fake = _FakePg(columns=[("id", "text"), ("content", "jsonb")])
+def test_kb_startup_continuity_fails_closed_when_no_domain_tags_or_jsonb_content(app_id, monkeypatch):
+    # no domain, no tags column, no jsonb content blob -> nothing to filter on.
+    fake = _FakePg(columns=[("id", "text"), ("body", "text"), ("source_type", "text")])
     monkeypatch.setattr(server, "get_pg", lambda: fake)
 
     result = server.kb_startup_continuity(app_id=app_id, limit=5)
 
     assert result["atoms"] == []
     assert "_note" in result
-    assert set(result["_unmapped"]) == {"domain", "source", "tags"}
-    # only the introspection query ran — no SELECT issued against an
-    # unidentifiable continuity condition.
-    assert len(fake.executed) == 1
+    assert {"domain", "tags"} <= set(result["_unmapped"])
+    # no continuity SELECT was issued against an unidentifiable condition
+    # (only information_schema introspection ran, never a query on `knowledge`)
+    assert not any("FROM knowledge WHERE" in sql for sql, _ in fake.executed)
 
 
 def test_kb_startup_continuity_schema_unusable_without_id_column(app_id, monkeypatch):

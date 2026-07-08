@@ -20,8 +20,8 @@ log carries a one-line entry and points there rather than duplicating.
 | ID | Sev | Status | Component | One-line | Ref |
 |----|-----|--------|-----------|----------|-----|
 | B-14 | P0 | Fixed | Kart sandbox / trust root | Kart bwrap had R+W to `$WILLOW_HOME/mcp_apps` (manifests + identity bindings) — untrusted runtime could rewrite the ACLs that gate it. Fixed: `mcp_apps` now `bound_ro` in bwrap | FRANK `baf2f63a`, `293b2130`; willow-2.0#777; probe `MAGSU06N` |
-| B-15 | P3 | Open | knowledge / kb | `kb_startup_continuity` silently returns empty — keyed off a `tags`/continuity-domain shape the adopted DB doesn't have | issue #20 |
-| B-16 | P3 | Open | server pipeline | `_sanitize` fires before the permission gate on `store_put` — a denied caller can still trip sanitizer errors first (ordering nit) | FRANK `90960b8b` |
+| B-15 | P3 | Fixed | knowledge / kb | `kb_startup_continuity` silently returned empty — filtered on a `tags`/`domain='continuity'` shape the adopted DB lacks. Fixed: read tags from the jsonb `content->'tags'` blob + always emit `_continuity_filter` | issue #20; probe `707E561A` |
+| B-16 | P3 | Fixed | server pipeline | `_sanitize` fired before the permission gate — a denied caller could trip sanitizer errors first. Fixed: `_guarded` now runs gate → sanitize → rate | FRANK `90960b8b`; probe `4D9139B8` |
 | B-17 | P2 | Open | schema / tasks | `task_status` never surfaces completion time — `tasks.completed_at`/`steps` are unmapped, so `completed_at` is `null` even for `completed` tasks | this session |
 | B-18 | P3 | Open | diagnostics | `diagnostic_summary` returns verdict `degraded` when the caller merely omits `app_id` — conflates a missing argument with a broken install, diluting the signal | this session |
 | B-19 | P2 | Open | task interface / Kart | `task_submit` has no `allow_net` — willow-mcp's Kart lane is hardwired net-isolated, so a willow-mcp-only session cannot do git/push/`gh` work at all | this session |
@@ -41,28 +41,6 @@ log carries a one-line entry and points there rather than duplicating.
 
 ## Open
 
-### B-15 · P3 · `kb_startup_continuity` silently returns empty
-**Component:** knowledge / kb
-**Found:** 2026-07-08, stdio live test.
-**Ref:** issue #20 (comment 4914394048).
-
-Against the adopted `willow_20` DB, `kb_startup_continuity` keys off a `tags`
-column and a continuity domain that don't exist in that schema (tags live inside
-a `content` JSONB blob; no continuity-domain rows). It returns empty with no
-error — a silent no-op that looks like "nothing to continue" rather than "query
-shape doesn't match this DB." Recommended issue #20 stay open for this residual.
-
-### B-16 · P3 · `_sanitize` runs before the permission gate on `store_put`
-**Component:** `server.py` `_guarded` pipeline
-**Found:** 2026-07-08, stdio live test.
-**Ref:** FRANK `90960b8b` (evidence.minor).
-
-On `store_put`, input sanitization fires before `_gate()`, so a caller who lacks
-permission can still surface a sanitizer error instead of a clean permission
-denial. Minor ordering nit, not a security hole (the gate still denies dispatch);
-worth aligning so denial is the first signal. Note L-DOS-01's fix already
-reordered rate-check after gate for a different reason — same spirit.
-
 ### B-17 · P2 · `task_status` never surfaces task completion time
 **Component:** schema mapping / `tasks` table
 **Found:** 2026-07-08, live boot + PR session (probes `MAGSU06N`, `E3BD68F7`).
@@ -72,10 +50,15 @@ Against the adopted `willow_20` DB the `tasks` mapping leaves `completed_at` and
 every `task_status` call returns `completed_at: null, steps: null,
 _unmapped: [steps, completed_at]`, even for a task whose `status` is `completed`.
 A caller can see *that* a task finished but not *when*, and can't compute elapsed
-time from the tool output. The underlying column exists in the adopted schema; it
-just isn't mapped. Fix is a one-line mapping addition (mirror the B-10/B-11
-confirm-with-evidence path) or a documented reason the column is intentionally
-dropped.
+time from the tool output. **Correction (verified via live introspection
+2026-07-08):** the adopted `tasks` table has **no** `completed_at` or `steps`
+column at all — the null is a deliberate "don't guess a substitute like
+`updated_at`" choice (see the `_TASK_FIELDS` note in `server.py`), not an
+unmapped-but-present column. So this is not a one-line mapping fix; the data
+isn't there to surface. Real options: (a) accept the null and document it, or
+(b) add a real completion-time column upstream in the adopted schema. Downgrade
+candidate to P3 given there's no local defect to fix. (My original filing that
+"the column exists, just isn't mapped" was wrong.)
 
 ### B-18 · P3 · `diagnostic_summary` verdict `degraded` on a missing `app_id` argument
 **Component:** `diagnostic_summary`
@@ -107,6 +90,29 @@ this gap forces onto the fleet lane).
 
 ## Fixed
 
+- **B-15 · P3 (issue #20)** — `kb_startup_continuity` no longer silently
+  returns empty on the adopted `willow_20` DB. The old filter keyed off a
+  `domain='continuity'` value (the `domain`/`project` column is ~all-null — no
+  such value) and a top-level `tags` column that doesn't exist; tags actually
+  live inside the jsonb `content` blob (physically the `content` column, which
+  is unmapped as a canonical field because canonical `content` maps to
+  `summary` — B-10). Fix: when there's no top-level `tags` column but a jsonb
+  `content` column is present (discovered by introspection, not assumed), read
+  continuity atoms from `content->'tags' @> '["continuity"]'`. The result now
+  always carries a `_continuity_filter` listing exactly what was searched, so an
+  empty result reads as "genuinely nothing to continue" rather than "the query
+  couldn't target this schema" (fail-loud). **Verified** via probe `707E561A`:
+  returns the 9 continuity-tagged atoms that the old path missed. Tests added in
+  `test_server.py` (jsonb path, top-level-tags preference, fail-closed).
+- **B-16 · P3 (FRANK `90960b8b`)** — `_sanitize` no longer runs before the
+  permission gate. `_guarded` now runs **gate → sanitize → rate → dispatch →
+  receipt**: an unpermitted caller gets a clean permission denial as the first
+  signal instead of a sanitizer error for a call it was never allowed to make.
+  Gate still validates the app_id shape and precedes the rate check, so
+  L-DOS-01 is preserved. **Verified** via probe `4D9139B8`: unpermitted app +
+  illegal collection → gate denial (was sanitize error); permitted app + illegal
+  collection still hits the sanitizer. Ordering + control tests in
+  `test_server.py`.
 - **B-14 · P0 (FRANK `baf2f63a`/`293b2130`, willow-2.0#777)** — Kart bwrap
   sandbox no longer has R+W to willow-mcp's on-disk trust root. The host stdio
   server and the Kart sandbox share `$WILLOW_HOME`, and `mcp_apps/` (per-app
