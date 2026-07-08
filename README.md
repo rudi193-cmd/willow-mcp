@@ -100,6 +100,65 @@ need Postgres knowledge or shared SOIL data.
 
 You can also run the full [willow-2.0](https://github.com/rudi193-cmd/willow-2.0) server directly — the tool API is identical, apps work against both transparently.
 
+## HTTP serve mode (OAuth)
+
+> Serve mode is **2.0.0+**. Until the 2.0.0 release lands on PyPI, install from
+> source (`pip install -e .` in a clone) to use it.
+
+Beyond stdio, willow-mcp can run as an HTTP server that authenticates callers
+with **OAuth 2.0 + PKCE** against Google or Apple as the upstream identity
+provider. Signing in proves *who* a caller is; a separate, operator-controlled
+**identity binding** step maps that identity to an `app_id` before any tool
+permission applies. An authenticated-but-unbound caller is denied exactly like
+an unmanifested `app_id` — fail closed, never fail open.
+
+**1. Store provider credentials in the local vault** (secrets are prompted, so
+they never land in shell history or a process listing):
+
+```bash
+willow-mcp setup --google-client-id "<client-id>"        # prompts for the secret
+# or, for Apple:
+willow-mcp setup --apple-team-id "<team>" --apple-client-id "<svc>" \
+                 --apple-key-id "<kid>" --apple-p8-key-path ./AuthKey.p8
+```
+
+**2. Run the server:**
+
+```bash
+python3 -m willow_mcp --serve --port 8765 --host 127.0.0.1
+```
+
+`--port`/`--host` take precedence over `WILLOW_MCP_PORT`/`WILLOW_MCP_HOST`,
+which take precedence over the defaults (`8765` / `127.0.0.1`). Point an HTTP
+MCP client at `http://<host>:<port>/mcp`.
+
+**3. First sign-in proposes a binding.** When a person completes the Google/Apple
+approval flow, the server writes an **unconfirmed** binding to
+`$WILLOW_HOME/mcp_apps/_identity_bindings/<issuer>__<subject>.json`:
+
+```json
+{ "issuer": "google", "subject_id": "…", "email": "you@example.com",
+  "email_basis": "asserted", "app_id": null, "confirmed": false }
+```
+
+`email_basis` records how much downstream code should trust the email, because
+IdPs differ: `asserted` (Google — present and IdP-asserted every sign-in),
+`first_auth_only` (Apple — may appear only on the first authorization),
+`relay` (Apple private-relay address that can stop forwarding), or
+`unavailable`. If a bound identity's email later changes between sign-ins, the
+binding is annotated with `email_drift` rather than silently updated.
+
+**4. Confirm the binding (operator-only, local).** Confirmation is deliberately
+*not* an MCP tool — a remote caller must never confirm its own binding. Run it
+on the host that owns `$WILLOW_HOME`:
+
+```bash
+willow-mcp confirm-binding --issuer google --subject "<subject-id>" --app-id "<app_id>"
+```
+
+Only after this does the caller's session resolve to the manifest permissions
+for `<app_id>` (see [Authorization](#authorization)).
+
 ## Configuration
 
 | Env var | Default | Description |
@@ -108,6 +167,10 @@ You can also run the full [willow-2.0](https://github.com/rudi193-cmd/willow-2.0
 | `WILLOW_PG_USER` | `$USER` | Postgres user (Unix socket auth) |
 | `WILLOW_STORE_ROOT` | `~/.willow/store` | SQLite store directory — set to willow-2.0's store root to share data |
 | `WILLOW_APP_ID` | `willow-mcp` | Default app_id if not passed per-call |
+| `WILLOW_HOME` | `~/.willow` | Root for manifests, vault, and identity bindings |
+| `WILLOW_MCP_HOST` | `127.0.0.1` | Serve-mode bind host (`--host` overrides) |
+| `WILLOW_MCP_PORT` | `8765` | Serve-mode bind port (`--port` overrides) |
+| `WILLOW_MCP_URL` | *(derived)* | Public base URL for OAuth issuer/callbacks in serve mode |
 | `SAP_SAFE_ROOT` | `~/.sap/Applications` | SAFE folder root |
 | `SAP_PGP_FINGERPRINT` | *(empty)* | Pinned GPG fingerprint |
 
@@ -126,6 +189,10 @@ see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the full set
 `schema_admin`, `task_queue`, `agent_dispatch`, `fleet_read`,
 `full_access`). Fail-closed: no manifest, or an empty `permissions` list,
 denies every call for that `app_id`.
+
+In [HTTP serve mode](#http-serve-mode-oauth), the `app_id` is not taken from
+the call — it is resolved from the caller's confirmed OAuth identity binding,
+then checked against that same manifest ACL.
 
 ## Hooks and skills (Claude Code)
 
