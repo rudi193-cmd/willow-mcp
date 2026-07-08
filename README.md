@@ -159,6 +159,31 @@ willow-mcp confirm-binding --issuer google --subject "<subject-id>" --app-id "<a
 Only after this does the caller's session resolve to the manifest permissions
 for `<app_id>` (see [Authorization](#authorization)).
 
+### Turning serve mode on and off
+
+Serve mode is a background process, not part of the stdio server — so it's
+turned on and off on demand rather than by editing config each time.
+`scripts/willow-serve` manages a systemd `--user` service for the `--serve`
+process **and** toggles the matching http entry in `.mcp.json`, so an MCP
+client connects to it only while it's on:
+
+```bash
+scripts/willow-serve install   # one-time: write + load the systemd user unit
+scripts/willow-serve on         # start serve + add the .mcp.json entry
+scripts/willow-serve off        # stop serve  + remove the .mcp.json entry
+scripts/willow-serve status     # unit state + whether the entry is present
+scripts/willow-serve logs        # follow the serve logs (journalctl)
+```
+
+After `on`/`off`, reconnect your MCP client (in Claude Code: `/mcp`) so it
+picks up the changed `.mcp.json`. Port/host default to `8766`/`127.0.0.1`; set
+`WILLOW_MCP_PORT` / `WILLOW_MCP_HOST` before `install` to change them. Claude
+Code users get this as the [`willow-serve` skill](skills/willow-serve.md) —
+just ask to turn serve mode on or off.
+
+> If you already signed in once, `on` reuses your cached credential — no OAuth
+> screen reappears unless it was cleared. That's expected, not a failure.
+
 ## Configuration
 
 | Env var | Default | Description |
@@ -205,6 +230,8 @@ the MCP server itself:
   redirecting to the matching MCP tool instead.
 - **[`skills/schema-confirm.md`](skills/schema-confirm.md)** walks through
   reviewing and confirming a table's schema mapping before writing to it.
+- **[`skills/willow-serve.md`](skills/willow-serve.md)** turns OAuth serve mode
+  on/off on request (see [above](#turning-serve-mode-on-and-off)).
 
 See [docs/design/hooks-and-skills.md](docs/design/hooks-and-skills.md) for
 the design and the reasoning behind shipping these alongside tools rather

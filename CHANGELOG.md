@@ -30,7 +30,10 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 - Tool set expanded 11 → 21 (`kb_*`, `agent_*`, `fleet_*`, `schema_confirm_mapping`).
 - Input sanitizer, per-caller rate limiter, and a receipt log.
 - Claude Code plugin: a `PreToolUse` hook that redirects raw `psql`/`sqlite3`
-  access to the matching MCP tool, and a `schema-confirm` skill.
+  access to the matching MCP tool, and `schema-confirm` / `willow-serve` skills.
+- `scripts/willow-serve` — turn OAuth serve mode on/off on demand via a systemd
+  `--user` service, toggling the matching `.mcp.json` client entry to match.
+  Installed unit template in `deploy/`.
 - Dockerfile and GitHub Actions test workflow (runs against a Postgres service).
 
 ### Fixed

@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# willow-serve — turn willow-mcp OAuth serve mode on/off at will.
+#
+# Manages a systemd --user unit for the `--serve` HTTP process AND toggles the
+# matching http entry in this repo's .mcp.json, so the client connects only when
+# serve is on. No hand-editing of config, no code change per toggle.
+#
+#   willow-serve install   # one-time: write + load the systemd user unit
+#   willow-serve on         # start serve + add the .mcp.json entry   (then /mcp)
+#   willow-serve off        # stop serve  + remove the .mcp.json entry (then /mcp)
+#   willow-serve status     # unit state + whether the entry is present
+#   willow-serve logs        # follow the serve process logs (journalctl)
+#
+# Port/host come from WILLOW_MCP_PORT / WILLOW_MCP_HOST (defaults 8766 / 127.0.0.1).
+# Change them, re-run `install`, then `on`.
+set -euo pipefail
+
+UNIT="willow-mcp-serve"
+PORT="${WILLOW_MCP_PORT:-8766}"
+HOST="${WILLOW_MCP_HOST:-127.0.0.1}"
+ENTRY_NAME="willow-mcp-serve"
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MCP_JSON="$REPO_ROOT/.mcp.json"
+VENV_PY="$REPO_ROOT/.venv/bin/python3"
+TEMPLATE="$REPO_ROOT/deploy/willow-mcp-serve.service.template"
+URL="http://$HOST:$PORT/mcp"
+UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+UNIT_FILE="$UNIT_DIR/$UNIT.service"
+
+usage() { echo "usage: willow-serve {install|on|off|status|logs}" >&2; exit 2; }
+have_unit() { [ -f "$UNIT_FILE" ]; }
+
+# Add or remove the http entry in .mcp.json. Idempotent; preserves other servers.
+TOGGLE_PY="$REPO_ROOT/scripts/mcp_entry_toggle.py"
+toggle_entry() {  # $1 = add|remove
+  local py="python3"
+  [ -x "$VENV_PY" ] && py="$VENV_PY"
+  "$py" "$TOGGLE_PY" "$MCP_JSON" "$ENTRY_NAME" "$URL" "$1"
+}
+
+entry_present() { grep -q "\"$ENTRY_NAME\"" "$MCP_JSON" 2>/dev/null; }
+
+case "${1:-}" in
+  install)
+    [ -f "$TEMPLATE" ] || { echo "missing template: $TEMPLATE" >&2; exit 1; }
+    [ -x "$VENV_PY" ] || echo "warning: $VENV_PY not found — create the venv first (see README)" >&2
+    mkdir -p "$UNIT_DIR"
+    sed -e "s#@VENV@#$VENV_PY#g" \
+        -e "s#@WORKDIR@#$REPO_ROOT#g" \
+        -e "s#@PORT@#$PORT#g" \
+        -e "s#@HOST@#$HOST#g" \
+        "$TEMPLATE" > "$UNIT_FILE"
+    systemctl --user daemon-reload
+    echo "installed $UNIT_FILE  (port $PORT, host $HOST)"
+    echo "next: willow-serve on"
+    ;;
+  on)
+    have_unit || { echo "unit not installed — run: willow-serve install" >&2; exit 1; }
+    systemctl --user start "$UNIT"
+    toggle_entry add
+    if systemctl --user is-active --quiet "$UNIT"; then
+      echo "serve ON   $URL   (.mcp.json entry added — run /mcp to reconnect)"
+    else
+      echo "unit did not stay active — check: willow-serve logs" >&2
+      exit 1
+    fi
+    ;;
+  off)
+    have_unit && systemctl --user stop "$UNIT" || true
+    toggle_entry remove
+    echo "serve OFF   (.mcp.json entry removed — run /mcp to reconnect)"
+    ;;
+  status)
+    if have_unit && systemctl --user is-active --quiet "$UNIT"; then
+      echo "unit:      active (port $PORT)"
+    else
+      echo "unit:      inactive"
+    fi
+    if entry_present; then
+      echo ".mcp.json: entry present  ($URL)"
+    else
+      echo ".mcp.json: entry absent"
+    fi
+    ;;
+  logs)
+    journalctl --user -u "$UNIT" -f
+    ;;
+  *)
+    usage
+    ;;
+esac
