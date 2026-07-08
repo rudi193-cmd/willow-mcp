@@ -498,12 +498,23 @@ bug into an allow-list-shaped design.
 3. Add `schema_confirm_mapping` tool + write-path gate for
    `knowledge_ingest` / `kb_journal` / `kb_promote`.
 4. Add audit logging.
-5. Only after the above: revisit `task_*`/`agent_*` tools, which currently
-   assume a `kart_task_queue` / `routing_decisions` shape that may not exist
-   at all in a host database — same introspect-or-refuse treatment, plus a
-   decision on whether willow-mcp should be allowed to *create* a task queue
-   table when none exists (a write-time question, not a read-time one, and
-   arguably its own consent gate distinct from schema confirmation).
+5. **Done, 2026-07-08.** `task_submit`/`task_status`/`task_list`/`fleet_health`
+   hardcoded `kart_task_queue`, which does not exist in production —
+   confirmed via live `information_schema` introspection. The real table is
+   `tasks` (`id, task, submitted_by, agent, status, result, created_at, ...`
+   — no `steps` or `completed_at` column). `agent_route`/`agent_dispatch_result`
+   needed no change: `routing_decisions` already matches what they assume,
+   column-for-column. Wired `tasks` through `schema_profile` the same way as
+   `knowledge` (§9 step 2): reads (`task_status`, `task_list`, `fleet_health`)
+   infer via mapping, `task_submit` (a write) is gated behind
+   `schema_confirm_mapping` same as `knowledge_ingest`. `task_id` canonical
+   field aliases the real `id` column; `steps`/`completed_at` stay unmapped
+   (null on read) rather than guessing a substitute like `updated_at`, which
+   fires on any update, not just completion. No table-*creation* question
+   arose — the table already existed, only the assumed name was wrong, so
+   the deferred create-vs-refuse design question in this step's original
+   text does not apply here and remains open only for a host database where
+   no task-tracking table exists at all.
 6. **Done, independently of 1–5.** The identity-binding artifact and gate
    wiring (§6.3 steps 1–3) shipped: `identity_binding.py` implements
    `propose_binding` / `confirm_binding` / `resolve_app_id`, and

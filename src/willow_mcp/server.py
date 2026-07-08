@@ -176,11 +176,21 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
 # unmapped ones are simply omitted from results (§3.3), never crash a read.
 _KNOWLEDGE_FIELDS = ["id", "content", "domain", "source", "tags"]
 
+# Canonical fields the `tasks` tools speak in (§9 step 5). The real production
+# table is named `tasks`, not `kart_task_queue` — confirmed via live
+# information_schema introspection 2026-07-08. It has no `steps` or
+# `completed_at` column; those stay unmapped (null on read) rather than
+# guessing at a substitute like `updated_at`, which fires on any update, not
+# just completion.
+_TASK_FIELDS = ["task_id", "task", "submitted_by", "agent", "status", "result",
+                 "steps", "created_at", "completed_at"]
+
 # Registry of tables schema_confirm_mapping knows how to confirm, and the
 # canonical fields each one speaks in. Extend this when a new table gets a
-# schema-adapted write path (§9 step 5 will add task_*/agent_* here later).
+# schema-adapted write path.
 _CONFIRMABLE_TABLES: dict[str, list[str]] = {
     "knowledge": _KNOWLEDGE_FIELDS,
+    "tasks": _TASK_FIELDS,
 }
 
 
@@ -555,14 +565,30 @@ def task_submit(app_id: str, task: str, agent: str = "kart") -> dict:
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
+    if "error" in mapping:
+        return mapping
+    unconfirmed = _require_confirmed(mapping)
+    if unconfirmed:
+        return unconfirmed
+    fields = mapping["fields"]
+    if fields["task_id"]["column"] is None or fields["task"]["column"] is None:
+        return {"error": "schema_unusable: 'tasks' table has no mappable 'task_id' or 'task' column"}
+
     import random
     task_id = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789", k=8))
+    values = {"task_id": task_id, "task": task}
+    if fields["submitted_by"]["column"]:
+        values["submitted_by"] = app_id or "willow-mcp"
+    if fields["agent"]["column"]:
+        values["agent"] = agent
+
+    cols = ", ".join(f'"{fields[f]["column"]}"' for f in values)
+    placeholders = ", ".join(["%s"] * len(values))
+    params = [_write_param(fields[f], v) for f, v in values.items()]
     cur = pg.cursor()
-    cur.execute(
-        "INSERT INTO kart_task_queue (task_id, submitted_by, agent, task) "
-        "VALUES (%s, %s, %s, %s)",
-        (task_id, app_id or "willow-mcp", agent, task)
-    )
+    cur.execute(f"INSERT INTO tasks ({cols}) VALUES ({placeholders})", params)
     cur.close()
     return {"task_id": task_id, "status": "pending"}
 
@@ -574,18 +600,27 @@ def task_status(app_id: str, task_id: str) -> dict:
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
+    if "error" in mapping:
+        return mapping
+    fields = mapping["fields"]
+    id_col = fields["task_id"]["column"]
+    if id_col is None:
+        return {"error": "schema_unusable: 'tasks' table has no mappable 'task_id' column"}
+
+    select_clause, present, unmapped = _build_select(_TASK_FIELDS, fields)
     cur = pg.cursor()
-    cur.execute(
-        "SELECT task_id, status, result, steps, created_at, completed_at "
-        "FROM kart_task_queue WHERE task_id = %s",
-        (task_id,)
-    )
+    cur.execute(f'SELECT {select_clause} FROM tasks WHERE "{id_col}" = %s', (task_id,))
     row = cur.fetchone()
     cur.close()
     if not row:
         return {"error": "not_found"}
-    return {"task_id": row[0], "status": row[1], "result": row[2],
-            "steps": row[3], "created_at": str(row[4]), "completed_at": str(row[5])}
+
+    result = _row_to_dict(row, present, unmapped)
+    if unmapped:
+        result["_unmapped"] = unmapped
+    return result
 
 
 @mcp.tool()
@@ -595,17 +630,34 @@ def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
+    if "error" in mapping:
+        return mapping
+    fields = mapping["fields"]
+    id_col, status_col, agent_col = (fields["task_id"]["column"], fields["status"]["column"],
+                                      fields["agent"]["column"])
+    if id_col is None or status_col is None or agent_col is None:
+        return {"error": "schema_unusable: 'tasks' table has no mappable 'task_id', 'status', or 'agent' column"}
+
+    listed_fields = ["task_id", "task", "submitted_by", "created_at"]
+    select_clause, present, unmapped = _build_select(listed_fields, fields)
     cur = pg.cursor()
     cur.execute(
-        "SELECT task_id, task, submitted_by, created_at FROM kart_task_queue "
-        "WHERE status = 'pending' AND agent = %s ORDER BY created_at LIMIT %s",
+        f'SELECT {select_clause} FROM tasks WHERE "{status_col}" = \'pending\' AND "{agent_col}" = %s '
+        f'ORDER BY "{fields["created_at"]["column"] or id_col}" LIMIT %s',
         (agent, limit)
     )
     rows = cur.fetchall()
     cur.close()
-    return {"pending": [{"task_id": r[0], "task": r[1][:80],
-                          "submitted_by": r[2], "created_at": str(r[3])}
-                         for r in rows]}
+    pending = [_row_to_dict(r, present, unmapped) for r in rows]
+    for p in pending:
+        if p.get("task"):
+            p["task"] = p["task"][:80]
+    result = {"pending": pending}
+    if unmapped:
+        result["_unmapped"] = unmapped
+    return result
 
 
 # ── Knowledge extension tools ──────────────────────────────────────────────────
@@ -866,11 +918,17 @@ def fleet_health(app_id: str) -> dict:
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
+    if "error" in mapping:
+        return mapping
+    status_col = mapping["fields"]["status"]["column"]
+    if status_col is None:
+        return {"error": "schema_unusable: 'tasks' table has no mappable 'status' column"}
+
     try:
         cur = pg.cursor()
-        cur.execute(
-            "SELECT status, COUNT(*) FROM kart_task_queue GROUP BY status"
-        )
+        cur.execute(f'SELECT "{status_col}", COUNT(*) FROM tasks GROUP BY "{status_col}"')
         rows = cur.fetchall()
         cur.close()
     except Exception as e:

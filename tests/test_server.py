@@ -436,3 +436,109 @@ def test_kb_promote_schema_unusable_when_domain_unmapped_even_if_confirmed(app_i
 
     result = server.kb_promote(app_id=app_id, atom_id="A1", domain="general")
     assert "schema_unusable" in result["error"]
+
+
+# ── task_submit / task_status / task_list / fleet_health (schema-adapted,
+# docs/design/schema-adaptation.md §9 step 5) ──
+#
+# The real production table is `tasks`, not `kart_task_queue` (confirmed via
+# live information_schema introspection 2026-07-08). These tools previously
+# hardcoded `kart_task_queue`, which doesn't exist, so every call crashed
+# with UndefinedTable. They now go through the same schema_profile mapping
+# as the knowledge_* tools.
+
+_TASKS_COLUMNS = [
+    ("id", "text"), ("task", "text"), ("submitted_by", "text"), ("agent", "text"),
+    ("status", "text"), ("result", "jsonb"), ("created_at", "timestamp with time zone"),
+]
+
+
+def test_task_submit_refuses_until_confirmed(app_id, monkeypatch):
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.task_submit(app_id=app_id, task="do a thing")
+    assert "unconfirmed_schema" in result["error"]
+    assert len(fake.executed) == 1  # only the introspection query ran
+
+
+def test_task_submit_writes_mapped_columns_after_confirm(app_id, monkeypatch):
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="tasks")
+
+    result = server.task_submit(app_id=app_id, task="do a thing", agent="kart")
+
+    assert result["status"] == "pending"
+    assert "task_id" in result
+    insert_sql, params = fake.executed[-1]
+    assert insert_sql.startswith("INSERT INTO tasks")
+    assert '"id"' in insert_sql          # task_id -> id, alias-mapped
+    assert '"submitted_by"' in insert_sql
+    assert '"agent"' in insert_sql
+    assert params[0] == result["task_id"]
+
+
+def test_task_status_not_found(app_id, monkeypatch):
+    fake = _FakePg(columns=_TASKS_COLUMNS, canned_rows=[])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    assert server.task_status(app_id=app_id, task_id="ghost") == {"error": "not_found"}
+
+
+def test_task_status_maps_id_to_task_id_and_surfaces_unmapped(app_id, monkeypatch):
+    fake = _FakePg(
+        columns=_TASKS_COLUMNS,
+        canned_rows=[("T1", "do a thing", "willow", "kart", "pending", None, "2026-07-08")],
+    )
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.task_status(app_id=app_id, task_id="T1")
+
+    assert result["task_id"] == "T1"
+    assert result["status"] == "pending"
+    assert set(result["_unmapped"]) == {"steps", "completed_at"}
+    select_sql, params = fake.executed[-1]
+    assert '"id" AS "task_id"' in select_sql
+    assert 'WHERE "id" = %s' in select_sql
+    assert params == ("T1",)
+
+
+def test_task_status_table_not_found(app_id, monkeypatch):
+    fake = _FakePg(columns=[])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.task_status(app_id=app_id, task_id="T1")
+    assert result == {"error": "table_not_found", "table": "tasks"}
+
+
+def test_task_list_filters_by_status_and_agent(app_id, monkeypatch):
+    fake = _FakePg(
+        columns=_TASKS_COLUMNS,
+        canned_rows=[("T1", "x" * 100, "willow", "2026-07-08")],
+    )
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.task_list(app_id=app_id, agent="kart", limit=5)
+
+    assert result["pending"][0]["task_id"] == "T1"
+    assert len(result["pending"][0]["task"]) == 80  # truncated
+    select_sql, params = fake.executed[-1]
+    assert '"status" = \'pending\'' in select_sql
+    assert '"agent" = %s' in select_sql
+    assert params == ("kart", 5)
+
+
+def test_fleet_health_counts_by_mapped_status_column(app_id, monkeypatch):
+    fake = _FakePg(columns=_TASKS_COLUMNS, canned_rows=[("pending", 3), ("completed", 7)])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.fleet_health(app_id=app_id)
+
+    assert result == {"pending": 3, "running": 0, "completed": 7, "failed": 0, "total": 10}
+    select_sql, params = fake.executed[-1]
+    assert select_sql == 'SELECT "status", COUNT(*) FROM tasks GROUP BY "status"'
+
+
+def test_fleet_health_table_not_found(app_id, monkeypatch):
+    fake = _FakePg(columns=[])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.fleet_health(app_id=app_id)
+    assert result == {"error": "table_not_found", "table": "tasks"}
