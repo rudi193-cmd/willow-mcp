@@ -1,0 +1,17 @@
+# systemd --user unit template for willow-mcp OAuth HTTP serve mode.
+# Not used directly — `scripts/willow-serve install` fills in the @PLACEHOLDERS@
+# and writes the resolved unit to ~/.config/systemd/user/willow-mcp-serve.service.
+[Unit]
+Description=willow-mcp OAuth HTTP serve mode
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@WORKDIR@
+ExecStart=@VENV@ -m willow_mcp --serve --port @PORT@ --host @HOST@
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
