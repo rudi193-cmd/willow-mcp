@@ -1,20 +1,17 @@
 """Tests for the willow-mcp <-> kartikeya task-queue bridge.
 
-Guarded by importorskip: the whole module is skipped where kartikeya is not
-installed (e.g. base CI), and runs where the [worker] extra is present. The
-Postgres backend is exercised against a fake connection that records SQL — the
-same style as tests/test_server.py — with the schema mapping stubbed, so no live
-DB is touched.
+kartikeya is a hard dependency (B-22 close-out), so these run unconditionally.
+The Postgres backend is exercised against a fake connection that records SQL —
+the same style as tests/test_server.py — with the schema mapping stubbed, so no
+live DB is touched.
 """
 import json
 
 import pytest
 
-pytest.importorskip("kartikeya")
+from kartikeya import QueueStats, TaskRow
 
-from kartikeya import QueueStats, TaskRow  # noqa: E402
-
-from willow_mcp import task_queue as tq  # noqa: E402
+from willow_mcp import task_queue as tq
 
 
 class _FakeCursor:
