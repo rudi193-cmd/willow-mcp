@@ -1,0 +1,417 @@
+<title>willow ~ /trunk</title>
+<style>
+  :root {
+    --base: #1e1e2e;
+    --mantle: #181825;
+    --surface0: #313244;
+    --surface1: #45475a;
+    --text: #cdd6f4;
+    --subtext: #a6adc8;
+    --mauve: #cba6f7;
+    --green: #a6e3a1;
+    --red: #f38ba8;
+    --peach: #fab387;
+    --overlay: #6c7086;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--mantle);
+    color: var(--text);
+    font-family: "JetBrains Mono", "Fira Code", ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  ::selection { background: var(--mauve); color: var(--mantle); }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--mantle); }
+  ::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--overlay); }
+  * { scrollbar-width: thin; scrollbar-color: var(--surface1) var(--mantle); }
+
+  a { color: var(--mauve); }
+
+  :focus-visible {
+    outline: 2px solid var(--mauve);
+    outline-offset: 1px;
+    border-radius: 2px;
+  }
+
+  /* ---------- top bar (polybar-esque) ---------- */
+  .bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 26px;
+    padding: 0 10px;
+    background: var(--mantle);
+    border-bottom: 1px solid var(--surface0);
+    font-size: 12px;
+    color: var(--subtext);
+  }
+
+  .bar-group { display: flex; align-items: center; gap: 12px; }
+
+  .ws {
+    display: flex;
+    gap: 4px;
+  }
+
+  .ws span {
+    display: inline-block;
+    min-width: 16px;
+    text-align: center;
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--overlay);
+  }
+
+  .ws span.focused {
+    background: var(--surface0);
+    color: var(--mauve);
+    border: 1px solid var(--mauve);
+  }
+
+  .bar-title {
+    color: var(--overlay);
+    letter-spacing: 0.02em;
+  }
+
+  .tray { display: flex; gap: 10px; align-items: center; }
+  .tray .glyph { color: var(--subtext); }
+  .tray .glyph.warn { color: var(--peach); }
+  .tray .glyph.bad { color: var(--red); }
+  .tray .glyph.ok { color: var(--green); }
+  .clock { color: var(--text); }
+
+  /* ---------- workspace body / tiled pane ---------- */
+  .desktop {
+    padding: 14px;
+  }
+
+  .pane {
+    background: var(--base);
+    border: 2px solid var(--mauve);
+    border-radius: 3px;
+    box-shadow: 0 0 0 1px rgba(203, 166, 247, 0.15);
+    animation: pulse-border 5s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pane { animation: none; }
+  }
+
+  @keyframes pulse-border {
+    0%, 100% { border-color: var(--mauve); }
+    50% { border-color: #b389e8; }
+  }
+
+  .pane-titlebar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 10px;
+    background: var(--mantle);
+    border-bottom: 1px solid var(--surface0);
+    color: var(--subtext);
+    font-size: 12px;
+  }
+
+  .pane-titlebar .dot3 { display: flex; gap: 5px; }
+  .pane-titlebar .dot3 span {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--surface1);
+  }
+  .pane-titlebar .dot3 span:nth-child(1) { background: var(--red); opacity: .6; }
+  .pane-titlebar .dot3 span:nth-child(2) { background: var(--peach); opacity: .6; }
+  .pane-titlebar .dot3 span:nth-child(3) { background: var(--green); opacity: .6; }
+
+  .pane-body {
+    padding: 14px 16px 18px;
+  }
+
+  h1.hero {
+    margin: 0 0 2px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .hero-sub {
+    color: var(--subtext);
+    font-size: 12px;
+    margin-bottom: 14px;
+  }
+
+  .status-pill {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .status-pill.degraded { background: rgba(250, 179, 135, 0.15); color: var(--peach); border: 1px solid var(--peach); }
+
+  /* ---------- neofetch-style summary ---------- */
+  .fetch {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 3px 14px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    background: var(--mantle);
+    border: 1px solid var(--surface0);
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  .fetch dt { color: var(--mauve); text-align: right; }
+  .fetch dd { margin: 0; color: var(--text); }
+  .fetch dd .v-degraded { color: var(--peach); font-weight: 700; }
+  .fetch dd .v-warn { color: var(--peach); }
+  .fetch dd .v-bad { color: var(--red); }
+  .fetch dd .v-ok { color: var(--green); }
+
+  /* ---------- section grid ---------- */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 12px;
+  }
+
+  section.card {
+    background: var(--mantle);
+    border: 1px solid var(--surface0);
+    border-radius: 3px;
+    padding: 10px 12px 12px;
+  }
+
+  section.card.full { grid-column: 1 / -1; }
+
+  .card h2 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    text-transform: lowercase;
+    letter-spacing: 0.03em;
+    color: var(--subtext);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid var(--surface0);
+    padding-bottom: 6px;
+  }
+
+  .card h2 .glyph { color: var(--mauve); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table th {
+    text-align: left;
+    color: var(--overlay);
+    font-weight: 500;
+    padding: 2px 6px 4px 0;
+    border-bottom: 1px solid var(--surface0);
+  }
+  table td {
+    padding: 3px 6px 3px 0;
+    border-bottom: 1px solid rgba(49, 50, 68, 0.5);
+    vertical-align: top;
+  }
+  table tr:last-child td { border-bottom: none; }
+
+  .mono-dim { color: var(--overlay); }
+  .tag { font-size: 11px; padding: 0 5px; border-radius: 2px; }
+  .tag.role-engineer { background: rgba(203,166,247,0.15); color: var(--mauve); }
+  .tag.role-operator { background: rgba(137,180,250,0.15); color: #89b4fa; }
+  .tag.role-worker { background: rgba(166,173,200,0.15); color: var(--subtext); }
+
+  .stat-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+  .stat {
+    flex: 1 1 90px;
+    background: var(--surface0);
+    border-radius: 3px;
+    padding: 6px 8px;
+    text-align: center;
+  }
+  .stat .n { font-size: 17px; font-weight: 700; display: block; }
+  .stat .l { font-size: 10px; color: var(--overlay); text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat.n-total .n { color: var(--text); }
+  .stat.n-failed .n { color: var(--red); }
+  .stat.n-pending .n { color: var(--peach); }
+  .stat.n-running .n { color: var(--subtext); }
+  .stat.n-done .n { color: var(--green); }
+
+  .pip-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .pip { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--surface1); }
+  .pip.filled { background: var(--mauve); border-color: var(--mauve); }
+  .pip-label { font-size: 11px; color: var(--subtext); margin-left: 4px; }
+
+  .warn-box {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px dashed var(--peach);
+    border-radius: 3px;
+    background: rgba(250, 179, 135, 0.06);
+    color: var(--peach);
+    font-size: 11.5px;
+  }
+  .warn-box .glyph { margin-right: 4px; }
+
+  ul.plain { list-style: none; margin: 0; padding: 0; }
+  ul.plain li {
+    display: flex;
+    gap: 8px;
+    padding: 3px 0;
+    border-bottom: 1px dotted rgba(49,50,68,0.7);
+    font-size: 12px;
+  }
+  ul.plain li:last-child { border-bottom: none; }
+  ul.plain .id { color: var(--mauve); min-width: 108px; }
+  ul.plain .meta { color: var(--overlay); }
+
+  .log-line { display: grid; grid-template-columns: 78px 130px 1fr; gap: 8px; font-size: 12px; padding: 3px 0; border-bottom: 1px dotted rgba(49,50,68,0.7); }
+  .log-line:last-child { border-bottom: none; }
+  .log-line .t { color: var(--overlay); }
+  .log-line .op { color: var(--mauve); }
+  .log-line .r.ok { color: var(--green); }
+  .log-line .r.info { color: var(--subtext); }
+
+  footer.status-line {
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid var(--surface0);
+    color: var(--overlay);
+    font-size: 11px;
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+
+<div class="bar">
+  <div class="bar-group">
+    <span class="bar-title">~/willow</span>
+    <div class="ws" aria-label="workspaces">
+      <span class="focused" tabindex="0">1</span>
+      <span tabindex="0">2</span>
+      <span tabindex="0">3</span>
+      <span tabindex="0">4</span>
+      <span tabindex="0">5</span>
+    </div>
+  </div>
+  <div class="bar-group tray">
+    <span class="glyph bad" title="trunk: degraded">⏻ trunk</span>
+    <span class="glyph warn" title="sap heartbeat: none">⟳ sap</span>
+    <span class="glyph ok" title="canopy: 5 agents registered">▲ canopy</span>
+    <span class="clock">2026-07-08 · wed</span>
+  </div>
+</div>
+
+<div class="desktop">
+  <div class="pane">
+    <div class="pane-titlebar">
+      <span>willow — dashboard — 1/1 tiled</span>
+      <span class="dot3"><span></span><span></span><span></span></span>
+    </div>
+    <div class="pane-body">
+      <h1 class="hero">willow <span class="status-pill degraded">degraded</span></h1>
+      <div class="hero-sub">trunk status · sap gate · canopy fleet · roots store · rings schema · leaves knowledge · litter log</div>
+
+      <dl class="fetch">
+        <dt>trunk@willow</dt><dd class="v-degraded">DEGRADED</dd>
+        <dt>sap</dt><dd>369 tasks · <span class="v-bad">357 failed</span> · <span class="v-warn">2 pending</span> · 0 running · 0 done</dd>
+        <dt>heartbeat</dt><dd class="v-bad">none — no worker has polled the queue</dd>
+        <dt>canopy</dt><dd>5 agents · 1 engineer · 1 operator · 3 workers</dd>
+        <dt>rings</dt><dd><span class="v-warn">2/4 tables confirmed</span> today</dd>
+        <dt>roots</dt><dd>2 collections active · <span class="v-warn">isolation gap flagged</span></dd>
+        <dt>leaves</dt><dd>3 atoms ingested recently</dd>
+        <dt>uptime</dt><dd>session live · last litter entry: task_submit</dd>
+      </dl>
+
+      <div class="grid">
+
+        <section class="card full">
+          <h2><span class="glyph">▲</span> sap — task queue</h2>
+          <div class="stat-row">
+            <div class="stat n-total"><span class="n">369</span><span class="l">total</span></div>
+            <div class="stat n-failed"><span class="n">357</span><span class="l">failed</span></div>
+            <div class="stat n-pending"><span class="n">2</span><span class="l">pending</span></div>
+            <div class="stat n-running"><span class="n">0</span><span class="l">running</span></div>
+            <div class="stat n-done"><span class="n">0</span><span class="l">completed</span></div>
+          </div>
+          <table>
+            <tr><th>id</th><th>label</th><th>state</th><th>note</th></tr>
+            <tr><td class="mono-dim">2W1CHRFQ</td><td>echo smoke test</td><td><span style="color:var(--peach)">pending</span></td><td class="mono-dim">queued recently</td></tr>
+            <tr><td class="mono-dim">8ED0A500</td><td>embed backfill</td><td><span style="color:var(--peach)">pending</span></td><td class="mono-dim">queued since may 19 — stuck</td></tr>
+            <tr><td class="mono-dim">×2</td><td>(various)</td><td><span style="color:var(--red)">failed</span></td><td class="mono-dim">err: "no executable commands found"</td></tr>
+          </table>
+          <div class="warn-box"><span class="glyph">!</span>no worker process has polled sap this session — heartbeat: none.</div>
+        </section>
+
+        <section class="card">
+          <h2><span class="glyph">▲</span> canopy — agent fleet</h2>
+          <table>
+            <tr><th>agent</th><th>role</th><th>function</th></tr>
+            <tr><td>skirnir</td><td><span class="tag role-engineer">engineer</span></td><td class="mono-dim">emissary / gate-witness, closes loops</td></tr>
+            <tr><td>Auto</td><td><span class="tag role-operator">operator</span></td><td class="mono-dim">cursor IDE-integrated router</td></tr>
+            <tr><td>ganas1</td><td><span class="tag role-worker">worker</span></td><td class="mono-dim">file intake / classification pipeline</td></tr>
+            <tr><td>ganas2</td><td><span class="tag role-worker">worker</span></td><td class="mono-dim">local model test bed (qwen2.5:3b)</td></tr>
+            <tr><td>ganas3</td><td><span class="tag role-worker">worker</span></td><td class="mono-dim">image generation (imagen 4)</td></tr>
+          </table>
+        </section>
+
+        <section class="card">
+          <h2><span class="glyph">▲</span> rings — schema confirmation</h2>
+          <div class="pip-row">
+            <span class="pip filled"></span><span class="pip filled"></span><span class="pip"></span><span class="pip"></span>
+            <span class="pip-label">2 / 4 confirmed today</span>
+          </div>
+          <table>
+            <tr><th>table</th><th>state</th></tr>
+            <tr><td>tasks</td><td><span style="color:var(--green)">confirmed</span></td></tr>
+            <tr><td>knowledge</td><td><span style="color:var(--green)">confirmed</span></td></tr>
+            <tr><td>agents</td><td><span style="color:var(--peach)">unconfirmed</span></td></tr>
+            <tr><td>routing</td><td><span style="color:var(--peach)">unconfirmed</span></td></tr>
+          </table>
+        </section>
+
+        <section class="card">
+          <h2><span class="glyph">▲</span> roots — persistent store</h2>
+          <ul class="plain">
+            <li><span class="id">mcp_smoke_test</span><span class="meta">write → read → delete, this session</span></li>
+            <li><span class="id">ctx__willow-mcp</span><span class="meta">properly app-scoped</span></li>
+          </ul>
+          <div class="warn-box"><span class="glyph">!</span>all other collections are visible to any app with full access — isolation gap.</div>
+        </section>
+
+        <section class="card">
+          <h2><span class="glyph">▲</span> leaves — knowledge atoms</h2>
+          <ul class="plain">
+            <li><span class="id">509084FA</span><span class="meta">ingested this session</span></li>
+            <li><span class="id">grove_msg_111</span><span class="meta">from a github channel</span></li>
+            <li><span class="id">L8A5A</span><span class="meta">migrated from an older version</span></li>
+          </ul>
+        </section>
+
+        <section class="card full">
+          <h2><span class="glyph">▲</span> litter — activity log</h2>
+          <div class="log-line"><span class="t">recent</span><span class="op">store_put</span><span class="r ok">ok</span></div>
+          <div class="log-line"><span class="t">recent</span><span class="op">store_get</span><span class="r ok">ok</span></div>
+          <div class="log-line"><span class="t">recent</span><span class="op">store_delete</span><span class="r ok">ok</span></div>
+          <div class="log-line"><span class="t">recent</span><span class="op">schema_confirm_mapping</span><span class="r info">2 tables confirmed</span></div>
+          <div class="log-line"><span class="t">recent</span><span class="op">task_submit</span><span class="r info">queued, unread</span></div>
+        </section>
+
+      </div>
+
+      <footer class="status-line">
+        <span>willow ~ trunk:degraded sap:2/369-pending canopy:5 rings:2/4</span>
+        <span>[1] focused · mauve border · i3-ish</span>
+      </footer>
+    </div>
+  </div>
+</div>

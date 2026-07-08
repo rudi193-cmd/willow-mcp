@@ -1,0 +1,516 @@
+<title>WILLOW BBS - Main Menu</title>
+<style>
+  :root {
+    --black: #000000;
+    --cyan: #55FFFF;
+    --dcyan: #00AAAA;
+    --magenta: #FF55FF;
+    --dmagenta: #AA00AA;
+    --yellow: #FFFF55;
+    --dyellow: #AA5500;
+    --green: #55FF55;
+    --dgreen: #00AA00;
+    --red: #FF5555;
+    --dred: #AA0000;
+    --blue: #5555FF;
+    --dblue: #0000AA;
+    --white: #FFFFFF;
+    --gray: #AAAAAA;
+    --dgray: #555555;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--black);
+    color: var(--gray);
+    font-family: "Courier New", "Lucida Console", Consolas, monospace;
+    font-size: 15px;
+    line-height: 1.35;
+  }
+
+  body {
+    padding: 24px 12px 60px;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* CRT scanline overlay */
+  body::before {
+    content: "";
+    pointer-events: none;
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.0) 0px,
+      rgba(0, 0, 0, 0.0) 2px,
+      rgba(0, 0, 0, 0.22) 3px,
+      rgba(0, 0, 0, 0.0) 4px
+    );
+    z-index: 500;
+    mix-blend-mode: multiply;
+  }
+
+  /* subtle vignette to sell "monitor" */
+  body::after {
+    content: "";
+    pointer-events: none;
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
+    z-index: 501;
+  }
+
+  .wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+  }
+
+  .glow {
+    text-shadow: 0 0 2px currentColor, 0 0 6px currentColor;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .flicker {
+      animation: flicker 5.5s infinite;
+    }
+  }
+
+  @keyframes flicker {
+    0%, 96%, 100% { opacity: 1; }
+    97% { opacity: 0.92; }
+    98% { opacity: 1; }
+    98.5% { opacity: 0.95; }
+  }
+
+  pre {
+    margin: 0;
+    white-space: pre;
+    font-family: inherit;
+  }
+
+  /* ===== connect handshake ===== */
+  #handshake {
+    color: var(--gray);
+    white-space: pre-wrap;
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+  #handshake .ok { color: var(--green); }
+  #handshake .hi { color: var(--white); }
+
+  #main-screen {
+    opacity: 0;
+  }
+  #main-screen.show {
+    opacity: 1;
+  }
+
+  .skip-note {
+    color: var(--dgray);
+    font-size: 12px;
+    margin-top: 4px;
+  }
+
+  /* ===== logo ===== */
+  .logo {
+    color: var(--magenta);
+    font-weight: bold;
+    font-size: 13px;
+    line-height: 1.05;
+    text-align: center;
+    text-shadow: 0 0 3px var(--magenta);
+    overflow-x: auto;
+  }
+  .logo .c1 { color: var(--cyan); text-shadow: 0 0 3px var(--cyan); }
+  .logo .c2 { color: var(--yellow); text-shadow: 0 0 3px var(--yellow); }
+
+  .tagline {
+    text-align: center;
+    color: var(--yellow);
+    margin: 6px 0 2px;
+    letter-spacing: 2px;
+  }
+  .subtag {
+    text-align: center;
+    color: var(--dcyan);
+    margin-bottom: 14px;
+    font-size: 12px;
+  }
+
+  .box {
+    border: 2px solid var(--cyan);
+    padding: 10px 14px;
+    margin-bottom: 16px;
+  }
+  .box.double {
+    border-style: double;
+    border-width: 5px;
+  }
+  .box-title {
+    color: var(--black);
+    background: var(--cyan);
+    display: inline-block;
+    padding: 0 8px;
+    font-weight: bold;
+    margin: -18px 0 10px 4px;
+  }
+
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 16px;
+  }
+
+  .menu-item {
+    margin: 3px 0;
+  }
+  .menu-num {
+    color: var(--yellow);
+    font-weight: bold;
+  }
+  .menu-text {
+    color: var(--white);
+  }
+  .menu-desc {
+    color: var(--dcyan);
+  }
+
+  .status-badge {
+    display: inline-block;
+    padding: 1px 10px;
+    font-weight: bold;
+    letter-spacing: 1px;
+  }
+  .badge-degraded {
+    background: var(--red);
+    color: var(--black);
+  }
+  .badge-ok {
+    background: var(--green);
+    color: var(--black);
+  }
+  .badge-warn {
+    background: var(--yellow);
+    color: var(--black);
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 6px;
+    font-size: 14px;
+  }
+  th {
+    color: var(--black);
+    background: var(--dcyan);
+    text-align: left;
+    padding: 2px 8px;
+    border: 1px solid var(--cyan);
+  }
+  td {
+    padding: 2px 8px;
+    border: 1px solid var(--dblue);
+    color: var(--gray);
+  }
+  tr.hot td { color: var(--red); }
+  tr.pend td { color: var(--yellow); }
+  tr.ok td { color: var(--green); }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin-top: 8px;
+    text-align: center;
+  }
+  .stat-cell {
+    border: 1px solid var(--dblue);
+    padding: 6px 2px;
+  }
+  .stat-num {
+    font-size: 20px;
+    font-weight: bold;
+    display: block;
+  }
+  .stat-label {
+    color: var(--dcyan);
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+  .n-total { color: var(--white); }
+  .n-failed { color: var(--red); }
+  .n-pending { color: var(--yellow); }
+  .n-running { color: var(--cyan); }
+  .n-done { color: var(--green); }
+
+  .sysop {
+    color: var(--green);
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--dgreen);
+  }
+  .sysop .tag {
+    color: var(--black);
+    background: var(--green);
+    font-weight: bold;
+    padding: 0 6px;
+    margin-right: 6px;
+  }
+
+  .role-eng { color: var(--magenta); }
+  .role-op { color: var(--cyan); }
+  .role-wrk { color: var(--gray); }
+
+  .callout {
+    border: 1px solid var(--red);
+    background: rgba(255, 85, 85, 0.08);
+    color: var(--red);
+    padding: 6px 10px;
+    margin-top: 8px;
+  }
+  .callout .tag {
+    color: var(--black);
+    background: var(--red);
+    font-weight: bold;
+    padding: 0 6px;
+    margin-right: 6px;
+  }
+
+  .footer {
+    text-align: center;
+    color: var(--dgray);
+    margin-top: 20px;
+    font-size: 12px;
+  }
+  .footer .blink {
+    color: var(--yellow);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .footer .blink { animation: flicker 1.2s steps(1) infinite; }
+  }
+
+  .prompt-line {
+    color: var(--white);
+    margin-top: 10px;
+  }
+  .prompt-line .caret {
+    background: var(--white);
+    display: inline-block;
+    width: 8px;
+    height: 14px;
+    vertical-align: middle;
+    margin-left: 2px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .prompt-line .caret { animation: caretblink 1s steps(1) infinite; }
+  }
+  @keyframes caretblink { 50% { opacity: 0; } }
+
+  hr.dline {
+    border: none;
+    border-top: 2px double var(--dblue);
+    margin: 12px 0;
+  }
+
+  a { color: var(--cyan); }
+
+  @media (max-width: 640px) {
+    .stat-grid { grid-template-columns: repeat(2, 1fr); }
+    .logo { font-size: 8px; }
+    table, thead, tbody, th, td, tr { font-size: 12px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <pre id="handshake"></pre>
+
+  <div id="main-screen">
+
+    <pre class="logo flicker">██╗    ██╗██╗██╗     ██╗      ██████╗ ██╗    ██╗
+██║    ██║██║██║     ██║     ██╔═══██╗██║    ██║
+██║ █╗ ██║██║██║     ██║     ██║   ██║██║ █╗ ██║
+██║███╗██║██║██║     ██║     ██║   ██║██║███╗██║
+╚███╔███╔╝██║███████╗███████╗╚██████╔╝╚███╔███╔╝
+ ╚══╝╚══╝ ╚═╝╚══════╝╚══════╝ ╚═════╝  ╚══╝╚══╝ </pre>
+    <div class="tagline glow">░▒▓ <span class="c1" style="color:var(--cyan)">W I L L O W</span>  <span class="c2" style="color:var(--yellow)">B U L L E T I N   B O A R D   S Y S T E M</span> ▓▒░</div>
+    <div class="subtag">:: NODE 1 OF 1 :: 14400 BAUD :: SYSOP: skirnir :: EST. THIS SESSION ::</div>
+
+    <div class="box double">
+      <div class="box-title">[ TRUNK :: OVERALL SYSTEM STATUS ]</div>
+      <div class="row">
+        <div>TRUNK STATE ......... <span class="status-badge badge-degraded glow">DEGRADED</span></div>
+        <div>RINGS CONFIRMED ...... <span style="color:var(--yellow)">2 / 4</span></div>
+        <div>WORKER HEARTBEAT ..... <span style="color:var(--red)">NONE</span></div>
+      </div>
+      <div class="sysop">
+        <span class="tag">SYSOP</span>
+        Yeah, I see it too. Trunk's flashin' red and the queue's backed up
+        like a BBS with a 300 baud caller hoggin' the line. Grab a cup of
+        joe, this'll take a sec to read.
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="box-title">[ MAIN MENU ]</div>
+      <div class="menu-item"><span class="menu-num">[1]</span> <span class="menu-text">System Status</span>   <span class="menu-desc">- trunk / sap / canopy at a glance</span></div>
+      <div class="menu-item"><span class="menu-num">[2]</span> <span class="menu-text">Task Queue</span>      <span class="menu-desc">- sap: 369 tasks, see what's stuck</span></div>
+      <div class="menu-item"><span class="menu-num">[3]</span> <span class="menu-text">User List</span>       <span class="menu-desc">- canopy: 5 agents online (sorta)</span></div>
+      <div class="menu-item"><span class="menu-num">[4]</span> <span class="menu-text">File Areas</span>      <span class="menu-desc">- leaves: knowledge base uploads</span></div>
+      <div class="menu-item"><span class="menu-num">[5]</span> <span class="menu-text">Message Log</span>     <span class="menu-desc">- litter: recent activity feed</span></div>
+      <div class="menu-item"><span class="menu-num">[G]</span> <span class="menu-text" style="color:var(--dgray)">Goodbye</span>       <span class="menu-desc" style="color:var(--dgray)">- log off (nice try, this is a static page)</span></div>
+    </div>
+
+    <hr class="dline">
+
+    <div class="box">
+      <div class="box-title">[2] TASK QUEUE :: SAP</div>
+      <div class="stat-grid">
+        <div class="stat-cell"><span class="stat-num n-total">369</span><span class="stat-label">Total</span></div>
+        <div class="stat-cell"><span class="stat-num n-failed glow">357</span><span class="stat-label">Failed</span></div>
+        <div class="stat-cell"><span class="stat-num n-pending">2</span><span class="stat-label">Pending</span></div>
+        <div class="stat-cell"><span class="stat-num n-running">0</span><span class="stat-label">Running</span></div>
+        <div class="stat-cell"><span class="stat-num n-done">0</span><span class="stat-label">Completed</span></div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>TASK ID</th><th>DESCRIPTION</th><th>STATE</th><th>NOTE</th></tr>
+        </thead>
+        <tbody>
+          <tr class="pend"><td>2W1CHRFQ</td><td>echo smoke test</td><td>PENDING</td><td>queued recently</td></tr>
+          <tr class="pend"><td>8ED0A500</td><td>embed backfill</td><td>PENDING</td><td>queued since May 19 - STALE</td></tr>
+          <tr class="hot"><td>------</td><td>(x357) various</td><td>FAILED</td><td>"no executable commands found"</td></tr>
+        </tbody>
+      </table>
+      <div class="sysop">
+        <span class="tag">SYSOP</span>
+        357 outta 369 failed with the SAME error. That ain't bad luck, caller,
+        that's nobody home. Heartbeat on the worker process reads NONE.
+        Somebody unplug the modem?
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="box-title">[3] USER LIST :: CANOPY</div>
+      <table>
+        <thead>
+          <tr><th>HANDLE</th><th>ROLE</th><th>DESCRIPTION</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="role-eng">skirnir</td><td class="role-eng">ENGINEER</td><td>emissary / gate-witness, closes loops</td></tr>
+          <tr><td class="role-op">Auto</td><td class="role-op">OPERATOR</td><td>Cursor IDE-integrated router</td></tr>
+          <tr><td class="role-wrk">ganas1</td><td class="role-wrk">WORKER</td><td>file intake / classification pipeline</td></tr>
+          <tr><td class="role-wrk">ganas2</td><td class="role-wrk">WORKER</td><td>local model test bed (qwen2.5:3b)</td></tr>
+          <tr><td class="role-wrk">ganas3</td><td class="role-wrk">WORKER</td><td>image generation (Imagen 4)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box">
+      <div class="box-title">[RINGS] SCHEMA CONFIRMATION</div>
+      <div class="row">
+        <div>tasks .............. <span style="color:var(--green)">[CONFIRMED]</span></div>
+        <div>knowledge .......... <span style="color:var(--green)">[CONFIRMED]</span></div>
+        <div>agents ............. <span style="color:var(--yellow)">[UNCONFIRMED]</span></div>
+        <div>routing ............ <span style="color:var(--yellow)">[UNCONFIRMED]</span></div>
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="box-title">[ROOTS] PERSISTENT STORE</div>
+      <div>collection <span style="color:var(--cyan)">mcp_smoke_test</span> .... record written, read back, then deleted this session <span style="color:var(--green)">[CLEAN]</span></div>
+      <div>collection <span style="color:var(--cyan)">ctx__willow-mcp</span> ... properly app-scoped <span style="color:var(--green)">[OK]</span></div>
+      <div class="callout">
+        <span class="tag">! WARNING !</span>
+        All OTHER collections in this store are visible to ANY app holding
+        full access. No per-collection fence. Ask your SYSOP about ACLs
+        before you leave the door wide open, caller.
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="box-title">[4] FILE AREAS :: LEAVES (recent uploads)</div>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>ORIGIN</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>509084FA</td><td>ingested this session</td></tr>
+          <tr><td>grove_msg_111</td><td>from a GitHub channel</td></tr>
+          <tr><td>L8A5A</td><td>migrated from an older version</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box">
+      <div class="box-title">[5] MESSAGE LOG :: LITTER (recent activity)</div>
+      <table>
+        <thead>
+          <tr><th>#</th><th>EVENT</th><th>RESULT</th></tr>
+        </thead>
+        <tbody>
+          <tr class="ok"><td>1</td><td>store_put</td><td>ok</td></tr>
+          <tr class="ok"><td>2</td><td>store_get</td><td>ok</td></tr>
+          <tr class="ok"><td>3</td><td>store_delete</td><td>ok</td></tr>
+          <tr class="ok"><td>4</td><td>schema_confirm_mapping</td><td>2 tables confirmed</td></tr>
+          <tr class="pend"><td>5</td><td>task_submit</td><td>queued, unread</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prompt-line">Command (1-5, G) or [Q]uit? <span class="caret"></span></div>
+
+    <div class="footer">
+      WILLOW BBS &middot; A subsidiary of the SAP permission gate &middot;
+      <span class="blink">-- press any key --</span><br>
+      No carrier was harmed in the rendering of this menu.
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  var reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var hs = document.getElementById("handshake");
+  var main = document.getElementById("main-screen");
+
+  if (reduced) {
+    hs.style.display = "none";
+    main.classList.add("show");
+    return;
+  }
+
+  var lines = [
+    "ATDT 555-0139",
+    "CONNECT 14400/ARQ",
+    "<span class=\"hi\">ANSI</span> graphics detected... <span class=\"ok\">OK</span>",
+    "Negotiating terminal type... <span class=\"ok\">ANSI-BBS</span>",
+    "Loading WILLOW BBS main menu..."
+  ];
+
+  var i = 0;
+  function next() {
+    if (i >= lines.length) {
+      setTimeout(function () {
+        hs.style.display = "none";
+        main.classList.add("show");
+      }, 250);
+      return;
+    }
+    var div = document.createElement("div");
+    div.innerHTML = lines[i];
+    hs.appendChild(div);
+    i++;
+    setTimeout(next, 220);
+  }
+  next();
+})();
+</script>
