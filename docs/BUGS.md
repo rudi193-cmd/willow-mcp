@@ -27,7 +27,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-19 | P2 | Fixed | task interface / Kart | `task_submit` had no `allow_net`. Fixed: `allow_net=True` gated by a new `task_net` manifest permission (not in full_access) appends the worker's `# allow_net` directive | this session; probe `5H1M355V` |
 | B-20 | P3 | Fixed | repo metadata / docs | GitHub "About" description read "Superseded by Willow 2.0 … now live in the monorepo" — stale, contradicting the active 2.0.0 repo; visible to anyone (surfaced in an external review). Fixed via `gh repo edit --description`; repo confirmed not archived | this session; DeepSeek review |
 | B-21 | P0 | Fixed | task interface / Kart | `task_net` gate bypassable via task text — the worker reads egress policy from a `# allow_net` line in the stored task, but `task_submit` gated & appended that line only behind `if allow_net:`, so a `task_queue`-only caller could embed the directive with `allow_net=False` and get ungated egress (also `# allow_localhost`). Fixed: strip caller-supplied directive lines unconditionally before the gated append | this session; L-NET-01; PR #32; PR #31 review §2a |
-| B-22 | P1 | Open | packaging / Kart | Product ships **no task executor** — `pyproject` advertises a "Kart task queue" and ships `task_submit`/`task_status`, but no worker/sandbox is in the package (`find -iname '*kart*'` empty); a clean `pip install` leaves every task `pending` forever. Ran only because a stale out-of-repo willow-2.0 Kart was present. Direction set: productionize 2.0's Kart into willow-mcp | this session; `docs/design/kart-productionization.md`; PR #31 review §1 |
+| B-22 | P1 | Fixed | packaging / Kart | Product shipped **no task executor** — `pyproject` advertised a "Kart task queue" but no worker/sandbox was in the package; a clean `pip install` left every task `pending`. Fixed: Kart extracted as the published **`kartikeya`** package (PyPI) and made a hard dependency; `willow-mcp worker` + `WillowMcpTaskQueue` (Pg/SQLite) drain the queue | this session; `docs/design/kart-lift-spec.md`; PRs #35, #36; kartikeya 0.0.1 |
 | B-23 | P3 | Fixed | process / skills+hooks | Task-queue surface (`task_submit`/`task_net`, B-19; `# allow_net` footgun, B-21) shipped with no skill or hook, violating the "hooks/skills ship with the tool" rule (`docs/design/hooks-and-skills.md` §2). Fixed: added `skills/kart-tasks.md` + a `task_submit` matcher on `pre_tool_use.py` warning on hand-embedded net directives | this session; operator-caught |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
@@ -45,21 +45,31 @@ log carries a one-line entry and points there rather than duplicating.
 
 ## Open
 
-- **B-22 · P1 (this session)** — willow-mcp ships **no Kart executor**. The
-  package advertises a "Kart task queue" and exposes `task_submit`/`task_status`/
-  `task_list`/`fleet_health`, but there is no worker, sandbox, or queue-drainer
-  anywhere in the repo (`find -iname '*kart*'` is empty) and `[project.scripts]`
-  registers only the MCP server. On a clean `pip install willow-mcp`, submitted
-  tasks sit `pending` forever with nothing to run them — the tools only ever
-  executed because an out-of-repo (often stale) willow-2.0 Kart was present on
-  the operator's machines. **Direction set** (operator, 2026-07-08): productionize
-  the mature willow-2.0 Kart *into* willow-mcp as shipped code — a staged
-  decouple→vendor→entry-point migration, plan in
-  `docs/design/kart-productionization.md`. Stays Open until a `willow-mcp worker`
-  ships and a clean install can execute a task end-to-end. Surfaced by PR #31 §1
-  (filed there as a diagnostics gap; the real severity is packaging/DOA).
+_None — all tracked bugs are Fixed, Documented, or Stale._
 
 ## Fixed
+
+- **B-22 · P1 (this session)** — willow-mcp shipped **no Kart executor**: the
+  package advertised a "Kart task queue" and exposed `task_submit`/`task_status`/
+  `task_list`/`fleet_health`, but no worker/sandbox/drainer was in the repo, so a
+  clean `pip install` left every task `pending` forever (it only ran because an
+  out-of-repo, often stale, willow-2.0 Kart was present). **Fixed** by extracting
+  the mature willow-2.0 Kart as a standalone, host-agnostic package — **`kartikeya`**
+  (github.com/rudi193-cmd/kartikeya, **published to PyPI as 0.0.1**) — with the
+  sandbox/worker/execute core decoupled from all fleet imports behind a
+  `TaskQueue` backend seam (bundled SQLite reference impl + Postgres). willow-mcp
+  now: depends on `kartikeya` (hard dep, `>=0.0.1,<0.1.0`); ships
+  `WillowMcpTaskQueue` (Postgres over the adopted `tasks` table, atomic
+  `FOR UPDATE SKIP LOCKED`; SQLite fallback when no PG); the `willow-mcp worker`
+  subcommand; and `docs/schema/tasks.postgres.sql`. A clean
+  `pip install willow-mcp` now ships a working queue drainer. Verified: clean-venv
+  `pip install kartikeya` imports + `kart` CLI resolves; kartikeya standalone e2e
+  green (submit → worker → completed); willow-mcp integration tests run
+  unconditionally. Plan: `docs/design/kart-lift-spec.md`; extraction PRs on the
+  kartikeya repo; willow-mcp PRs #35 (integration) + #36 (hard dep / close-out).
+  **Residual (not blocking):** the full real-bwrap end-to-end with network egress
+  on/off must be validated on a bare host — the dev Kart sandbox can't nest
+  bubblewrap, so its tests run with `WILLOW_KART_NO_BWRAP=1`.
 
 - **B-23 · P3 (this session)** — the task-queue tool surface shipped without
   its companion skill/hook, breaking the standing rule that a footgun/workflow
