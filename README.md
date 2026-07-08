@@ -80,7 +80,7 @@ works unmodified on any clone once the venv above exists):
 Point `WILLOW_PG_DB` / `WILLOW_STORE_ROOT` at your host fleet store when you
 need Postgres knowledge or shared SOIL data.
 
-You can also run the full [willow-1.9](https://github.com/rudi193-cmd/willow-1.9) server directly — the tool API is identical, apps work against both transparently.
+You can also run the full [willow-2.0](https://github.com/rudi193-cmd/willow-2.0) server directly — the tool API is identical, apps work against both transparently.
 
 ## Configuration
 
