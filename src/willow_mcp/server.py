@@ -42,6 +42,7 @@ from .db import Store, get_pg
 from .gate import permitted
 from .identity_binding import resolve_app_id
 from .receipts import ReceiptLog
+from . import schema_profile as sp
 
 _store = Store()
 _receipt_log = ReceiptLog()
@@ -165,6 +166,38 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
             )
         }
     return effective, None
+
+
+# ── Schema-adapted knowledge reads (docs/design/schema-adaptation.md §9 step 2) ─
+
+# Canonical fields the `knowledge` read tools speak in — matches the §3.2
+# example exactly. Not every host `knowledge` table will have all of these;
+# unmapped ones are simply omitted from results (§3.3), never crash a read.
+_KNOWLEDGE_FIELDS = ["id", "content", "domain", "source", "tags"]
+
+
+def _build_select(fields_wanted: list[str], mapping_fields: dict) -> tuple[str, list[str], list[str]]:
+    """From a resolved mapping, build a SELECT column list using only real,
+    confirmed-present columns. Returns (select_clause, present_fields,
+    unmapped_fields) — present_fields is the row-tuple order to zip results
+    against; unmapped_fields is surfaced to the caller per §3.3, never
+    silently dropped."""
+    parts, present, unmapped = [], [], []
+    for field in fields_wanted:
+        col = mapping_fields[field]["column"]
+        if col is None:
+            unmapped.append(field)
+            continue
+        parts.append(f'"{col}" AS "{field}"')
+        present.append(field)
+    return ", ".join(parts), present, unmapped
+
+
+def _row_to_dict(row: tuple, present_fields: list[str], unmapped_fields: list[str]) -> dict:
+    rec = dict(zip(present_fields, row))
+    for field in unmapped_fields:
+        rec[field] = None
+    return rec
 
 
 # ── Sanitizer (Phase 4a) ─────────────────────────────────────────────────────
@@ -431,20 +464,34 @@ def knowledge_search(
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
-    cur = pg.cursor()
-    conditions = " AND ".join(["content ILIKE %s"] * len(tokens))
+
+    mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
+    if "error" in mapping:
+        return mapping
+    fields = mapping["fields"]
+    if fields["id"]["column"] is None or fields["content"]["column"] is None:
+        return {"error": "schema_unusable: 'knowledge' table has no mappable 'id' or 'content' column"}
+
+    select_clause, present, unmapped = _build_select(_KNOWLEDGE_FIELDS, fields)
+    content_ref = sp.cast_for_ilike(fields["content"])
+    conditions = " AND ".join([f"{content_ref} ILIKE %s"] * len(tokens))
     params: list = [f"%{t}%" for t in tokens]
-    sql = f"SELECT id, content, domain, source FROM knowledge WHERE {conditions}"
-    if domain:
-        sql += " AND domain = %s"
+    sql = f"SELECT {select_clause} FROM knowledge WHERE {conditions}"
+    if domain and fields["domain"]["column"]:
+        sql += f' AND "{fields["domain"]["column"]}" = %s'
         params.append(domain)
     sql += " LIMIT %s"
     params.append(limit)
+
+    cur = pg.cursor()
     cur.execute(sql, params)
     rows = cur.fetchall()
     cur.close()
-    return {"results": [{"id": r[0], "content": r[1], "domain": r[2], "source": r[3]}
-                         for r in rows]}
+
+    result = {"results": [_row_to_dict(r, present, unmapped) for r in rows]}
+    if unmapped:
+        result["_unmapped"] = unmapped
+    return result
 
 
 # ── Task queue tools ───────────────────────────────────────────────────────────
@@ -518,17 +565,27 @@ def kb_at(app_id: str, atom_id: str) -> dict:
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
+    if "error" in mapping:
+        return mapping
+    fields = mapping["fields"]
+    id_col = fields["id"]["column"]
+    if id_col is None:
+        return {"error": "schema_unusable: 'knowledge' table has no mappable 'id' column"}
+
+    select_clause, present, unmapped = _build_select(_KNOWLEDGE_FIELDS, fields)
     cur = pg.cursor()
-    cur.execute(
-        "SELECT id, content, domain, source, tags FROM knowledge WHERE id = %s",
-        (atom_id,)
-    )
+    cur.execute(f'SELECT {select_clause} FROM knowledge WHERE "{id_col}" = %s', (atom_id,))
     row = cur.fetchone()
     cur.close()
     if not row:
         return {"error": "not_found"}
-    return {"id": row[0], "content": row[1], "domain": row[2],
-            "source": row[3], "tags": json.loads(row[4] or "[]")}
+
+    result = _row_to_dict(row, present, unmapped)
+    if unmapped:
+        result["_unmapped"] = unmapped
+    return result
 
 
 @mcp.tool()
@@ -579,17 +636,43 @@ def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
+    if "error" in mapping:
+        return mapping
+    fields = mapping["fields"]
+    id_col, domain_col, tags_col = (fields["id"]["column"], fields["domain"]["column"],
+                                     fields["tags"]["column"])
+    if id_col is None:
+        return {"error": "schema_unusable: 'knowledge' table has no mappable 'id' column"}
+
+    select_clause, present, unmapped = _build_select(_KNOWLEDGE_FIELDS, fields)
+    where_parts, params = [], []
+    if domain_col:
+        where_parts.append(f'"{domain_col}" = %s')
+        params.append("continuity")
+    if tags_col:
+        where_parts.append(f'"{tags_col}" LIKE %s')
+        params.append('%"continuity"%')
+    # No 'domain' or 'tags' mapping at all -> nothing to filter continuity by;
+    # fail closed to an empty set rather than silently returning every atom.
+    if not where_parts:
+        return {"atoms": [], "_unmapped": unmapped,
+                "_note": "neither 'domain' nor 'tags' is mapped on this table — "
+                         "cannot identify continuity atoms"}
+    where_sql = " OR ".join(where_parts)
+    params.append(limit)
+
     cur = pg.cursor()
-    cur.execute(
-        "SELECT id, content, domain, source FROM knowledge "
-        "WHERE domain = 'continuity' OR tags LIKE %s "
-        "ORDER BY id DESC LIMIT %s",
-        ('%"continuity"%', limit)
-    )
+    cur.execute(f'SELECT {select_clause} FROM knowledge WHERE {where_sql} '
+                f'ORDER BY "{id_col}" DESC LIMIT %s', params)
     rows = cur.fetchall()
     cur.close()
-    return {"atoms": [{"id": r[0], "content": r[1], "domain": r[2], "source": r[3]}
-                       for r in rows]}
+
+    result = {"atoms": [_row_to_dict(r, present, unmapped) for r in rows]}
+    if unmapped:
+        result["_unmapped"] = unmapped
+    return result
 
 
 # ── Agent dispatch tools ───────────────────────────────────────────────────────
