@@ -23,6 +23,54 @@ def pgp_enabled() -> bool:
     return bool(fp and _FP_RE.match(fp))
 
 
+def signing_blocked() -> tuple[bool, str]:
+    """True when detached signing must not run (Kart sandbox)."""
+    if os.environ.get("WILLOW_IN_KART", "").strip():
+        return True, (
+            "PGP signing is not available inside the Kart bwrap sandbox "
+            "(gpg-agent socket unreachable). Run sign-seed from host terminal."
+        )
+    return False, ""
+
+
+def sign_detached(file_path: Path) -> tuple[bool, str]:
+    """Create file_path.name.sig via gpg --detach-sign --armor (host-side only)."""
+    blocked, reason = signing_blocked()
+    if blocked:
+        return False, reason
+    if not file_path.is_file():
+        return False, f"file not found: {file_path}"
+
+    sig_path = file_path.parent / f"{file_path.name}.sig"
+    try:
+        subprocess.run(
+            [
+                "gpg",
+                "--batch",
+                "--yes",
+                "--detach-sign",
+                "--armor",
+                "-o",
+                str(sig_path),
+                str(file_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        return False, "gpg not found on PATH"
+    except subprocess.CalledProcessError as e:
+        detail = (e.stderr or e.stdout or str(e)).strip()[:200]
+        return False, detail or "gpg detach-sign failed"
+    except subprocess.TimeoutExpired:
+        return False, "gpg detach-sign timed out (30s)"
+    except OSError as e:
+        return False, f"gpg detach-sign error: {e}"
+    return True, str(sig_path)
+
+
 def verify_detached(file_path: Path) -> tuple[bool, str]:
     """Verify file_path + file_path.name.sig against WILLOW_PGP_FINGERPRINT."""
     expected = expected_fingerprint()

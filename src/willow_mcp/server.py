@@ -15,7 +15,7 @@ Tools:
   Dispatch (FS):   dispatch_send, dispatch_read, dispatch_list, dispatch_accept,
                    handoff_write_v4, handoff_read, verify_handoff, agent_clear,
                    session_read, session_enter, session_handoff_write
-  Registry:        specialist_list, specialist_get
+  Registry:        specialist_list, specialist_get, agent_seed_mirror
   Fleet (PG):      fleet_status, fleet_health
   Context (SQLite):context_save, context_get, context_list, context_expire
   Audit (SQLite):  receipts_tail
@@ -1251,6 +1251,22 @@ def specialist_get(app_id: str, agent_id: str, include_permissions: bool = True)
         path = reg.resolve_persona_path(agent_id)
         row["persona_file"] = str(path) if path else None
     return row
+
+
+@mcp.tool()
+@_guarded("agent_seed_mirror")
+def agent_seed_mirror(app_id: str, agent_id: str, slice: str = "full") -> dict:
+    """Mirror a ratified home seed into SOIL collection willow_agents_seeds (AS-5).
+
+    Requires ratified status; when WILLOW_PGP_FINGERPRINT is set the detached
+    .sig must verify. slice: full | voice_only | work_context.
+    """
+    from . import gate
+    from . import seed_mirror as sm
+
+    if not gate.collection_permitted(app_id, sm.MIRROR_COLLECTION):
+        return _collection_denied(app_id, sm.MIRROR_COLLECTION)
+    return sm.mirror_seed_to_store(_store, agent_id, slice_name=slice)
 
 
 # ── Fleet read tools ───────────────────────────────────────────────────────────

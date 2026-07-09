@@ -68,3 +68,20 @@ def test_pgp_skipped_when_fingerprint_unset(home, monkeypatch):
     assert out["present"] is True
     assert out["ratification_status"] == "ratified"
     assert out.get("verify") is None
+    assert out.get("trusted") is True
+
+
+def test_pgp_enforced_when_fingerprint_set(home, monkeypatch):
+    monkeypatch.setenv("WILLOW_PGP_FINGERPRINT", "B" * 40)
+    _write_seed(
+        home,
+        "hanuman",
+        seed={
+            "instruction": "Build.",
+            "ratification": {"status": "ratified", "ratified_at": "2026-07-09"},
+        },
+    )
+    monkeypatch.setattr(sl.pgp, "verify_detached", lambda p: (True, "ok"))
+    out = sl.load_agent_seed("hanuman")
+    assert out["trusted"] is True
+    assert out["verify"]["ok"] is True

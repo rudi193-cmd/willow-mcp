@@ -41,7 +41,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "store_get", "store_search", "store_list", "store_search_all",
     }),
     "store_write": frozenset({
-        "store_put", "store_update", "store_delete",
+        "store_put", "store_update", "store_delete", "agent_seed_mirror",
     }),
     "store_all": frozenset({
         "store_put", "store_get", "store_list", "store_update",
@@ -63,7 +63,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     }),
     "dispatch_read": frozenset({
         "dispatch_read", "dispatch_list", "handoff_read", "session_read", "session_enter",
-        "specialist_list", "specialist_get",
+        "specialist_list", "specialist_get", "agent_seed_mirror",
     }),
     "dispatch_write": frozenset({
         "dispatch_send", "dispatch_accept", "handoff_write_v4",
@@ -75,7 +75,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "session_read", "session_enter", "session_handoff_write", "agent_route", "agent_dispatch_result",
         "fleet_status", "fleet_health", "context_save", "context_get",
         "context_list", "knowledge_search", "store_get", "store_search",
-        "specialist_list", "specialist_get",
+        "specialist_list", "specialist_get", "agent_seed_mirror",
     }),
     "fleet_read": frozenset({
         "fleet_status", "fleet_health",
@@ -108,6 +108,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "dispatch_send", "dispatch_read", "dispatch_list", "dispatch_accept",
         "handoff_write_v4", "handoff_read", "verify_handoff", "agent_clear",
         "session_read", "session_enter", "session_handoff_write",
+        "agent_seed_mirror",
         # Fleet (read-only)
         "fleet_status", "fleet_health",
         # Schema admin
