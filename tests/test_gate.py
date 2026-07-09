@@ -67,6 +67,29 @@ def test_permitted_full_access_group(apps_root):
         assert gate.permitted("admin", tool) is True
 
 
+def test_permitted_deny_tools_overlay(apps_root):
+    app_dir = apps_root / "deny"
+    app_dir.mkdir()
+    (app_dir / "manifest.json").write_text(
+        json.dumps({
+            "permissions": ["full_access"],
+            "deny_tools": ["task_submit", "knowledge_ingest"],
+        })
+    )
+    assert gate.permitted("deny", "store_get") is True
+    assert gate.permitted("deny", "task_submit") is False
+    assert gate.permitted("deny", "knowledge_ingest") is False
+
+
+def test_permitted_malformed_deny_tools_fails_closed(apps_root):
+    app_dir = apps_root / "badden"
+    app_dir.mkdir()
+    (app_dir / "manifest.json").write_text(
+        json.dumps({"permissions": ["store_read"], "deny_tools": "not-a-list"})
+    )
+    assert gate.permitted("badden", "store_get") is False
+
+
 # ── store_scope / collection isolation (B-24 / L-ISO-01) ────────────────────
 
 def test_store_scope_none_when_unset(apps_root):

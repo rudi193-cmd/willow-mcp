@@ -1,6 +1,7 @@
 {
   "format": "specialist_registry_v1",
-  "note": "Seed registry — permissions are aspirational until gate.py compiles and enforces them. See docs/design/specialist-registry.md",
+  "updated_at": "2026-07-09T09:15:00Z",
+  "note": "Ratified permissions per docs/design/permissions-matrix.md. Compile with willow-mcp compile-agents.",
   "specialists": [
     {
       "agent_id": "hanuman",
@@ -135,7 +136,7 @@
     "display_name": "Willow",
     "role": "orchestrator",
     "roles": ["orchestrator", "magistrate"],
-    "permissions": ["orchestrator", "dispatch_read", "context", "store_read", "knowledge_read"],
+    "permissions": ["orchestrator"],
     "deny_tools": [],
     "persona_path": "personas/willow.md",
     "persona_bundle": false,

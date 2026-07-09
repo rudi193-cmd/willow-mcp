@@ -1,19 +1,18 @@
 # Fleet roles — specialist registry (user view)
 
-*Machine source: `docs/design/specialist-registry.md` · seed: `bundle/config/specialists.json`*
-
-> **Permissions not live yet.** The Tool use column lists intended gate groups. Runtime still uses hand-edited manifests and `roles.py` until registry compilation and `deny_tools` enforcement land.
+*Machine source: `docs/design/specialist-registry.md` · policy: `docs/design/permissions-matrix.md`*  
+*Seed: `bundle/config/specialists.json` → compile with `willow-mcp compile-agents`*
 
 ## Specialists
 
-| Function | Name | Roles | Tool use (intended) | Persona file |
-|----------|------|-------|---------------------|--------------|
+| Function | Name | Roles | Tool use | Persona file |
+|----------|------|-------|----------|--------------|
 | BUILD | Hanuman | builder, coordinator | dispatch_write, task_queue, store_read, knowledge_read | `personas/hanuman.md` |
 | AUDIT | Loki | auditor | dispatch_read, dispatch_write, knowledge_read | `personas/loki.md` |
 | RESEARCH | Jeles | librarian, retrieval | dispatch_read, dispatch_write, knowledge_read | `personas/jeles.md` |
 | OPERATE | Ada | operator, monitor | dispatch_read, dispatch_write, fleet_read, knowledge_read | `personas/ada.md` |
-| EMISSARY | Skirnir | gate, witness | dispatch_read, context *(TBD)* | `personas/skirnir.md` |
-| ARCHITECT | Vishwakarma | architect, safe | dispatch_read, store_read, knowledge_read *(TBD)* | `personas/vishwakarma.md` |
+| EMISSARY | Skirnir | gate, witness | dispatch_read, context | `personas/skirnir.md` |
+| ARCHITECT | Vishwakarma | architect, safe | dispatch_read, store_read, knowledge_read | `personas/vishwakarma.md` |
 
 ### Deny highlights
 
@@ -28,7 +27,7 @@
 
 | Function | Name | Roles | Tool use (intended) | Persona |
 |----------|------|-------|---------------------|---------|
-| ORCHESTRATE | Willow | orchestrator, magistrate | orchestrator *(human + PGP gated)* | Charter picker only |
+| ORCHESTRATE | Willow | orchestrator, magistrate | orchestrator (human + PGP gated) | Charter picker only |
 
 See `human-orchestrator.md` — agents cannot run this seat.
 

@@ -53,6 +53,7 @@ def test_registry_materialized_on_init(home):
     hanuman = json.loads((paths.mcp_app_dir("hanuman") / "manifest.json").read_text())
     assert hanuman["app_id"] == "hanuman"
     assert "task_queue" in hanuman["permissions"]
+    assert "kb_promote" in hanuman.get("deny_tools", [])
 
     registry = result.get("registry") or {}
     assert registry.get("manifests_created") or paths.mcp_app_dir("loki").joinpath("manifest.json").is_file()

@@ -83,16 +83,25 @@ def test_wrong_recipient_rejected(home):
 
 
 def test_session_enter_human_path(home):
+    from willow_mcp import home_init as hi
+
+    hi.ensure_home_layout()
     out = ds.session_enter("hanuman", "sess-human")
     assert out["entry_mode"] == "human"
     assert out["dispatch_id"] is None
     assert "session_handoff_write" in out["closeout_tools"]
+    assert out.get("persona")
+    assert "Hanuman" in out.get("persona", "") or out.get("display_name") == "Hanuman"
+    assert out.get("persona_path") == "personas/hanuman.md"
     sess = ds.session_read("hanuman", "sess-human")
     assert sess["status"] == "idle"
     assert sess["dispatch_id"] == ""
 
 
 def test_session_enter_dispatch_by_id(home):
+    from willow_mcp import home_init as hi
+
+    hi.ensure_home_layout()
     sent = ds.dispatch_send("willow", "loki", "# Build\n\nShip it.\n", summary="build")
     did = sent["dispatch_id"]
     out = ds.session_enter("loki", "sess-disp", dispatch_id=did)
@@ -101,6 +110,8 @@ def test_session_enter_dispatch_by_id(home):
     assert "Ship it" in out["assignment"]
     assert out["status"] == "working"
     assert out["closeout_tools"] == ["handoff_write_v4"]
+    assert out.get("persona")
+    assert out.get("display_name") == "Loki"
 
 
 def test_session_enter_picks_pending_packet(home):

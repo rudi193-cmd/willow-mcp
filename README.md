@@ -23,7 +23,13 @@ Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 
 ```bash
 willow-mcp-init    # scaffold $WILLOW_HOME (idempotent)
+willow-mcp-compile --force   # compile manifests (use product venv — see below)
 ```
+
+> **PATH note:** `~/.local/bin/willow-mcp` is often the **fleet** shim (`sap_mcp.py`), not this
+> product. Use the product venv binary:
+> `~/github/.willow/venvs/willow-mcp/bin/willow-mcp-compile --force`
+> or `.../bin/willow-mcp compile-agents --force` after `pip install -e .` in that venv.
 
 Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (LOCKED).
 
