@@ -2139,6 +2139,15 @@ def main():
         help="path to specialists.json (default: $WILLOW_HOME/config or bundle)",
     )
 
+    persona_p = subparsers.add_parser(
+        "compile-persona",
+        help="Compile personas/{agent_id}.md from $WILLOW_HOME/seeds/{agent_id}.json",
+    )
+    persona_p.add_argument("agent_id", help="agent id (e.g. hanuman, willow)")
+    persona_p.add_argument("--force", action="store_true", help="overwrite existing persona .md")
+    persona_p.add_argument("--dry-run", action="store_true", help="preview markdown without writing")
+    persona_p.add_argument("--out", default="", help="optional output path")
+
     args, _ = parser.parse_known_args()
 
     if args.command == "setup":
@@ -2171,6 +2180,14 @@ def main():
             registry_file=reg,
         )
         print(json.dumps(result, indent=2))
+        return
+    if args.command == "compile-persona":
+        from pathlib import Path
+
+        from .persona_compile import compile_persona
+
+        out = Path(args.out).expanduser() if args.out else None
+        print(json.dumps(compile_persona(args.agent_id, dry_run=args.dry_run, force=args.force, out_path=out), indent=2))
         return
 
     if args.serve or _SERVE_MODE:

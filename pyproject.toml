@@ -28,6 +28,7 @@ willow-mcp = "willow_mcp.server:main"
 willow-mcp-init = "willow_mcp.home_init:main"
 willow-mcp-compile = "willow_mcp.registry:compile_cli_main"
 willow-mcp-sign-seed = "willow_mcp.seed_sign:main"
+willow-mcp-compile-persona = "willow_mcp.persona_compile:main"
 
 [project.urls]
 Homepage = "https://github.com/rudi193-cmd/willow-mcp"
