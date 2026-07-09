@@ -323,4 +323,68 @@ And on 2026-07-09:
 
 **Recommendation:** L-ISO-01's fix is opt-in, not a new default — any deployment running multiple apps with only partial trust in each other on one willow-mcp instance should add `store_scope` to each app's manifest rather than relying on the unscoped default, since `full_access`/`store_read` without it still implies read access to every other app's data (single-operator, single-trust-domain deployments are unaffected either way, the same accepted trust model noted for stdio `app_id` elsewhere in this doc). Any deployment where the agent process is not fully trusted should additionally `chown` `mcp_apps/` (including `_net_leases/`) to a separate uid and set `WILLOW_MCP_STRICT_TRUST_ROOT=1`, per L-NET-02 — without that, the three egress keys are policy, not enforcement. No open items from this audit block a serve-mode deployment or PyPI publish with OAuth enabled. Before publishing, re-run a fresh audit pass specifically against serve mode's current (now-fixed) state — this document's rubric was written stdio-first and augmented for serve mode reactively; a clean-slate pass would catch anything this incremental process missed.
 
-*ΔΣ=42*
+---
+
+## Addendum — Live adversarial audit (2026-07-09)
+
+Unlike the rubric pass above (static review), this addendum records results from
+**driving the running server** over the real MCP stdio protocol with hostile
+input. Method: two rounds — the first surfaced confounders (Pydantic arg-
+validation errors, a missing `knowledge` table, and the rate limiter masking
+deeper controls), which were de-confounded and re-run so each verdict reflects
+the control it actually exercises; plus a direct battery against the Kart
+security scanner and a sandbox filesystem-tamper probe.
+
+### Live re-validation — controls confirmed against the running server
+
+| Surface | Probe(s) | Result |
+|---|---|---|
+| Protocol | garbage bytes, non-JSON-RPC, call-before-init, unknown method, 10 MB line, 5k-deep nested JSON | server survives, stays up, still completes a valid handshake |
+| Auth / gate | empty & unmanifested `app_id` (fail-closed), `../willow` traversal, gate-denied tools, `deny_tools`, orchestrator `human_only` + `dispatch_id` | all denied |
+| Store scope | cross-lane write (`collection_denied`), `../../tmp` (`illegal path characters`), `record_id` `../etc/passwd` (`not_found`) | contained |
+| SQL injection | `' OR '1'='1`, `DROP TABLE`, `UNION SELECT` against a real table holding a secret row | parameterized — injections return empty, secret surfaces only on a legitimate match, table intact |
+| Egress | `allow_net=True` → `net_denied` (first of three keys) | denied |
+| Sandbox | netns isolation (separate inode, no routes); **manifest write → `Read-only file system`** | isolated; ACL trust roots immutable from inside the sandbox |
+| Rate limiting | 20-call burst | 10/20 throttled |
+
+### New findings
+
+#### P2: L-DOS-02 — Kart scanner has no resource-exhaustion coverage — OPEN (fix at source)
+
+`kartikeya.check_kart_task` blocks `rm -rf /`, `curl|sh`, reverse shells, `chmod
+-R 777 /`, and `mkfs`, but **passes the entire resource-exhaustion class**: fork
+bomb (`:(){ :|:& };:`), CPU spin (`while :; do :; done`), disk fill (`dd
+if=/dev/zero`), and memory hog all reach the sandbox. The bwrap sandbox mitigates
+with a 120 s timeout + PID namespace, but imposes **no memory / CPU / PID cgroup
+limits**, so a detonating bomb can degrade the host for up to the timeout window.
+Authenticated-caller only (requires `task_queue` + a confirmed mapping + past the
+rate limiter). The scanner lives in the **`kartikeya`** dependency, not this repo.
+*Remediation:* add resource-exhaustion patterns to `kartikeya`'s `task_scan`, and
+a memory/PID cap on the sandbox; optionally a willow-side submit-time pre-scan as
+defense-in-depth.
+
+#### P3: L-CMD-01 — Kart scanner destructive-class gaps — OPEN (fix at source)
+
+`find / -delete` and `cat /dev/zero > /dev/sda` **pass** the scanner despite being
+equivalent to `rm -rf /` / a disk wipe (both of which *are* caught). In this
+configuration bwrap's ephemeral filesystem, read-only trust-root binds, and
+absent device nodes contain them (verified: a sandboxed write to the ACL manifest
+returns `Read-only file system`), so they are not exploitable against the host —
+but the scanner should not depend solely on the sandbox for the destructive class.
+Same location/remediation as L-DOS-02.
+
+#### P3: L-DOS-03 — No record-size limit on the SOIL store — OBSERVE
+
+`store_put` accepted a 5 MB record in 0.13 s with no cap. Storage-exhaustion
+vector for an authenticated caller (unbounded record/collection growth).
+*Remediation:* bound record size (mirror the existing field-size truncation used
+for `content`/`tags`).
+
+**Assessment:** the security architecture held under live fire — fail-closed
+gating, parameterized SQL, sandbox network+filesystem isolation, read-only ACL
+trust roots, three-key egress, and rate limiting all confirmed against the
+running server. The only real gap is coverage in the sandboxed executor's static
+scanner (L-DOS-02 / L-CMD-01), which is contained for the filesystem class by the
+sandbox and localized to the `kartikeya` dependency.
+
+*ΔΣ=43*
