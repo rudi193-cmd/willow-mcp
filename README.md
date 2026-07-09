@@ -53,6 +53,10 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `kb_journal` | Add a journal-domain knowledge atom (requires a confirmed schema mapping) |
 | `kb_startup_continuity` | Fetch atoms tagged/domained for startup continuity |
 | `schema_confirm_mapping` | Confirm (optionally correct) a table's column mapping, unlocking its write tools. `preview=True` dry-runs it and renders a **sample row** so you can see what each field actually resolves to before trusting a name match — see [docs/design/schema-adaptation.md](docs/design/schema-adaptation.md) |
+| `gap_log` | Log or bump a "we don't know this yet" entry (fleet-wide backlog, SOIL-only, no Postgres needed) |
+| `gap_list` | List gaps, most-asked first — filter by `topic` and/or `status` (`open`/`resolved`/`promoted`) |
+| `gap_resolve` | Mark a gap as being worked or answered — bookkeeping only, does not write to the knowledge base |
+| `gap_promote` | Turn a resolved gap into a knowledge atom. Requires `answer`, at least one `source`, and `confirmed_by`; writes through the same schema-confirmation gate as `knowledge_ingest` and closes the gap out |
 | `task_submit` | Submit task to Kart queue |
 | `task_status` | Check task status |
 | `task_list` | List pending tasks |
@@ -359,8 +363,12 @@ needs a manifest at `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json`:
 see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the full set
 (`store_read`, `store_write`, `knowledge_read`, `knowledge_write`,
 `schema_admin`, `task_queue`, `agent_dispatch`, `fleet_read`, `context`,
-`audit`, `full_access`). Fail-closed: no manifest, or an empty `permissions`
-list, denies every call for that `app_id`.
+`audit`, `gap_read`, `gap_write`, `gap_promote`, `full_access`). Fail-closed:
+no manifest, or an empty `permissions` list, denies every call for that
+`app_id`. `gap_promote` is kept separate from `gap_write` — landing
+something as trusted knowledge is a more consequential act than logging or
+resolving a gap, the same reasoning `schema_admin` gets its own group
+instead of folding into `knowledge_write`.
 
 There is also one **capability permission**, `task_net`, which is not a tool
 name but a privilege flag: it lets an app *ask* for `task_submit(allow_net=True)`.

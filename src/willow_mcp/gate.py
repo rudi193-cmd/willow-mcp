@@ -88,6 +88,18 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "audit": frozenset({
         "receipts_tail",
     }),
+    "gap_read": frozenset({
+        "gap_list",
+    }),
+    "gap_write": frozenset({
+        "gap_log", "gap_resolve",
+    }),
+    # Landing a gap as trusted knowledge is a more consequential act than
+    # logging or resolving one, so it's gated as its own group rather than
+    # folded into gap_write — same reasoning as schema_admin below.
+    "gap_promote": frozenset({
+        "gap_promote",
+    }),
     # Confirming a schema mapping unlocks write tools for a whole table — a
     # more consequential act than any single write, so it's gated as its
     # own group rather than folded into knowledge_write (docs/design/
@@ -120,6 +132,8 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "context_save", "context_get", "context_list", "context_expire",
         # Self-audit
         "receipts_tail",
+        # Gap backlog
+        "gap_log", "gap_list", "gap_resolve", "gap_promote",
     }),
 }
 

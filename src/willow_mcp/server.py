@@ -56,6 +56,7 @@ from .receipts import ReceiptLog
 from . import schema_profile as sp
 from . import dispatch as dispatch_stack
 from . import handoff as handoff_stack
+from . import gaps as gap_backlog
 
 _store = Store()
 _receipt_log = ReceiptLog()
@@ -298,7 +299,7 @@ def _sanitize(kwargs: dict) -> tuple[dict, Optional[str]]:
             if size > _MAX_BLOB_BYTES:
                 return kwargs, f"'{key}' exceeds 512KB limit ({size} bytes)"
 
-    for key in ("content", "task", "query"):
+    for key in ("content", "task", "query", "question", "answer"):
         val = kwargs.get(key)
         if isinstance(val, str):
             cleaned = val.replace("\x00", "")
@@ -539,16 +540,21 @@ def store_search_all(app_id: str, query: str) -> list:
 
 # ── Knowledge tools ────────────────────────────────────────────────────────────
 
-@mcp.tool()
-@_guarded("knowledge_ingest")
-def knowledge_ingest(
+def _knowledge_ingest_core(
     app_id: str,
     content: str,
     domain: str = "general",
     source: str = "",
     tags: Optional[list] = None,
 ) -> dict:
-    """Add a knowledge atom to the Postgres knowledge base. Check for duplicates first."""
+    """The actual knowledge-base write, shared by knowledge_ingest and
+    gap_promote. Deliberately ungated (no @_guarded, no receipt of its
+    own) — callers are tools already gated under their own name, and
+    routing both through one _guarded("knowledge_ingest") wrapper would
+    force gap_promote callers to also hold knowledge_ingest permission and
+    would double the receipt/rate-limit accounting for one logical write.
+    The schema-confirmation requirement below is the real gate either way:
+    unconfirmed, this refuses to write regardless of caller."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -582,6 +588,108 @@ def knowledge_ingest(
     )
     cur.close()
     return {"id": kid}
+
+
+@mcp.tool()
+@_guarded("knowledge_ingest")
+def knowledge_ingest(
+    app_id: str,
+    content: str,
+    domain: str = "general",
+    source: str = "",
+    tags: Optional[list] = None,
+) -> dict:
+    """Add a knowledge atom to the Postgres knowledge base. Check for duplicates first."""
+    return _knowledge_ingest_core(app_id, content, domain=domain, source=source, tags=tags)
+
+
+# ── Gap backlog tools ──────────────────────────────────────────────────────────
+#
+# "What don't we know yet" — a fleet-wide backlog (core/gaps.py), not scoped
+# to app_id, the same way knowledge_search/store_search_all are shared by
+# default. gap_log/list/resolve work SOIL-only (no Postgres needed);
+# gap_promote is the one write that reaches the knowledge base, and it does
+# so through the exact same schema-confirmation gate as knowledge_ingest.
+
+@mcp.tool()
+@_guarded("gap_log")
+def gap_log(app_id: str, topic: str, question: str) -> dict:
+    """Log or bump a "we don't know this yet" entry. Repeated asks of the
+    same topic+question increment asked_count instead of duplicating —
+    asked_count is the backlog's own priority signal for what to fill in
+    next. Returns {id, status, asked_count}."""
+    return gap_backlog.log(topic, question)
+
+
+@mcp.tool()
+@_guarded("gap_list", list_error=True)
+def gap_list(
+    app_id: str,
+    topic: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+) -> list:
+    """List gaps, most-asked first. Filter by topic and/or status
+    (open | resolved | promoted)."""
+    return gap_backlog.list_gaps(topic=topic, status=status, limit=limit)
+
+
+@mcp.tool()
+@_guarded("gap_resolve")
+def gap_resolve(app_id: str, gap_id: str, note: str = "") -> dict:
+    """Mark a gap as being worked or answered — bookkeeping only, does not
+    write to the knowledge base. Use gap_promote to actually land a
+    verified answer and close the gap out."""
+    return gap_backlog.resolve(gap_id, note=note)
+
+
+@mcp.tool()
+@_guarded("gap_promote")
+def gap_promote(
+    app_id: str,
+    gap_id: str,
+    answer: str,
+    sources: list,
+    confirmed_by: str,
+    domain: str = "general",
+    tags: Optional[list] = None,
+) -> dict:
+    """Turn a gap into trusted knowledge. Requires an answer, at least one
+    source, and who's vouching for it (confirmed_by) — a human name, an
+    agent id, whatever this fleet uses as an identity, but never empty.
+    Writes through the SAME schema-confirmation gate as a direct
+    knowledge_ingest call: if the 'knowledge' table mapping for this app_id
+    hasn't been confirmed via schema_confirm_mapping, this refuses with
+    unconfirmed_schema exactly like knowledge_ingest would. Requires
+    Postgres — gap_log/list/resolve work SOIL-only, but promotion targets
+    the durable, searchable knowledge base. Gated as its own permission
+    (gap_promote), separate from gap_write, the same way schema_admin is
+    kept separate from knowledge_write — landing something as trusted
+    knowledge is a more consequential act than logging or resolving a gap."""
+    gap = gap_backlog.get(gap_id)
+    if not gap:
+        return {"error": "not_found"}
+    if gap.get("status") == "promoted":
+        return {"error": "already_promoted", "promoted_to": gap.get("promoted_to")}
+
+    answer = (answer or "").strip()
+    confirmed_by = (confirmed_by or "").strip()
+    source_list = [str(s) for s in (sources or []) if str(s).strip()]
+    if not answer or not source_list or not confirmed_by:
+        return {"error": "answer, at least one source, and confirmed_by are required"}
+
+    merged_tags = list(tags or []) + [f"confirmed_by:{confirmed_by}", f"gap:{gap_id}"]
+    result = _knowledge_ingest_core(
+        app_id,
+        answer,
+        domain=domain,
+        source=", ".join(source_list),
+        tags=merged_tags,
+    )
+    if "error" in result:
+        return result
+    gap_backlog.mark_promoted(gap_id, result["id"])
+    return {"id": result["id"], "gap_id": gap_id, "promoted": True}
 
 
 @mcp.tool()
