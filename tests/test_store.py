@@ -103,6 +103,39 @@ def test_search_all(store):
     assert "col_b" in collections
 
 
+# ── list_collections (factored out of search_all's own enumeration) ─────────
+
+def test_list_collections_empty_store(store):
+    assert store.list_collections() == []
+
+
+def test_list_collections_lists_every_collection(store):
+    store.put("col_a", {"x": 1})
+    store.put("col_b", {"x": 2})
+    assert set(store.list_collections()) == {"col_a", "col_b"}
+
+
+def test_list_collections_honors_scope(store):
+    store.put("myapp_notes", {"x": 1})
+    store.put("agents", {"x": 2})
+    assert store.list_collections(scope=["myapp_*"]) == ["myapp_notes"]
+
+
+def test_list_collections_empty_scope_denies_all(store):
+    store.put("col_a", {"x": 1})
+    assert store.list_collections(scope=[]) == []
+
+
+def test_list_collections_matches_search_all_enumeration(store):
+    """search_all was refactored to call list_collections internally —
+    pin that the set of collections it walks didn't change shape."""
+    store.put("col_a", {"content": "willow"})
+    store.put("col_b", {"content": "willow"})
+    assert set(store.list_collections()) == {
+        r["_collection"] for r in store.search_all("willow")
+    }
+
+
 def test_put_rejects_path_traversal_collection(store):
     """Regression: Store itself must reject an unsafe collection name,
     independent of server.py's _sanitize() — defense in depth."""

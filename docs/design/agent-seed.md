@@ -202,25 +202,27 @@ Aligns with fleet KB pattern (tier + lifecycle + provenance):
 
 ---
 
-## 5. Exposure membrane (UI — future slice)
+## 5. Exposure membrane (AS-8)
 
 Cross-ref: charter `dec-exposure-picker-ui-2026-07-09`.
 
-Standing defaults: `$WILLOW_HOME/config/exposure.json` (or extension of `settings.global.json`).
+Standing defaults: `$WILLOW_HOME/config/exposure.json` (`exposure_v1`; scaffolded by `willow-mcp-init`).
 
 | Preset | Blocks included |
 |--------|-----------------|
 | `voice_only` | `persona.register`, `persona.voice_rules` |
-| `work_context` | + `context.active_work`, `context.session_pattern` |
-| `full_seed` | + `persona.cast`, `persona.pillars`, `context.personal_note` |
-| `custom` | Per-field checkboxes |
+| `work_context` | + `context.active_work`, `context.session_pattern`, `context.correction_pattern` |
+| `full_seed` (`full` alias) | + `persona.cast`, `persona.pillars`, `context.personal_note`, … |
+| `custom` | Per-field dotted paths (checkbox IDs) |
+
+MCP: `exposure_config_get`, `exposure_slice`. `session_enter` injects `agent_seed_exposure` from `session_enter` default.
 
 Pipeline:
 
 ```
 agent_seed_v1 (home)
-  → exposure_profile (standing defaults)
-  → exposure_slice (per-action picker, audited)
+  → exposure_profile (standing defaults in exposure.json)
+  → exposure_slice (per-action preset or custom fields)
   → outbound_envelope (dispatch / cloud LLM / Grove)
 ```
 
@@ -250,7 +252,7 @@ session_enter(app_id, session_id, dispatch_id?)
   2. load agent_seed from $WILLOW_HOME/seeds/{agent_id}.json
   3. verify .sig if WILLOW_PGP_FINGERPRINT set
   4. if ratification.status == pending → surface gaps[]
-  5. apply exposure_profile + per-action slice (future)
+  5. apply exposure_profile + per-action slice (`agent_seed_exposure` via `exposure.json`)
   6. load persona_path (.md) — compiled from seed or bundle fallback
   7. dispatch path: inject assignment.md
 ```
@@ -296,9 +298,9 @@ Registry slice **S-R*** for permissions remains blocked until operator ratifies 
 | AS-3 | `session_enter` reads seed (advisory if unratified) | **done** |
 | AS-4 | `sign-seed` CLI + `.sig` verify in loader | **done** |
 | AS-5 | SOIL `agents/seeds` mirror tool | **done** (`willow_agents_seeds` + `agent_seed_mirror`) |
-| AS-6 | `kb_ingest` slice promotion (`source_type: agent_seed`) | ratification |
-| AS-7 | `compile-persona` seed → `.md` | — |
-| AS-8 | Exposure picker + `exposure.json` | UI slice |
+| AS-6 | `kb_ingest` slice promotion (`source_type: agent_seed`) | **done** |
+| AS-7 | `compile-persona` seed → `.md` | **done** (`willow-mcp-compile-persona`) |
+| AS-8 | Exposure picker + `exposure.json` | **done** (`exposure_config_get`, `exposure_slice`) |
 
 ---
 

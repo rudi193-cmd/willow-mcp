@@ -89,9 +89,18 @@ separate keys**, all held at once (B-19, B-29, B-32):
   its deadline, or a lease whose record names a *different* app than the file it
   sits in — all read as **denied**. Absence is not consent. A name is not an
   identity.
-- Flipping `consent.internet` to `false` stops egress **fleet-wide**, instantly,
-  without editing a single manifest. That is the intended off switch — reach for
-  it rather than revoking capabilities one app at a time.
+- Flipping `consent.internet` to `false` stops egress through **`task_submit`**,
+  without editing a single manifest. Reach for it rather than revoking
+  capabilities one app at a time.
+- **It does not stop egress fleet-wide, and this doc used to say it did.** The
+  three keys gate the *submitter*. The *executor* — `kartikeya`, and willow-2.0's
+  own Kart copy — reads `# allow_net` out of the task text and honors it on sight:
+  no `consent`, no `lease`, no `task_net` appears anywhere in it. The `tasks`
+  table is shared Postgres, so any other submitter that writes a row carrying
+  that directive reaches the network regardless of what the consent file says
+  (**B-37**, P0). Verified live with `task_net` revoked and the lease expired.
+  Until B-37 lands, `consent.internet: false` is an off switch for one door in a
+  building with more than one door.
 - **An agent may request egress; it may never grant itself egress.** If you find
   yourself about to write `task_net` into a manifest, or to run
   `willow-mcp grant-net`, so that your own next call succeeds — **stop.** That is

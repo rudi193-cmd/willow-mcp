@@ -381,8 +381,8 @@ Same operator may run both; designs must not require fylgja for willow-mcp to wo
 
 | File | Nest content | Governance / fleet | willow-mcp name |
 |------|--------------|-------------------|-----------------|
-| `ORIENT.md` | DAG dispatch CLI | Tri-modal seat (`~/github/willow`) | `docs/ORIENT_ORCHESTRATOR.md` |
-| `AGENTS.md` | Specialist packet guide | Governance cold-start | `docs/AGENTS_SPECIALIST.md` |
+| `ORIENT.md` | DAG dispatch CLI | Tri-modal seat (charter spike) | **Do not import** — charter keeps its own `ORIENT.md` |
+| `AGENTS.md` | Nest packet guide | Governance cold-start | `docs/AGENTS.md` (`#orchestrator` / `#specialist`) |
 | `envelopes/pre-approved.json` | Tool allow/deny per role | Article III.2 **authority grants** | `persona_envelopes` / manifest — **not** pre-approved |
 
 ### Constitution & law

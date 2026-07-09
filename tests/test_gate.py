@@ -185,3 +185,33 @@ def test_collection_permitted_prefix_wildcard(apps_root):
 def test_collection_permitted_empty_scope_denies_all(apps_root):
     _write_manifest(apps_root, "locked", ["full_access"], store_scope=[])
     assert gate.collection_permitted("locked", "anything") is False
+
+
+# ── gap backlog permission groups ────────────────────────────────────────────
+
+def test_gap_read_expands_to_gap_list_only(apps_root):
+    _write_manifest(apps_root, "gap_reader", ["gap_read"])
+    assert gate.permitted("gap_reader", "gap_list") is True
+    assert gate.permitted("gap_reader", "gap_log") is False
+    assert gate.permitted("gap_reader", "gap_promote") is False
+
+
+def test_gap_write_expands_to_log_and_resolve_not_promote(apps_root):
+    _write_manifest(apps_root, "gap_writer", ["gap_write"])
+    assert gate.permitted("gap_writer", "gap_log") is True
+    assert gate.permitted("gap_writer", "gap_resolve") is True
+    assert gate.permitted("gap_writer", "gap_promote") is False
+
+
+def test_gap_promote_is_its_own_group(apps_root):
+    # Landing a gap as trusted knowledge is gated separately from gap_write,
+    # same reasoning as schema_admin vs knowledge_write.
+    _write_manifest(apps_root, "gap_promoter", ["gap_promote"])
+    assert gate.permitted("gap_promoter", "gap_promote") is True
+    assert gate.permitted("gap_promoter", "gap_log") is False
+
+
+def test_gap_tools_included_in_full_access(apps_root):
+    _write_manifest(apps_root, "admin", ["full_access"])
+    for tool in ("gap_log", "gap_list", "gap_resolve", "gap_promote"):
+        assert gate.permitted("admin", tool) is True

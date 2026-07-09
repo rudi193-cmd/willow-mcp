@@ -28,6 +28,17 @@ Assumes the viewer already knows what MCP/Postgres/a task queue are — labels
 use the real tool/table vocabulary (`fleet_status`, `schema_confirm_mapping`,
 `receipts_tail`, etc).
 
+A seventh tree part, **stomata**, was added once the egress gate got its own
+CLI (`willow-mcp gates`): the pores that decide whether an app may exchange
+anything with the outside world — `consent.internet` (the operator's standing
+switch), `task_net` (the capability to ever ask), and the egress lease (the
+time-boxed grant), all three or the pore stays shut. Unlike every other part
+of the tree here, this one isn't a fabricated mockup number: `willow-mcp
+gates` renders this exact three-key on/off state today. The mirror's Stomata
+card is deliberately built from the same primitives (`chip`/`agent-row`)
+already in the file rather than new CSS, to keep it feeling native to the
+sketch instead of bolted on.
+
 ## `willow-general-audience.html` — consumer-facing
 
 Same tree, no terminal, no jargon. Every label is something a person would

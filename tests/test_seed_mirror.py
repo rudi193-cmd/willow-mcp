@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from willow_mcp import exposure as exp
 from willow_mcp import seed_loader as sl
 from willow_mcp import seed_mirror as sm
 from willow_mcp import server
@@ -48,7 +49,7 @@ def test_apply_slice_voice_only():
         "persona": {"register": "calm", "voice_rules": ["a"], "cast": "secret"},
         "context": {"active_work": "hidden"},
     }
-    body = sm.apply_slice(data, "voice_only")
+    body = exp.apply_slice(data, "voice_only")
     assert body == {"persona": {"register": "calm", "voice_rules": ["a"]}}
 
 
@@ -72,7 +73,7 @@ def test_mirror_to_store(home, monkeypatch):
     monkeypatch.delenv("WILLOW_PGP_FINGERPRINT", raising=False)
     _write_ratified_seed(home, "jeles")
     store = Store()
-    out = sm.mirror_seed_to_store(store, "jeles")
+    out = sm.mirror_seed_to_store(store, "jeles", slice_name="full")
     assert out["ok"] is True
     assert out["collection"] == sm.MIRROR_COLLECTION
     item = store.get(sm.MIRROR_COLLECTION, "jeles")

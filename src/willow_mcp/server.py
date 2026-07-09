@@ -8,16 +8,18 @@ Modes:
 Tools:
   Store (SQLite):  store_put, store_get, store_list, store_update, store_search,
                    store_delete, store_search_all
-  Knowledge (PG):  knowledge_ingest, knowledge_search,
+  Knowledge (PG):  knowledge_ingest, knowledge_search, kb_ingest,
                    kb_at, kb_promote, kb_journal, kb_startup_continuity
   Tasks (PG):      task_submit, task_status, task_list
   Agent (PG):      agent_route, agent_dispatch_result
   Dispatch (FS):   dispatch_send, dispatch_read, dispatch_list, dispatch_accept,
                    handoff_write_v4, handoff_read, verify_handoff, agent_clear,
                    session_read, session_enter, session_handoff_write
-  Registry:        specialist_list, specialist_get, agent_seed_mirror
+  Registry:        specialist_list, specialist_get, agent_seed_mirror,
+                   exposure_config_get, exposure_slice
   Fleet (PG):      fleet_status, fleet_health
   Context (SQLite):context_save, context_get, context_list, context_expire
+  Integrations:    integration_list, integration_status, integration_call
   Audit (SQLite):  receipts_tail
   Diagnostic:      diagnostic_summary (ungated self-check)
 
@@ -43,6 +45,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from functools import wraps
+from pathlib import Path
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -52,9 +55,11 @@ from .db import Store, get_pg
 from .gate import permitted
 from .identity_binding import resolve_app_id
 from .receipts import ReceiptLog
+from . import paths
 from . import schema_profile as sp
 from . import dispatch as dispatch_stack
 from . import handoff as handoff_stack
+from . import gaps as gap_backlog
 
 _store = Store()
 _receipt_log = ReceiptLog()
@@ -290,14 +295,14 @@ def _sanitize(kwargs: dict) -> tuple[dict, Optional[str]]:
     Returns (cleaned_kwargs, None) on success, or (kwargs, error_message) if a
     field fails validation outright (caller denies the call — no partial writes).
     """
-    for key in ("record", "context", "value"):
+    for key in ("record", "context", "value", "body"):
         val = kwargs.get(key)
         if isinstance(val, dict):
             size = len(json.dumps(val))
             if size > _MAX_BLOB_BYTES:
                 return kwargs, f"'{key}' exceeds 512KB limit ({size} bytes)"
 
-    for key in ("content", "task", "query"):
+    for key in ("content", "task", "query", "question", "answer", "topic"):
         val = kwargs.get(key)
         if isinstance(val, str):
             cleaned = val.replace("\x00", "")
@@ -310,13 +315,14 @@ def _sanitize(kwargs: dict) -> tuple[dict, Optional[str]]:
     if isinstance(collection, str) and _PATH_TRAVERSAL_RE.search(collection):
         return kwargs, "'collection' contains illegal path characters"
 
-    tags = kwargs.get("tags")
-    if isinstance(tags, list):
-        if len(tags) > _MAX_TAGS:
-            return kwargs, f"'tags' exceeds max {_MAX_TAGS} items"
-        for t in tags:
-            if isinstance(t, str) and len(t) > _MAX_TAG_LEN:
-                return kwargs, f"tag exceeds max {_MAX_TAG_LEN} chars"
+    for key in ("tags", "sources"):
+        items = kwargs.get(key)
+        if isinstance(items, list):
+            if len(items) > _MAX_TAGS:
+                return kwargs, f"'{key}' exceeds max {_MAX_TAGS} items"
+            for item in items:
+                if isinstance(item, str) and len(item) > _MAX_TAG_LEN:
+                    return kwargs, f"'{key}' item exceeds max {_MAX_TAG_LEN} chars"
 
     return kwargs, None
 
@@ -440,8 +446,9 @@ def _guarded(tool_name: str, *, list_error: bool = False):
 # ── Store tools ────────────────────────────────────────────────────────────────
 #
 # Collection-level scoping (B-24 / SECURITY_AUDIT.md L-ISO-01): the SOIL store
-# is deliberately shared with the wider Willow fleet by default (WILLOW_STORE_
-# ROOT, README's "share data" note) — store_* tools have no isolation unless
+# shares the wider Willow fleet's store by default (WILLOW_STORE_ROOT) — a
+# default, not a design commitment; point it elsewhere and diagnostic_summary's
+# `severance` check confirms the cut — store_* tools have no isolation unless
 # an app's manifest opts in via a `store_scope` list (gate.store_scope /
 # gate.collection_permitted). Unscoped apps keep today's unrestricted access;
 # this only closes the gap for apps an operator explicitly chooses to confine.
@@ -538,16 +545,21 @@ def store_search_all(app_id: str, query: str) -> list:
 
 # ── Knowledge tools ────────────────────────────────────────────────────────────
 
-@mcp.tool()
-@_guarded("knowledge_ingest")
-def knowledge_ingest(
+def _knowledge_ingest_core(
     app_id: str,
     content: str,
     domain: str = "general",
     source: str = "",
     tags: Optional[list] = None,
 ) -> dict:
-    """Add a knowledge atom to the Postgres knowledge base. Check for duplicates first."""
+    """The actual knowledge-base write, shared by knowledge_ingest and
+    gap_promote. Deliberately ungated (no @_guarded, no receipt of its
+    own) — callers are tools already gated under their own name, and
+    routing both through one _guarded("knowledge_ingest") wrapper would
+    force gap_promote callers to also hold knowledge_ingest permission and
+    would double the receipt/rate-limit accounting for one logical write.
+    The schema-confirmation requirement below is the real gate either way:
+    unconfirmed, this refuses to write regardless of caller."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -581,6 +593,108 @@ def knowledge_ingest(
     )
     cur.close()
     return {"id": kid}
+
+
+@mcp.tool()
+@_guarded("knowledge_ingest")
+def knowledge_ingest(
+    app_id: str,
+    content: str,
+    domain: str = "general",
+    source: str = "",
+    tags: Optional[list] = None,
+) -> dict:
+    """Add a knowledge atom to the Postgres knowledge base. Check for duplicates first."""
+    return _knowledge_ingest_core(app_id, content, domain=domain, source=source, tags=tags)
+
+
+# ── Gap backlog tools ──────────────────────────────────────────────────────────
+#
+# "What don't we know yet" — a fleet-wide backlog (core/gaps.py), not scoped
+# to app_id, the same way knowledge_search/store_search_all are shared by
+# default. gap_log/list/resolve work SOIL-only (no Postgres needed);
+# gap_promote is the one write that reaches the knowledge base, and it does
+# so through the exact same schema-confirmation gate as knowledge_ingest.
+
+@mcp.tool()
+@_guarded("gap_log")
+def gap_log(app_id: str, topic: str, question: str) -> dict:
+    """Log or bump a "we don't know this yet" entry. Repeated asks of the
+    same topic+question increment asked_count instead of duplicating —
+    asked_count is the backlog's own priority signal for what to fill in
+    next. Returns {id, status, asked_count}."""
+    return gap_backlog.log(topic, question)
+
+
+@mcp.tool()
+@_guarded("gap_list", list_error=True)
+def gap_list(
+    app_id: str,
+    topic: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 50,
+) -> list:
+    """List gaps, most-asked first. Filter by topic and/or status
+    (open | resolved | promoted)."""
+    return gap_backlog.list_gaps(topic=topic, status=status, limit=limit)
+
+
+@mcp.tool()
+@_guarded("gap_resolve")
+def gap_resolve(app_id: str, gap_id: str, note: str = "") -> dict:
+    """Mark a gap as being worked or answered — bookkeeping only, does not
+    write to the knowledge base. Use gap_promote to actually land a
+    verified answer and close the gap out."""
+    return gap_backlog.resolve(gap_id, note=note)
+
+
+@mcp.tool()
+@_guarded("gap_promote")
+def gap_promote(
+    app_id: str,
+    gap_id: str,
+    answer: str,
+    sources: list,
+    confirmed_by: str,
+    domain: str = "general",
+    tags: Optional[list] = None,
+) -> dict:
+    """Turn a gap into trusted knowledge. Requires an answer, at least one
+    source, and who's vouching for it (confirmed_by) — a human name, an
+    agent id, whatever this fleet uses as an identity, but never empty.
+    Writes through the SAME schema-confirmation gate as a direct
+    knowledge_ingest call: if the 'knowledge' table mapping for this app_id
+    hasn't been confirmed via schema_confirm_mapping, this refuses with
+    unconfirmed_schema exactly like knowledge_ingest would. Requires
+    Postgres — gap_log/list/resolve work SOIL-only, but promotion targets
+    the durable, searchable knowledge base. Gated as its own permission
+    (gap_promote), separate from gap_write, the same way schema_admin is
+    kept separate from knowledge_write — landing something as trusted
+    knowledge is a more consequential act than logging or resolving a gap."""
+    gap = gap_backlog.get(gap_id)
+    if not gap:
+        return {"error": "not_found"}
+    if gap.get("status") == "promoted":
+        return {"error": "already_promoted", "promoted_to": gap.get("promoted_to")}
+
+    answer = (answer or "").strip()
+    confirmed_by = (confirmed_by or "").strip()
+    source_list = [str(s) for s in (sources or []) if str(s).strip()]
+    if not answer or not source_list or not confirmed_by:
+        return {"error": "answer, at least one source, and confirmed_by are required"}
+
+    merged_tags = list(tags or []) + [f"confirmed_by:{confirmed_by}", f"gap:{gap_id}"]
+    result = _knowledge_ingest_core(
+        app_id,
+        answer,
+        domain=domain,
+        source=", ".join(source_list),
+        tags=merged_tags,
+    )
+    if "error" in result:
+        return result
+    gap_backlog.mark_promoted(gap_id, result["id"])
+    return {"id": result["id"], "gap_id": gap_id, "promoted": True}
 
 
 @mcp.tool()
@@ -644,7 +758,25 @@ def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = F
     permitted right now*, fleet-wide; the lease says *this app, until this time*.
     Only when all three hold is the Kart worker's `# allow_net` directive appended
     so the sandbox gets egress. No MCP tool can issue a lease.
+
+    Task text is security-scanned at SUBMIT time (defense-in-depth): a task the
+    Kart scanner would refuse — destructive, exfiltration, secret access, obfusc-
+    ation, or resource-exhaustion (fork bomb / spin / disk-fill) — is rejected
+    here before it ever occupies a queue slot, not only when the worker later
+    picks it up. The worker re-scans at execution regardless; this just denies
+    earlier and keeps a bomb from sitting `pending`.
     """
+    # Submit-time scan, before any DB work — a dangerous task is refused even if
+    # Postgres is down. kartikeya is a hard dependency, but degrade open (worker
+    # still scans) rather than crash the tool if it is somehow unimportable.
+    try:
+        from kartikeya import check_kart_task
+        blocked = check_kart_task(task or "")
+    except Exception:
+        blocked = None
+    if blocked:
+        return blocked
+
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -902,6 +1034,48 @@ def kb_journal(
     )
     cur.close()
     return {"id": kid, "domain": "journal"}
+
+
+@mcp.tool()
+@_guarded("kb_ingest")
+def kb_ingest(
+    app_id: str,
+    agent_id: str,
+    slice: str = "",
+    sensitivity: str = "sensitive",
+    tier: str = "canonical",
+    supersede: bool = True,
+) -> dict:
+    """Promote a ratified agent_seed slice to Postgres KB (source_type: agent_seed).
+
+    Requires ratified + trusted seed at $WILLOW_HOME/seeds/{agent_id}.json.
+    slice: voice_only | work_context | full (omit to use exposure.json default for kb_ingest).
+    Never promotes persona.cast or context.personal_note.
+    """
+    from . import seed_kb as skb
+
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
+    if "error" in mapping:
+        return mapping
+    unconfirmed = _require_confirmed(mapping)
+    if unconfirmed:
+        return unconfirmed
+
+    kid = str(uuid.uuid4())[:8].upper()
+    return skb.promote_seed_to_kb(
+        pg,
+        mapping["fields"],
+        agent_id=agent_id,
+        slice_name=slice,
+        sensitivity=sensitivity,
+        tier=tier,
+        supersede=supersede,
+        new_id=kid,
+    )
 
 
 @mcp.tool()
@@ -1254,12 +1428,53 @@ def specialist_get(app_id: str, agent_id: str, include_permissions: bool = True)
 
 
 @mcp.tool()
+@_guarded("exposure_config_get")
+def exposure_config_get(app_id: str) -> dict:
+    """Read standing exposure defaults ($WILLOW_HOME/config/exposure.json, AS-8)."""
+    from . import exposure as exp
+    from .paths import exposure_config_path, willow_home
+
+    path = exposure_config_path()
+    cfg = exp.load_exposure_config()
+    return {
+        "format": exp.EXPOSURE_FORMAT,
+        "path": str(path.relative_to(willow_home())) if path.is_file() else None,
+        "exists": path.is_file(),
+        "config": cfg,
+    }
+
+
+@mcp.tool()
+@_guarded("exposure_slice")
+def exposure_slice(
+    app_id: str,
+    agent_id: str,
+    destination: str = "session_enter",
+    preset: str = "",
+    fields: list[str] | None = None,
+) -> dict:
+    """Resolve and apply an exposure preset for a seed destination (AS-8).
+
+    destination: session_enter | kb_ingest | agent_seed_mirror | grove | cloud_llm | dispatch.
+    preset: override standing default. fields: custom dotted paths (checkbox IDs).
+    """
+    from . import exposure as exp
+
+    return exp.build_exposure_slice(
+        agent_id,
+        destination=destination,
+        preset=preset,
+        fields=fields,
+    )
+
+
+@mcp.tool()
 @_guarded("agent_seed_mirror")
-def agent_seed_mirror(app_id: str, agent_id: str, slice: str = "full") -> dict:
+def agent_seed_mirror(app_id: str, agent_id: str, slice: str = "") -> dict:
     """Mirror a ratified home seed into SOIL collection willow_agents_seeds (AS-5).
 
     Requires ratified status; when WILLOW_PGP_FINGERPRINT is set the detached
-    .sig must verify. slice: full | voice_only | work_context.
+    .sig must verify. slice: full | voice_only | work_context (omit for exposure.json default).
     """
     from . import gate
     from . import seed_mirror as sm
@@ -1413,6 +1628,58 @@ def context_expire(app_id: str, key: str) -> dict:
     return {"expired": _store.delete(_ctx_collection(app_id), key)}
 
 
+# ── Integrations (outbound adapters) ─────────────────────────────────────────
+#
+# External HTTP APIs, called from the server process — see integrations.py for
+# the adapter ledger (live vs declared stubs) and the earn rule. Live calls are
+# the fourth consumer of the three-key egress gate: the integration_net
+# capability (own line, never implied by task_net), the operator's standing
+# consent.internet, and an unexpired lease. integration_call is additionally
+# kept out of full_access (gate.py), so even the attempt surface is opt-in.
+
+@mcp.tool()
+@_guarded("integration_list")
+def integration_list(app_id: str) -> dict:
+    """List every integration adapter — live and declared stubs — with status,
+    credential *source* (env/vault, never the value), and, for stubs, what is
+    missing and what earns the implementation."""
+    from . import integrations
+    return {"integrations": integrations.list_integrations()}
+
+
+@mcp.tool()
+@_guarded("integration_status")
+def integration_status(app_id: str, name: str) -> dict:
+    """Offline readiness readout for one integration: live or stub, credential
+    presence, and whether the three-key egress gate would pass for this app
+    right now. Makes no network call — ask this before asking for a lease."""
+    from . import integrations
+    return integrations.status(app_id, name)
+
+
+@mcp.tool()
+@_guarded("integration_call")
+def integration_call(app_id: str, name: str, method: str, path: str,
+                     params: Optional[dict] = None,
+                     body: Optional[dict] = None) -> dict:
+    """Call an external API through a registered integration adapter.
+
+    Egress needs THREE keys, all held at once: the 'integration_net' capability
+    in this app's manifest (own line — NOT granted by task_net, integration_call,
+    or full_access), the operator's standing consent.internet, and an unexpired
+    egress lease issued via `willow-mcp grant-net`. Declared stubs refuse with
+    what is missing and what earns their implementation."""
+    from . import integrations
+    adapter = integrations.get(name)
+    if adapter is None:
+        return {"error": f"unknown_integration: {name!r}",
+                "known": sorted(integrations.REGISTRY)}
+    denial = integrations.egress_denial(app_id)
+    if denial:
+        return denial
+    return adapter.request(method, path, params=params, body=body)
+
+
 # ── Self-audit ───────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -1466,6 +1733,28 @@ def _diag_store() -> dict:
         check["collections"] = len(names)
         check["names"] = names[:20]
         check["status"] = "ok" if check["writable"] else "fail"
+    except Exception as e:
+        check["status"] = "fail"
+        check["error"] = str(e)[:160]
+    return check
+
+
+def _diag_rings() -> dict:
+    """Learned-mapping tree (schema_rings): how much column->field vocabulary this
+    deployment has confirmed, and how close it sits to the prune (canopy) cap."""
+    check: dict = {"backend": "schema-rings"}
+    try:
+        g = sp.girth()  # {columns, pairs, cap, tick}
+        pairs = g.get("pairs", 0)
+        cap = g.get("cap", 0) or 1
+        check.update({
+            "columns": g.get("columns", 0),
+            "pairs": pairs,
+            "cap": g.get("cap", 0),
+            "confirmations": g.get("tick", 0),
+            "saturation_pct": round(100.0 * pairs / cap, 1),
+            "status": "ok",
+        })
     except Exception as e:
         check["status"] = "fail"
         check["error"] = str(e)[:160]
@@ -1633,15 +1922,105 @@ def _diag_net_lease(app_id: str) -> dict:
     On a single-uid host that is all of them, which is exactly B-32."""
     from . import gate, lease
     holds_capability = bool(app_id) and gate.permitted(app_id, gate.NET_PERMISSION)
+    forgeable = lease.self_writable_trust_paths(app_id)
     return {
         "lease_root": str(lease._leases_root()),
         "max_ttl_seconds": lease.MAX_TTL_SECONDS,
         "strict_trust_root": lease.strict_trust_root(),
         "holds_task_net": holds_capability,
         "lease": lease.read_lease(app_id) if app_id else {"status": "none"},
-        "self_writable": lease.self_writable_trust_paths(app_id),
-        "status": "ok",
+        "self_writable": forgeable,
+        # A sub-check that lists the keys this process could forge and then calls
+        # itself "ok" is asserting a membrane it just measured a hole in. The
+        # verdict still turns on _derive_problems (a lone `warn` here would make
+        # `degraded` every install's resting state, B-18) — but this field now
+        # says what it found.
+        "status": "ok" if not forgeable else "warn",
     }
+
+
+def _under(child: Path, parent: Path) -> bool:
+    """Is `child` the same inode as `parent`, or inside it — after symlinks?
+
+    Compares resolved paths. `~/.willow` is commonly a symlink into a fleet tree,
+    so a string prefix test reports "severed" for two names of one directory."""
+    try:
+        c, p = child.resolve(), parent.resolve()
+    except OSError:
+        return False
+    return c == p or p in c.parents
+
+
+def _diag_severance(store: dict, postgres: dict, net_lease: dict | None) -> dict:
+    """Can this install still see the fleet it claims to be cut off from?
+
+    Three properties, each independently checkable from inside the process:
+
+      store      — the SOIL store is not the fleet's store
+      postgres   — the database is not the fleet's database
+      trust_root — this process cannot rewrite the ACLs that gate it
+
+    The first two are DATA: someone who writes them corrupts records. The third
+    is AUTHORITY: someone who writes it grants themselves egress. Only the third
+    can turn a severed install into a compromised one, so only it is an `error`.
+
+    Reports `not_asserted` when the operator has named no fleet. That is not a
+    failure — a single-trust-domain install is complete without severance, and
+    an install that has never claimed to be cut off cannot be caught lying."""
+    fleet_home = paths.fleet_home()
+    fleet_db = paths.fleet_pg_db()
+
+    if fleet_home is None and not fleet_db:
+        return {"status": "not_asserted",
+                "detail": ("no fleet named — set WILLOW_MCP_FLEET_HOME and "
+                           "WILLOW_MCP_FLEET_PG_DB to assert this install is severed from one"),
+                "surfaces": {}}
+
+    surfaces: dict = {}
+
+    # ── data: store ───────────────────────────────────────────────────────────
+    store_root = store.get("root")
+    if fleet_home is None:
+        surfaces["store"] = {"severed": None, "reason": "WILLOW_MCP_FLEET_HOME unset"}
+    elif not store_root:
+        surfaces["store"] = {"severed": None, "reason": "store root unresolved"}
+    else:
+        shared = _under(Path(store_root), fleet_home)
+        surfaces["store"] = {
+            "path": store_root, "severed": not shared,
+            "reason": f"resolves inside {fleet_home}" if shared else None}
+
+    # ── data: postgres ────────────────────────────────────────────────────────
+    dbname = postgres.get("dbname")
+    if not fleet_db:
+        surfaces["postgres"] = {"severed": None, "reason": "WILLOW_MCP_FLEET_PG_DB unset"}
+    else:
+        shared = bool(dbname) and dbname == fleet_db
+        surfaces["postgres"] = {
+            "dbname": dbname, "severed": not shared,
+            "reason": f"is the fleet database '{fleet_db}'" if shared else None}
+
+    # ── authority: trust root ─────────────────────────────────────────────────
+    # Reuses the paths _diag_net_lease already computes. A trust root this
+    # process can write is a gate it can open, whether or not it holds task_net
+    # today — B-32 (host self-grant) and B-33 (sandbox writes consent) are both
+    # this property, observed at two different callers.
+    forgeable = (net_lease or {}).get("self_writable") or []
+    apps_root = paths.mcp_apps_root()
+    inside_fleet = fleet_home is not None and _under(apps_root, fleet_home)
+    surfaces["trust_root"] = {
+        "apps_root": str(apps_root),
+        "self_writable": [f["path"] for f in forgeable],
+        "inside_fleet_home": inside_fleet,
+        "severed": not forgeable and not inside_fleet,
+    }
+
+    violated = [k for k, v in surfaces.items() if v.get("severed") is False]
+    unknown = [k for k, v in surfaces.items() if v.get("severed") is None]
+    status = "violated" if violated else ("partial" if unknown else "ok")
+    return {"status": status, "fleet_home": str(fleet_home) if fleet_home else None,
+            "fleet_pg_db": fleet_db or None, "violated": violated,
+            "unknown": unknown, "surfaces": surfaces}
 
 
 def _diag_env() -> dict:
@@ -1650,13 +2029,13 @@ def _diag_env() -> dict:
     # systemd --user unit does not inherit a shell `export`.
     keys = ["WILLOW_HOME", "WILLOW_PG_DB", "WILLOW_PG_USER", "WILLOW_STORE_ROOT",
             "WILLOW_APP_ID", "WILLOW_MCP_APPS_ROOT", "WILLOW_MCP_HOST", "WILLOW_MCP_PORT",
-            "WILLOW_SETTINGS_GLOBAL"]
+            "WILLOW_SETTINGS_GLOBAL", "WILLOW_MCP_FLEET_HOME", "WILLOW_MCP_FLEET_PG_DB"]
     return {k: os.environ.get(k) for k in keys}
 
 
 def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                      worker: dict | None = None, consent: dict | None = None,
-                     net_lease: dict | None = None) -> list[dict]:
+                     net_lease: dict | None = None, severance: dict | None = None) -> list[dict]:
     """Pure: turn raw check dicts into actionable problems. Unit-tested without
     a live DB — this is where the empty-DB footgun becomes a named diagnosis."""
     problems: list[dict] = []
@@ -1784,6 +2163,48 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                              "Request and confirm are not yet separate authorities here (B-32)."),
                 "fix": "chown the lease root (and manifest) to a uid the agent does not run as, "
                        "then set WILLOW_MCP_STRICT_TRUST_ROOT=1 to enforce it"})
+    if severance and severance.get("status") not in (None, "not_asserted"):
+        surfaces = severance.get("surfaces", {})
+        # A severed install that reports `ok` while wired to the fleet is worse
+        # than no check at all. Once the operator has named a fleet, every surface
+        # that still resolves into it is a named problem.
+        for name in severance.get("violated", []):
+            surf = surfaces.get(name, {})
+            if name == "trust_root":
+                # AUTHORITY, not data. This process can rewrite the ACLs that gate
+                # it: the manifest that grants task_net, the lease root, the consent
+                # file. Severance from a fleet whose gate you still hold the pen for
+                # is not severance. B-32 (host lane) and B-33 (sandbox lane).
+                writable = ", ".join(surf.get("self_writable", [])) or surf.get("apps_root", "")
+                problems.append({
+                    "severity": "error", "check": "severance",
+                    "detail": ("this install claims severance but its trust root is within "
+                               "reach: " + writable + ". A process that can write its own "
+                               "manifest, lease root, or consent file can grant itself the "
+                               "egress the cut was supposed to deny."),
+                    "fix": ("move the trust root outside every path this process and the Kart "
+                            "sandbox can write (WILLOW_MCP_APPS_ROOT), and chown it to a uid "
+                            "the agent does not run as")})
+            else:
+                # DATA. Corruptible, not authority-bearing. Degrades; does not break.
+                problems.append({
+                    "severity": "warn", "check": "severance",
+                    "detail": (f"{name} is not severed from the fleet named by "
+                               f"WILLOW_MCP_FLEET_HOME/WILLOW_MCP_FLEET_PG_DB: "
+                               f"{surf.get('reason')}"),
+                    "fix": (f"point WILLOW_STORE_ROOT at a store outside "
+                            f"{severance.get('fleet_home')}" if name == "store"
+                            else f"set WILLOW_PG_DB to a database other than "
+                                 f"'{severance.get('fleet_pg_db')}'")})
+        for name in severance.get("unknown", []):
+            # Half a claim. The operator asserted severance from *something* but
+            # left the other coordinate unnamed, so this surface cannot be checked
+            # either way. Fail closed: an unverifiable claim is not a passing one.
+            problems.append({
+                "severity": "warn", "check": "severance",
+                "detail": (f"severance is asserted but {name} cannot be checked: "
+                           f"{surfaces.get(name, {}).get('reason')}"),
+                "fix": "set both WILLOW_MCP_FLEET_HOME and WILLOW_MCP_FLEET_PG_DB, or neither"})
     return problems
 
 
@@ -1819,10 +2240,15 @@ def diagnostic_summary(app_id: str = "") -> dict:
     whether willow-mcp's tables are present), schema-mapping confirmation state,
     your app_id's manifest + resolved permissions, identity bindings, whether a
     task worker is alive to drain the queue, your egress lease and which of the
-    keys authorizing it this process could forge, and the config-bearing
+    keys authorizing it this process could forge, whether this install is still
+    wired to a fleet it claims to be severed from, and the config-bearing
     environment — then a verdict (ok/degraded/broken) with named problems and
     fixes. Ungated on purpose: it must answer even when your manifest or database
-    is misconfigured. Reveals only your own config, never fleet rows or vault secrets."""
+    is misconfigured. Reveals only your own config, never fleet rows or vault secrets.
+
+    Severance is asserted, never assumed: name a fleet with WILLOW_MCP_FLEET_HOME
+    and WILLOW_MCP_FLEET_PG_DB and every shared surface becomes a named problem.
+    Name none and the check reports `not_asserted` and changes nothing."""
     mode = "serve" if _SERVE_MODE else "stdio"
     redact = False
     if _SERVE_MODE:
@@ -1839,15 +2265,18 @@ def diagnostic_summary(app_id: str = "") -> dict:
     eff = app_id or _DEFAULT_APP_ID
     store = _diag_store()
     postgres = _diag_postgres()
+    rings = _diag_rings()
     schema = _diag_schema(eff)
     manifest = _diag_manifest(eff)
     bindings = _diag_bindings()
     worker = _diag_worker(eff)
     consent = _diag_consent()
     net_lease = _diag_net_lease(eff)
+    severance = _diag_severance(store, postgres, net_lease)
     env = _diag_env()
 
-    problems = _derive_problems(store, postgres, manifest, mode, worker, consent, net_lease)
+    problems = _derive_problems(store, postgres, manifest, mode, worker, consent,
+                                net_lease, severance)
     verdict = _derive_verdict(problems)
 
     report = {
@@ -1855,10 +2284,10 @@ def diagnostic_summary(app_id: str = "") -> dict:
         "mode": mode,
         "serve": {"host": _HOST, "port": _PORT, "base_url": _BASE_URL} if _SERVE_MODE else None,
         "app_id": eff or None,
-        "checks": {"store": store, "postgres": postgres, "schema": schema,
-                   "manifest": manifest, "identity_bindings": bindings,
+        "checks": {"store": store, "postgres": postgres, "rings": rings,
+                   "schema": schema, "manifest": manifest, "identity_bindings": bindings,
                    "worker": worker, "consent": consent, "net_lease": net_lease,
-                   "env": env},
+                   "severance": severance, "env": env},
         "problems": problems,
     }
     if redact:
@@ -2028,7 +2457,75 @@ def _cmd_net_status(args) -> None:
             print(f"  {f['key']}: {f['path']}")
 
 
+def _cmd_gates(args) -> None:
+    """`willow-mcp gates` — every authorization gate as one on/off panel."""
+    from . import gates_panel
+
+    rows = gates_panel.collect(args.app_id or "")
+
+    if args.json:
+        print(json.dumps([r.__dict__ for r in rows], indent=2))
+        return
+
+    if not args.no_tui or not args.html:
+        print(gates_panel.render_tui(rows))
+
+    if args.html:
+        html = gates_panel.render_html(rows, datetime.now(timezone.utc).isoformat())
+        out = Path(args.html).expanduser()
+        out.write_text(html, encoding="utf-8")
+        print(f"\nwrote {out}")
+
+
+def _cmd_tree(args) -> None:
+    """`willow-mcp tree` — every tree part in one call, for a real dashboard."""
+    from . import tree_view
+
+    eff_app_id = args.app_id or _DEFAULT_APP_ID
+    tree = tree_view.build_tree(eff_app_id)
+    if args.json:
+        print(json.dumps(tree, indent=2, default=str))
+    else:
+        print(tree_view.render_summary(tree))
+
+
+def _cmd_set_permission(args, *, granted: bool) -> None:
+    """`willow-mcp allow-permission` / `deny-permission` — flip one manifest
+    permission for one app. Local/stdio-only, exactly like `grant-net`: no
+    MCP tool can reach this, so an agent can never grant itself a permission
+    it was just denied.
+    """
+    from . import manifest_admin
+
+    try:
+        manifest = manifest_admin.set_permission(args.app_id, args.permission, granted)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    verb = "granted to" if granted else "revoked from"
+    print(f"Permission {args.permission!r} {verb} app_id={args.app_id!r}.")
+    print(f"  permissions now: {manifest['permissions']}")
+
+
 def main():
+    """Entry point. Wraps `_main` so a downstream reader closing early
+    (`willow-mcp gates | head`, `... | grep -q`) exits clean instead of an
+    unhandled `BrokenPipeError` traceback — several of these subcommands
+    (`gates`, `net-status`, `tree`) print multiple lines and are exactly the
+    shape someone pipes into `head`/`grep`."""
+    try:
+        _main()
+    except BrokenPipeError:
+        # Standard recipe (see Python docs, "brokenpipeerror-example"): the
+        # reader is gone, so redirect our still-open stdout to devnull before
+        # exiting — otherwise Python's own shutdown flush re-raises trying to
+        # write to the closed pipe and prints a second, spurious traceback.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(1)
+
+
+def _main():
     import argparse
     parser = argparse.ArgumentParser(prog="willow-mcp")
     parser.add_argument("--serve", action="store_true", help="Run as HTTP server with OAuth")
@@ -2081,6 +2578,41 @@ def main():
         "net-status", help="Show egress leases and which trust-root keys this process can forge")
     status_p.add_argument("app_id", nargs="?", default="")
 
+    gates_p = subparsers.add_parser(
+        "gates",
+        help="Show every authorization gate (consent, manifest permissions, egress "
+             "lease, identity bindings, worker...) as one on/off panel, egress-lease shaped",
+    )
+    gates_p.add_argument("app_id", nargs="?", default="",
+                          help="scope to one app_id (default: every app under mcp_apps/)")
+    gates_p.add_argument("--html", nargs="?", const="willow-gates.html", default=None,
+                          metavar="PATH",
+                          help="write a static HTML snapshot instead of (or as well as) "
+                               "the terminal table; defaults to ./willow-gates.html")
+    gates_p.add_argument("--json", action="store_true", help="print raw JSON, no table")
+    gates_p.add_argument("--no-tui", action="store_true",
+                          help="with --html, skip printing the terminal table")
+
+    allow_p = subparsers.add_parser(
+        "allow-permission",
+        help="Add a permission group (or the task_net capability) to an app's manifest")
+    allow_p.add_argument("app_id")
+    allow_p.add_argument("permission")
+
+    deny_p = subparsers.add_parser(
+        "deny-permission",
+        help="Remove a permission group (or the task_net capability) from an app's manifest")
+    deny_p.add_argument("app_id")
+    deny_p.add_argument("permission")
+
+    tree_p = subparsers.add_parser(
+        "tree",
+        help="Dump every tree part (trunk/sap/canopy/roots/rings/leaves/litter/stomata) "
+             "as one call — the integration seam for a real dashboard",
+    )
+    tree_p.add_argument("app_id", nargs="?", default=os.environ.get("WILLOW_APP_ID", ""))
+    tree_p.add_argument("--json", action="store_true", help="print raw JSON, no summary")
+
     compile_p = subparsers.add_parser(
         "compile-agents",
         help="Compile mcp_apps/*/manifest.json from specialists registry",
@@ -2096,6 +2628,15 @@ def main():
         default="",
         help="path to specialists.json (default: $WILLOW_HOME/config or bundle)",
     )
+
+    persona_p = subparsers.add_parser(
+        "compile-persona",
+        help="Compile personas/{agent_id}.md from $WILLOW_HOME/seeds/{agent_id}.json",
+    )
+    persona_p.add_argument("agent_id", help="agent id (e.g. hanuman, willow)")
+    persona_p.add_argument("--force", action="store_true", help="overwrite existing persona .md")
+    persona_p.add_argument("--dry-run", action="store_true", help="preview markdown without writing")
+    persona_p.add_argument("--out", default="", help="optional output path")
 
     args, _ = parser.parse_known_args()
 
@@ -2117,6 +2658,18 @@ def main():
     if args.command == "net-status":
         _cmd_net_status(args)
         return
+    if args.command == "gates":
+        _cmd_gates(args)
+        return
+    if args.command == "allow-permission":
+        _cmd_set_permission(args, granted=True)
+        return
+    if args.command == "deny-permission":
+        _cmd_set_permission(args, granted=False)
+        return
+    if args.command == "tree":
+        _cmd_tree(args)
+        return
     if args.command == "compile-agents":
         from pathlib import Path
 
@@ -2129,6 +2682,14 @@ def main():
             registry_file=reg,
         )
         print(json.dumps(result, indent=2))
+        return
+    if args.command == "compile-persona":
+        from pathlib import Path
+
+        from .persona_compile import compile_persona
+
+        out = Path(args.out).expanduser() if args.out else None
+        print(json.dumps(compile_persona(args.agent_id, dry_run=args.dry_run, force=args.force, out_path=out), indent=2))
         return
 
     if args.serve or _SERVE_MODE:

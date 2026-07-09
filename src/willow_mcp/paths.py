@@ -26,6 +26,37 @@ def layout_version_path() -> Path:
     return willow_home() / ".layout-version"
 
 
+# ── severance: the fleet this install claims NOT to be ────────────────────────
+#
+# Every path above is willow_home()/<subdir>, so "no resolved path lies under
+# WILLOW_HOME" is a tautological failure, not an assertion — a correctly severed
+# install has all of its paths under its own home. The checkable property is
+# that none of them lies under the *fleet's* home, and that the fleet's database
+# is not this install's database. willow-mcp has no way to know either unless the
+# operator names them.
+#
+# Both are env-only and neither defaults. In particular fleet_home() must NOT
+# fall back to ~/.willow: on a fleet host that is a symlink into the fleet's own
+# tree, so an unconfigured install would declare itself severed from the very
+# directory it is standing in.
+#
+# Unset means "no severance claimed" — a single-trust-domain install is complete
+# without one, and asserting otherwise would make `degraded` the resting verdict
+# for most installs (B-18). Set-but-unreadable fails closed (B-25).
+
+def fleet_home() -> Path | None:
+    raw = os.environ.get("WILLOW_MCP_FLEET_HOME", "").strip()
+    return Path(raw) if raw else None
+
+
+def fleet_pg_db() -> str:
+    return os.environ.get("WILLOW_MCP_FLEET_PG_DB", "").strip()
+
+
+def severance_asserted() -> bool:
+    return fleet_home() is not None or bool(fleet_pg_db())
+
+
 # ── config/ ───────────────────────────────────────────────────────────────────
 
 def config_dir() -> Path:
@@ -59,6 +90,10 @@ def persona_envelopes_path() -> Path:
 
 def rotation_path() -> Path:
     return config_dir() / "rotation.json"
+
+
+def exposure_config_path() -> Path:
+    return config_dir() / "exposure.json"
 
 
 # ── dispatch / sessions / handoffs ────────────────────────────────────────────

