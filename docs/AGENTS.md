@@ -132,6 +132,7 @@ Voice files at `$WILLOW_HOME/personas/<agent>.md` after `willow-mcp-init`. Perso
 - No `WILLOW_HUMAN_ORCHESTRATOR` on specialist MCP configs.
 - `task_submit` needs manifest `task_queue` + operator consent + egress lease.
 - KB writes need `schema_confirm_mapping` before `knowledge_ingest`.
+- `gap_promote` is its own permission group. `gap_write` (log, resolve) never implies it — landing a gap as trusted knowledge is the consequential act, and it passes the same `schema_confirm_mapping` gate as any `knowledge_ingest` call.
 
 ---
 
@@ -142,6 +143,7 @@ Voice files at `$WILLOW_HOME/personas/<agent>.md` after `willow-mcp-init`. Perso
 | `docs/design/human-orchestrator.md` | LOCKED — injection / privilege gate for willow seat |
 | `docs/design/session-lifecycle.md` | Dispatch packet lifecycle |
 | `docs/design/specialist-registry.md` | Permissions compile source |
+| `docs/design/gap-backlog.md` | Gap backlog — `gap_log` / `gap_list` / `gap_resolve` / `gap_promote` |
 | Charter `ORIENT.md` | Governance-seat orient (not bundled here) |
 | Charter `CONSTITUTION.md` | Law (not bundled here) |
 
