@@ -175,3 +175,34 @@ def test_diagnostic_summary_smoke():
     for key in ("store", "postgres", "schema", "manifest", "identity_bindings", "env"):
         assert key in rep["checks"]
     assert isinstance(rep["problems"], list)
+
+
+# ── learned-mapping tree (schema_rings) health ───────────────────────────────
+
+def test_diag_rings_reports_sapling_when_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS", str(tmp_path / "rings.json"))
+    r = server._diag_rings()
+    assert r["status"] == "ok"
+    assert r["pairs"] == 0 and r["columns"] == 0
+    assert r["saturation_pct"] == 0.0
+    assert set(r) >= {"pairs", "cap", "columns", "confirmations", "saturation_pct"}
+
+
+def test_diag_rings_counts_grown_rings_and_saturation(tmp_path, monkeypatch):
+    rings = tmp_path / "rings.json"
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS", str(rings))
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS_MAX", "100")
+    # one confirm grows two non-trivial rings (submitter->submitted_by, stat->status)
+    server.sp.grow_ring({"submitted_by": {"column": "submitter"},
+                         "status": {"column": "stat"}})
+    r = server._diag_rings()
+    assert r["pairs"] == 2 and r["cap"] == 100
+    assert r["confirmations"] == 1
+    assert r["saturation_pct"] == 2.0
+
+
+def test_diagnostic_summary_includes_rings_check(tmp_path, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS", str(tmp_path / "rings.json"))
+    report = server.diagnostic_summary(app_id="willow")
+    assert "rings" in report["checks"]
+    assert report["checks"]["rings"]["backend"] == "schema-rings"

@@ -1739,6 +1739,28 @@ def _diag_store() -> dict:
     return check
 
 
+def _diag_rings() -> dict:
+    """Learned-mapping tree (schema_rings): how much column->field vocabulary this
+    deployment has confirmed, and how close it sits to the prune (canopy) cap."""
+    check: dict = {"backend": "schema-rings"}
+    try:
+        g = sp.girth()  # {columns, pairs, cap, tick}
+        pairs = g.get("pairs", 0)
+        cap = g.get("cap", 0) or 1
+        check.update({
+            "columns": g.get("columns", 0),
+            "pairs": pairs,
+            "cap": g.get("cap", 0),
+            "confirmations": g.get("tick", 0),
+            "saturation_pct": round(100.0 * pairs / cap, 1),
+            "status": "ok",
+        })
+    except Exception as e:
+        check["status"] = "fail"
+        check["error"] = str(e)[:160]
+    return check
+
+
 def _diag_postgres() -> dict:
     check: dict = {"backend": "postgres", "reachable": False,
                    "dbname": os.environ.get("WILLOW_PG_DB", "willow"),
@@ -2243,6 +2265,7 @@ def diagnostic_summary(app_id: str = "") -> dict:
     eff = app_id or _DEFAULT_APP_ID
     store = _diag_store()
     postgres = _diag_postgres()
+    rings = _diag_rings()
     schema = _diag_schema(eff)
     manifest = _diag_manifest(eff)
     bindings = _diag_bindings()
@@ -2261,8 +2284,8 @@ def diagnostic_summary(app_id: str = "") -> dict:
         "mode": mode,
         "serve": {"host": _HOST, "port": _PORT, "base_url": _BASE_URL} if _SERVE_MODE else None,
         "app_id": eff or None,
-        "checks": {"store": store, "postgres": postgres, "schema": schema,
-                   "manifest": manifest, "identity_bindings": bindings,
+        "checks": {"store": store, "postgres": postgres, "rings": rings,
+                   "schema": schema, "manifest": manifest, "identity_bindings": bindings,
                    "worker": worker, "consent": consent, "net_lease": net_lease,
                    "severance": severance, "env": env},
         "problems": problems,
