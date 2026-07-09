@@ -123,6 +123,95 @@ def test_guarded_sanitize_runs_after_gate_for_permitted_app(app_id):
     assert "sanitize" in result["error"]
 
 
+# ── store_scope / cross-app isolation (B-24 / SECURITY_AUDIT.md L-ISO-01) ───
+#
+# Unscoped apps (no `store_scope` in their manifest) must keep today's
+# unrestricted behavior — the SOIL store is deliberately shared with the
+# wider fleet by default (README's "share data" note). These tests exercise
+# the opt-in denial path a scoped app now gets, and confirm an unscoped app
+# is unaffected.
+
+@pytest.fixture
+def scoped_app_id(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / "scopedapp"
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(json.dumps({
+        "permissions": ["full_access"],
+        "store_scope": ["b24_scoped_*"],
+    }))
+    return "scopedapp"
+
+
+def test_store_put_denied_outside_scope(scoped_app_id):
+    result = server.store_put(app_id=scoped_app_id, collection="agents", record={"v": 1})
+    assert "error" in result
+    assert "collection_denied" in result["error"]
+
+
+def test_store_put_allowed_inside_scope(scoped_app_id):
+    result = server.store_put(app_id=scoped_app_id, collection="b24_scoped_notes", record={"v": 1})
+    assert "id" in result
+
+
+def test_store_get_denied_outside_scope(scoped_app_id):
+    result = server.store_get(app_id=scoped_app_id, collection="agents", record_id="x")
+    assert result.get("error", "").startswith("collection_denied")
+
+
+def test_store_list_denied_outside_scope_is_list_shaped(scoped_app_id):
+    result = server.store_list(app_id=scoped_app_id, collection="agents")
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert "collection_denied" in result[0]["error"]
+
+
+def test_store_search_denied_outside_scope_is_list_shaped(scoped_app_id):
+    result = server.store_search(app_id=scoped_app_id, collection="agents", query="x")
+    assert isinstance(result, list)
+    assert "collection_denied" in result[0]["error"]
+
+
+def test_store_update_denied_outside_scope(scoped_app_id):
+    result = server.store_update(app_id=scoped_app_id, collection="agents", record_id="x", record={"v": 1})
+    assert "collection_denied" in result["error"]
+
+
+def test_store_delete_denied_outside_scope(scoped_app_id):
+    result = server.store_delete(app_id=scoped_app_id, collection="agents", record_id="x")
+    assert "collection_denied" in result["error"]
+
+
+def test_store_search_all_confines_to_scope(scoped_app_id):
+    # Write into an in-scope collection via the scoped app, and directly into
+    # an out-of-scope one via an unscoped admin app, then confirm search_all
+    # for the scoped app only ever sees its own slice.
+    server.store_put(app_id=scoped_app_id, collection="b24_scoped_notes", record={"content": "b24marker findme"})
+
+    admin_dir = None
+    import os
+    apps_root = os.environ["WILLOW_MCP_APPS_ROOT"]
+    admin_dir = os.path.join(apps_root, "unscopedadmin")
+    os.makedirs(admin_dir, exist_ok=True)
+    with open(os.path.join(admin_dir, "manifest.json"), "w") as f:
+        f.write(json.dumps({"permissions": ["full_access"]}))
+    server.store_put(app_id="unscopedadmin", collection="agents", record={"content": "b24marker findme"})
+
+    scoped_results = server.store_search_all(app_id=scoped_app_id, query="b24marker")
+    assert {r.get("_collection") for r in scoped_results} == {"b24_scoped_notes"}
+
+    unscoped_results = server.store_search_all(app_id="unscopedadmin", query="b24marker")
+    assert {r.get("_collection") for r in unscoped_results} == {"b24_scoped_notes", "agents"}
+
+
+def test_store_put_unscoped_app_unaffected(app_id):
+    """Control: an app with no store_scope keeps full, unrestricted access —
+    this fix must not regress the shared-fleet-store default."""
+    result = server.store_put(app_id=app_id, collection="agents", record={"v": 1})
+    assert "id" in result
+
+
 # ── knowledge_search / kb_at / kb_startup_continuity (schema-adapted, docs/design/schema-adaptation.md §9 step 2) ──
 #
 # These tools build their SQL from a schema_profile mapping instead of

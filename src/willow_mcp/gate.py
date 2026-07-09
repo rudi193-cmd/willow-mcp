@@ -133,6 +133,37 @@ def authorized(app_id: str) -> bool:
     return _load_manifest(app_id) is not None
 
 
+def store_scope(app_id: str) -> Optional[list]:
+    """Return this app's manifest `store_scope` list, or None if unset.
+
+    None means unrestricted — the store_* tools default to today's behavior
+    (the SOIL store is deliberately shared with the wider Willow fleet via
+    WILLOW_STORE_ROOT). An operator opts an app into isolation by adding a
+    `store_scope` array to its manifest.json, e.g. `["myapp_*"]` or
+    `["mcp_smoke_test"]`. See B-24 / SECURITY_AUDIT.md L-ISO-01.
+    """
+    try:
+        app_id = _validate_app_id(app_id)
+    except ValueError:
+        return None
+    manifest = _load_manifest(app_id)
+    if manifest is None:
+        return None
+    scope = manifest.get("store_scope")
+    if scope is None:
+        return None
+    if not isinstance(scope, list) or not all(isinstance(p, str) for p in scope):
+        logger.warning("gate: malformed store_scope for %r — ignoring, treating as unrestricted", app_id)
+        return None
+    return scope
+
+
+def collection_permitted(app_id: str, collection: str) -> bool:
+    """True if this app's (optional) store_scope allows touching `collection`."""
+    from . import db
+    return db.collection_in_scope(collection, store_scope(app_id))
+
+
 def permitted(app_id: str, tool_name: str) -> bool:
     """
     Return True if app_id is authorized and its manifest permits tool_name.

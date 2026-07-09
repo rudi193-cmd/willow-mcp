@@ -253,6 +253,31 @@ task with network access. It is deliberately excluded from `task_queue` and
 `full_access` — network egress from the sandbox must be granted explicitly, on
 its own line, and only host-side (never authored from inside the sandbox).
 
+### `store_scope` — confining an app to its own collections
+
+By default, `store_*` tools are **unrestricted across collections** — the
+SOIL store is deliberately shared with the wider Willow fleet (see
+`WILLOW_STORE_ROOT` in [Configuration](#configuration) above), so an app with
+`store_read`/`store_write`/`full_access` can see every collection any other
+app or fleet process has written, the same way it always could. That's the
+right default for a single-operator, single-trust-domain install, but it
+means a `store_read` grant to one app is implicitly a grant to read every
+other app's data too.
+
+An operator who wants an app confined to its own data adds an optional
+`store_scope` array to that app's manifest:
+
+```json
+{"permissions": ["full_access"], "store_scope": ["myapp_*"]}
+```
+
+Patterns match by exact name, or by prefix if they end in `*`. With
+`store_scope` set, `store_put`/`get`/`list`/`update`/`search`/`delete` reject
+any collection outside it (`collection_denied`), and `store_search_all`
+only searches the matching collections instead of every collection in the
+store. Omit the field entirely for today's unrestricted behavior — an empty
+list (`"store_scope": []`) means "no collections," not "unrestricted."
+
 In [HTTP serve mode](#http-serve-mode-oauth), the `app_id` is not taken from
 the call — it is resolved from the caller's confirmed OAuth identity binding,
 then checked against that same manifest ACL.
