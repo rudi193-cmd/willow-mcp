@@ -293,7 +293,7 @@ Registry slice **S-R*** for permissions remains blocked until operator ratifies 
 |-------|-------------|------------|
 | AS-1 | This doc + `agent-seed-template.json` | — |
 | AS-2 | `paths.seeds_dir()`; init creates `seeds/` | — |
-| AS-3 | `session_enter` reads seed (advisory if unratified) | — |
+| AS-3 | `session_enter` reads seed (advisory if unratified) | **done** |
 | AS-4 | `sign-seed` CLI + `.sig` verify in loader | PGP P1 |
 | AS-5 | SOIL `agents/seeds` mirror tool | — |
 | AS-6 | `kb_ingest` slice promotion (`source_type: agent_seed`) | ratification |

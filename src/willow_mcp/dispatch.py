@@ -17,6 +17,7 @@ from .paths import (
 )
 from .human_session import is_orchestrator_app
 from .registry import persona_context
+from .seed_loader import seed_context
 from .roles import VALID_STATUSES
 
 
@@ -269,6 +270,7 @@ def session_enter(
                 "Never dispatch entry for willow."
             ),
             **persona_context(app_id),
+            **seed_context(app_id),
         }
 
     did = (dispatch_id or "").strip().upper()
@@ -294,6 +296,7 @@ def session_enter(
             "closeout_tools": ["context_save", "session_handoff_write"],
             "message": "Human entry — no dispatch_id. Use human-facing agent and output.",
             **persona_context(app_id),
+            **seed_context(app_id),
         }
 
     pkt = dispatch_read(did)
@@ -325,6 +328,7 @@ def session_enter(
         "closeout_tools": ["handoff_write_v4"],
         "status": pkt.get("status", {}).get("status"),
         **persona_context(app_id),
+        **seed_context(app_id),
     }
 
 
