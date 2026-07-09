@@ -622,28 +622,29 @@ def knowledge_search(
 def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = False) -> dict:
     """Submit a task to the Kart sandboxed execution queue. Returns task_id for polling.
 
-    Tasks run network-isolated by default. Egress needs TWO keys, and both must
-    be held: the 'task_net' capability permission in the app's manifest (it is
-    NOT included in task_queue or full_access; grant it explicitly), and the
-    operator's standing `consent.internet` in $WILLOW_HOME/settings.global.json.
-    The manifest key says *this app may ever request egress*; the consent key
-    says *the operator permits egress right now*, and turning it off stops egress
-    fleet-wide without touching a manifest. Only when both hold is the Kart
-    worker's `# allow_net` directive appended so the sandbox gets egress.
+    Tasks run network-isolated by default. Egress needs THREE keys, all held at
+    once: the 'task_net' capability in the app's manifest (it is NOT included in
+    task_queue or full_access; grant it explicitly), the operator's standing
+    `consent.internet` in $WILLOW_HOME/settings.global.json, and an unexpired
+    egress **lease** issued by the operator via `willow-mcp grant-net`. The
+    capability says *this app may ever request egress*; consent says *egress is
+    permitted right now*, fleet-wide; the lease says *this app, until this time*.
+    Only when all three hold is the Kart worker's `# allow_net` directive appended
+    so the sandbox gets egress. No MCP tool can issue a lease.
     """
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
 
     if allow_net:
-        from . import consent, gate
-        # Inner key: is this app allowed to ask at all? (capability)
+        from . import consent, gate, lease
+        # Key 1: is this app allowed to ask at all? (capability, granted once)
         if not gate.permitted(app_id, gate.NET_PERMISSION):
             return {"error": (
                 f"net_denied: allow_net requires the '{gate.NET_PERMISSION}' permission in "
                 f"this app's manifest ($WILLOW_HOME/mcp_apps/{app_id or '<app_id>'}/manifest.json). "
                 "It is not granted by task_queue or full_access — add it explicitly.")}
-        # Outer key: does the operator permit egress right now? (standing consent)
+        # Key 2: does the operator permit egress right now? (standing consent)
         # Read fail-closed — an absent or unparseable policy is not consent.
         if not consent.internet_permitted():
             return {"error": (
@@ -652,6 +653,30 @@ def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = F
                 f"'{gate.NET_PERMISSION}', but egress is switched off (or the consent "
                 "policy could not be read, which denies). Only the operator may turn it "
                 "on — an agent may request egress, never grant it to itself.")}
+        # Key 3: has the operator issued a live lease for THIS app? (B-32)
+        # A capability that never expires is indistinguishable from one that was
+        # self-granted an hour ago; a lease has a clock and an issuer.
+        lease_state = lease.read_lease(app_id)
+        if lease_state["status"] != "active":
+            return {"error": (
+                f"lease_denied: allow_net requires an unexpired egress lease for '{app_id}' "
+                f"(status: {lease_state['status']}"
+                + (f" — {lease_state['error']}" if lease_state.get("error") else "")
+                + "). Leases are issued only by the operator, on the host, via "
+                f"`willow-mcp grant-net {app_id or '<app_id>'} --ttl 30m --reason ...`, and they "
+                "expire. No MCP tool can mint one. Ask for a lease; do not write the file.")}
+        # Whichever keys are within this process's own write reach are keys it
+        # could have forged. Reported always; enforced only under strict mode,
+        # because on a single-uid host that is every install (B-32 residual).
+        if lease.strict_trust_root():
+            forgeable = lease.self_writable_trust_paths(app_id)
+            if forgeable:
+                return {"error": (
+                    "trust_root_denied: WILLOW_MCP_STRICT_TRUST_ROOT is set, but this "
+                    "process can write the very keys that authorize it: "
+                    + ", ".join(f"{f['key']} ({f['path']})" for f in forgeable)
+                    + ". A confirm authority inside the actor's write reach is not an "
+                    "authority. Chown these to a uid the agent does not run as.")}
 
     mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
     if "error" in mapping:
@@ -1383,12 +1408,31 @@ def _diag_worker(app_id: str) -> dict:
 
 
 def _diag_consent() -> dict:
-    """Standing operator consent — the outer key of the two-key egress gate.
+    """Standing operator consent — the fleet-wide key of the three-key egress gate.
 
     Read-only and fail-closed: willow-mcp never authors this policy, and anything
     it cannot read as an explicit `true` reads as denial."""
     from . import consent
     return consent.read_consent()
+
+
+def _diag_net_lease(app_id: str) -> dict:
+    """Egress leases — the third key, and an honest report on who could forge it.
+
+    `self_writable` is the part that matters. It lists the trust-root paths this
+    very process can write: every one of them is a key it could mint for itself.
+    On a single-uid host that is all of them, which is exactly B-32."""
+    from . import gate, lease
+    holds_capability = bool(app_id) and gate.permitted(app_id, gate.NET_PERMISSION)
+    return {
+        "lease_root": str(lease._leases_root()),
+        "max_ttl_seconds": lease.MAX_TTL_SECONDS,
+        "strict_trust_root": lease.strict_trust_root(),
+        "holds_task_net": holds_capability,
+        "lease": lease.read_lease(app_id) if app_id else {"status": "none"},
+        "self_writable": lease.self_writable_trust_paths(app_id),
+        "status": "ok",
+    }
 
 
 def _diag_env() -> dict:
@@ -1402,7 +1446,8 @@ def _diag_env() -> dict:
 
 
 def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
-                     worker: dict | None = None, consent: dict | None = None) -> list[dict]:
+                     worker: dict | None = None, consent: dict | None = None,
+                     net_lease: dict | None = None) -> list[dict]:
     """Pure: turn raw check dicts into actionable problems. Unit-tested without
     a live DB — this is where the empty-DB footgun becomes a named diagnosis."""
     problems: list[dict] = []
@@ -1481,6 +1526,45 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                 "fix": (f"reconcile {consent.get('legacy_path')} with "
                         f"{consent.get('canonical_path')} — edit the canonical file "
                         "(or delete the legacy one) so one statement of intent remains")})
+    if net_lease:
+        lease_state = net_lease.get("lease", {})
+        status = lease_state.get("status")
+        if status in ("malformed", "mismatch"):
+            # Denies egress either way (fail-closed), so the install is not broken —
+            # but a lease file that does not parse, or one whose record names a
+            # different app than the file it sits in, is a hand-edit or a forgery
+            # attempt. Neither should pass silently.
+            problems.append({
+                "severity": "warn", "check": "net_lease",
+                "detail": (f"egress lease at {lease_state.get('path')} is {status}"
+                           + (f": {lease_state['error']}" if lease_state.get("error") else "")
+                           + " — allow_net is denied. A lease is only ever written by "
+                             "`willow-mcp grant-net`; this one was not, or was edited after."),
+                "fix": f"remove it, then re-issue with `willow-mcp grant-net {net_lease.get('app_id') or lease_state.get('app_id') or '<app_id>'} --ttl 30m`"})
+        forgeable = net_lease.get("self_writable") or []
+        if forgeable and net_lease.get("strict_trust_root"):
+            problems.append({
+                "severity": "error", "check": "net_lease",
+                "detail": ("WILLOW_MCP_STRICT_TRUST_ROOT is set, but this process can write "
+                           "the keys that authorize it: "
+                           + ", ".join(f["path"] for f in forgeable)
+                           + " — every allow_net task will be refused"),
+                "fix": "chown the lease root and manifest to a uid the agent does not run as, "
+                       "or unset WILLOW_MCP_STRICT_TRUST_ROOT and accept the residual (B-32)"})
+        elif forgeable and net_lease.get("holds_task_net"):
+            # Only for an app that actually holds the egress capability. Warning on
+            # every install would make `degraded` the resting verdict for the many
+            # that never request egress — the false-positive class B-18 removed.
+            problems.append({
+                "severity": "warn", "check": "net_lease",
+                "detail": ("this app holds 'task_net' and this process can write the keys "
+                           "that authorize its egress: "
+                           + ", ".join(f"{f['key']} ({f['path']})" for f in forgeable)
+                           + ". Leases expire and are attributed, so a self-grant now decays "
+                             "and leaves a record — but the OS is not preventing one. "
+                             "Request and confirm are not yet separate authorities here (B-32)."),
+                "fix": "chown the lease root (and manifest) to a uid the agent does not run as, "
+                       "then set WILLOW_MCP_STRICT_TRUST_ROOT=1 to enforce it"})
     return problems
 
 
@@ -1515,10 +1599,11 @@ def diagnostic_summary(app_id: str = "") -> dict:
     store (path/writable/collections), Postgres (reachable + which database +
     whether willow-mcp's tables are present), schema-mapping confirmation state,
     your app_id's manifest + resolved permissions, identity bindings, whether a
-    task worker is alive to drain the queue, and the config-bearing environment —
-    then a verdict (ok/degraded/broken) with named problems and fixes. Ungated on
-    purpose: it must answer even when your manifest or database is misconfigured.
-    Reveals only your own config, never fleet rows or vault secrets."""
+    task worker is alive to drain the queue, your egress lease and which of the
+    keys authorizing it this process could forge, and the config-bearing
+    environment — then a verdict (ok/degraded/broken) with named problems and
+    fixes. Ungated on purpose: it must answer even when your manifest or database
+    is misconfigured. Reveals only your own config, never fleet rows or vault secrets."""
     mode = "serve" if _SERVE_MODE else "stdio"
     redact = False
     if _SERVE_MODE:
@@ -1540,9 +1625,10 @@ def diagnostic_summary(app_id: str = "") -> dict:
     bindings = _diag_bindings()
     worker = _diag_worker(eff)
     consent = _diag_consent()
+    net_lease = _diag_net_lease(eff)
     env = _diag_env()
 
-    problems = _derive_problems(store, postgres, manifest, mode, worker, consent)
+    problems = _derive_problems(store, postgres, manifest, mode, worker, consent, net_lease)
     verdict = _derive_verdict(problems)
 
     report = {
@@ -1552,7 +1638,8 @@ def diagnostic_summary(app_id: str = "") -> dict:
         "app_id": eff or None,
         "checks": {"store": store, "postgres": postgres, "schema": schema,
                    "manifest": manifest, "identity_bindings": bindings,
-                   "worker": worker, "consent": consent, "env": env},
+                   "worker": worker, "consent": consent, "net_lease": net_lease,
+                   "env": env},
         "problems": problems,
     }
     if redact:
@@ -1662,6 +1749,66 @@ def _cmd_worker(args) -> None:
         beat.close()
 
 
+def _cmd_grant_net(args) -> None:
+    """`willow-mcp grant-net` — issue a time-boxed egress lease (B-32).
+
+    Local/stdio-only by design, exactly like `confirm-binding`: no MCP tool can
+    reach this, so an agent can request egress and never grant it to itself. The
+    lease expires on its own; the ceiling is 3h (FRANK `cc553729`).
+    """
+    from . import lease
+
+    try:
+        ttl = lease.parse_ttl(args.ttl)
+        record = lease.grant(args.app_id, ttl, issuer=args.issuer, reason=args.reason or "")
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(f"Egress lease issued to app_id={record['app_id']!r} by {record['issuer']!r}\n"
+          f"  expires: {record['expires_at']} (ttl {record['ttl_seconds']}s)\n"
+          f"  reason:  {record['reason'] or '(none given)'}")
+    forgeable = lease.self_writable_trust_paths(args.app_id)
+    if forgeable and not lease.strict_trust_root():
+        print("\n  NOTE: this host has no uid separation — the agent's own process can write\n"
+              "  " + ", ".join(f["path"] for f in forgeable) + "\n"
+              "  so this lease constrains time and leaves a record, but does not prevent a\n"
+              "  self-grant. See B-32.", file=sys.stderr)
+
+
+def _cmd_revoke_net(args) -> None:
+    """`willow-mcp revoke-net` — end an egress lease before it expires."""
+    from . import lease
+
+    try:
+        had = lease.revoke(args.app_id)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(f"Egress lease for {args.app_id!r} {'revoked' if had else 'was not present'}.")
+
+
+def _cmd_net_status(args) -> None:
+    """`willow-mcp net-status` — what egress is currently authorized, and by whom."""
+    from . import lease
+
+    leases = [lease.read_lease(args.app_id)] if args.app_id else lease.list_leases()
+    if not leases:
+        print("No egress leases on disk. allow_net is denied for every app.")
+    for st in leases:
+        line = f"{st['app_id']:<24} {st['status']}"
+        if st["status"] == "active":
+            line += f"  expires in {st['remaining_seconds']}s (issuer: {st.get('issuer')})"
+        elif st.get("error"):
+            line += f"  — {st['error']}"
+        print(line)
+    forgeable = lease.self_writable_trust_paths(args.app_id or "")
+    print(f"\nstrict_trust_root: {lease.strict_trust_root()}")
+    if forgeable:
+        print("self-writable trust paths (keys this process could forge):")
+        for f in forgeable:
+            print(f"  {f['key']}: {f['path']}")
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(prog="willow-mcp")
@@ -1697,6 +1844,24 @@ def main():
     worker_p.add_argument("--app-id", dest="app_id", default=os.environ.get("WILLOW_APP_ID", ""),
                           help="app_id whose confirmed 'tasks' mapping to use (default $WILLOW_APP_ID)")
 
+    grant_p = subparsers.add_parser(
+        "grant-net",
+        help="Issue a time-boxed egress lease for an app_id (local-only — never an MCP tool)",
+    )
+    grant_p.add_argument("app_id")
+    grant_p.add_argument("--ttl", default="30m",
+                         help="lease lifetime: 900s / 30m / 2h (ceiling 3h)")
+    grant_p.add_argument("--reason", default="", help="why this grant exists — it is recorded")
+    grant_p.add_argument("--issuer", default=os.environ.get("USER", "operator"),
+                         help="who is issuing the lease (default $USER)")
+
+    revoke_p = subparsers.add_parser("revoke-net", help="End an egress lease before it expires")
+    revoke_p.add_argument("app_id")
+
+    status_p = subparsers.add_parser(
+        "net-status", help="Show egress leases and which trust-root keys this process can forge")
+    status_p.add_argument("app_id", nargs="?", default="")
+
     args, _ = parser.parse_known_args()
 
     if args.command == "setup":
@@ -1707,6 +1872,15 @@ def main():
         return
     if args.command == "worker":
         _cmd_worker(args)
+        return
+    if args.command == "grant-net":
+        _cmd_grant_net(args)
+        return
+    if args.command == "revoke-net":
+        _cmd_revoke_net(args)
+        return
+    if args.command == "net-status":
+        _cmd_net_status(args)
         return
 
     if args.serve or _SERVE_MODE:

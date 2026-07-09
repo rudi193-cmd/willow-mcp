@@ -51,34 +51,66 @@ Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 | `context_list` | List your saved context keys and expiry times (expired ones skipped) |
 | `context_expire` | Delete a saved context before its TTL |
 | `receipts_tail` | Read your own most-recent tool-call receipts — a self-audit trail scoped to your `app_id` |
-| `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/worker/env health, with a verdict and named fixes. Ungated — see below |
+| `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/worker/consent/egress-lease/env health, with a verdict and named fixes. Ungated — see below |
 
-### Egress needs two keys
+### Egress needs three keys
 
-A task that reaches the network requires **both** of these, and either one
+A task that reaches the network requires **all three** of these, and any one
 missing denies before anything is written:
 
 | Key | Question | Where | Turned by |
 |---|---|---|---|
 | `task_net` | May this app *ever* request egress? | `mcp_apps/<app_id>/manifest.json` | operator, granted once |
 | `consent.internet` | Is egress permitted *right now*? | `$WILLOW_HOME/settings.global.json` | operator, flipped freely |
+| egress lease | For *this app*, until *when*? | `mcp_apps/_net_leases/<app_id>.json` | operator, `willow-mcp grant-net`, expires on its own |
 
 ```jsonc
 // $WILLOW_HOME/settings.global.json — the off switch
 { "consent": { "internet": false, "cloud_llm": true, "lan": false } }
 ```
 
+```console
+$ willow-mcp grant-net myapp --ttl 30m --reason "publish the release"
+$ willow-mcp net-status          # what is live, and for how much longer
+$ willow-mcp revoke-net myapp    # or just wait; the ceiling is 3h
+```
+
 Setting `consent.internet` to `false` stops network tasks **fleet-wide**,
 immediately, without editing a single manifest. `task_net` is a capability
 (rarely granted, deliberately excluded from `full_access`); `consent.internet` is
-a switch. An agent may *request* egress and may never *grant it to itself*.
+a switch; the lease is a **time-boxed grant** that an agent may ask for and never
+issue. No MCP tool can mint one — `grant-net` is local CLI only, exactly like
+`confirm-binding`. An agent may *request* egress and may never *grant it to
+itself*.
 
-Consent is read **fail-closed**: a missing file, an unparseable file, or a
-non-boolean value (`"true"`, `1`) all read as denied. Absence is not consent.
-willow-mcp only reads this policy — it is authored by willow-2.0's
+Consent and leases are both read **fail-closed**: a missing file, an unparseable
+file, a non-boolean value (`"true"`, `1`), a lease past its deadline, a deadline
+with no timezone, or a lease record naming a *different* app than the file it sits
+in — all read as denied. Absence is not consent, and a name is not an identity.
+willow-mcp only reads the consent policy — it is authored by willow-2.0's
 `global_settings.py`. If the legacy `consent.json` and the canonical
 `settings.global.json` disagree, `diagnostic_summary` reports it as an error
 rather than quietly obeying one of them.
+
+#### The residual, stated plainly
+
+On a host where the agent and the MCP server run as the same uid, the agent can
+write the very files that authorize its egress. Leases make a self-grant *expire*
+and *leave a record*, and the PreToolUse hook blocks the obvious attempts — but
+the operating system is not stopping it. `diagnostic_summary` names exactly which
+keys the running process could forge, under `checks.net_lease.self_writable`.
+
+The control is ownership. Put `mcp_apps/` and `mcp_apps/_net_leases/` under a uid
+the agent does not run as, then:
+
+```console
+$ export WILLOW_MCP_STRICT_TRUST_ROOT=1   # refuse egress when the keys are self-writable
+```
+
+Strict mode is **off by default** because turning it on before that separation
+exists would deny egress on every current install. This is tracked as B-32 in
+`docs/BUGS.md`; requesting egress and confirming it are separate authorities, and
+until the filesystem says so, only convention does.
 
 ### Running the task worker
 
@@ -305,10 +337,12 @@ see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the full set
 list, denies every call for that `app_id`.
 
 There is also one **capability permission**, `task_net`, which is not a tool
-name but a privilege flag: it lets `task_submit(allow_net=True)` run a Kart
-task with network access. It is deliberately excluded from `task_queue` and
-`full_access` — network egress from the sandbox must be granted explicitly, on
-its own line, and only host-side (never authored from inside the sandbox).
+name but a privilege flag: it lets an app *ask* for `task_submit(allow_net=True)`.
+It is deliberately excluded from `task_queue` and `full_access` — network egress
+from the sandbox must be granted explicitly, on its own line, and only host-side
+(never authored from inside the sandbox). On its own it authorizes nothing: the
+call also needs the operator's `consent.internet` and a live egress lease
+(see [Egress needs three keys](#egress-needs-three-keys)).
 
 ### `store_scope` — confining an app to its own collections
 
@@ -356,11 +390,16 @@ the MCP server itself:
 
 - **`hooks/pre_tool_use.py`** blocks `Bash` commands that reach for raw
   `psql`/`psycopg2`/`sqlite3` against a database or store willow-mcp owns,
-  redirecting to the matching MCP tool instead.
+  redirecting to the matching MCP tool instead. It also blocks any call that
+  would write the keys authorizing the agent's *own* egress — minting a lease,
+  running `grant-net`, or editing a manifest to add `task_net` — and warns on a
+  `task_submit` that hand-embeds a `# allow_net` directive.
 - **[`skills/schema-confirm.md`](skills/schema-confirm.md)** walks through
   reviewing and confirming a table's schema mapping before writing to it.
 - **[`skills/willow-serve.md`](skills/willow-serve.md)** turns OAuth serve mode
   on/off on request (see [above](#turning-serve-mode-on-and-off)).
+- **[`skills/kart-tasks.md`](skills/kart-tasks.md)** covers submitting and polling
+  Kart tasks, the three-key egress model, and worker liveness.
 
 See [docs/design/hooks-and-skills.md](docs/design/hooks-and-skills.md) for
 the design and the reasoning behind shipping these alongside tools rather

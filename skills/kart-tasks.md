@@ -1,6 +1,6 @@
 ---
 name: kart-tasks
-description: Guided use of willow-mcp's Kart task queue — submit/poll, the task_net + allow_net network model and its footguns, and the worker-liveness caveat
+description: Guided use of willow-mcp's Kart task queue — submit/poll, the three-key egress model (task_net + consent.internet + a time-boxed lease) and its footguns, and the worker-liveness caveat
 ---
 
 # /kart-tasks
@@ -65,30 +65,40 @@ task_submit(app_id=..., task="echo hello", agent="kart")
 `task` is shell. Keep it a real command; the worker extracts and runs it in the
 sandbox. Returns a `task_id` for polling.
 
-## 2. The network model — two keys, and its footguns
+## 2. The network model — three keys, and its footguns
 
-Tasks run **network-isolated by default**. Egress is opt-in and needs **two
-separate keys**, held at once (B-29):
+Tasks run **network-isolated by default**. Egress is opt-in and needs **three
+separate keys**, all held at once (B-19, B-29, B-32):
 
 | Key | Question it answers | Where it lives | Who turns it |
 |---|---|---|---|
 | `task_net` | *May this app ever request egress?* | `mcp_apps/<app>/manifest.json` | operator, granted once |
 | `consent.internet` | *Is egress permitted right now?* | `$WILLOW_HOME/settings.global.json` | operator, flipped freely |
+| **egress lease** | *This app, until when?* | `mcp_apps/_net_leases/<app>.json` | operator, `willow-mcp grant-net`, expires |
 
 - Pass **`allow_net=True`**. Without the **`task_net`** capability you get
   `net_denied`; with `task_net` but `consent.internet: false` you get
-  `consent_denied`. Neither writes anything first. `task_net` is **not** included
-  in `task_queue` or `full_access` — grant it explicitly (same separation as
-  B-14/B-19).
-- **Consent is read fail-closed.** No policy file, an unparseable one, or
-  `"internet": "true"` (a string) all read as **denied**. Absence is not consent.
+  `consent_denied`; with both but no live lease you get `lease_denied`. None of
+  them writes anything first. `task_net` is **not** included in `task_queue` or
+  `full_access` — grant it explicitly (same separation as B-14/B-19).
+- **The lease expires.** Ceiling is 3h (FRANK `cc553729`); the default is 30m.
+  When it lapses, egress stops with no one having to remember to turn it off.
+  `willow-mcp net-status` shows what is live and how long it has left.
+- **Consent is read fail-closed, and so is the lease.** No policy file, an
+  unparseable one, `"internet": "true"` (a string), a lease with no timezone on
+  its deadline, or a lease whose record names a *different* app than the file it
+  sits in — all read as **denied**. Absence is not consent. A name is not an
+  identity.
 - Flipping `consent.internet` to `false` stops egress **fleet-wide**, instantly,
   without editing a single manifest. That is the intended off switch — reach for
   it rather than revoking capabilities one app at a time.
 - **An agent may request egress; it may never grant itself egress.** If you find
-  yourself about to write `task_net` into a manifest so that your own next call
-  succeeds, stop: that is the escalation the gate exists to prevent (B-32), and
-  `consent.internet` is deliberately not yours to flip.
+  yourself about to write `task_net` into a manifest, or to run
+  `willow-mcp grant-net`, so that your own next call succeeds — **stop.** That is
+  the escalation the gate exists to prevent (B-32), and the PreToolUse hook blocks
+  it. Ask the operator for a lease. The correct sentence is *"this needs egress to
+  push the branch — please run `willow-mcp grant-net <app> --ttl 15m`"*, not a
+  file edit.
 - **Do not hand-embed `# allow_net` or `# allow_localhost` lines in `task`
   text.** The Kart worker reads its network policy from exactly those directive
   lines, so it's tempting to add one directly — but the server **strips any
@@ -99,8 +109,20 @@ separate keys**, held at once (B-29):
   self-granted at all. The PreToolUse hook warns if you try.
 
 So: **network = `allow_net=True` + `task_net` in the manifest + `consent.internet`
-from the operator. Never a directive in the task string, and never a manifest you
-edited yourself to make your own call succeed.**
+from the operator + a live lease the operator issued.** Never a directive in the
+task string, never a manifest you edited yourself, never a lease you minted.
+
+### What the lease does and does not buy
+
+A lease is time-boxed and attributed, so a grant decays on its own and leaves a
+record of who issued it and why. It is **not** a full fix for B-32. On a host
+where the agent and the MCP server share a uid, the agent can still write the
+lease file — it now has to forge a third artifact, with a clock, under audit, but
+the operating system is not stopping it. `diagnostic_summary` reports exactly
+which keys the current process could forge, under `checks.net_lease.self_writable`.
+The real control is ownership: put the lease root and manifest under a uid the
+agent does not run as, then set `WILLOW_MCP_STRICT_TRUST_ROOT=1` so egress is
+refused whenever the process reading the keys could also have written them.
 
 ## 3. Polling
 
@@ -124,6 +146,6 @@ It will not tell you to keep polling a `pending` task when `fleet_health` report
 `stranded: true`. It will not add a `# allow_net` directive to task text as a
 shortcut around the `task_net` permission — that path is closed by design (B-21),
 and the correct move is to ask the operator to grant the permission. And it will
-not edit a manifest or a consent file to make your own egress call succeed:
-requesting egress and confirming it are separate authorities, and you hold only
-the first.
+not edit a manifest, flip a consent file, or issue a lease to make your own egress
+call succeed: requesting egress and confirming it are separate authorities, and
+you hold only the first.

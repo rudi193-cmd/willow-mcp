@@ -10,6 +10,26 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Time-boxed egress leases** (B-32 / L-NET-02). `task_submit(allow_net=True)` now
+  needs a **third** key: an unexpired lease issued by the operator with
+  `willow-mcp grant-net <app_id> --ttl 30m --reason ...` (ceiling 3h, per FRANK
+  `cc553729`). `task_net` is demoted to a capability — *this app may ever ask* —
+  while the lease is the grant itself, carrying an issuer, a reason, and a deadline.
+  **No MCP tool can mint a lease**: issuance is local-CLI-only, exactly as
+  `confirm-binding` is. New `revoke-net` and `net-status` subcommands. Leases are
+  read fail-closed — absent, unparseable, expired, over-ceiling, a deadline with no
+  timezone, or a record naming a different `app_id` than the file it sits in all
+  deny. Because leases live under `mcp_apps/`, they inherit B-14's `bound_ro`
+  sandbox mount: a sandboxed task cannot mint one (verified — `OSError(EROFS)`).
+  `diagnostic_summary` gains a `net_lease` check whose `self_writable` field names
+  every authorizing key the running process could forge, and the PreToolUse hook
+  blocks an agent from writing any of them. **The residual is real and deliberate:**
+  on a single-uid host the agent can still write the lease, so this narrows and
+  audits the self-grant rather than preventing it. Set
+  `WILLOW_MCP_STRICT_TRUST_ROOT=1` after `chown`ing the trust root to a uid the
+  agent does not run as, and egress is refused whenever the keys are self-writable.
+  Off by default, because enabling it before that separation exists would deny
+  egress on every current install.
 - **Two-key egress gate** (B-29). `task_submit(allow_net=True)` now requires the
   operator's standing `consent.internet` from `$WILLOW_HOME/settings.global.json`
   **in addition to** the app's `task_net` capability. Either one missing denies
