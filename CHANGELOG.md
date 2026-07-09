@@ -10,6 +10,19 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Integration adapters** (`integrations.py`) — outbound HTTP adapters with a
+  shared base (env→vault credential resolution, bounded stdlib transport with
+  Retry-After-honoring retries, credential-scrubbed errors). Two live adapters
+  (`github`, `huggingface`) and six **declared stubs** (`gmail`, `slack`,
+  `notion`, `google-drive`, `datadog`, `jira`) that refuse fail-closed and name
+  what earns their implementation. New tools `integration_list`,
+  `integration_status`, `integration_call`; new operator CLI
+  `willow-mcp-integrations` (`list` / `check` / `set-token`). Live calls are the
+  fourth consumer of the three-key egress gate, keyed on a new
+  `integration_net` capability — its own line, never implied by `task_net` or
+  `full_access`, because the server-process lane is strictly more privileged
+  than the sandbox lane. `integration_call` is likewise excluded from
+  `full_access`. See `docs/design/integrations.md` for the earn rule.
 - **Time-boxed egress leases** (B-32 / L-NET-02). `task_submit(allow_net=True)` now
   needs a **third** key: an unexpired lease issued by the operator with
   `willow-mcp grant-net <app_id> --ttl 30m --reason ...` (ceiling 3h, per FRANK

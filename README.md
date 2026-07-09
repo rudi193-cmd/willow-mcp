@@ -77,6 +77,9 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `context_get` | Read a saved context; `expired` (and purged) once its TTL passes |
 | `context_list` | List your saved context keys and expiry times (expired ones skipped) |
 | `context_expire` | Delete a saved context before its TTL |
+| `integration_list` | The integration ledger: every outbound adapter, live or **declared stub**, with credential *source* (never the value) |
+| `integration_status` | Offline readiness readout for one adapter — live/stub, credential presence, and whether the egress gate would pass. No network call |
+| `integration_call` | Call an external API through a registered adapter — behind the three-key egress gate, keyed on `integration_net` (own line, never implied by `task_net` or `full_access`) |
 | `receipts_tail` | Read your own most-recent tool-call receipts — a self-audit trail scoped to your `app_id` |
 | `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/worker/consent/egress-lease/env health, with a verdict and named fixes. Ungated — see below |
 
@@ -141,6 +144,32 @@ Strict mode is **off by default** because turning it on before that separation
 exists would deny egress on every current install. This is tracked as B-32 in
 `docs/BUGS.md`; requesting egress and confirming it are separate authorities, and
 until the filesystem says so, only convention does.
+
+### Integrations (outbound adapters)
+
+`integration_call` lets the **server process** call external HTTP APIs through
+registered adapters — a second egress lane, beside the Kart sandbox's. It uses
+the same three-key gate, but keyed on its **own** capability, `integration_net`:
+the server egresses as its own uid with its own filesystem view, a strictly more
+privileged lane than the network-namespaced sandbox, so `task_net` never implies
+it (and vice versa). `integration_call` itself is also excluded from
+`full_access` — even the attempt surface is opt-in.
+
+Adapters are **earned, not scaffolded**. Two are live (`github`,
+`huggingface`); six are *declared stubs* (`gmail`, `slack`, `notion`,
+`google-drive`, `datadog`, `jira`) that refuse fail-closed, each naming what it
+needs and what earns its implementation. `integration_list` is the ledger — see
+[`docs/design/integrations.md`](docs/design/integrations.md) for the earn rule.
+
+Credentials resolve environment-variable-first (e.g. `WILLOW_GITHUB_TOKEN`,
+then `GITHUB_TOKEN`), then the vault under `integration/<name>/token`. No tool
+ever returns a credential — only its *source*.
+
+```console
+$ willow-mcp-integrations list                # the ledger, live + stubs
+$ willow-mcp-integrations check github --app-id myapp   # offline: creds? keys? no network call
+$ willow-mcp-integrations set-token github   # prompted + hidden, stored in the vault
+```
 
 ### Running the task worker
 

@@ -19,6 +19,7 @@ Tools:
                    exposure_config_get, exposure_slice
   Fleet (PG):      fleet_status, fleet_health
   Context (SQLite):context_save, context_get, context_list, context_expire
+  Integrations:    integration_list, integration_status, integration_call
   Audit (SQLite):  receipts_tail
   Diagnostic:      diagnostic_summary (ungated self-check)
 
@@ -294,7 +295,7 @@ def _sanitize(kwargs: dict) -> tuple[dict, Optional[str]]:
     Returns (cleaned_kwargs, None) on success, or (kwargs, error_message) if a
     field fails validation outright (caller denies the call — no partial writes).
     """
-    for key in ("record", "context", "value"):
+    for key in ("record", "context", "value", "body"):
         val = kwargs.get(key)
         if isinstance(val, dict):
             size = len(json.dumps(val))
@@ -1607,6 +1608,58 @@ def context_list(app_id: str) -> dict:
 def context_expire(app_id: str, key: str) -> dict:
     """Delete a saved context now, before its TTL. Returns {expired: bool}."""
     return {"expired": _store.delete(_ctx_collection(app_id), key)}
+
+
+# ── Integrations (outbound adapters) ─────────────────────────────────────────
+#
+# External HTTP APIs, called from the server process — see integrations.py for
+# the adapter ledger (live vs declared stubs) and the earn rule. Live calls are
+# the fourth consumer of the three-key egress gate: the integration_net
+# capability (own line, never implied by task_net), the operator's standing
+# consent.internet, and an unexpired lease. integration_call is additionally
+# kept out of full_access (gate.py), so even the attempt surface is opt-in.
+
+@mcp.tool()
+@_guarded("integration_list")
+def integration_list(app_id: str) -> dict:
+    """List every integration adapter — live and declared stubs — with status,
+    credential *source* (env/vault, never the value), and, for stubs, what is
+    missing and what earns the implementation."""
+    from . import integrations
+    return {"integrations": integrations.list_integrations()}
+
+
+@mcp.tool()
+@_guarded("integration_status")
+def integration_status(app_id: str, name: str) -> dict:
+    """Offline readiness readout for one integration: live or stub, credential
+    presence, and whether the three-key egress gate would pass for this app
+    right now. Makes no network call — ask this before asking for a lease."""
+    from . import integrations
+    return integrations.status(app_id, name)
+
+
+@mcp.tool()
+@_guarded("integration_call")
+def integration_call(app_id: str, name: str, method: str, path: str,
+                     params: Optional[dict] = None,
+                     body: Optional[dict] = None) -> dict:
+    """Call an external API through a registered integration adapter.
+
+    Egress needs THREE keys, all held at once: the 'integration_net' capability
+    in this app's manifest (own line — NOT granted by task_net, integration_call,
+    or full_access), the operator's standing consent.internet, and an unexpired
+    egress lease issued via `willow-mcp grant-net`. Declared stubs refuse with
+    what is missing and what earns their implementation."""
+    from . import integrations
+    adapter = integrations.get(name)
+    if adapter is None:
+        return {"error": f"unknown_integration: {name!r}",
+                "known": sorted(integrations.REGISTRY)}
+    denial = integrations.egress_denial(app_id)
+    if denial:
+        return denial
+    return adapter.request(method, path, params=params, body=body)
 
 
 # ── Self-audit ───────────────────────────────────────────────────────────────
