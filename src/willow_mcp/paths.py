@@ -130,6 +130,18 @@ def hooks_dir() -> Path:
     return willow_home() / "hooks"
 
 
+def personas_dir() -> Path:
+    return willow_home() / "personas"
+
+
+def seeds_dir() -> Path:
+    return willow_home() / "seeds"
+
+
+def specialists_config_path() -> Path:
+    return config_dir() / "specialists.json"
+
+
 def packages_dir() -> Path:
     return willow_home() / "packages"
 
@@ -238,6 +250,8 @@ def all_layout_dirs() -> list[Path]:
         home / "templates",
         home / "skills",
         home / "hooks",
+        home / "personas",
+        home / "seeds",
         home / "packages",
         home / "mcp_apps",
         home / "store",

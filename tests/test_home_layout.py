@@ -16,7 +16,8 @@ def test_all_layout_dirs_under_home(home):
     assert "config" in names
     assert "dispatch" in names
     assert "mcp_apps" in names
-    assert "ledgers/entries" in names
+    assert "personas" in names
+    assert "seeds" in names
 
 
 def test_ensure_home_layout_idempotent(home):
@@ -38,3 +39,24 @@ def test_bundle_seeds_copied_once(home):
     assert (paths.hooks_dir() / "pre_tool_use.py").is_file()
     roster = json.loads(paths.agent_roster_path().read_text())
     assert any(a["id"] == "jeles" and a["role"] == "librarian" for a in roster["agents"])
+
+
+def test_registry_materialized_on_init(home):
+    result = hi.ensure_home_layout()
+    assert paths.specialists_config_path().is_file()
+    assert (paths.personas_dir() / "hanuman.md").is_file()
+    assert (paths.personas_dir() / "willow.md").is_file()
+    assert (paths.seeds_dir() / "agent-seed-template.json").is_file()
+    assert (paths.mcp_app_dir("hanuman") / "manifest.json").is_file()
+    assert (paths.mcp_app_dir("willow") / "manifest.json").is_file()
+
+    hanuman = json.loads((paths.mcp_app_dir("hanuman") / "manifest.json").read_text())
+    assert hanuman["app_id"] == "hanuman"
+    assert "task_queue" in hanuman["permissions"]
+
+    registry = result.get("registry") or {}
+    assert registry.get("manifests_created") or paths.mcp_app_dir("loki").joinpath("manifest.json").is_file()
+
+    second = hi.ensure_home_layout()
+    assert not second["registry"]["personas_copied"]
+    assert not second["registry"]["manifests_created"]
