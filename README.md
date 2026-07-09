@@ -21,6 +21,12 @@ pip install willow-mcp
 
 Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 
+```bash
+willow-mcp-init    # scaffold $WILLOW_HOME (idempotent)
+```
+
+Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (LOCKED).
+
 ## Tools
 
 | Tool | Description |
@@ -44,6 +50,15 @@ Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 | `task_list` | List pending tasks |
 | `agent_route` | Route a task to a target agent, recording the decision |
 | `agent_dispatch_result` | Record the result of a dispatched agent task |
+| `dispatch_send` | Create dispatch packet (`meta.json` + `assignment.md`) |
+| `dispatch_read` | Read dispatch assignment and status |
+| `dispatch_list` | List dispatch packets |
+| `dispatch_accept` | Specialist accepts packet (pending → working) |
+| `handoff_write_v4` | Complete work — `handoff.json` + `closeout.md` |
+| `handoff_read` | Read handoff for a dispatch |
+| `verify_handoff` | Orchestrator verifies completion |
+| `agent_clear` | Clear specialist for next packet |
+| `session_read` | Read thin session state file |
 | `fleet_status` | List agents registered in the fleet |
 | `fleet_health` | Task queue counts by status, live worker heartbeats, and whether the queue is `stranded` |
 | `context_save` | Save ephemeral per-identity working state under a key, with an optional TTL (SOIL-backed, no Postgres) |

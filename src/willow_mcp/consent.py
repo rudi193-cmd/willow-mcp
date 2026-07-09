@@ -49,6 +49,8 @@ import logging
 import os
 from pathlib import Path
 
+from . import paths
+
 logger = logging.getLogger("willow_mcp.consent")
 
 CONSENT_KEYS = ("internet", "cloud_llm", "lan")
@@ -58,22 +60,26 @@ _DENY_ALL: dict[str, bool] = {k: False for k in CONSENT_KEYS}
 
 
 def _willow_home() -> Path:
-    return Path(os.environ.get("WILLOW_HOME", Path.home() / ".willow"))
+    return paths.willow_home()
 
 
 def settings_path() -> Path:
-    """Canonical fleet settings, honouring the writer's own env override."""
+    """Canonical fleet settings — config/ preferred; legacy root supported."""
     override = os.environ.get("WILLOW_SETTINGS_GLOBAL")
-    return Path(override) if override else _willow_home() / "settings.global.json"
+    if override:
+        return Path(override)
+    cfg = paths.settings_global_path()
+    if cfg.is_file():
+        return cfg
+    return paths.settings_global_legacy_path()
 
 
 def legacy_path() -> Path:
-    """The flat mirror file: {"internet": true, ...}.
-
-    Named `legacy` for the read precedence it has (fallback only), not for its
-    lifecycle — willow-2.0 still writes it on every save. See the module header.
-    """
-    return _willow_home() / "consent.json"
+    """Flat consent mirror — config/ preferred; legacy root supported."""
+    cfg = paths.consent_path()
+    if cfg.is_file():
+        return cfg
+    return paths.consent_legacy_path()
 
 
 def _strict_bools(raw: object) -> dict[str, bool] | None:

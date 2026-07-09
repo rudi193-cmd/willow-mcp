@@ -1,0 +1,391 @@
+"""Dispatch packet I/O — meta.json, assignment.md, status.json under $WILLOW_HOME/dispatch/."""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+from .paths import (
+    dispatch_dir,
+    dispatch_root,
+    handoffs_dir,
+    new_dispatch_id,
+    session_path,
+    sessions_dir,
+)
+from .human_session import is_orchestrator_app
+from .roles import VALID_STATUSES
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _read_json(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def dispatch_send(
+    from_app: str,
+    to_app: str,
+    assignment_md: str,
+    *,
+    role: str = "",
+    reply_to: str = "willow",
+    summary: str = "",
+    phase: str = "operate",
+    priority: str = "normal",
+    context_refs: Optional[list[str]] = None,
+    dispatch_id: str = "",
+) -> dict:
+    """Create dispatch/{id}/ with meta, assignment, and status pending."""
+    if not (assignment_md or "").strip():
+        return {"error": "assignment_required"}
+    did = (dispatch_id or new_dispatch_id()).upper()
+    root = dispatch_dir(did)
+    if root.exists():
+        return {"error": "dispatch_exists", "dispatch_id": did}
+
+    role = (role or to_app).lower()
+    rel_assignment = f"dispatch/{did}/assignment.md"
+    meta = {
+        "format": "startup_packet_meta_v1",
+        "version": 1,
+        "dispatch_id": did,
+        "from_app": from_app,
+        "to_app": to_app,
+        "role": role,
+        "phase": phase,
+        "reply_to": reply_to,
+        "priority": priority,
+        "reply_contract": "handoff_v4",
+        "assignment_path": rel_assignment,
+        "context_refs": list(context_refs or []),
+        "summary": (summary or "").strip() or _first_line(assignment_md),
+        "created_at": _utc_now(),
+        "status": "pending",
+    }
+    status = {
+        "status": "pending",
+        "updated_at": meta["created_at"],
+        "handoff_path": None,
+        "verified_at": None,
+        "cleared_at": None,
+    }
+
+    root.mkdir(parents=True, exist_ok=False)
+    _write_json(root / "meta.json", meta)
+    (root / "assignment.md").write_text(assignment_md.strip() + "\n", encoding="utf-8")
+    _write_json(root / "status.json", status)
+
+    return {
+        "dispatch_id": did,
+        "to_app": to_app,
+        "from_app": from_app,
+        "status": "pending",
+        "assignment_path": str(root / "assignment.md"),
+        "summary": meta["summary"],
+    }
+
+
+def _first_line(md: str) -> str:
+    for line in md.splitlines():
+        s = line.strip().lstrip("#").strip()
+        if s:
+            return s[:200]
+    return "dispatch assignment"
+
+
+def dispatch_read(dispatch_id: str) -> dict:
+    root = dispatch_dir(dispatch_id)
+    meta = _read_json(root / "meta.json")
+    if not meta:
+        return {"error": "not_found", "dispatch_id": dispatch_id}
+    status = _read_json(root / "status.json") or {}
+    assignment_path = root / "assignment.md"
+    assignment = ""
+    if assignment_path.exists():
+        assignment = assignment_path.read_text(encoding="utf-8")
+    return {
+        "dispatch_id": dispatch_id,
+        "meta": meta,
+        "status": status,
+        "assignment": assignment,
+    }
+
+
+def dispatch_list(
+    *,
+    to_app: str = "",
+    from_app: str = "",
+    status: str = "",
+    limit: int = 20,
+) -> dict:
+    disp_root = dispatch_root()
+    if not disp_root.is_dir():
+        return {"dispatches": [], "total": 0}
+
+    rows: list[dict] = []
+    for child in sorted(disp_root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not child.is_dir():
+            continue
+        meta = _read_json(child / "meta.json")
+        st = _read_json(child / "status.json") or {}
+        if not meta:
+            continue
+        if to_app and meta.get("to_app", "").lower() != to_app.lower():
+            continue
+        if from_app and meta.get("from_app", "").lower() != from_app.lower():
+            continue
+        cur_status = st.get("status") or meta.get("status") or "pending"
+        if status and cur_status != status:
+            continue
+        rows.append({
+            "dispatch_id": meta.get("dispatch_id", child.name),
+            "from_app": meta.get("from_app"),
+            "to_app": meta.get("to_app"),
+            "role": meta.get("role"),
+            "summary": meta.get("summary", ""),
+            "status": cur_status,
+            "created_at": meta.get("created_at"),
+            "reply_to": meta.get("reply_to"),
+        })
+        if len(rows) >= limit:
+            break
+    return {"dispatches": rows, "total": len(rows)}
+
+
+def dispatch_set_status(dispatch_id: str, status: str, **extra: Any) -> dict:
+    if status not in VALID_STATUSES:
+        return {"error": "invalid_status", "status": status}
+    root = dispatch_dir(dispatch_id)
+    path = root / "status.json"
+    data = _read_json(path)
+    if data is None:
+        return {"error": "not_found", "dispatch_id": dispatch_id}
+    data["status"] = status
+    data["updated_at"] = _utc_now()
+    for key, val in extra.items():
+        if val is not None:
+            data[key] = val
+    _write_json(path, data)
+    meta_path = root / "meta.json"
+    meta = _read_json(meta_path)
+    if meta:
+        meta["status"] = status
+        _write_json(meta_path, meta)
+    return {"dispatch_id": dispatch_id, "status": status}
+
+
+def dispatch_accept(dispatch_id: str, app_id: str, session_id: str = "") -> dict:
+    """Specialist takes packet: pending → working."""
+    pkt = dispatch_read(dispatch_id)
+    if pkt.get("error"):
+        return pkt
+    if pkt["meta"].get("to_app", "").lower() != app_id.lower():
+        return {"error": "wrong_recipient", "expected": pkt["meta"].get("to_app")}
+    cur = pkt.get("status", {}).get("status", "pending")
+    if cur not in ("pending", "cleared"):
+        return {"error": "invalid_transition", "from": cur, "to": "working"}
+    dispatch_set_status(dispatch_id, "working")
+    if session_id:
+        session_bind(app_id, session_id, dispatch_id, "working")
+    return dispatch_read(dispatch_id)
+
+
+def session_bind(app_id: str, session_id: str, dispatch_id: str, status: str) -> dict:
+    sessions_dir().mkdir(parents=True, exist_ok=True)
+    data = {
+        "app_id": app_id,
+        "session_id": session_id,
+        "status": status,
+        "dispatch_id": dispatch_id,
+        "updated_at": _utc_now(),
+    }
+    _write_json(session_path(app_id, session_id), data)
+    return data
+
+
+def session_read(app_id: str, session_id: str) -> dict:
+    data = _read_json(session_path(app_id, session_id))
+    if not data:
+        return {"error": "not_found"}
+    return data
+
+
+def _pending_for_app(app_id: str) -> dict | None:
+    rows = dispatch_list(to_app=app_id, status="pending", limit=1)
+    dispatches = rows.get("dispatches") or []
+    return dispatches[0] if dispatches else None
+
+
+def session_enter(
+    app_id: str,
+    session_id: str,
+    dispatch_id: str = "",
+) -> dict:
+    """Resolve session entry mode: human prompt vs dispatch id path.
+
+    Orchestrator (willow) is human-only — never dispatch entry. See human-orchestrator.md.
+    """
+    # ── Orchestrator seat: human operator only; no agent, no packet boot ──
+    if is_orchestrator_app(app_id):
+        did = (dispatch_id or "").strip().upper()
+        if did:
+            return {
+                "entry_mode": "human_orchestrator",
+                "app_id": app_id,
+                "session_id": session_id,
+                "error": "orchestrator_human_only",
+                "message": (
+                    "Willow is human-only. dispatch_id is not accepted. "
+                    "Agents cannot run the orchestrator seat."
+                ),
+            }
+        session_bind(app_id, session_id, "", "idle")
+        return {
+            "entry_mode": "human_orchestrator",
+            "app_id": app_id,
+            "session_id": session_id,
+            "dispatch_id": None,
+            "agent_doc": "docs/ORIENT_ORCHESTRATOR.md",
+            "closeout_tools": ["session_handoff_write"],
+            "message": (
+                "Human orchestrator entry. Desk: dispatch_list. "
+                "Assign with dispatch_send (human host only). "
+                "Never dispatch entry for willow."
+            ),
+        }
+
+    did = (dispatch_id or "").strip().upper()
+
+    if not did:
+        existing = session_read(app_id, session_id)
+        if not existing.get("error") and existing.get("dispatch_id"):
+            did = str(existing["dispatch_id"]).upper()
+
+    if not did:
+        pending = _pending_for_app(app_id)
+        if pending:
+            did = pending["dispatch_id"]
+
+    if not did:
+        session_bind(app_id, session_id, "", "idle")
+        return {
+            "entry_mode": "human",
+            "app_id": app_id,
+            "session_id": session_id,
+            "dispatch_id": None,
+            "agent_doc": "docs/AGENTS_SPECIALIST.md",
+            "closeout_tools": ["context_save", "session_handoff_write"],
+            "message": "Human entry — no dispatch_id. Use human-facing agent and output.",
+        }
+
+    pkt = dispatch_read(did)
+    if pkt.get("error"):
+        return {"entry_mode": "dispatch", "error": pkt["error"], "dispatch_id": did}
+
+    if pkt["meta"].get("to_app", "").lower() != app_id.lower():
+        return {
+            "entry_mode": "dispatch",
+            "error": "wrong_recipient",
+            "dispatch_id": did,
+            "expected": pkt["meta"].get("to_app"),
+        }
+
+    cur = pkt.get("status", {}).get("status", "pending")
+    if cur == "pending":
+        pkt = dispatch_accept(did, app_id, session_id)
+    elif session_id:
+        session_bind(app_id, session_id, did, cur)
+
+    return {
+        "entry_mode": "dispatch",
+        "app_id": app_id,
+        "session_id": session_id,
+        "dispatch_id": did,
+        "role": pkt.get("meta", {}).get("role"),
+        "assignment": pkt.get("assignment", ""),
+        "summary": pkt.get("meta", {}).get("summary", ""),
+        "closeout_tools": ["handoff_write_v4"],
+        "status": pkt.get("status", {}).get("status"),
+    }
+
+
+def session_handoff_write(
+    app_id: str,
+    session_id: str,
+    *,
+    narrative: str,
+    summary: str = "",
+    findings: Optional[list[dict]] = None,
+    next_bite: str = "",
+) -> dict:
+    """Human-entry closeout — no dispatch_id required."""
+    sessions_dir().mkdir(parents=True, exist_ok=True)
+    handoffs = handoffs_dir(app_id)
+    handoffs.mkdir(parents=True, exist_ok=True)
+    stamp = _utc_now()[:10]
+    hid = new_dispatch_id()[:8].lower()
+    path = handoffs / f"session_handoff-{stamp}-{hid}_{app_id}.md"
+    lines = [
+        f"# Session handoff — {app_id}",
+        "",
+        f"**Entry mode:** human",
+        f"**Session:** {session_id}",
+        f"**Written:** {_utc_now()}",
+        "",
+        "## Summary",
+        "",
+        summary or narrative[:500],
+        "",
+        "## Narrative",
+        "",
+        narrative,
+        "",
+    ]
+    if findings:
+        lines.extend(["## Findings", ""])
+        for f in findings:
+            lines.append(f"- **{f.get('id', 'finding')}** ({f.get('severity', '')}): {f.get('text', '')}")
+        lines.append("")
+    if next_bite:
+        lines.extend(["## Next bite", "", next_bite, ""])
+    body = "\n".join(lines)
+    path.write_text(body, encoding="utf-8")
+    session_bind(app_id, session_id, "", "idle")
+    return {
+        "entry_mode": "human",
+        "handoff_path": str(path),
+        "continuity_key": f"handoff/{stamp}-{hid}",
+    }
+
+
+def agent_clear(target_app: str, dispatch_id: str, session_id: str = "") -> dict:
+    """Orchestrator clears specialist after verify: → cleared."""
+    pkt = dispatch_read(dispatch_id)
+    if pkt.get("error"):
+        return pkt
+    st = pkt.get("status", {}).get("status")
+    if st not in ("complete", "verified"):
+        return {"error": "not_ready_for_clear", "status": st}
+    dispatch_set_status(
+        dispatch_id,
+        "cleared",
+        cleared_at=_utc_now(),
+    )
+    if session_id:
+        session_bind(target_app, session_id, "", "idle")
+    return {"dispatch_id": dispatch_id, "target_app": target_app, "status": "cleared"}

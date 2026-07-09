@@ -61,6 +61,20 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "agent_dispatch": frozenset({
         "agent_route", "agent_dispatch_result",
     }),
+    "dispatch_read": frozenset({
+        "dispatch_read", "dispatch_list", "handoff_read", "session_read", "session_enter",
+    }),
+    "dispatch_write": frozenset({
+        "dispatch_send", "dispatch_accept", "handoff_write_v4",
+        "verify_handoff", "agent_clear", "session_handoff_write",
+    }),
+    "orchestrator": frozenset({
+        "dispatch_send", "dispatch_read", "dispatch_list", "dispatch_accept",
+        "handoff_write_v4", "handoff_read", "verify_handoff", "agent_clear",
+        "session_read", "session_enter", "session_handoff_write", "agent_route", "agent_dispatch_result",
+        "fleet_status", "fleet_health", "context_save", "context_get",
+        "context_list", "knowledge_search", "store_get", "store_search",
+    }),
     "fleet_read": frozenset({
         "fleet_status", "fleet_health",
     }),
@@ -89,6 +103,9 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "task_submit", "task_status", "task_list",
         # Dispatch
         "agent_route", "agent_dispatch_result",
+        "dispatch_send", "dispatch_read", "dispatch_list", "dispatch_accept",
+        "handoff_write_v4", "handoff_read", "verify_handoff", "agent_clear",
+        "session_read", "session_enter", "session_handoff_write",
         # Fleet (read-only)
         "fleet_status", "fleet_health",
         # Schema admin
