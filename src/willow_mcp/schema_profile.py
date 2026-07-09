@@ -33,12 +33,27 @@ SCHEMA_VERSION = 1
 # Static-but-extensible alias dictionary (§7 open question, resolved as
 # "static built-in list" for the first pass — a per-deployment override file
 # is cheap to add later if a host schema needs a name this list doesn't
-# anticipate).
+# anticipate). Ordering matters: propose_mapping takes the FIRST present alias,
+# so more-specific legacy names are listed before generic fallbacks (e.g. a
+# tasks table's business key `jobno`/`jobid` outranks a bare surrogate `id`).
 CANONICAL_ALIASES: dict[str, tuple[str, ...]] = {
+    # ── knowledge fields ──
     "source": ("source_type", "origin", "origin_ref"),
     "content": ("content", "body", "text"),
     "tags": ("tags", "labels"),
-    "task_id": ("id",),
+    # ── task-queue fields — 2000s-era job-scheduler house style ──
+    "task_id": ("jobno", "job_no", "jobid", "job_id", "reqid", "req_id", "ticket", "id"),
+    "task": ("cmd_line", "cmdline", "command", "cmd", "cmd_text", "script", "action", "payload"),
+    "submitted_by": ("submitter", "requestor", "requester", "created_by", "owner",
+                     "username", "usr", "user", "author"),
+    "agent": ("worker", "executor", "runner", "processor", "handler"),
+    "status": ("stat", "state", "job_state", "proc_state", "status_code", "st"),
+    "result": ("output", "outblob", "result_text", "response", "stdout", "res", "log"),
+    "steps": ("nsteps", "num_steps", "step_count", "step_cnt"),
+    "created_at": ("created", "crt_dt", "created_ts", "ins_ts", "insert_ts",
+                   "date_created", "queued_at", "submit_time", "ctime"),
+    "completed_at": ("fin_dt", "finished_at", "completed", "done_at", "end_time",
+                     "finish_time", "mtime"),
 }
 
 # Column data types that must be cast to text before use in an ILIKE
@@ -107,6 +122,179 @@ def propose_mapping(columns: list[ColumnInfo], canonical_fields: list[str]) -> d
                 "confidence": 0.0, "data_type": None,
             }
     return mapping
+
+
+# ── data-shape layer (docs/design/schema-adaptation.md §3.2 extension) ──────
+# Name matching alone cannot catch the worst trap: a column that name-matches a
+# canonical field but holds the WRONG KIND of data (a `task` column full of job
+# CLASSES, not commands). The name-based tiers above always pick an exact name
+# match, so an alias can never rescue that case. This layer reads a small sample
+# of real values, classifies each column's SHAPE, and — purely advisorily —
+# flags mismatches and suggests better-shaped columns. It never mutates the
+# mapping or auto-confirms: it makes the proposal louder, the human still
+# decides (principle 2: visible confidence; principle 3: writes may not guess).
+
+_INTERPRETERS = frozenset({
+    "sh", "bash", "zsh", "ksh", "perl", "python", "python2", "python3", "ruby",
+    "php", "node", "java", "awk", "sed", "pwsh", "powershell", "cmd",
+})
+_SCRIPT_EXT_RE = re.compile(r"\.(pl|sh|py|rb|php|js|exe|bat|ps1|cmd)\b", re.I)
+_PATH_FLAG_RE = re.compile(r"/\S+.*\s-{1,2}\w")
+_IDENTIFIER_RE = re.compile(r"[A-Za-z]{0,10}[-_]?\d{1,12}$")
+
+# Shapes each canonical field is expected to carry. A column whose sampled shape
+# is outside this set (and non-empty) is a mismatch worth flagging.
+_EXPECTED_SHAPES: dict[str, frozenset] = {
+    "task": frozenset({"command", "freetext"}),
+    "task_id": frozenset({"identifier", "integer"}),
+    "status": frozenset({"flag", "enum"}),
+    "steps": frozenset({"integer"}),
+    "created_at": frozenset({"timestamp"}),
+    "completed_at": frozenset({"timestamp"}),
+    "agent": frozenset({"enum", "identifier"}),
+    "submitted_by": frozenset({"identifier", "enum", "freetext"}),
+    "result": frozenset({"freetext", "command"}),
+    # knowledge side
+    "content": frozenset({"freetext", "command"}),
+    "domain": frozenset({"enum", "identifier"}),
+    "source": frozenset({"enum", "identifier", "freetext"}),
+    "tags": frozenset({"enum", "freetext"}),
+}
+
+
+def _looks_command(s: str) -> bool:
+    s = s.strip()
+    if not s:
+        return False
+    if s[0] in "/.~":
+        return True
+    head = s.split()[0]
+    if head.rsplit("/", 1)[-1] in _INTERPRETERS:
+        return True
+    if _SCRIPT_EXT_RE.search(s):
+        return True
+    return bool(_PATH_FLAG_RE.search(s))
+
+
+def classify_shape(values: list, data_type: Optional[str] = None) -> str:
+    """Classify a column's data shape from a sample of its values. One of:
+    empty | timestamp | integer | flag | command | enum | identifier | freetext.
+    Pure function of its inputs. Type hints win for timestamps/ints; everything
+    else is inferred from the string form of the values."""
+    dt = (data_type or "").lower()
+    if "timestamp" in dt or dt == "date":
+        return "timestamp"
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return "empty"
+    if dt in ("integer", "bigint", "smallint") or all(
+        isinstance(v, int) and not isinstance(v, bool) for v in vals
+    ):
+        return "integer"
+    strs = [str(v).strip() for v in vals if str(v).strip() != ""]
+    if not strs:
+        return "empty"
+    n = len(strs)
+    distinct = set(strs)
+    if all(len(s) == 1 for s in strs):
+        return "flag"
+    if sum(1 for s in strs if _looks_command(s)) >= max(1, (n + 1) // 2):
+        return "command"
+    # identifier before enum: a code like JOB0041 is more specific than a small
+    # label set, and low-cardinality samples would otherwise read as enum.
+    if all(_IDENTIFIER_RE.match(s) for s in strs):
+        return "identifier"
+    if len(distinct) <= max(2, n // 2) and all(len(s) <= 16 and " " not in s for s in strs):
+        return "enum"
+    return "freetext"
+
+
+def _sample_columns(conn, table: str, columns: list, limit: int = 8) -> dict:
+    """Return {column_name: [sampled values]} for every column, or {} on error.
+    A diagnostic aid — degrades to {} rather than raising."""
+    _validate_table(table)
+    names = [c.name for c in columns]
+    if not names:
+        return {}
+    limit = max(1, min(int(limit), 25))
+    col_sql = ", ".join(f'"{c}"' for c in names)
+    cur = conn.cursor()
+    try:
+        cur.execute(f'SELECT {col_sql} FROM "{table}" LIMIT %s', (limit,))
+        rows = cur.fetchall()
+    except Exception:  # noqa: BLE001 — advisory sampler must not crash a review
+        return {}
+    finally:
+        cur.close()
+    out: dict = {name: [] for name in names}
+    for row in rows:
+        for name, val in zip(names, row):
+            out[name].append(val)
+    return out
+
+
+def refine_with_data(conn, table: str, fields: dict, canonical_fields: list[str],
+                     columns: Optional[list] = None, limit: int = 8) -> dict:
+    """Advisory data-shape pass over a name-based proposal. Returns
+    {"shapes": {col: shape}, "suggestions": [...]} WITHOUT changing `fields`.
+
+    A suggestion fires when a field's currently-mapped column is the wrong shape
+    (severity "trap" — the name lied) or is unmapped while a well-shaped column
+    is free (severity "hint"). Columns already well-placed on another field are
+    not poached. This is the pass that catches the `task`-holds-a-job-class trap
+    the name tiers sail straight past."""
+    if columns is None:
+        columns = introspect(conn, table)
+    col_types = {c.name: c.data_type for c in columns}
+    samples = _sample_columns(conn, table, columns, limit=limit)
+    shapes = {c: classify_shape(vals, col_types.get(c)) for c, vals in samples.items()}
+    if not shapes:
+        return {"shapes": {}, "suggestions": []}
+
+    # Columns that already sit on a field whose expected shape they satisfy —
+    # don't suggest stealing these away.
+    well_placed = set()
+    for f in canonical_fields:
+        c = fields.get(f, {}).get("column")
+        exp = _EXPECTED_SHAPES.get(f)
+        if c and exp and shapes.get(c) in exp:
+            well_placed.add(c)
+
+    suggestions = []
+    for field in canonical_fields:
+        exp = _EXPECTED_SHAPES.get(field)
+        if not exp:
+            continue
+        cur_col = fields.get(field, {}).get("column")
+        cur_shape = shapes.get(cur_col) if cur_col else None
+        mismatch = cur_col is not None and cur_shape not in exp and cur_shape not in (None, "empty")
+        unmapped = cur_col is None
+        if not (mismatch or unmapped):
+            continue
+        candidates = [
+            c for c, sh in shapes.items()
+            if sh in exp and c != cur_col and (c not in well_placed)
+        ]
+        if not candidates:
+            continue
+        best = candidates[0]
+        suggestions.append({
+            "field": field,
+            "current_column": cur_col,
+            "current_tier": fields.get(field, {}).get("tier"),
+            "current_shape": cur_shape,
+            "suggested_column": best,
+            "suggested_shape": shapes.get(best),
+            "severity": "trap" if mismatch else "hint",
+            "reason": (
+                f"'{cur_col}' name-matched {field}, but its values look like "
+                f"'{cur_shape}', not {'/'.join(sorted(exp))}; '{best}' is "
+                f"'{shapes.get(best)}'-shaped"
+                if mismatch else
+                f"{field} is unmapped; '{best}' is '{shapes.get(best)}'-shaped"
+            ),
+        })
+    return {"shapes": shapes, "suggestions": suggestions}
 
 
 def db_fingerprint(conn) -> str:
@@ -283,6 +471,7 @@ def preview(conn, app_id: str, table: str, canonical_fields: list[str],
     if err:
         err["table"] = table
         return err
+    refined = refine_with_data(conn, table, fields, canonical_fields, columns=columns)
     return {
         "schema_version": SCHEMA_VERSION,
         "database": fingerprint,
@@ -291,6 +480,8 @@ def preview(conn, app_id: str, table: str, canonical_fields: list[str],
         "preview": True,
         "fields": fields,
         "sample": render_sample(conn, table, fields),
+        "shapes": refined["shapes"],
+        "suggestions": refined["suggestions"],
     }
 
 

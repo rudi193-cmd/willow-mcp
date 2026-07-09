@@ -113,6 +113,149 @@ def test_propose_mapping_is_pure_and_deterministic():
     assert a == b
 
 
+# ── legacy-alias mapping (2000s job-scheduler house style) ───────────────
+
+TASK_CANON = ["task_id", "task", "submitted_by", "agent", "status", "result",
+              "steps", "created_at", "completed_at"]
+
+# A 2002 batch table: terse legacy names, a `task` column that holds a job
+# CLASS (not a command), and both a surrogate `id` and a real key `jobno`.
+LEGACY_TASKS_COLUMNS = {
+    "id": "integer", "jobno": "character varying", "task": "character varying",
+    "cmd_line": "text", "submitter": "character varying", "agent": "character varying",
+    "stat": "character", "result": "text", "nsteps": "integer",
+    "created_at": "timestamp without time zone", "fin_dt": "timestamp without time zone",
+}
+
+
+def test_legacy_aliases_map_terse_columns():
+    cols = sp.introspect(_FakeConn(LEGACY_TASKS_COLUMNS), "tasks")
+    m = sp.propose_mapping(cols, TASK_CANON)
+    assert m["submitted_by"]["column"] == "submitter" and m["submitted_by"]["tier"] == "alias"
+    assert m["status"]["column"] == "stat"
+    assert m["steps"]["column"] == "nsteps"
+    assert m["completed_at"]["column"] == "fin_dt"
+
+
+def test_business_key_alias_outranks_bare_id():
+    # jobno is listed before id in the task_id alias tuple, so it must win when
+    # both are present — the real key beats the surrogate.
+    cols = sp.introspect(_FakeConn(LEGACY_TASKS_COLUMNS), "tasks")
+    m = sp.propose_mapping(cols, TASK_CANON)
+    assert m["task_id"]["column"] == "jobno"
+
+
+def test_bare_id_still_maps_task_id_when_no_business_key():
+    # test_server's fake tasks table has only `id` — id remains a valid fallback.
+    cols = sp.introspect(_FakeConn({"id": "text", "task": "text", "agent": "text"}), "tasks")
+    m = sp.propose_mapping(cols, TASK_CANON)
+    assert m["task_id"]["column"] == "id" and m["task_id"]["tier"] == "alias"
+
+
+def test_exact_name_still_beats_alias_even_when_it_is_a_trap():
+    # An exact `task` column wins over the `cmd_line` alias — which is exactly
+    # why the name tiers can't catch this trap and the data-shape pass must.
+    cols = sp.introspect(_FakeConn(LEGACY_TASKS_COLUMNS), "tasks")
+    m = sp.propose_mapping(cols, TASK_CANON)
+    assert m["task"]["column"] == "task" and m["task"]["tier"] == "exact"
+
+
+# ── data-shape classifier ────────────────────────────────────────────────
+
+def test_classify_shape_command():
+    assert sp.classify_shape(["/usr/local/bin/eod.pl --batch", "perl gen.pl -m 200202"]) == "command"
+
+
+def test_classify_shape_enum_and_flag():
+    assert sp.classify_shape(["NIGHTLY", "ADHOC", "NIGHTLY"]) == "enum"
+    assert sp.classify_shape(["P", "R", "C", "F"]) == "flag"
+
+
+def test_classify_shape_identifier_integer_timestamp():
+    assert sp.classify_shape(["JOB0041", "JOB0042"]) == "identifier"
+    assert sp.classify_shape([1, 2, 3]) == "integer"
+    assert sp.classify_shape(["2002-03-14 02:15:00"], data_type="timestamp without time zone") == "timestamp"
+
+
+def test_classify_shape_empty_and_freetext():
+    assert sp.classify_shape([None, None]) == "empty"
+    assert sp.classify_shape(["settlement OK: 4,182 txns posted to the ledger today"]) == "freetext"
+
+
+# ── data-shape refinement (the trap-catcher) ─────────────────────────────
+
+class _FakeSQLConn:
+    """Serves both the information_schema introspection and a `SELECT ... LIMIT`
+    sample, dispatching on the SQL so refine_with_data sees real rows."""
+    def __init__(self, columns: dict, rows: list, host="localhost", dbname="legacy2002"):
+        self._columns = columns
+        self._rows = rows
+        self._host, self._dbname = host, dbname
+
+    def cursor(self):
+        return _FakeSQLConn._Cur(self)
+
+    def get_dsn_parameters(self):
+        return {"host": self._host, "dbname": self._dbname}
+
+    class _Cur:
+        def __init__(self, conn):
+            self.conn, self._out = conn, []
+
+        def execute(self, sql, params=None):
+            if "information_schema.columns" in sql:
+                self._out = list(self.conn._columns.items())
+            else:
+                self._out = list(self.conn._rows)
+
+        def fetchall(self):
+            return self._out
+
+        def close(self):
+            pass
+
+
+# rows aligned to LEGACY_TASKS_COLUMNS insertion order
+_LEGACY_ROWS = [
+    (1, "JOB0041", "NIGHTLY", "/usr/local/bin/eod_settlement.pl --batch", "jsmith", "crond", "C", "settlement OK: 4182 txns posted", 7, "2002-03-14 02:15:00", "2002-03-14 02:47:33"),
+    (2, "JOB0042", "NIGHTLY", "perl /opt/reports/gen_stmts.pl -m 200202", "jsmith", "crond", "C", "18904 statements spooled to LPT3", 3, "2002-03-14 03:00:00", "2002-03-14 03:52:10"),
+    (3, "JOB0043", "ADHOC", "sh /home/mfg/reindex_parts.sh", "awong", "operator", "F", "ORA-01652 unable to extend temp segment", 2, "2002-03-15 11:22:41", "2002-03-15 11:23:05"),
+]
+
+
+def test_refine_flags_the_task_class_trap_and_suggests_the_command_column():
+    conn = _FakeSQLConn(LEGACY_TASKS_COLUMNS, _LEGACY_ROWS)
+    cols = sp.introspect(conn, "tasks")
+    fields = sp.propose_mapping(cols, TASK_CANON)  # task -> task (the trap)
+    refined = sp.refine_with_data(conn, "tasks", fields, TASK_CANON, columns=cols)
+
+    task_sugg = [s for s in refined["suggestions"] if s["field"] == "task"]
+    assert len(task_sugg) == 1
+    assert task_sugg[0]["suggested_column"] == "cmd_line"
+    assert task_sugg[0]["severity"] == "trap"
+    assert refined["shapes"]["task"] == "enum"
+    assert refined["shapes"]["cmd_line"] == "command"
+
+
+def test_refine_does_not_poach_well_placed_columns():
+    # Fields whose name-mapped column already fits its expected shape must not
+    # generate spurious suggestions.
+    conn = _FakeSQLConn(LEGACY_TASKS_COLUMNS, _LEGACY_ROWS)
+    cols = sp.introspect(conn, "tasks")
+    fields = sp.propose_mapping(cols, TASK_CANON)
+    refined = sp.refine_with_data(conn, "tasks", fields, TASK_CANON, columns=cols)
+    noisy = {s["field"] for s in refined["suggestions"]}
+    assert "created_at" not in noisy and "result" not in noisy and "steps" not in noisy
+
+
+def test_refine_degrades_to_empty_on_no_data():
+    conn = _FakeSQLConn(LEGACY_TASKS_COLUMNS, [])  # no rows
+    cols = sp.introspect(conn, "tasks")
+    fields = sp.propose_mapping(cols, TASK_CANON)
+    refined = sp.refine_with_data(conn, "tasks", fields, TASK_CANON, columns=cols)
+    assert refined["suggestions"] == []
+
+
 # ── db_fingerprint ──────────────────────────────────────────────────────
 
 def test_db_fingerprint_stable_for_same_host_dbname():
