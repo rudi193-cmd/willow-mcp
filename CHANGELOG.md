@@ -10,6 +10,14 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Worker liveness** (Kart lift stage 4, B-26). `willow-mcp worker` publishes a
+  heartbeat through kartikeya's `on_heartbeat` seam. `fleet_health` now reports
+  `workers` (each `alive` / `stale` / `dead`) and a `stranded` boolean — true when
+  there is pending work and no live worker — and `diagnostic_summary` gains a
+  `worker` check that names the condition and its fix. Previously a submitted task
+  looked identical whether a worker was about to claim it or none existed.
+  Heartbeats are advisory telemetry, never authorization: no gate reads them, and
+  reads verify the recorded pid is a live local process.
 - **HTTP serve mode** (`--serve`) with OAuth 2.0 + PKCE against Google/Apple as
   the upstream IdP, plus a local credential vault (`willow-mcp setup`).
 - **Identity binding**: serve-mode sign-ins propose an unconfirmed
@@ -54,6 +62,12 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 - Dockerfile and GitHub Actions test workflow (runs against a Postgres service).
 
 ### Fixed
+- **`pip install willow-mcp[worker]` was advertised but never existed (B-27).**
+  The worker's "kartikeya is missing" errors, its `--help` text, and
+  `task_queue.py`'s docstring all pointed at a `[worker]` extra; `pyproject.toml`
+  declares no extras at all, and `kartikeya` has been a hard dependency since the
+  B-22 close-out. The one message shown when a worker can't start told operators
+  to run a command that errors. All four sites now say `pip install willow-mcp`.
 - **Schema confirmation could accept a name match as truth (#20).**
   `schema_confirm_mapping` mapped canonical fields to real columns by name and
   confirmed without ever showing the data — so a `content` column that actually

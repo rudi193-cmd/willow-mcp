@@ -24,18 +24,37 @@ bubblewrap sandbox. **If no worker is running, your task sits `pending`
 forever** — `task_submit` returning `{"status": "pending"}` is *not* a signal
 that anything will execute it.
 
-> **Packaging caveat (current):** the Kart worker is being productionized into
-> willow-mcp (see `docs/design/kart-productionization.md`). Until that lands, a
-> clean `pip install willow-mcp` ships the queue tools but **not** the worker —
-> task execution depends on a Kart worker being present and running on the host.
-> The concrete `willow-mcp worker` run command will be documented here once the
-> lift ships. Tracked as B-22 in `docs/BUGS.md`.
+Start one with:
 
-**Before trusting a submission, check the queue is actually being drained.**
-Call `fleet_health` and read the counts: a healthy queue shows tasks moving
-`pending → running → completed`. A large `pending` with `running: 0` and a
-stale timestamp means nothing is listening — say so plainly rather than
-polling `task_status` forever.
+```
+willow-mcp worker --lane fast      # daemon: polls until stopped
+willow-mcp worker --once           # drain whatever is queued, then exit
+```
+
+**Before trusting a submission, ask whether anything is draining the queue.**
+You no longer have to guess. `fleet_health` reports live workers directly:
+
+```json
+{"pending": 3, "running": 0, ...,
+ "workers": {"alive": 0, "workers": [...]},
+ "stranded": true}
+```
+
+`stranded: true` means **there is pending work and no live worker** — the task
+you just submitted will not run. Say that plainly instead of polling
+`task_status` in a loop. `diagnostic_summary` raises the same condition as a
+named `worker` problem with the fix attached.
+
+Each entry in `workers.workers` carries a `state`:
+
+| state | meaning |
+|---|---|
+| `alive` | process up, loop ticking — your task will be claimed |
+| `stale` | process up, but its loop stopped ticking (wedged) |
+| `dead` | the recorded pid is gone; a leftover file, not a worker |
+
+Only `alive` counts. Heartbeats are **advisory telemetry, never authorization** —
+no permission decision reads them.
 
 ## 1. Submitting a task
 
@@ -74,18 +93,18 @@ task_status(app_id=..., task_id=...)
 ```
 
 Returns `status`, `result`, and completion time. Poll with restraint — if
-`fleet_health` shows the queue isn't moving (see §0), stop and report the
-worker gap rather than re-polling a task nothing will run.
+`fleet_health` reports `stranded: true` (see §0), stop and report the worker
+gap rather than re-polling a task nothing will run.
 
 ## 4. Listing
 
-`task_list` filters by status/agent; `fleet_health` gives the aggregate
-counts. Use `fleet_health` first to distinguish "queued, worker will get to it"
-from "queued, nothing is listening."
+`task_list` filters by status/agent; `fleet_health` gives the aggregate counts
+**plus worker liveness**. Check `stranded` first: it is exactly the distinction
+between "queued, a worker will get to it" and "queued, nothing is listening."
 
 ## What this skill will not do
 
-It will not tell you to keep polling a `pending` task when `fleet_health` shows
-no worker is draining the queue, and it will not add a `# allow_net` directive
-to task text as a shortcut around the `task_net` permission — that path is
-closed by design (B-21), and the correct move is to grant the permission.
+It will not tell you to keep polling a `pending` task when `fleet_health` reports
+`stranded: true`, and it will not add a `# allow_net` directive to task text as a
+shortcut around the `task_net` permission — that path is closed by design (B-21),
+and the correct move is to grant the permission.

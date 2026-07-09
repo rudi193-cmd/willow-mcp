@@ -1,7 +1,8 @@
 # Spec: Kart Lift — extract a standalone `kart` package
 
-Status: **IMPLEMENTED** (2026-07-08). Stages 1–3 shipped; B-22 Fixed. Engineering
-spec for the migration whose direction is set in `kart-productionization.md`.
+Status: **IMPLEMENTED** (2026-07-08). Stages 1–4 shipped; B-22 and B-26 Fixed.
+Engineering spec for the migration whose direction is set in
+`kart-productionization.md`.
 
 > **Reading note.** The package shipped as **`kartikeya`** (PyPI, 0.0.1), the name
 > locked in §1. The body of this spec was written before that rename and says
@@ -10,10 +11,12 @@ spec for the migration whose direction is set in `kart-productionization.md`.
 > record, not corrected in place.
 >
 > **As-shipped:** stages 1–3 landed (extract → willow-mcp integration → hard
-> dependency + docs), via willow-mcp PRs #35 and #36. Stage 4 (worker heartbeat
-> in `fleet_health`/`diagnostic_summary`) and stage 5 (willow-2.0 migration off
-> its `core/kart_*` copy) remain open. The drift window in §9 is therefore still
-> open by design.
+> dependency + docs), via willow-mcp PRs #35 and #36. **Stage 4 (worker heartbeat)
+> landed as B-26**: `willow-mcp worker` publishes liveness through kartikeya's
+> `on_heartbeat` seam, `fleet_health` reports `workers` + `stranded`, and
+> `diagnostic_summary` carries a `worker` check. Stage 5 (willow-2.0 migration off
+> its `core/kart_*` copy) remains open, so the drift window in §9 is still open by
+> design.
 
 **Decisions locked (operator, 2026-07-08):**
 1. **Shared package** — Kart becomes its own installable package; willow-mcp
@@ -181,8 +184,11 @@ Spans two (maybe three) repos; sequence willow-mcp value first.
 3. **Security e2e + docs → B-22 Fixed:** the §4 net-gate e2e test, README
    quickstart, fill `skills/kart-tasks.md` §0 worker-run section, honest
    `pyproject`.
-4. **Liveness:** worker heartbeat via the `on_heartbeat` seam surfaced in
-   `fleet_health`/`diagnostic_summary` (review §1).
+4. **Liveness:** ✅ *shipped (B-26).* Worker heartbeat via the `on_heartbeat` seam
+   surfaced in `fleet_health` (`workers`, `stranded`) and `diagnostic_summary`
+   (`checks.worker` + a `worker` problem) (review §1). Advisory telemetry only —
+   `$WILLOW_HOME` is sandbox-writable, so reads verify pid liveness and no gate
+   consults a heartbeat.
 5. **willow-2.0 migration (separate, later):** point willow-2.0 at the `kart`
    package, delete its `core/kart_*`. Ends drift. Can trail well behind stage 3.
 6. **Optional:** `kart[llm]`, systemd templates, batch-lane polish.

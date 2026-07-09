@@ -1047,7 +1047,12 @@ def fleet_status(app_id: str) -> dict:
 @mcp.tool()
 @_guarded("fleet_health")
 def fleet_health(app_id: str) -> dict:
-    """Fleet health — task queue counts by status across all agents."""
+    """Fleet health — task queue counts by status, plus live worker heartbeats.
+
+    A queue depth is only half the picture: `pending` tasks with no live worker
+    are not "queued", they are stranded. `workers` reports every process
+    publishing a heartbeat, and `stranded` is true when there is pending work and
+    nothing running to drain it."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -1067,12 +1072,17 @@ def fleet_health(app_id: str) -> dict:
     except Exception as e:
         return {"error": f"fleet_unavailable: {e}"}
     counts = {r[0]: r[1] for r in rows}
+    from .heartbeat import read_workers
+    workers = read_workers()
+    pending = counts.get("pending", 0)
     return {
-        "pending":   counts.get("pending", 0),
+        "pending":   pending,
         "running":   counts.get("running", 0),
         "completed": counts.get("completed", 0),
         "failed":    counts.get("failed", 0),
         "total":     sum(counts.values()),
+        "workers":   workers,
+        "stranded":  pending > 0 and workers.get("alive", 0) == 0,
     }
 
 
@@ -1334,6 +1344,31 @@ def _diag_bindings() -> dict:
     return check
 
 
+def _diag_worker(app_id: str) -> dict:
+    """Worker liveness + the queue depth that makes its absence matter.
+
+    `pending` is best-effort: no Postgres, an unconfirmed mapping, or any query
+    failure leaves it None, which means "unknown" and never raises a problem. An
+    install that only uses store_*/knowledge_* has no worker and no queue — that
+    is healthy, not degraded (B-18's lesson: don't diagnose a non-defect)."""
+    from .heartbeat import read_workers
+    check = read_workers()
+    check["pending"] = None
+    try:
+        pg = get_pg()
+        if pg is not None:
+            mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
+            status_col = mapping.get("fields", {}).get("status", {}).get("column")
+            if "error" not in mapping and status_col:
+                cur = pg.cursor()
+                cur.execute(f'SELECT COUNT(*) FROM tasks WHERE "{status_col}" = %s', ("pending",))
+                check["pending"] = cur.fetchone()[0]
+                cur.close()
+    except Exception:
+        pass  # unknown, not broken
+    return check
+
+
 def _diag_env() -> dict:
     # Config-bearing env, set-or-None. A var showing None here (its default in
     # effect) while data lives elsewhere is the serve-mode env footgun: the
@@ -1343,7 +1378,8 @@ def _diag_env() -> dict:
     return {k: os.environ.get(k) for k in keys}
 
 
-def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str) -> list[dict]:
+def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
+                     worker: dict | None = None) -> list[dict]:
     """Pure: turn raw check dicts into actionable problems. Unit-tested without
     a live DB — this is where the empty-DB footgun becomes a named diagnosis."""
     problems: list[dict] = []
@@ -1380,6 +1416,22 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str) -> 
             p["fix"] = (f"populate {manifest.get('apps_root')}/{manifest.get('app_id')}"
                         "/manifest.json with a non-empty \"permissions\" list")
         problems.append(p)
+    if worker:
+        pending = worker.get("pending")
+        alive = worker.get("alive", 0)
+        # No worker is only a defect when something is waiting on one. An install
+        # that never submits tasks is complete without a worker; saying otherwise
+        # would make `degraded` the resting state for most installs.
+        if alive == 0 and isinstance(pending, int) and pending > 0:
+            died = [w for w in worker.get("workers", []) if w.get("state") in ("stale", "dead")]
+            detail = (f"{pending} task(s) pending and no live worker — nothing will drain the "
+                      f"queue; task_submit will return task_ids that never execute")
+            if died:
+                detail += (f" (found {len(died)} heartbeat(s) from stopped worker(s): "
+                           f"{', '.join(str(w.get('pid')) for w in died)})")
+            problems.append({"severity": "warn", "check": "worker", "detail": detail,
+                             "fix": "start a worker: `willow-mcp worker --lane fast` "
+                                    "(or `--once` to drain and exit)"})
     return problems
 
 
@@ -1413,11 +1465,11 @@ def diagnostic_summary(app_id: str = "") -> dict:
     """Self-check: is this willow-mcp install wired correctly? Reports the SOIL
     store (path/writable/collections), Postgres (reachable + which database +
     whether willow-mcp's tables are present), schema-mapping confirmation state,
-    your app_id's manifest + resolved permissions, identity bindings, and the
-    config-bearing environment — then a verdict (ok/degraded/broken) with named
-    problems and fixes. Ungated on purpose: it must answer even when your
-    manifest or database is misconfigured. Reveals only your own config, never
-    fleet rows or vault secrets."""
+    your app_id's manifest + resolved permissions, identity bindings, whether a
+    task worker is alive to drain the queue, and the config-bearing environment —
+    then a verdict (ok/degraded/broken) with named problems and fixes. Ungated on
+    purpose: it must answer even when your manifest or database is misconfigured.
+    Reveals only your own config, never fleet rows or vault secrets."""
     mode = "serve" if _SERVE_MODE else "stdio"
     redact = False
     if _SERVE_MODE:
@@ -1437,9 +1489,10 @@ def diagnostic_summary(app_id: str = "") -> dict:
     schema = _diag_schema(eff)
     manifest = _diag_manifest(eff)
     bindings = _diag_bindings()
+    worker = _diag_worker(eff)
     env = _diag_env()
 
-    problems = _derive_problems(store, postgres, manifest, mode)
+    problems = _derive_problems(store, postgres, manifest, mode, worker)
     verdict = _derive_verdict(problems)
 
     report = {
@@ -1448,7 +1501,8 @@ def diagnostic_summary(app_id: str = "") -> dict:
         "serve": {"host": _HOST, "port": _PORT, "base_url": _BASE_URL} if _SERVE_MODE else None,
         "app_id": eff or None,
         "checks": {"store": store, "postgres": postgres, "schema": schema,
-                   "manifest": manifest, "identity_bindings": bindings, "env": env},
+                   "manifest": manifest, "identity_bindings": bindings,
+                   "worker": worker, "env": env},
         "problems": problems,
     }
     if redact:
@@ -1532,8 +1586,9 @@ def _cmd_worker(args) -> None:
         import kartikeya
     except ModuleNotFoundError:
         print(
-            "willow-mcp worker requires the 'kartikeya' package — "
-            "install it with `pip install willow-mcp[worker]`.",
+            "willow-mcp worker requires the 'kartikeya' package, which willow-mcp "
+            "depends on — reinstall with `pip install willow-mcp`, or "
+            "`pip install -e .` from a source checkout.",
             file=sys.stderr,
         )
         raise SystemExit(1)
@@ -1545,9 +1600,16 @@ def _cmd_worker(args) -> None:
         print(f"willow-mcp worker: {e}", file=sys.stderr)
         raise SystemExit(1)
 
-    kartikeya.run_worker(
-        queue, lane=args.lane, slots=args.slots, interval=args.interval, once=args.once
-    )
+    from .heartbeat import WorkerHeartbeat, reap
+    reap()  # clear files left by workers that were killed rather than stopped
+    beat = WorkerHeartbeat(agent="kart", lane=args.lane, interval=args.interval)
+    try:
+        kartikeya.run_worker(
+            queue, lane=args.lane, slots=args.slots, interval=args.interval,
+            once=args.once, on_heartbeat=beat,
+        )
+    finally:
+        beat.close()
 
 
 def main():
@@ -1576,7 +1638,7 @@ def main():
 
     worker_p = subparsers.add_parser(
         "worker",
-        help="Run the Kart task worker (drains the queue; requires willow-mcp[worker])",
+        help="Run the Kart task worker (drains the queue; publishes a liveness heartbeat)",
     )
     worker_p.add_argument("--lane", default="fast", choices=["fast", "batch"])
     worker_p.add_argument("--slots", type=int, default=None)

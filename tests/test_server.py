@@ -784,15 +784,44 @@ def test_task_list_filters_by_status_and_agent(app_id, monkeypatch):
     assert params == ("kart", 5)
 
 
-def test_fleet_health_counts_by_mapped_status_column(app_id, monkeypatch):
+def test_fleet_health_counts_by_mapped_status_column(app_id, monkeypatch, tmp_path):
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))  # no live worker heartbeats
     fake = _FakePg(columns=_TASKS_COLUMNS, canned_rows=[("pending", 3), ("completed", 7)])
     monkeypatch.setattr(server, "get_pg", lambda: fake)
 
     result = server.fleet_health(app_id=app_id)
 
-    assert result == {"pending": 3, "running": 0, "completed": 7, "failed": 0, "total": 10}
+    counts = {k: result[k] for k in ("pending", "running", "completed", "failed", "total")}
+    assert counts == {"pending": 3, "running": 0, "completed": 7, "failed": 0, "total": 10}
+    # 3 pending with nothing draining them: queued is not the same as progressing.
+    assert result["stranded"] is True
+    assert result["workers"]["alive"] == 0
     select_sql, params = fake.executed[-1]
     assert select_sql == 'SELECT "status", COUNT(*) FROM tasks GROUP BY "status"'
+
+
+def test_fleet_health_not_stranded_when_a_worker_is_alive(app_id, monkeypatch, tmp_path):
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
+    from willow_mcp.heartbeat import WorkerHeartbeat
+    beat = WorkerHeartbeat(interval=5.0)
+    beat()
+    fake = _FakePg(columns=_TASKS_COLUMNS, canned_rows=[("pending", 3)])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.fleet_health(app_id=app_id)
+
+    assert result["stranded"] is False
+    assert result["workers"]["alive"] == 1
+
+
+def test_fleet_health_not_stranded_when_queue_is_empty(app_id, monkeypatch, tmp_path):
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
+    fake = _FakePg(columns=_TASKS_COLUMNS, canned_rows=[("completed", 7)])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.fleet_health(app_id=app_id)
+
+    assert result["stranded"] is False
 
 
 def test_fleet_health_table_not_found(app_id, monkeypatch):
