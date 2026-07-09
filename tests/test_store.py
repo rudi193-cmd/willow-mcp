@@ -3,7 +3,7 @@
 import threading
 
 import pytest
-from willow_mcp.db import Store
+from willow_mcp.db import Store, collection_in_scope
 
 
 @pytest.fixture
@@ -136,3 +136,48 @@ def test_concurrent_put_does_not_raise(store):
 
     assert errors == []
     assert len(store.all("concurrent")) == 8 * 20
+
+
+# ── collection_in_scope / search_all(scope=...) (B-24 / L-ISO-01) ───────────
+
+def test_collection_in_scope_none_is_unrestricted():
+    assert collection_in_scope("anything", None) is True
+
+
+def test_collection_in_scope_exact_match():
+    assert collection_in_scope("mcp_smoke_test", ["mcp_smoke_test"]) is True
+    assert collection_in_scope("agents", ["mcp_smoke_test"]) is False
+
+
+def test_collection_in_scope_prefix_wildcard():
+    assert collection_in_scope("myapp_notes", ["myapp_*"]) is True
+    assert collection_in_scope("otherapp_notes", ["myapp_*"]) is False
+
+
+def test_collection_in_scope_empty_list_denies_all():
+    assert collection_in_scope("anything", []) is False
+
+
+def test_search_all_unscoped_sees_everything(store):
+    store.put("col_a", {"content": "willow is a system"})
+    store.put("col_b", {"content": "willow runs on linux"})
+    results = store.search_all("willow")
+    assert len(results) == 2
+
+
+def test_search_all_scope_confines_to_matching_collections(store):
+    store.put("myapp_notes", {"content": "willow secrets for myapp"})
+    store.put("agents", {"content": "willow fleet roster"})
+    results = store.search_all("willow", scope=["myapp_*"])
+    assert len(results) == 1
+    assert results[0]["_collection"] == "myapp_notes"
+
+
+def test_search_all_scope_excludes_shared_collections(store):
+    # The exact regression this closes: an app scoped to its own collections
+    # must not see fleet-shared collections like "agents" via search_all,
+    # even though unscoped apps still can (the fleet-sharing default is
+    # preserved — see test_search_all_unscoped_sees_everything).
+    store.put("agents", {"content": "sensitive fleet roster data"})
+    results = store.search_all("sensitive", scope=["myapp_*"])
+    assert results == []

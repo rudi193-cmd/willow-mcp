@@ -425,6 +425,19 @@ def _guarded(tool_name: str, *, list_error: bool = False):
 
 
 # ── Store tools ────────────────────────────────────────────────────────────────
+#
+# Collection-level scoping (B-24 / SECURITY_AUDIT.md L-ISO-01): the SOIL store
+# is deliberately shared with the wider Willow fleet by default (WILLOW_STORE_
+# ROOT, README's "share data" note) — store_* tools have no isolation unless
+# an app's manifest opts in via a `store_scope` list (gate.store_scope /
+# gate.collection_permitted). Unscoped apps keep today's unrestricted access;
+# this only closes the gap for apps an operator explicitly chooses to confine.
+
+def _collection_denied(app_id: str, collection: str) -> dict:
+    return {"error": (
+        f"collection_denied: '{collection}' is outside this app's store_scope "
+        f"in $WILLOW_HOME/mcp_apps/{app_id or '<app_id>'}/manifest.json")}
+
 
 @mcp.tool()
 @_guarded("store_put")
@@ -436,6 +449,9 @@ def store_put(
     deviation: float = 0.0,
 ) -> dict:
     """Write a record to a named collection. Returns {id, action}. High deviation (>0.6 rad) auto-flags."""
+    from . import gate
+    if not gate.collection_permitted(app_id, collection):
+        return _collection_denied(app_id, collection)
     rid, action = _store.put(collection, record, record_id=record_id, deviation=deviation)
     return {"id": rid, "action": action}
 
@@ -444,6 +460,9 @@ def store_put(
 @_guarded("store_get")
 def store_get(app_id: str, collection: str, record_id: str) -> dict:
     """Read a single record by ID. Returns the record or {error: not_found}."""
+    from . import gate
+    if not gate.collection_permitted(app_id, collection):
+        return _collection_denied(app_id, collection)
     item = _store.get(collection, record_id)
     return item or {"error": "not_found"}
 
@@ -452,6 +471,9 @@ def store_get(app_id: str, collection: str, record_id: str) -> dict:
 @_guarded("store_list", list_error=True)
 def store_list(app_id: str, collection: str) -> list:
     """Return every record in a collection (unfiltered). Prefer store_search for large collections."""
+    from . import gate
+    if not gate.collection_permitted(app_id, collection):
+        return [_collection_denied(app_id, collection)]
     return _store.all(collection)
 
 
@@ -465,6 +487,9 @@ def store_update(
     deviation: float = 0.0,
 ) -> dict:
     """Update an existing record in-place with audit trail. Use store_put to create."""
+    from . import gate
+    if not gate.collection_permitted(app_id, collection):
+        return _collection_denied(app_id, collection)
     rid = _store.update(collection, record_id, record, deviation=deviation)
     return {"id": rid} if rid else {"error": "not_found"}
 
@@ -473,6 +498,9 @@ def store_update(
 @_guarded("store_search", list_error=True)
 def store_search(app_id: str, collection: str, query: str) -> list:
     """Full-text search within a single collection (AND logic across tokens)."""
+    from . import gate
+    if not gate.collection_permitted(app_id, collection):
+        return [_collection_denied(app_id, collection)]
     return _store.search(collection, query)
 
 
@@ -480,6 +508,9 @@ def store_search(app_id: str, collection: str, query: str) -> list:
 @_guarded("store_delete")
 def store_delete(app_id: str, collection: str, record_id: str) -> dict:
     """Soft-delete a record — invisible to get/search but retained in audit trail."""
+    from . import gate
+    if not gate.collection_permitted(app_id, collection):
+        return _collection_denied(app_id, collection)
     deleted = _store.delete(collection, record_id)
     return {"deleted": deleted}
 
@@ -487,8 +518,9 @@ def store_delete(app_id: str, collection: str, record_id: str) -> dict:
 @mcp.tool()
 @_guarded("store_search_all", list_error=True)
 def store_search_all(app_id: str, query: str) -> list:
-    """Search across ALL SOIL collections. Use when the collection is unknown."""
-    return _store.search_all(query)
+    """Search across ALL SOIL collections (or only this app's store_scope, if it has one). Use when the collection is unknown."""
+    from . import gate
+    return _store.search_all(query, scope=gate.store_scope(app_id))
 
 
 # ── Knowledge tools ────────────────────────────────────────────────────────────
