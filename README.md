@@ -53,7 +53,7 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `kb_journal` | Add a journal-domain knowledge atom (requires a confirmed schema mapping) |
 | `kb_startup_continuity` | Fetch atoms tagged/domained for startup continuity |
 | `schema_confirm_mapping` | Confirm (optionally correct) a table's column mapping, unlocking its write tools. `preview=True` dry-runs it and renders a **sample row** so you can see what each field actually resolves to before trusting a name match — see [docs/design/schema-adaptation.md](docs/design/schema-adaptation.md) |
-| `gap_log` | Log or bump a "we don't know this yet" entry (fleet-wide backlog, SOIL-only, no Postgres needed) |
+| `gap_log` | Log or bump a "we don't know this yet" entry (fleet-wide backlog, SOIL-only, no Postgres needed) — see [docs/design/gap-backlog.md](docs/design/gap-backlog.md) |
 | `gap_list` | List gaps, most-asked first — filter by `topic` and/or `status` (`open`/`resolved`/`promoted`) |
 | `gap_resolve` | Mark a gap as being worked or answered — bookkeeping only, does not write to the knowledge base |
 | `gap_promote` | Turn a resolved gap into a knowledge atom. Requires `answer`, at least one `source`, and `confirmed_by`; writes through the same schema-confirmation gate as `knowledge_ingest` and closes the gap out |
