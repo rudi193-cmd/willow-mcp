@@ -61,6 +61,25 @@ def test_sanitize_rejects_too_many_tags():
     assert problem is not None
 
 
+def test_sanitize_truncates_oversized_topic():
+    big = "x" * (70 * 1024)
+    cleaned, problem = server._sanitize({"topic": big})
+    assert problem is None
+    assert len(cleaned["topic"].encode("utf-8")) <= 64 * 1024
+
+
+def test_sanitize_rejects_too_many_sources():
+    cleaned, problem = server._sanitize({"sources": [f"s{i}" for i in range(40)]})
+    assert problem is not None
+    assert "sources" in problem
+
+
+def test_sanitize_rejects_oversized_source_item():
+    cleaned, problem = server._sanitize({"sources": ["x" * 200]})
+    assert problem is not None
+    assert "sources" in problem
+
+
 # ── _check_rate ────────────────────────────────────────────────────────────
 
 def test_check_rate_allows_burst_then_limits():

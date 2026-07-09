@@ -299,7 +299,7 @@ def _sanitize(kwargs: dict) -> tuple[dict, Optional[str]]:
             if size > _MAX_BLOB_BYTES:
                 return kwargs, f"'{key}' exceeds 512KB limit ({size} bytes)"
 
-    for key in ("content", "task", "query", "question", "answer"):
+    for key in ("content", "task", "query", "question", "answer", "topic"):
         val = kwargs.get(key)
         if isinstance(val, str):
             cleaned = val.replace("\x00", "")
@@ -312,13 +312,14 @@ def _sanitize(kwargs: dict) -> tuple[dict, Optional[str]]:
     if isinstance(collection, str) and _PATH_TRAVERSAL_RE.search(collection):
         return kwargs, "'collection' contains illegal path characters"
 
-    tags = kwargs.get("tags")
-    if isinstance(tags, list):
-        if len(tags) > _MAX_TAGS:
-            return kwargs, f"'tags' exceeds max {_MAX_TAGS} items"
-        for t in tags:
-            if isinstance(t, str) and len(t) > _MAX_TAG_LEN:
-                return kwargs, f"tag exceeds max {_MAX_TAG_LEN} chars"
+    for key in ("tags", "sources"):
+        items = kwargs.get(key)
+        if isinstance(items, list):
+            if len(items) > _MAX_TAGS:
+                return kwargs, f"'{key}' exceeds max {_MAX_TAGS} items"
+            for item in items:
+                if isinstance(item, str) and len(item) > _MAX_TAG_LEN:
+                    return kwargs, f"'{key}' item exceeds max {_MAX_TAG_LEN} chars"
 
     return kwargs, None
 
