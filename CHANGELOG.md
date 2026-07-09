@@ -10,6 +10,22 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **The Grove** (`the_grove.py`) — a rings store for *lessons*, sibling to
+  `schema_profile`'s vocabulary rings but unbounded on purpose: vocabulary may
+  be pruned cheaply, lessons are kept precisely so the deployment cannot become
+  something that forgets them. One ring per lesson (`add_ring`/`rings`/`depth`),
+  `canopy()` (the visible architecture), `deep_roots()` (the recorded lessons),
+  and a pipe-friendly status: `python -m willow_mcp.the_grove --status` reports
+  stability, ring depth, and soil health; run with no arguments for the resting
+  display. A diseased rings file reads as empty but reports the grove
+  `unsettled` rather than silently claiming depth 0.
+- **`core.record_lessons()`** — distill any SQLite journal (any schema — the
+  table holding the writing is introspected, never assumed) into entry count,
+  date range, and theme tallies, then grow exactly one grove ring carrying the
+  lesson worth keeping. The source is opened `mode=ro` — a journal handed to
+  this function is being remembered, not edited — and every failure is
+  fail-soft (`{"error": ...}`, no ring), because a ring must never record a
+  lesson that wasn't actually learned.
 - **Integration adapters** (`integrations.py`) — outbound HTTP adapters with a
   shared base (env→vault credential resolution, bounded stdlib transport with
   Retry-After-honoring retries, credential-scrubbed errors). Two live adapters
