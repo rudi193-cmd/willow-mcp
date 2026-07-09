@@ -29,6 +29,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-21 | P0 | Fixed | task interface / Kart | `task_net` gate bypassable via task text — the worker reads egress policy from a `# allow_net` line in the stored task, but `task_submit` gated & appended that line only behind `if allow_net:`, so a `task_queue`-only caller could embed the directive with `allow_net=False` and get ungated egress (also `# allow_localhost`). Fixed: strip caller-supplied directive lines unconditionally before the gated append | this session; L-NET-01; PR #32; PR #31 review §2a |
 | B-22 | P1 | Fixed | packaging / Kart | Product shipped **no task executor** — `pyproject` advertised a "Kart task queue" but no worker/sandbox was in the package; a clean `pip install` left every task `pending`. Fixed: Kart extracted as the published **`kartikeya`** package (PyPI) and made a hard dependency; `willow-mcp worker` + `WillowMcpTaskQueue` (Pg/SQLite) drain the queue | this session; `docs/design/kart-lift-spec.md`; PRs #35, #36; kartikeya 0.0.1 |
 | B-23 | P3 | Fixed | process / skills+hooks | Task-queue surface (`task_submit`/`task_net`, B-19; `# allow_net` footgun, B-21) shipped with no skill or hook, violating the "hooks/skills ship with the tool" rule (`docs/design/hooks-and-skills.md` §2). Fixed: added `skills/kart-tasks.md` + a `task_submit` matcher on `pre_tool_use.py` warning on hand-embedded net directives | this session; operator-caught |
+| B-24 | P0 | Open | db / store | `store_*` tools (put/get/list/update/search/delete/search_all) have no cross-app isolation — `app_id` is discarded after the permission gate, `db.py` never scopes by it, so any app with `store_read`/`store_write`/`full_access` can read/write/delete every other app's SOIL data. `context_*` already namespaces per app (`ctx__<app_id>`); `store_*` never got the same treatment | L-ISO-01; PR #31 review §2b; re-confirmed this session |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -45,7 +46,19 @@ log carries a one-line entry and points there rather than duplicating.
 
 ## Open
 
-_None — all tracked bugs are Fixed, Documented, or Stale._
+- **B-24 · P0** — `store_*` tools have no cross-app isolation. Any app granted
+  `store_read`/`store_write`/`store_all`/`full_access` can read, write, or
+  delete **every other app's** SOIL store data, not just its own —
+  `store_search_all` makes this explicit by searching across all collections
+  by design. `context_*` solved this correctly (`ctx__<app_id>` prefix,
+  `server.py:1047-1048`); `store_*` never got the same treatment. First
+  flagged in an external review (`docs/design/mcp-review-2026-07-08.md` §2b)
+  as "worth a decision, not asserted as a bug" since it might be intentional
+  shared scratch space; re-confirmed on a follow-up pass with no README or
+  code comment anywhere stating that's the intent, so it's logged as a gap
+  rather than assumed-fine. See `SECURITY_AUDIT.md` L-ISO-01 for the full
+  writeup and a recommended fix (namespace `store_*` per app, or add an
+  explicit opt-in sharing primitive if cross-app scratch space is wanted).
 
 ## Fixed
 
