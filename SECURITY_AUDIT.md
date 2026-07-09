@@ -349,7 +349,7 @@ security scanner and a sandbox filesystem-tamper probe.
 
 ### New findings
 
-#### P2: L-DOS-02 — Kart scanner has no resource-exhaustion coverage — OPEN (fix at source)
+#### P2: L-DOS-02 — Resource-exhaustion in the sandboxed executor — RESOLVED (source-fixed)
 
 `kartikeya.check_kart_task` blocks `rm -rf /`, `curl|sh`, reverse shells, `chmod
 -R 777 /`, and `mkfs`, but **passes the entire resource-exhaustion class**: fork
@@ -364,9 +364,13 @@ mapping + past the rate limiter). The scanner lives in the **`kartikeya`**
 dependency, not this repo. *Remediation (two parts):* (1) DONE — resource-
 exhaustion + missing-destructive patterns added to `kartikeya`'s `security_scan`
 (fork bomb / spin / disk-fill / `find / -delete` / raw-device write), verified
-against a live worker. (2) OPEN — a `memory.max`/`pids.max`/`cpu.max` cgroup cap
-on the sandbox child, the only defense for the non-pattern-detectable memory-hog
-class and any novel bomb the denylist misses. Also DONE — willow-mcp's
+against a live worker. (2) DONE — a memory + PID cap on the sandbox child
+(`kartikeya` `sandbox.py`): a cgroup v2 leaf under a delegated `KART_CGROUP_PARENT`
+when available, else POSIX rlimits (`RLIMIT_AS`/`RLIMIT_NPROC`) as the always-on
+fallback; env-tunable (`KART_MEM_MAX` 2G, `KART_PIDS_MAX` 512), off switch
+`WILLOW_KART_NO_RLIMIT=1`. This is the only defense for the non-pattern-detectable
+memory-hog class. Verified live: a `bytearray(900MB)` task under a 512M cap now
+fails with `MemoryError` instead of consuming host RAM. Also DONE — willow-mcp's
 `task_submit` now runs `check_kart_task` at **submit time**, before any DB work,
 so a scanner-refused task is denied before it ever occupies a queue slot (the
 worker still re-scans at execution). Verified live: a fork bomb is refused at
