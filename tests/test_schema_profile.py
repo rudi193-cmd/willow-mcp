@@ -256,6 +256,119 @@ def test_refine_degrades_to_empty_on_no_data():
     assert refined["suggestions"] == []
 
 
+# ── guarded hints (2004-archive regression) ──────────────────────────────
+
+KNOW_CANON = ["id", "content", "domain", "source", "tags"]
+
+# A freetext-heavy archive table: many columns share the `freetext` shape, so an
+# unguarded "first well-shaped column" hint fires confidently-wrong. `content`
+# holds a citation (still freetext), the body is in `abstract`, and `lang` is a
+# 2-letter noise column.
+ARCHIVE_COLUMNS = {
+    "rec_no": "integer", "accession": "character varying", "content": "text",
+    "abstract": "text", "subj": "character varying", "provenance": "character varying",
+    "kw": "text", "lang": "character", "added_on": "date",
+}
+_ARCHIVE_ROWS = [
+    (1, "ACC-2004-0912", "Cormen, T. et al. (2001). Intro to Algorithms. OCLC#47297975.",
+     "A comprehensive treatment of modern algorithms with rigorous proofs of correctness and running time.",
+     "Computer Science", "Interlibrary Loan / MIT", "algorithms;complexity", "en", "2004-02-11"),
+    (2, "ACC-2004-1033", "Knuth, D. (1997). TAOCP Vol.1. LoC QA76.6.K64.",
+     "The foundational volume on fundamental algorithms and the analysis of basic programming techniques.",
+     "Computer Science", "Donated by A. Turing Estate", "analysis;combinatorics", "en", "2004-03-04"),
+]
+
+
+def test_guarded_hints_stay_silent_on_freetext_heavy_table():
+    # The 2004 regression: unguarded hints suggested lang/accession for
+    # domain/source/tags. With the discriminating-shape + name-affinity guards,
+    # a shape-poor table must produce NO hints rather than confident-wrong ones.
+    conn = _FakeSQLConn(ARCHIVE_COLUMNS, _ARCHIVE_ROWS)
+    cols = sp.introspect(conn, "knowledge")
+    fields = sp.propose_mapping(cols, KNOW_CANON)
+    refined = sp.refine_with_data(conn, "knowledge", fields, KNOW_CANON, columns=cols)
+    hints = [s for s in refined["suggestions"] if s["severity"] == "hint"]
+    assert hints == []
+
+
+def test_trap_flag_survives_guards_and_keeps_its_replacement():
+    # The tasks trap must still fire WITH a replacement: cmd_line is the only
+    # command-shaped column (discriminating), and the trap path does not require
+    # name affinity.
+    conn = _FakeSQLConn(LEGACY_TASKS_COLUMNS, _LEGACY_ROWS)
+    cols = sp.introspect(conn, "tasks")
+    fields = sp.propose_mapping(cols, TASK_CANON)
+    refined = sp.refine_with_data(conn, "tasks", fields, TASK_CANON, columns=cols)
+    trap = [s for s in refined["suggestions"] if s["field"] == "task"]
+    assert trap and trap[0]["severity"] == "trap" and trap[0]["suggested_column"] == "cmd_line"
+
+
+# ── deployment-wide learned mappings ─────────────────────────────────────
+
+@pytest.fixture
+def lessons_store(tmp_path, monkeypatch):
+    p = tmp_path / "schema_lessons.json"
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_LESSONS", str(p))
+    return p
+
+
+def test_propose_without_lessons_is_unchanged(lessons_store):
+    # Purity/back-compat: omitting lessons must reproduce the name+alias result.
+    cols = sp.introspect(_FakeConn(LEGACY_TASKS_COLUMNS), "tasks")
+    assert sp.propose_mapping(cols, TASK_CANON) == sp.propose_mapping(cols, TASK_CANON, None)
+
+
+def test_record_and_load_lessons_skips_trivial_matches(lessons_store):
+    fields = {
+        "task_id": {"column": "jobno"},      # non-trivial -> learned
+        "task": {"column": "task"},          # trivial (col == field) -> skipped
+        "status": {"column": "stat"},        # non-trivial -> learned
+    }
+    sp.record_lessons(fields)
+    lessons = sp.load_lessons()
+    assert lessons["jobno"] == {"task_id": 1}
+    assert lessons["stat"] == {"status": 1}
+    assert "task" not in lessons  # the trap self-match teaches nothing
+
+
+def test_learned_tier_maps_terse_columns_and_counts(lessons_store):
+    sp.record_lessons({"submitter": {"column": "submitter"}})  # trivial, ignored
+    sp.record_lessons({"submitted_by": {"column": "requestor"}})
+    sp.record_lessons({"submitted_by": {"column": "requestor"}})  # count -> 2
+    cols = sp.introspect(_FakeConn({"requestor": "text", "task": "text"}), "tasks")
+    m = sp.propose_mapping(cols, TASK_CANON, sp.load_lessons())
+    assert m["submitted_by"]["column"] == "requestor"
+    assert m["submitted_by"]["tier"] == "learned"
+    assert m["submitted_by"]["confidence"] == 0.95
+
+
+def test_learned_applies_across_tables_deployment_wide(lessons_store):
+    # Lessons are keyed by column name, not by table/db — a lesson learned on
+    # one table maps a same-named column on a different one.
+    sp.record_lessons({"domain": {"column": "subj"}})
+    cols = sp.introspect(_FakeConn({"subj": "character varying", "content": "text"}), "other_table")
+    m = sp.propose_mapping(cols, KNOW_CANON, sp.load_lessons())
+    assert m["domain"]["column"] == "subj" and m["domain"]["tier"] == "learned"
+
+
+def test_exact_name_still_outranks_learned(lessons_store):
+    # A learned lesson must not override an exact-named column — the content
+    # trap residual is honest: only data can beat an exact-name collision.
+    sp.record_lessons({"content": {"column": "abstract"}})
+    cols = sp.introspect(_FakeConn({"content": "text", "abstract": "text"}), "knowledge")
+    m = sp.propose_mapping(cols, KNOW_CANON, sp.load_lessons())
+    assert m["content"]["column"] == "content" and m["content"]["tier"] == "exact"
+
+
+def test_confirm_records_lessons(home, lessons_store):
+    conn = _FakeConn(LEGACY_TASKS_COLUMNS)
+    sp.confirm(conn, "app", "tasks", TASK_CANON,
+               overrides={"task": "cmd_line", "submitted_by": "submitter"})
+    lessons = sp.load_lessons()
+    assert lessons["cmd_line"]["task"] == 1
+    assert lessons["submitter"]["submitted_by"] == 1
+
+
 # ── db_fingerprint ──────────────────────────────────────────────────────
 
 def test_db_fingerprint_stable_for_same_host_dbname():

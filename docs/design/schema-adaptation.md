@@ -474,6 +474,22 @@ bug into an allow-list-shaped design.
 - **Aliasing dictionary scope.** Should common aliases (`source`/`source_type`/
   `origin`) ship as a static built-in list, or be per-deployment configurable?
   Static-but-extensible seems right; a config override file is cheap to add.
+  *Resolved (both).* The static list stays as a cold-start prior, but the
+  durable answer is a **deployment-wide learned tier**: `confirm()` records each
+  non-trivial `column → field` mapping to `$WILLOW_HOME/schema_lessons.json`, and
+  `propose_mapping` consults it between the exact and alias tiers (`exact →
+  learned → alias → unmapped`, tier `learned`, confidence 0.95). This is what
+  actually generalizes — an adversarial test on a legacy schema the heuristics
+  had never seen mapped 0/5 cold, then 4/5 automatically on a *different*
+  database in the same deployment after one confirmation. A learned mapping is
+  still a proposal a human confirms; it never auto-applies, and it never
+  overrides an exact-named column (so an exact-name trap — a `content` column
+  holding a citation — is beaten only by the data-shape pass, not by names or
+  memory). A separate **data-shape** pass (`classify_shape` / `refine_with_data`,
+  §3.2) reads a sample of real values to FLAG a name-match whose data is the
+  wrong kind, and — guarded by discriminating-shape + name-affinity + no column
+  reuse — to HINT a replacement; on a shape-poor table it stays silent rather
+  than guessing.
 - **Who can call `schema_confirm_mapping`?** Presumably gated at least as
   strictly as `knowledge_write` — arguably its own permission group, since
   confirming a mapping is a more consequential act than a single write.

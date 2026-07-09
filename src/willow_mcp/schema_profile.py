@@ -18,17 +18,30 @@ Design principles this module exists to satisfy (see doc §2):
      with a discovered_at timestamp; a dedicated audit log is future work
      (§5, not this pass).
 """
+import difflib
 import hashlib
 import json
 import os
 import re
 import time
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 SCHEMA_VERSION = 1
+
+# Hint tuning (docs/design/schema-adaptation.md §3.2 extension). A data-shape
+# HINT for an unmapped field fires only when the candidate column's shape is
+# DISCRIMINATING (shared by at most this many columns) AND its name has affinity
+# to the field — the 2004-archive test showed that on a freetext-heavy table an
+# unguarded "first well-shaped column" hint is confidently wrong (it matched a
+# `lang` noise column and reused the accession key for two fields). Silence beats
+# a wrong guess. The trap-FLAG (a mapped column whose data is the wrong shape) is
+# NOT gated by name affinity — that's how the tasks `cmd_line` rescue works.
+_HINT_SHARED_SHAPE_MAX = 2
+_HINT_NAME_AFFINITY_MIN = 0.55
 
 # Static-but-extensible alias dictionary (§7 open question, resolved as
 # "static built-in list" for the first pass — a per-deployment override file
@@ -88,30 +101,113 @@ def introspect(conn, table: str) -> list[ColumnInfo]:
     return [ColumnInfo(name=r[0], data_type=r[1]) for r in rows]
 
 
-def propose_mapping(columns: list[ColumnInfo], canonical_fields: list[str]) -> dict:
-    """Heuristic pass: exact name match -> known alias -> unmapped.
+# ── deployment-wide learned mappings (docs/design/schema-adaptation.md §7) ──
+# The 2004-archive test proved static heuristics don't transfer across schemas:
+# `subj`->domain, `provenance`->source, `kw`->tags have no name or shape tell —
+# the only thing that ever finds them is "someone in this deployment confirmed
+# that column->field once." confirm() is already a labeled example; this store
+# accumulates those examples (deployment-wide, keyed by column name) so the next
+# unfamiliar table maps itself. It feeds PROPOSALS at high-but-sub-exact
+# confidence — a learned mapping is still witnessed at confirm time, never
+# auto-applied (principle 3: writes may not guess; a remembered human decision
+# is not the same as an unattended one).
 
-    Returns {field: {"column": str|None, "tier": "exact"|"alias"|"unmapped",
-    "confidence": float, "data_type": str|None}}. Pure function of its
-    arguments — same columns + same canonical_fields always produce the same
-    mapping, so re-running it on an unconfirmed artifact is safe.
-    """
+def _lessons_path() -> Path:
+    env = os.environ.get("WILLOW_MCP_SCHEMA_LESSONS")
+    if env:
+        return Path(env)
+    home = Path(os.environ.get("WILLOW_HOME", Path.home() / ".willow"))
+    return home / "schema_lessons.json"
+
+
+def load_lessons() -> dict:
+    """Load the deployment learned-mapping store: {column_name: {field: count}}.
+    A missing or unreadable store is simply empty — lessons are an optimization,
+    never load-bearing."""
+    path = _lessons_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+        return data.get("columns", {}) if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def record_lessons(fields: dict) -> None:
+    """Persist the non-trivial (column != field) mappings of a CONFIRMED record
+    as deployment lessons, incrementing a per-(column,field) count. Trivial
+    exact self-matches (column name == canonical field) teach nothing and are
+    skipped — so confirming the naive `task`->`task` trap never records a
+    lesson, only a human override to `cmd_line` does."""
+    columns = load_lessons()
+    changed = False
+    for field, m in fields.items():
+        col = m.get("column")
+        if not col or col == field:
+            continue
+        bucket = columns.setdefault(col, {})
+        bucket[field] = bucket.get(field, 0) + 1
+        changed = True
+    if not changed:
+        return
+    path = _lessons_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json_atomic(path, {"format": "schema_lessons_v1", "columns": columns})
+
+
+def _best_learned_column(lessons: dict, field: str, by_name: dict, taken: set) -> Optional[str]:
+    """The present, not-yet-taken column most-confirmed for `field` in this
+    deployment, or None. Deterministic: highest count wins, column name breaks
+    ties."""
+    candidates = [
+        (counts.get(field, 0), col)
+        for col, counts in lessons.items()
+        if col in by_name and col not in taken and counts.get(field, 0) > 0
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: (-t[0], t[1]))
+    return candidates[0][1]
+
+
+def propose_mapping(columns: list[ColumnInfo], canonical_fields: list[str],
+                    lessons: Optional[dict] = None) -> dict:
+    """Heuristic pass: exact name -> deployment-learned -> known alias -> unmapped.
+
+    Returns {field: {"column": str|None, "tier": "exact"|"learned"|"alias"|
+    "unmapped", "confidence": float, "data_type": str|None}}. Pure function of
+    its arguments — with `lessons=None` (the default) the learned tier is
+    skipped and the result is identical to the original name+alias behaviour, so
+    callers that want determinism without deployment state just omit it."""
     by_name = {c.name: c for c in columns}
+    lessons = lessons or {}
+    taken: set = set()
     mapping: dict = {}
     for field in canonical_fields:
         if field in by_name:
             col = by_name[field]
+            taken.add(col.name)
             mapping[field] = {
                 "column": col.name, "tier": "exact",
                 "confidence": 1.0, "data_type": col.data_type,
             }
             continue
+        learned = _best_learned_column(lessons, field, by_name, taken) if lessons else None
+        if learned is not None:
+            taken.add(learned)
+            mapping[field] = {
+                "column": learned, "tier": "learned",
+                "confidence": 0.95, "data_type": by_name[learned].data_type,
+            }
+            continue
         found = None
         for alias in CANONICAL_ALIASES.get(field, ()):
-            if alias in by_name:
+            if alias in by_name and alias not in taken:
                 found = by_name[alias]
                 break
         if found is not None:
+            taken.add(found.name)
             mapping[field] = {
                 "column": found.name, "tier": "alias",
                 "confidence": 0.9, "data_type": found.data_type,
@@ -209,6 +305,22 @@ def classify_shape(values: list, data_type: Optional[str] = None) -> str:
     return "freetext"
 
 
+def _name_affinity(column: str, field: str) -> float:
+    """How name-similar is a column to a canonical field (or any of its static
+    aliases)? Max SequenceMatcher ratio over {field} ∪ aliases(field), with a
+    substring containment treated as a strong match. Used only to gate HINTS —
+    a low-affinity column may still be flagged as a trap replacement, but won't
+    be *proposed* for an unmapped field on shape alone."""
+    col = column.lower()
+    targets = (field.lower(),) + tuple(a.lower() for a in CANONICAL_ALIASES.get(field, ()))
+    best = 0.0
+    for t in targets:
+        if col == t or col in t or t in col:
+            return 1.0
+        best = max(best, difflib.SequenceMatcher(None, col, t).ratio())
+    return best
+
+
 def _sample_columns(conn, table: str, columns: list, limit: int = 8) -> dict:
     """Return {column_name: [sampled values]} for every column, or {} on error.
     A diagnostic aid — degrades to {} rather than raising."""
@@ -260,6 +372,8 @@ def refine_with_data(conn, table: str, fields: dict, canonical_fields: list[str]
         if c and exp and shapes.get(c) in exp:
             well_placed.add(c)
 
+    shape_counts = Counter(shapes.values())
+    used: set = set()  # a column proposed for one field is not offered to another
     suggestions = []
     for field in canonical_fields:
         exp = _EXPECTED_SHAPES.get(field)
@@ -271,29 +385,55 @@ def refine_with_data(conn, table: str, fields: dict, canonical_fields: list[str]
         unmapped = cur_col is None
         if not (mismatch or unmapped):
             continue
+
+        # A replacement candidate must fit the expected shape, be free (not
+        # well-placed elsewhere, not already proposed), and — the 2004 guard —
+        # be DISCRIMINATING: its shape shared by few columns, so "the command-
+        # shaped one" is meaningful but "one of six freetext columns" is not.
         candidates = [
             c for c, sh in shapes.items()
-            if sh in exp and c != cur_col and (c not in well_placed)
+            if sh in exp and c != cur_col and c not in well_placed and c not in used
+            and shape_counts[sh] <= _HINT_SHARED_SHAPE_MAX
         ]
-        if not candidates:
-            continue
-        best = candidates[0]
-        suggestions.append({
-            "field": field,
-            "current_column": cur_col,
-            "current_tier": fields.get(field, {}).get("tier"),
-            "current_shape": cur_shape,
-            "suggested_column": best,
-            "suggested_shape": shapes.get(best),
-            "severity": "trap" if mismatch else "hint",
-            "reason": (
-                f"'{cur_col}' name-matched {field}, but its values look like "
-                f"'{cur_shape}', not {'/'.join(sorted(exp))}; '{best}' is "
-                f"'{shapes.get(best)}'-shaped"
-                if mismatch else
-                f"{field} is unmapped; '{best}' is '{shapes.get(best)}'-shaped"
-            ),
-        })
+
+        if mismatch:
+            # The FLAG is always worth emitting — a column whose data is the
+            # wrong shape is a finding on its own. A replacement is attached only
+            # when a discriminating candidate exists; name affinity is NOT
+            # required (this is the `task`->`cmd_line` rescue path).
+            best = candidates[0] if candidates else None
+            entry = {
+                "field": field, "current_column": cur_col,
+                "current_tier": fields.get(field, {}).get("tier"),
+                "current_shape": cur_shape, "severity": "trap",
+                "reason": (
+                    f"'{cur_col}' name-matched {field}, but its values look like "
+                    f"'{cur_shape}', not {'/'.join(sorted(exp))}"
+                    + (f"; '{best}' is '{shapes.get(best)}'-shaped" if best else
+                       "; no better-shaped column found — confirm by hand")
+                ),
+            }
+            if best:
+                entry["suggested_column"] = best
+                entry["suggested_shape"] = shapes.get(best)
+                used.add(best)
+            suggestions.append(entry)
+        else:
+            # HINT for an unmapped field: additionally require name affinity, so
+            # a shape match alone can't propose an unrelated column. If nothing
+            # clears both bars, stay silent (silence beats a wrong guess).
+            affine = [c for c in candidates if _name_affinity(c, field) >= _HINT_NAME_AFFINITY_MIN]
+            if not affine:
+                continue
+            best = affine[0]
+            used.add(best)
+            suggestions.append({
+                "field": field, "current_column": None, "current_tier": "unmapped",
+                "current_shape": None, "suggested_column": best,
+                "suggested_shape": shapes.get(best), "severity": "hint",
+                "reason": f"{field} is unmapped; '{best}' is '{shapes.get(best)}'-shaped "
+                          f"and name-similar to {field}",
+            })
     return {"shapes": shapes, "suggestions": suggestions}
 
 
@@ -366,7 +506,7 @@ def resolve(conn, app_id: str, table: str, canonical_fields: list[str]) -> dict:
 
     fingerprint = db_fingerprint(conn)
     existing = load_mapping(app_id, fingerprint, table)
-    fresh_fields = propose_mapping(columns, canonical_fields)
+    fresh_fields = propose_mapping(columns, canonical_fields, load_lessons())
 
     if existing and existing.get("confirmed"):
         by_name = {c.name for c in columns}
@@ -466,7 +606,7 @@ def preview(conn, app_id: str, table: str, canonical_fields: list[str],
     by_name = {c.name: c for c in columns}
     fingerprint = db_fingerprint(conn)
     existing = load_mapping(app_id, fingerprint, table)
-    base_fields = (existing or {}).get("fields") or propose_mapping(columns, canonical_fields)
+    base_fields = (existing or {}).get("fields") or propose_mapping(columns, canonical_fields, load_lessons())
     fields, err = _apply_overrides(base_fields, overrides, by_name, canonical_fields)
     if err:
         err["table"] = table
@@ -511,7 +651,7 @@ def confirm(
 
     fingerprint = db_fingerprint(conn)
     existing = load_mapping(app_id, fingerprint, table)
-    base_fields = (existing or {}).get("fields") or propose_mapping(columns, canonical_fields)
+    base_fields = (existing or {}).get("fields") or propose_mapping(columns, canonical_fields, load_lessons())
     fields, err = _apply_overrides(base_fields, overrides, by_name, canonical_fields)
     if err:
         err["table"] = table
@@ -527,6 +667,10 @@ def confirm(
         "fields": fields,
     }
     save_mapping(app_id, fingerprint, table, record)
+    # A confirmed mapping is a labeled example — remember its non-trivial
+    # column->field pairs deployment-wide so the next unfamiliar table maps
+    # itself (the durable generalization lever the 2004 test argued for).
+    record_lessons(fields)
     return record
 
 
