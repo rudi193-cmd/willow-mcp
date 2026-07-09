@@ -83,3 +83,36 @@ jobs:
           PGPORT: 5432
           PGUSER: postgres
           PGPASSWORD: postgres
+
+      - name: CLI smoke test — live gates --serve dashboard
+        # willow-mcp gates --serve starts a real local HTTP server with
+        # working buttons (not a snapshot) — start it, hit its actual HTTP
+        # API the same way the page's own JS does, confirm a button click
+        # equivalent (POST /api/action) really flips the manifest on disk,
+        # then tear it down. Catches regressions in gates_serve.py/
+        # gates_actions.py that unit tests (which call Python functions
+        # directly, no HTTP) wouldn't see — a broken route, a serialization
+        # bug, uvicorn/Starlette wiring.
+        run: |
+          set -euo pipefail
+          export WILLOW_HOME="${RUNNER_TEMP}/willow_home"
+          willow-mcp gates smoketest --serve --port 8788 &
+          SERVER_PID=$!
+          trap 'kill "${SERVER_PID}" 2>/dev/null || true' EXIT
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8788/api/state > /dev/null && break
+            sleep 0.3
+          done
+          curl -sf http://127.0.0.1:8788/ | grep -q 'const APP_ID = "smoketest";'
+          curl -sf -X POST http://127.0.0.1:8788/api/action \
+            -H "Content-Type: application/json" \
+            -d '{"row_id":"perm.smoketest.store_read","inputs":{}}' \
+            | python -c "import json,sys; d=json.load(sys.stdin); assert d['ok'], d"
+          grep -q store_read "${WILLOW_HOME}/mcp_apps/smoketest/manifest.json"
+          kill "${SERVER_PID}"
+          trap - EXIT
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres

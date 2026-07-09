@@ -70,6 +70,18 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   never grant itself a permission it was just denied. `consent.*` rows are
   read-only by design (willow-mcp never writes that policy) and never show a
   command.
+- **`gates` is now interactive — a real TUI and a live local HTML dashboard, not
+  just a snapshot.** Bare `willow-mcp gates` in a real terminal opens a curses
+  screen: arrow keys / j-k to move, enter/space to actually flip the highlighted
+  gate — grant/revoke a lease (prompts for TTL + reason), allow/deny a permission,
+  confirm an identity binding, drain the task queue once. `willow-mcp gates
+  --serve` does the same over a `127.0.0.1`-only local HTTP server with real
+  clickable buttons, for anyone who'd rather use a browser. Both share one action
+  layer (`gates_actions.py`) with the `allow-permission`/`grant-net`/
+  `confirm-binding` CLI subcommands — pressing a row calls the exact same
+  functions, no new authority. `--json`/`--html`/`--static` are unchanged and
+  still what runs automatically when stdout isn't a real terminal (piped, CI),
+  so nothing scripted against the old output breaks.
 - **Time-boxed egress leases** (B-32 / L-NET-02). `task_submit(allow_net=True)` now
   needs a **third** key: an unexpired lease issued by the operator with
   `willow-mcp grant-net <app_id> --ttl 30m --reason ...` (ceiling 3h, per FRANK

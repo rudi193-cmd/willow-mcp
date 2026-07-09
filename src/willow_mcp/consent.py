@@ -1,12 +1,21 @@
-"""Standing operator consent — the fleet-wide ring of the three-key egress gate.
+"""Standing operator consent — the standing ring of the three-key egress gate.
 
 `task_net` in an app's manifest says *this app may ever request egress*.
 `consent.internet` in `$WILLOW_HOME/settings.global.json` says *the operator
 permits egress right now*. An egress lease (`lease.py`) says *this app, until
 this time*. A network-bearing task needs **all three**. The manifest key is a
 capability, granted once and rarely; the consent key is a switch the operator
-flips, and flipping it off must stop egress fleet-wide without editing a single
-manifest; the lease is a time-boxed grant that expires on its own.
+flips, without editing a single manifest; the lease is a time-boxed grant that
+expires on its own.
+
+**This is not a fleet-wide kill switch, and this docstring used to say it was.**
+All three keys are read by `task_submit` — the *submitter*. The *executor*
+(`kartikeya`) parses `# allow_net` from the stored task text and honors it on
+sight: `consent`, `lease`, and `task_net` appear nowhere in it. Because the
+`tasks` table is shared Postgres, any other submitter that writes a row bearing
+that directive reaches the network no matter what this file says (**B-37**, P0).
+Turning `internet` off stops egress through `task_submit`. It stops nothing else.
+Do not wire this module into a claim it cannot keep.
 
 This module only ever **reads**. `settings.global.json` is authored by
 willow-2.0's `willow/fylgja/global_settings.py`; willow-mcp is a consumer, and a
@@ -186,6 +195,8 @@ def permitted(key: str) -> bool:
 
 
 def internet_permitted() -> bool:
-    """The fleet-wide key of the three-key egress gate. See `gate.NET_PERMISSION`
-    for the capability and `lease.active` for the time-boxed grant."""
+    """The standing, all-apps key of the three-key egress gate. See
+    `gate.NET_PERMISSION` for the capability and `lease.active` for the time-boxed
+    grant. Read by `task_submit` only — see the module docstring on why this is not
+    a fleet-wide kill switch (B-37)."""
     return permitted("internet")
