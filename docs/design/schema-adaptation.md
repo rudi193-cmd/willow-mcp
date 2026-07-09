@@ -489,7 +489,13 @@ bug into an allow-list-shaped design.
   §3.2) reads a sample of real values to FLAG a name-match whose data is the
   wrong kind, and — guarded by discriminating-shape + name-affinity + no column
   reuse — to HINT a replacement; on a shape-poor table it stays silent rather
-  than guessing.
+  than guessing. The learned store is **bounded** (`WILLOW_MCP_SCHEMA_LESSONS_MAX`,
+  default 5000 pairs): an open, churning column-name vocabulary would otherwise
+  grow it without limit, so when it exceeds the cap it prunes by LFU with an
+  LRU tie-break (fewest confirmations first, oldest-among-ties next), keeping the
+  common load-bearing vocabulary and letting stale one-off names fade. Coverage
+  degrades gracefully if the cap is squeezed below the working set (a re-learn
+  costs one cold miss); the default sits well above realistic working sets.
 - **Who can call `schema_confirm_mapping`?** Presumably gated at least as
   strictly as `knowledge_write` — arguably its own permission group, since
   confirming a mapping is a more consequential act than a single write.

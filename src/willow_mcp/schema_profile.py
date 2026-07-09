@@ -112,6 +112,17 @@ def introspect(conn, table: str) -> list[ColumnInfo]:
 # auto-applied (principle 3: writes may not guess; a remembered human decision
 # is not the same as an unattended one).
 
+# The store is BOUNDED: an open column-name vocabulary would otherwise grow it
+# without limit (a churny deployment keeps inventing names). When it exceeds the
+# cap, prune by LFU with an LRU tie-break — evict the least-confirmed
+# (column,field) lessons first, oldest-among-ties next — so the common, load-
+# bearing vocabulary survives and stale one-off names from decommissioned
+# schemas fade. A logical `tick` (not wall-clock: deterministic, restart-stable)
+# stamps recency. Over-eviction only costs a re-learn (one cold miss), so the cap
+# is generous by default and env-overridable.
+_LESSONS_CAP_DEFAULT = 5000
+
+
 def _lessons_path() -> Path:
     env = os.environ.get("WILLOW_MCP_SCHEMA_LESSONS")
     if env:
@@ -120,40 +131,103 @@ def _lessons_path() -> Path:
     return home / "schema_lessons.json"
 
 
-def load_lessons() -> dict:
-    """Load the deployment learned-mapping store: {column_name: {field: count}}.
-    A missing or unreadable store is simply empty — lessons are an optimization,
-    never load-bearing."""
+def _lessons_cap() -> int:
+    try:
+        return max(1, int(os.environ.get("WILLOW_MCP_SCHEMA_LESSONS_MAX", _LESSONS_CAP_DEFAULT)))
+    except ValueError:
+        return _LESSONS_CAP_DEFAULT
+
+
+def _load_lessons_raw() -> dict:
+    """Load the rich store: {"tick": int, "columns": {col: {field: {"n","t"}}}}.
+    Normalizes the legacy v1 shape ({col: {field: count_int}}) on read, so an old
+    store keeps working and gets upgraded on the next write. Missing/unreadable
+    is an empty store — lessons are an optimization, never load-bearing."""
     path = _lessons_path()
+    empty = {"tick": 0, "columns": {}}
     if not path.exists():
-        return {}
+        return empty
     try:
         data = json.loads(path.read_text())
-        return data.get("columns", {}) if isinstance(data, dict) else {}
     except Exception:
-        return {}
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    raw_cols = data.get("columns", {})
+    cols: dict = {}
+    for col, fields in (raw_cols.items() if isinstance(raw_cols, dict) else ()):
+        norm: dict = {}
+        for field, val in (fields.items() if isinstance(fields, dict) else ()):
+            if isinstance(val, int):
+                norm[field] = {"n": val, "t": 0}
+            elif isinstance(val, dict):
+                norm[field] = {"n": int(val.get("n", 0)), "t": int(val.get("t", 0))}
+        if norm:
+            cols[col] = norm
+    return {"tick": int(data.get("tick", 0)), "columns": cols}
+
+
+def load_lessons() -> dict:
+    """Public view of the store: {column_name: {field: count}} (ints, recency
+    dropped) — the stable contract propose_mapping and callers read."""
+    return {col: {f: e["n"] for f, e in fields.items()}
+            for col, fields in _load_lessons_raw()["columns"].items()}
+
+
+def lessons_stats() -> dict:
+    """Size/health of the store — {columns, pairs, cap, tick}. For diagnostics
+    and for asserting the bound holds."""
+    raw = _load_lessons_raw()
+    pairs = sum(len(v) for v in raw["columns"].values())
+    return {"columns": len(raw["columns"]), "pairs": pairs,
+            "cap": _lessons_cap(), "tick": raw["tick"]}
+
+
+def _prune_lessons(cols: dict, cap: int) -> int:
+    """Evict lowest-value (column,field) pairs until size <= 90% of cap (the 10%
+    hysteresis avoids pruning on every write near the boundary). Value order:
+    fewest confirmations first, then least-recently-confirmed. Returns the count
+    evicted. Mutates `cols` in place, dropping any column left with no fields."""
+    pairs = [(e["n"], e["t"], col, field)
+             for col, fields in cols.items() for field, e in fields.items()]
+    if len(pairs) <= cap:
+        return 0
+    target = max(1, int(cap * 0.9))
+    pairs.sort()  # ascending by (n, t): least-confirmed, then oldest, first
+    evicted = 0
+    for _n, _t, col, field in pairs[: len(pairs) - target]:
+        del cols[col][field]
+        if not cols[col]:
+            del cols[col]
+        evicted += 1
+    return evicted
 
 
 def record_lessons(fields: dict) -> None:
     """Persist the non-trivial (column != field) mappings of a CONFIRMED record
-    as deployment lessons, incrementing a per-(column,field) count. Trivial
-    exact self-matches (column name == canonical field) teach nothing and are
-    skipped — so confirming the naive `task`->`task` trap never records a
-    lesson, only a human override to `cmd_line` does."""
-    columns = load_lessons()
+    as deployment lessons, incrementing a per-(column,field) count and stamping
+    recency. Trivial exact self-matches (column name == canonical field) teach
+    nothing and are skipped — so confirming the naive `task`->`task` trap never
+    records a lesson, only a human override to `cmd_line` does. Prunes to the cap
+    after recording so the store stays bounded in an open vocabulary."""
+    raw = _load_lessons_raw()
+    cols = raw["columns"]
+    tick = raw["tick"] + 1
     changed = False
     for field, m in fields.items():
         col = m.get("column")
         if not col or col == field:
             continue
-        bucket = columns.setdefault(col, {})
-        bucket[field] = bucket.get(field, 0) + 1
+        bucket = cols.setdefault(col, {})
+        prev = bucket.get(field) or {"n": 0}
+        bucket[field] = {"n": prev.get("n", 0) + 1, "t": tick}
         changed = True
     if not changed:
         return
+    _prune_lessons(cols, _lessons_cap())
     path = _lessons_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    _write_json_atomic(path, {"format": "schema_lessons_v1", "columns": columns})
+    _write_json_atomic(path, {"format": "schema_lessons_v2", "tick": tick, "columns": cols})
 
 
 def _best_learned_column(lessons: dict, field: str, by_name: dict, taken: set) -> Optional[str]:

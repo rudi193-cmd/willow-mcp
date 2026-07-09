@@ -369,6 +369,56 @@ def test_confirm_records_lessons(home, lessons_store):
     assert lessons["submitter"]["submitted_by"] == 1
 
 
+# ── bound & prune ─────────────────────────────────────────────────────────
+
+def test_store_is_bounded_by_cap(lessons_store, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_LESSONS_MAX", "10")
+    for i in range(50):  # 50 distinct one-off column names -> would be 50 pairs
+        sp.record_lessons({"task_id": {"column": f"legacy_id_{i}"}})
+    stats = sp.lessons_stats()
+    assert stats["pairs"] <= 10  # never exceeds the cap
+    assert stats["cap"] == 10
+
+
+def test_prune_evicts_least_confirmed_first(lessons_store, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_LESSONS_MAX", "5")
+    # A frequently-confirmed common name...
+    for _ in range(20):
+        sp.record_lessons({"submitted_by": {"column": "submitter"}})
+    # ...then a flood of one-off names to force eviction.
+    for i in range(40):
+        sp.record_lessons({"submitted_by": {"column": f"oneoff_{i}"}})
+    lessons = sp.load_lessons()
+    assert "submitter" in lessons  # high-count survivor is never evicted
+    assert lessons["submitter"]["submitted_by"] == 20
+    assert sp.lessons_stats()["pairs"] <= 5
+
+
+def test_prune_keeps_more_recent_among_equal_counts(lessons_store, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_LESSONS_MAX", "3")
+    order = ["a", "b", "c", "d", "e", "f"]  # each count-1, ascending recency
+    for name in order:
+        sp.record_lessons({"status": {"column": name}})
+    survivors = set(sp.load_lessons().keys())
+    # oldest count-1 names evicted first; the most-recent survive
+    assert "f" in survivors and "a" not in survivors
+
+
+def test_legacy_v1_store_is_read_and_upgraded(lessons_store):
+    # An old int-valued store must load and keep working, then upgrade on write.
+    import json
+    lessons_store.write_text(json.dumps({
+        "format": "schema_lessons_v1",
+        "columns": {"submitter": {"submitted_by": 3}},
+    }))
+    assert sp.load_lessons()["submitter"]["submitted_by"] == 3  # int contract intact
+    sp.record_lessons({"status": {"column": "stat"}})           # triggers upgrade
+    data = json.loads(lessons_store.read_text())
+    assert data["format"] == "schema_lessons_v2"
+    assert data["columns"]["submitter"]["submitted_by"]["n"] == 3  # count preserved
+    assert sp.load_lessons()["stat"]["status"] == 1
+
+
 # ── db_fingerprint ──────────────────────────────────────────────────────
 
 def test_db_fingerprint_stable_for_same_host_dbname():
