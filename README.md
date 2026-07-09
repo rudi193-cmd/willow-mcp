@@ -105,13 +105,23 @@ $ willow-mcp net-status          # what is live, and for how much longer
 $ willow-mcp revoke-net myapp    # or just wait; the ceiling is 3h
 ```
 
-Setting `consent.internet` to `false` stops network tasks **fleet-wide**,
-immediately, without editing a single manifest. `task_net` is a capability
-(rarely granted, deliberately excluded from `full_access`); `consent.internet` is
-a switch; the lease is a **time-boxed grant** that an agent may ask for and never
-issue. No MCP tool can mint one — `grant-net` is local CLI only, exactly like
-`confirm-binding`. An agent may *request* egress and may never *grant it to
-itself*.
+Setting `consent.internet` to `false` stops network tasks submitted through
+`task_submit`, immediately, without editing a single manifest. `task_net` is a
+capability (rarely granted, deliberately excluded from `full_access`);
+`consent.internet` is a switch; the lease is a **time-boxed grant** that an agent
+may ask for and never issue. No MCP tool can mint one — `grant-net` is local CLI
+only, exactly like `confirm-binding`. An agent may *request* egress and may never
+*grant it to itself*.
+
+> **It is not a fleet-wide kill switch, and this README used to say it was.** The
+> three keys gate the **submitter**. The **executor** — `kartikeya`, and
+> willow-2.0's own Kart copy — reads `# allow_net` out of the task text and honors
+> it on sight; `consent`, `lease`, and `task_net` appear nowhere in it. The `tasks`
+> table is shared Postgres, so any *other* submitter that writes a row carrying
+> that directive reaches the network regardless of this file (**B-37**, P0,
+> verified live with `task_net` revoked and the lease expired). Until B-37 lands,
+> `consent.internet: false` is an off switch for one door in a building with more
+> than one door.
 
 Consent and leases are both read **fail-closed**: a missing file, an unparseable
 file, a non-boolean value (`"true"`, `1`), a lease past its deadline, a deadline
