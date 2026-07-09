@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "willow-mcp": {
+      "type": "stdio",
+      "command": "/path/to/venv/bin/python",
+      "args": ["-m", "willow_mcp"],
+      "env": {
+        "WILLOW_APP_ID": "willow",
+        "WILLOW_HOME": "/home/you/.willow",
+        "WILLOW_STORE_ROOT": "/home/you/.willow/store",
+        "WILLOW_PG_DB": "willow_20",
+        "WILLOW_HUMAN_ORCHESTRATOR": "1"
+      }
+    }
+  }
+}

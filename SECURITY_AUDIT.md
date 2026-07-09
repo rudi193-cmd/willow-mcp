@@ -235,6 +235,31 @@ The gate never runs (it is keyed off the *argument*, not the *text*), the direct
 
 ---
 
+### P1: L-NET-02 — A host-side agent can self-grant its own egress — MITIGATED, NOT CLOSED
+
+**Severity:** P1
+**Status:** Mitigated — the remaining step is a deployment change, not a code change
+**Found:** 2026-07-08, demonstrated in-session while landing B-29
+**Mitigated:** 2026-07-09 (B-32: time-boxed leases, strict-trust-root mode, PreToolUse guard)
+
+B-14 made `$WILLOW_HOME/mcp_apps` a `bound_ro` mount *inside the Kart sandbox*, precisely so an untrusted runtime could not rewrite the ACL that gates it. But the agent driving the session does not run inside that sandbox. It holds ordinary file tools and can write `"task_net"` into its own manifest, then call `task_submit(allow_net=True)`. B-29's `consent.internet` is a second file in the same directory tree, writable by the same uid.
+
+This inverts the **sudo invariant** (FRANK `90e52ab7`): *the model may REQUEST egress, never CONFIRM it; request and confirm are separate authorities.* Under §0.1 the witness may not be the actor; under §0.3 nothing may extend its own reach. The escalation was demonstrated in-session with operator approval in chat — but the *mechanism* never required that approval, and an approval the machine cannot check is not a control.
+
+**Impact:** An agent with file-write access to `$WILLOW_HOME` can grant itself sandbox network egress and use it, with no operator action. This does not cross a trust boundary the OS is enforcing (agent and server share a uid by default), so it is P1 rather than P0: it defeats a policy control, not a kernel one.
+
+**Mitigations applied (B-32):**
+
+1. **Egress is now a time-boxed lease.** `task_net` in the manifest is demoted to a capability ("this app may ever *ask*"); the grant itself is a record under `mcp_apps/_net_leases/<app_id>.json` with an issuer, a reason, and a deadline capped at 3h (FRANK `cc553729`). A self-granted lease *expires* and *leaves an attributed record*, where a self-granted boolean persisted silently and forever.
+2. **No MCP tool can mint a lease.** Issuance is local-CLI-only (`willow-mcp grant-net`), exactly as `confirm_binding` is (L-AUTH-02). Leases are read fail-closed: expired, unparseable, naive-timestamped, over-ceiling, or naming a different `app_id` than the file they sit in all deny.
+3. **The sandbox lane is fully closed.** Leases live under `mcp_apps/`, so they inherit B-14's `bound_ro` mount. Verified: `lease.grant()` from inside the Kart sandbox raises `OSError(EROFS)` and no file appears.
+4. **The residual is reported, never implied away.** `diagnostic_summary.checks.net_lease.self_writable` lists exactly which authorizing keys the running process could forge. `WILLOW_MCP_STRICT_TRUST_ROOT=1` turns that into a refusal (`trust_root_denied`).
+5. **The PreToolUse hook blocks the crossing** — `grant-net`, a write under `_net_leases/`, or an edit adding `task_net` to a manifest. A hook is a guardrail in the agent's own harness, not a control; it makes the boundary visible where it would be crossed.
+
+**Not closed.** On a single-uid host the agent can still write the lease. It must now forge a *third* artifact, with a clock, under audit — but the operating system is not stopping it. **Strict mode is off by default**, because enabling it before uid separation exists would deny egress on every current install. The genuine fix is ownership: `chown` `mcp_apps/` and `mcp_apps/_net_leases/` to a uid the agent's process does not run as, then set `WILLOW_MCP_STRICT_TRUST_ROOT=1`. That is a deployment step this repo can support and check but cannot perform. Tracked as B-32 in `docs/BUGS.md`.
+
+---
+
 ### P0: L-ISO-01 — `store_*` tools have no cross-app isolation — RESOLVED
 
 **Severity:** P0
@@ -266,11 +291,13 @@ The gate never runs (it is keyed off the *argument*, not the *text*), the direct
 | Priority | Count | Items |
 |---|---|---|
 | P0 | 0 open, 3 resolved | L-ISO-01 (resolved), L-AUTH-02 (resolved), L-NET-01 (resolved) |
-| P1 | 0 | — (L-INT-01 resolved) |
+| P1 | 1 mitigated, 1 resolved | **L-NET-02 (mitigated, not closed)**, L-INT-01 (resolved) |
 | P2 | 0 open, 6 resolved-or-stale | L-REQ-01 (stale), L-AUTH-01 (stale), L-DOS-01 (resolved), L-BUG-01 (resolved), L-CONC-01 (resolved), L-TEST-01 (resolved) |
 | P3 | 0 | — (L-DOC-01 resolved) |
 
-**All findings from this audit are resolved or confirmed stale**, including L-ISO-01 — the last open P0 — via an opt-in `store_scope` manifest field rather than a breaking default change. Summary of what changed on 2026-07-08:
+**Every P0 is resolved or confirmed stale.** One P1 — **L-NET-02**, a host-side agent self-granting egress — is **mitigated but not closed**: leases now make a self-grant expire, attribute it, and surface it, and strict mode will refuse it outright, but the last step (uid separation via `chown`) is a deployment change this repo can check and cannot perform. Do not read the rest of this summary as saying otherwise.
+
+Summary of what changed on 2026-07-08:
 - **L-AUTH-02 (P0)** — serve-mode identity binding implemented (`identity_binding.py` + `oauth.py`/`gate.py`/`server.py` wiring + `willow-mcp confirm-binding` CLI). Verified end-to-end.
 - **L-NET-01 (P0)** — `task_submit` now strips caller-supplied net directives unconditionally before the permission-gated append.
 - **L-ISO-01 (P0)** — `store_*` tools gained opt-in per-app collection scoping (`store_scope` manifest field); unscoped apps keep today's shared-fleet-store default.
@@ -279,6 +306,9 @@ The gate never runs (it is keyed off the *argument*, not the *text*), the direct
 - **L-REQ-01, L-AUTH-01 (P2)** — confirmed stale (already superseded by an earlier rewrite, no action needed).
 - **L-DOC-01 (P3)** — `willow-mcp setup` and `willow-mcp confirm-binding` CLI subcommands implemented.
 - Test suite grew from 12 tests (1 file) to 252 tests — all passing.
+
+And on 2026-07-09:
+- **L-NET-02 (P1)** — egress became a **three-key** operation: the `task_net` capability, the operator's `consent.internet`, and a time-boxed, operator-issued **lease** (`willow-mcp grant-net`, ≤3h, no MCP tool can mint one). Leases read fail-closed and inherit B-14's `bound_ro` sandbox mount, so the sandbox lane is closed outright. The host-side lane is narrowed and reported, not closed — see the finding.
 
 **Assessment:** Both stdio mode (default) and serve mode (HTTP + OAuth) now meet the same bar:
 - ✅ Parameterized SQL queries (no injection)
@@ -289,7 +319,90 @@ The gate never runs (it is keyed off the *argument*, not the *text*), the direct
 - ✅ Proper use of MCP SDK, including its auth-context primitives
 - ✅ safe_integration.py present for fleet orchestration visibility
 - ✅ Meaningful test coverage across all seven source files
+- ⚠️ Egress is gated by three keys, all of which live in files the server's own uid can write on a default single-uid install — narrowed and reported, not enforced by the OS (L-NET-02)
 
-**Recommendation:** L-ISO-01's fix is opt-in, not a new default — any deployment running multiple apps with only partial trust in each other on one willow-mcp instance should add `store_scope` to each app's manifest rather than relying on the unscoped default, since `full_access`/`store_read` without it still implies read access to every other app's data (single-operator, single-trust-domain deployments are unaffected either way, the same accepted trust model noted for stdio `app_id` elsewhere in this doc). No open items from this audit block a serve-mode deployment or PyPI publish with OAuth enabled. Before publishing, re-run a fresh audit pass specifically against serve mode's current (now-fixed) state — this document's rubric was written stdio-first and augmented for serve mode reactively; a clean-slate pass would catch anything this incremental process missed.
+**Recommendation:** L-ISO-01's fix is opt-in, not a new default — any deployment running multiple apps with only partial trust in each other on one willow-mcp instance should add `store_scope` to each app's manifest rather than relying on the unscoped default, since `full_access`/`store_read` without it still implies read access to every other app's data (single-operator, single-trust-domain deployments are unaffected either way, the same accepted trust model noted for stdio `app_id` elsewhere in this doc). Any deployment where the agent process is not fully trusted should additionally `chown` `mcp_apps/` (including `_net_leases/`) to a separate uid and set `WILLOW_MCP_STRICT_TRUST_ROOT=1`, per L-NET-02 — without that, the three egress keys are policy, not enforcement. No open items from this audit block a serve-mode deployment or PyPI publish with OAuth enabled. Before publishing, re-run a fresh audit pass specifically against serve mode's current (now-fixed) state — this document's rubric was written stdio-first and augmented for serve mode reactively; a clean-slate pass would catch anything this incremental process missed.
 
-*ΔΣ=42*
+---
+
+## Addendum — Live adversarial audit (2026-07-09)
+
+Unlike the rubric pass above (static review), this addendum records results from
+**driving the running server** over the real MCP stdio protocol with hostile
+input. Method: two rounds — the first surfaced confounders (Pydantic arg-
+validation errors, a missing `knowledge` table, and the rate limiter masking
+deeper controls), which were de-confounded and re-run so each verdict reflects
+the control it actually exercises; plus a direct battery against the Kart
+security scanner and a sandbox filesystem-tamper probe.
+
+### Live re-validation — controls confirmed against the running server
+
+| Surface | Probe(s) | Result |
+|---|---|---|
+| Protocol | garbage bytes, non-JSON-RPC, call-before-init, unknown method, 10 MB line, 5k-deep nested JSON | server survives, stays up, still completes a valid handshake |
+| Auth / gate | empty & unmanifested `app_id` (fail-closed), `../willow` traversal, gate-denied tools, `deny_tools`, orchestrator `human_only` + `dispatch_id` | all denied |
+| Store scope | cross-lane write (`collection_denied`), `../../tmp` (`illegal path characters`), `record_id` `../etc/passwd` (`not_found`) | contained |
+| SQL injection | `' OR '1'='1`, `DROP TABLE`, `UNION SELECT` against a real table holding a secret row | parameterized — injections return empty, secret surfaces only on a legitimate match, table intact |
+| Egress | `allow_net=True` → `net_denied` (first of three keys) | denied |
+| Sandbox | netns isolation (separate inode, no routes); **manifest write → `Read-only file system`** | isolated; ACL trust roots immutable from inside the sandbox |
+| Rate limiting | 20-call burst | 10/20 throttled |
+
+### New findings
+
+#### P2: L-DOS-02 — Resource-exhaustion in the sandboxed executor — RESOLVED (source-fixed)
+
+`kartikeya.check_kart_task` blocks `rm -rf /`, `curl|sh`, reverse shells, `chmod
+-R 777 /`, and `mkfs`, but **passes the entire resource-exhaustion class**: fork
+bomb (`:(){ :|:& };:`), CPU spin (`while :; do :; done`), disk fill (`dd
+if=/dev/zero`), and memory hog all reach the sandbox. The bwrap sandbox mitigates
+with a 120 s timeout + PID namespace, but imposes **no memory / CPU / PID cgroup
+limits**, so a detonating bomb can degrade the host for up to the timeout window (`KART_POLL_TIMEOUT`
+120 s default; `KART_DAEMON_TIMEOUT` 1800 s). `--unshare-pid` confines PID
+*visibility* but does not by itself prevent host global-PID exhaustion without a
+`pids.max` cgroup. Authenticated-caller only (requires `task_queue` + a confirmed
+mapping + past the rate limiter). The scanner lives in the **`kartikeya`**
+dependency, not this repo. *Remediation (two parts):* (1) DONE — resource-
+exhaustion + missing-destructive patterns added to `kartikeya`'s `security_scan`
+(fork bomb / spin / disk-fill / `find / -delete` / raw-device write), verified
+against a live worker. (2) DONE — a memory + PID cap on the sandbox child
+(`kartikeya` `sandbox.py`): a cgroup v2 leaf under a delegated `KART_CGROUP_PARENT`
+when available, else POSIX rlimits (`RLIMIT_AS`/`RLIMIT_NPROC`) as the always-on
+fallback; env-tunable (`KART_MEM_MAX` 2G, `KART_PIDS_MAX` 512), off switch
+`WILLOW_KART_NO_RLIMIT=1`. This is the only defense for the non-pattern-detectable
+memory-hog class. Verified live: a `bytearray(900MB)` task under a 512M cap now
+fails with `MemoryError` instead of consuming host RAM. Also DONE — willow-mcp's
+`task_submit` now runs `check_kart_task` at **submit time**, before any DB work,
+so a scanner-refused task is denied before it ever occupies a queue slot (the
+worker still re-scans at execution). Verified live: a fork bomb is refused at
+submit and creates no queue row.
+
+#### P3: L-CMD-01 — Kart scanner destructive-class gaps — OPEN (fix at source)
+
+`find / -delete` and `cat /dev/zero > /dev/sda` **pass** the scanner despite being
+equivalent to `rm -rf /` / a disk wipe (both of which *are* caught). In this
+configuration bwrap's ephemeral filesystem, read-only trust-root binds, and
+absent device nodes contain them (verified: a sandboxed write to the ACL manifest
+returns `Read-only file system`), so they are not exploitable against the host —
+but the scanner should not depend solely on the sandbox for the destructive class.
+Same location/remediation as L-DOS-02.
+
+#### ~~P3: L-DOS-03 — No record-size limit on the SOIL store~~ — RETRACTED (false finding)
+
+Original observation: `store_put` appeared to accept a 5 MB record. **This was a
+harness artifact** — the probe only checked for a raised Python exception, not a
+returned `{"error"}`. On re-test, `store_put` **rejects** it:
+`sanitize: 'record' exceeds 512KB limit (5000012 bytes)`. `_sanitize()`
+(`server.py`, run inside `_guarded()` on every call) already enforces
+`_MAX_BLOB_BYTES = 512 KB` on `record`/`context`/`value` dicts, `_MAX_STR_BYTES =
+64 KB` with null-byte stripping on `content`/`task`/`query`/…, `_MAX_TAGS`/
+`_MAX_TAG_LEN` on `tags`/`sources`, and path-traversal rejection on `collection`.
+No record-size gap exists.
+
+**Assessment:** the security architecture held under live fire — fail-closed
+gating, parameterized SQL, sandbox network+filesystem isolation, read-only ACL
+trust roots, three-key egress, and rate limiting all confirmed against the
+running server. The only real gap is coverage in the sandboxed executor's static
+scanner (L-DOS-02 / L-CMD-01), which is contained for the filesystem class by the
+sandbox and localized to the `kartikeya` dependency.
+
+*ΔΣ=43*

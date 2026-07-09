@@ -34,6 +34,16 @@ log carries a one-line entry and points there rather than duplicating.
 | B-26 | P2 | Fixed | task interface / worker | Task queue had **no liveness signal** — `task_submit` returned `{"status":"pending"}` identically whether a worker was about to run it or none existed, so a stranded queue was indistinguishable from a busy one. Fixed: `willow-mcp worker` publishes a heartbeat via kartikeya's `on_heartbeat` seam; `fleet_health` gains `workers`/`stranded`, `diagnostic_summary` gains a `worker` check | Kart lift stage 4; this session |
 | B-27 | P3 | Fixed | packaging / docs | Three code paths told operators to `pip install willow-mcp[worker]` — an extra that **does not exist**; `kartikeya` has been a hard dependency since B-22, so the advice was unrunnable | found during B-26; this session |
 | B-28 | P3 | Open | schema / tasks | `completed_at` stays null on **failed** tasks. B-17's `set_task_completed_at()` trigger fires only on `NEW.status = 'completed'`, so a failed task never records when it finished (willow-mcp's own `mark_done` sets it correctly; the shared-DB trigger is the gap). Fix requires an `ALTER`/`CREATE OR REPLACE` on the shared fleet Postgres — **operator-gated**, not applied unilaterally | observed live, probe `1T8G5WG5`; follow-up to B-17 |
+| B-29 | P0 | Fixed | gate / consent | `allow_net` egress was gated **only** by the `task_net` manifest capability — the operator's standing `consent.internet` gated nothing. The fleet flag `consent_internet_gates_allow_net` was declared `implemented: false, status: deferred`, so the switch existed and was wired to nothing. Fixed: two-key gate (`task_net` **and** `consent.internet`), read fail-closed | egress-membrane design; FRANK `cc553729`; this session |
+| B-30 | P1 | Fixed | consent / config | The two consent files **disagreed** and the one an operator would naturally edit appeared inert. `consent.json` said `internet: false, lan: false`; `settings.global.json` said `true, true`. **First diagnosis was wrong:** `consent.json` is not a legacy leftover but a **write-only mirror** — `save_global_settings(sync_legacy=True)` (the default) and Grove's consent toggle both rewrite it on every save, while it is *read* only when the canonical file is absent. So it drifts silently and a delete does not stick. Resolved by re-syncing the mirror from canonical; the misleading "delete the legacy file" advice is gone from `diagnostic_summary` and `consent.py` | observed live; corrected 2026-07-09 |
+| B-31 | P1 | Open | consent / willow-2.0 | `global_settings.py` **fails open**: `DEFAULT_CONSENT` is all-`True`, and `_normalize_consent()` returns those defaults for any non-dict — a missing, truncated, or malformed consent block resolves to *all permitted*. Same inversion as B-25. willow-mcp now reads fail-closed independently; the writer is unfixed and out of this repo | cross-repo (willow-2.0); this session |
+| B-32 | P1 | Open | gate / sudo invariant | A **host-side agent can self-grant `task_net`** by writing the manifest with its own file tools, then use it. B-14 made `mcp_apps/` `bound_ro` to the *sandbox*; nothing constrains the host-side agent. This violates the sudo invariant (FRANK `90e52ab7`): *a model may REQUEST egress, never CONFIRM it — request and confirm are separate authorities*. **Mitigated, not closed:** egress is now a time-boxed operator-issued lease (`willow-mcp grant-net`, ≤3h, no MCP tool can mint one), the sandbox lane is closed outright, and `diagnostic_summary` names every key the process could forge. The host lane needs `chown` + `WILLOW_MCP_STRICT_TRUST_ROOT=1` — a deployment step, operator-gated | FRANK `90e52ab7`; §0.1/§0.3; L-NET-02; this session |
+| B-33 | P1 | Open | consent / Kart sandbox | The documented fleet-wide egress off switch is **writable from inside bwrap**. B-14 bound `$WILLOW_HOME/mcp_apps` `ro`; nobody protected the consent file beside it. Measured from inside the sandbox: `settings.global.json` **writable**, `consent.json` **writable**, `mcp_apps/willow/manifest.json` read-only, `_net_leases` protected. `$WILLOW_HOME` is `bound_rw` for *every* task, network-isolated or not. **Scoped honestly:** this raises **key 2 only** — an attacker still needs `task_net` (manifest, ro) and a live lease (protected). But the one control documented as the kill switch is the one the untrusted runtime can write. Falsifies "Flipping `consent.internet` to `false` stops egress fleet-wide, instantly" in `README.md`, `SECURITY_AUDIT.md` (L-NET-02 + B-29 close-out), and `skills/kart-tasks.md`. **Fix:** bind both files `bound_ro`, exactly as B-14 did for `mcp_apps/`; correct the three docs. Pairs with B-31 (`global_settings.py` fails open) — same file, same review. **Corollary:** `flag_enabled()` has zero call sites, so `consent_internet_gates_allow_net` is a record, not a gate; if anyone wires it into the egress path they add a fourth key living in a sandbox-writable file — don't | probed from inside bwrap 2026-07-09; filed 2026-07-09; follow-up to B-14/B-29/B-32 |
+| B-34 | ~~P0~~ | Stale | gate / orchestrator seat | ~~`human_only` is a dead field and `WILLOW_HUMAN_ORCHESTRATOR` is read by no code. Any agent holding `app_id=willow` can dispatch, verify, and clear.~~ **FALSE. The gate exists, is wired, and fires.** `human_session.py:41` reads `WILLOW_HUMAN_ORCHESTRATOR`; `server.py:201` calls `orchestrator_write_denial(effective, tool_name, serve_mode=…)` and `:202` returns it; the denial string `orchestrator_human_required` is at `human_session.py:60`, not absent. Two layers, conflated in the original: `gate.py` is the **manifest ACL** (it does contain the three tools), `human_session.py` is the **host attestation** applied after it. Observed firing on a live `dispatch_send` by the willow seat, 2026-07-09T12:26Z (FRANK `66bfd8b3`). **Root cause of the false alarm:** the probe called `diagnostic_summary()` with no `app_id`, so `is_orchestrator_app(None)` short-circuited `orchestrator_write_denial` to `None` — the gate was tested by not being the identity it guards. Withdrawn by root before any patch; had it been actioned, a working trust boundary would have been rewritten or deleted. Moved to *Stale* | filed 2026-07-09 (willow seat); refuted and withdrawn same day — FRANK `c4f7bec5`, `e4759e8b` |
+| B-35 | P1 | Open | governance / envelope registry | **Metered envelopes are unmetered; the citation the meter derives from is never written.** `envelopes/pre-approved.json` mandates `use_count_source: "frank"` — a count *derived* by tallying `envelope_citation` ledger entries, deliberately not stored ("a stored counter is mutable state an agent could touch"). The strings `envelope_citation` and `envelope_id` have **zero** matches across all of willow-2.0. `ledger_read()` (`core/pg_bridge.py:3214`) filters by project + limit only. So `max_count: 20` (`env-pr.merge-willow2-master`) and `max_count: 40` (`env-dispatch-fleet-sessions`) enforce nothing, `EDQUOT` can never fire, and verb 13 `envelope.apply` — the act that licenses the orchestrator seat — is `enforced_by: null`. Cross-repo (willow + willow-2.0); logged here because `gap_log` is gate-denied to `app_id=willow` (B-36) | found 2026-07-09 (willow seat); `syscall-table.json` invariants §13–19 |
+| B-36 | P2 | Open | gate / permission groups | `gap_log`/`gap_list`/`gap_resolve` (PR #54) and `kb_startup_continuity` are gate-denied for `app_id=willow`: the `orchestrator` group's 27-tool allow-list carries no `gap_*` verb and no `kb_startup_continuity`. The tool built to record "we don't know this yet" cannot be called by the seat whose job is noticing. **Recommendation: do not widen the group.** The denial is severance working one tool early — willow-mcp's backlog belongs to willow-mcp's participants; the fleet keeps its own in FRANK/KB. But note the cut is illusory: `gaps` is a live SOIL collection **in the fleet store** under `WILLOW_HOME`, so the gate denies the *tool* while the *data* sits in willow's house. Severance-by-ACL over a shared substrate. Resolve the store/DB severance first; this question then dissolves | found 2026-07-09 (willow seat); see `wo-membrane-checkable` Part B/C |
+| B-37 | P0 | Open | kart / egress | **The egress gate is in the submitter; the executor honors `# allow_net` on sight.** `task_submit` (`server.py:745`) holds all three keys — `task_net` + `consent.internet` + a live lease — appends the `# allow_net` directive only when they hold, and per B-21 strips any caller-supplied directive first. That protects **one door.** The executor asks nothing: in `kartikeya` 0.0.1 — *this repo's own hard dependency, extracted from this repo under B-22* — the literal `consent` has **0** matches, whole-word `lease` **0**, whole-word `task_net` **0**. `execute.py:133` parses the directive out of the task text and `sandbox.py` drops the network namespace and mounts credentials. `check_kart_task()` is a **content scanner** (`security_scan`, `_FLEET_ALLOWED` shapes), not an authorization gate: it asks whether the command looks dangerous, never whether the caller may reach the network. The `tasks` table is **shared Postgres** (`willow_20.tasks`), so **any submitter that writes a row whose task text contains `# allow_net` gets egress** — B-21's smuggling path, reopened one layer down, where the directive is not smuggled but *is the interface*. Observed live: with `task_net` revoked and the lease expired, `willow_run(allow_net=True)` reached GitHub (`git ls-remote` → `rc=0`, task `2E8E5FE0`, 2026-07-09T14:48:29Z). **Not fixed by kart-lift stage 5** — migrating willow-2.0 off its `core/kart_*` copy onto `kartikeya` would standardize this property, not remove it. **Fix:** egress authority belongs at the executor, keyed on the row's `submitted_by` and read from the trust root at execution time. A directive in a string is a claim; a lease on disk owned by another uid is a fact (B-32, one layer down). Requires a `kartikeya` change + version bump + dependency bump | found 2026-07-09 (hanuman), read from the installed dependency; FRANK `8683cd84` (correction), `41c2375a`; follow-up to B-19/B-21/B-29/B-32; sudo invariant `90e52ab7` |
+| B-38 | P2 | Open | diagnostics / severance | The severance check shipped in PR #57 asserts **three** surfaces — `store`, `postgres`, `trust_root` — and egress is not one of them. An install can be perfectly severed (own store, own database, trust root beyond reach, verdict `ok`) and still reach the internet, because the shell tool its operator actually calls takes `allow_net` as a **parameter** (B-37). Severance from a fleet's *state* is not severance from a fleet's *network*. The check as merged would have reported `ok` throughout the 2026-07-09 session in which egress was self-granted seven times. **Fix:** a fourth surface asserting that this process cannot reach the network without a key it does not hold — which is undefinable until B-37 moves that key somewhere the process cannot write | found 2026-07-09 (hanuman); FRANK `8683cd84`; PR #57; blocked on B-37 |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -49,6 +59,98 @@ log carries a one-line entry and points there rather than duplicating.
 | B-09 | P2 | Stale | gate | Silent fallback on missing SAP gate — `openclaw_sap_gate` gone in rewritten `gate.py` | L-AUTH-01 |
 
 ## Open
+
+- **B-31 · P1** — **willow-2.0's consent reader fails open.**
+  ```python
+  DEFAULT_CONSENT = {"internet": True, "cloud_llm": True, "lan": True}
+  def _normalize_consent(raw):
+      if not isinstance(raw, dict):
+          return dict(DEFAULT_CONSENT)   # unparseable consent -> permitted
+  ```
+  A missing, truncated, or malformed consent block resolves to *everything
+  permitted*. This is the same inversion as B-25 (`gate.store_scope` returning
+  "unrestricted" for an unreadable policy) and the same class as B-24: an
+  unparseable policy is not permission. willow-mcp's own reader
+  (`src/willow_mcp/consent.py`) deliberately inverts this — anything it cannot
+  read as an explicit `true` is `false` — so this repo is safe regardless. The
+  **writer** is still permissive, and it lives in willow-2.0. Out of scope here;
+  the two-line fix is `DEFAULT_CONSENT` all-`False` plus returning deny-all from
+  `_normalize_consent` on a non-dict.
+
+- **B-32 · P1** — **a host-side agent can self-grant `task_net`.** *Mitigated this
+  session; the last step is the operator's.* B-14 made `$WILLOW_HOME/mcp_apps`
+  `bound_ro` inside the Kart sandbox precisely so an untrusted runtime could not
+  rewrite the ACL that gates it. But the *host-side* agent — the one driving the
+  session — holds ordinary file tools and can simply write `"task_net"` into its
+  own manifest, then call `task_submit(allow_net=True)`. B-14 closed the sandbox
+  door; the host door was never closed. This inverts the **sudo invariant** (FRANK
+  `90e52ab7`): *the model may REQUEST egress, never CONFIRM it; request and confirm
+  are separate authorities.* Under §0.1 the witness may not be the actor; under
+  §0.3 nothing may extend its own reach. Demonstrated in a prior session: the agent
+  granted itself `task_net`, pushed a branch, and revoked it. The operator did
+  approve each step in chat — but the *mechanism* never required that approval, and
+  an approval the machine cannot check is not a control.
+
+  The three structural fixes named when this was filed were (a) put the confirm
+  authority outside the agent's write reach; (b) make `task_net` a time-boxed
+  lease the agent may request but not mint; (c) require the operator-owned
+  `consent.internet`. **(c) landed in B-29. (b) landed here. (a) is now
+  *supported and checked*, but it is a `chown`, so it remains the operator's.**
+
+  **What landed (B-32, this session):**
+  - **`lease.py` — egress is a time-boxed grant.** `task_net` is demoted to a
+    capability: *this app may ever ask*. The grant itself is a record at
+    `mcp_apps/_net_leases/<app_id>.json` carrying an issuer, a reason, and a
+    deadline capped at **3h** (FRANK `cc553729`: turn / session / ≤3h). A
+    self-granted lease **expires** and **leaves an attributed record**, where a
+    self-granted boolean persisted silently and forever.
+  - **No MCP tool can mint one.** Issuance is `willow-mcp grant-net` — local CLI
+    only, exactly as `confirm-binding` is (L-AUTH-02). Plus `revoke-net` and
+    `net-status`. A regression test asserts the server exports no such tool.
+  - **Read fail-closed**, in the spirit of `consent.py`: absent, unparseable,
+    expired, `ttl_seconds` above the ceiling, an `expires_at` with **no timezone**
+    (a deadline without a zone is a wish), or a record whose `app_id` names a
+    *different* app than the file it sits in — every one denies. *A name is not an
+    identity:* the filename is where we looked, not what the record claims.
+  - **The sandbox lane is now closed outright.** Leases live under `mcp_apps/`, so
+    they inherit B-14's `bound_ro` mount. Verified live: `lease.grant()` from
+    inside the Kart sandbox raises `OSError(EROFS)` and no file appears.
+  - **The residual is measured, not implied away.**
+    `diagnostic_summary.checks.net_lease.self_writable` lists exactly which
+    authorizing keys the running process could forge — on a single-uid host, all of
+    them. `WILLOW_MCP_STRICT_TRUST_ROOT=1` turns that into a refusal
+    (`trust_root_denied`). It is **off by default**: enabling it before uid
+    separation exists would deny egress on every install that exists today. That
+    default is a statement about deployments, not about policy — and it is *not*
+    the B-31 inversion, because the policy is read perfectly well; what is absent
+    is the OS enforcing who may have authored it.
+  - **The PreToolUse hook blocks the crossing** — `grant-net`, a write under
+    `_net_leases/`, or an edit adding `task_net` to a manifest. A hook lives in the
+    agent's own harness and is a guardrail, never a control; it makes the boundary
+    visible at the moment it would be crossed.
+
+  **A bug found in the fix, by running it rather than testing it.** `_leases_root()`
+  called `mkdir()` unconditionally, so the *read* path created the trust root too —
+  meaning on exactly the hardened, read-only deployment this work argues for,
+  `read_lease()` would raise `OSError(EROFS)` instead of denying. A reader that
+  mutates the trust root, and dies when it cannot, has the failure mode backwards.
+  Only `grant()` creates now; `self_writable_trust_paths()` asks whether the
+  *nearest existing ancestor* is writable, since an absent directory this process
+  could create is not hardening. Regression tests pin both.
+
+  **Still not closed.** On a single-uid host the agent can write the lease. It must
+  now forge a *third* artifact, with a clock, under audit — but the operating
+  system is not stopping it. The genuine fix is ownership:
+
+  ```console
+  $ sudo chown -R willow-operator ~/.willow/mcp_apps   # a uid the agent is not
+  $ export WILLOW_MCP_STRICT_TRUST_ROOT=1
+  ```
+
+  That is a deployment step this repo can support and check but must not perform —
+  same class as B-28 and B-30. Until it is taken, requesting egress and confirming
+  it are separated by convention, not by the kernel. Full writeup: `SECURITY_AUDIT.md`
+  L-NET-02.
 
 - **B-28 · P3** — `completed_at` is never set on **failed** tasks. B-17 added the
   column plus a `set_task_completed_at()` trigger to the shared fleet DB, but the
@@ -68,6 +170,116 @@ log carries a one-line entry and points there rather than duplicating.
   failed rows have no recoverable completion time.
 
 ## Fixed
+
+- **B-30 · P1 (2026-07-09)** — **the two consent files disagreed, and the first
+  diagnosis of *why* was wrong.** On this host:
+  ```
+  consent.json          internet: false,  lan: false
+  settings.global.json  internet: true,   lan: true    <- governs
+  ```
+  **What this bug was originally recorded as:** a legacy flat file, imported by
+  `load_global_settings()` only when the canonical file is absent, therefore inert
+  — "a file that looks exactly like the off switch, doing nothing." The suggested
+  fix was *reconcile the two, or delete the legacy file.*
+
+  **What it actually is.** `consent.json` is a **mirror**, and a live one:
+  ```python
+  def save_global_settings(data, *, path=None, sync_legacy: bool = True) -> None:
+      ...
+      if sync_legacy:
+          _write_legacy_consent(out["consent"])     # rewritten on EVERY save
+  ```
+  Every caller in `global_settings.py` passes `sync_legacy=True`, and Grove's
+  settings pane (`panes/settings.py`) mirrors it on every consent toggle. So the
+  file is continuously **written** and almost never **read** — read only as the
+  canonical file's absent-fallback.
+
+  That asymmetry is the hazard, and it is a sharper one than "inert." A write-only
+  mirror **drifts silently**: hand-edit it and nothing reads your edit, nothing
+  corrects it, and it sits looking authoritative until some unrelated save quietly
+  overwrites it. The disagreement observed here was not a dead file — it was a
+  **stale mirror**, produced by a hand-edit that no subsequent save had yet clobbered.
+  And the advice to "delete the legacy file" was *wrong*: the next
+  `save_global_settings()` or Grove toggle recreates it. A delete that looks like a
+  fix and silently comes back is worse than no advice.
+
+  **Resolved** by re-syncing the mirror from the canonical block via willow-2.0's own
+  writer (`_write_legacy_consent(read_consent())`) — canonical untouched, effective
+  policy unchanged, `diagnostic_summary` back to `ok` with `disagreement: null`.
+  Note the one real consequence: `consent.json` is willow-mcp's fallback if
+  `settings.global.json` ever goes missing, and that fallback went from `false`
+  (deny) to `true` (permit). Consistent with the operator's stated intent, and
+  academic anyway given B-31 (willow-2.0's `DEFAULT_CONSENT` is all-`True`), but it
+  is a permission-raising side effect of a "cosmetic" repair and is recorded as one.
+
+  **Fixed in code, not just on this host:** `consent.py`'s header and `legacy_path()`
+  no longer describe the file as a leftover; `diagnostic_summary`'s `consent` problem
+  now says *stale mirror*, warns that deleting it will not keep it gone, and gives
+  the re-sync one-liner as the fix. The `error` severity stays — a divergence still
+  means one of the two files is lying about the operator's intent, and willow-mcp
+  still refuses to guess which.
+
+  **Lesson.** "Legacy" was a word in a docstring, believed without reading the
+  writer. The read path was checked; the write path was not. Same class as B-27
+  (`pip install willow-mcp[worker]` — an extra that never existed, believed because
+  it was written down).
+
+- **B-29 · P0 (this session)** — **operator consent gated nothing.** Egress was
+  authorized solely by the `task_net` capability in an app's manifest. The
+  operator's standing consent — `consent.internet` in
+  `$WILLOW_HOME/settings.global.json` — was read by no gate anywhere. The fleet
+  settings file has carried the wiring instruction the whole time, as a flag
+  declaring its own absence:
+  ```json
+  "consent_internet_gates_allow_net": {
+    "enabled": false, "implemented": false, "status": "deferred",
+    "targets": ["kart_worker", "kart_sandbox", "sap_gate"],
+    "note": "Wire settings.global.json consent.internet to kart # allow_net ..."
+  }
+  ```
+  and `flag_enabled()` requires both `enabled` and `implemented`, so it was inert
+  by construction. The design was settled long before the code: the egress
+  membrane (FRANK `05611965 → 90e52ab7 → cc553729 → 0ba6a33f`, mapped in
+  `willow/design/egress-membrane-constitutional-map.md`) names consent a
+  time-boxed lease, and the sudo invariant separates *requesting* egress from
+  *confirming* it.
+  **Fix:** `allow_net=True` is now a **two-key** operation. The manifest's
+  `task_net` says *this app may ever request egress* (a capability, granted once).
+  The operator's `consent.internet` says *egress is permitted right now* (a
+  switch). Both must hold or the call returns `consent_denied` before any write.
+  Flipping one boolean stops egress fleet-wide without touching a single manifest
+  — which is the whole point.
+  **Fail-closed, deliberately diverging from the writer** (see B-31): new
+  `src/willow_mcp/consent.py` reads the policy and treats *anything* it cannot
+  read as an explicit `true` as denial — absent file, unparseable file, non-bool
+  value (`"true"`, `1`, `"yes"`). A corrupt canonical file denies and does **not**
+  fall back to the older, laxer legacy file. willow-mcp only ever **reads** this
+  policy; a gate that authors the policy it is checked against is not a gate.
+  **Disagreement is surfaced, never resolved** (B-30): when both files declare the
+  same key with different values, `diagnostic_summary` raises an `error`-severity
+  `consent` problem naming both. Keys only one file declares are *not* reported as
+  conflicts — a file that omits a key is silent on it, not in disagreement about
+  it. That distinction was caught by the end-to-end run, not by a unit test, and
+  has a regression test now.
+  **A false-green test was found and fixed.** `_app_with_perms` set only
+  `WILLOW_MCP_APPS_ROOT`, leaving `WILLOW_HOME` pointed at the developer's real
+  `~/.willow`. The existing `task_net` success tests therefore passed by reading
+  the *operator's live consent file* (`internet: true`) — and would have failed on
+  CI, where no such file exists. The fixture now pins `WILLOW_HOME` to `tmp_path`
+  and tests state consent explicitly. Verified by running the whole suite with
+  `WILLOW_HOME` pointed at an empty directory (the CI shape) as well as the
+  developer shape: **301 passing in both**.
+  **Verified end-to-end**, not just by unit test: with an app holding `task_net`
+  throughout, flipping `consent.internet` false denied egress; deleting the policy
+  denied; corrupting it denied; `"true"` as a string denied; a corrupt canonical
+  file beside a permissive legacy file denied; and a genuine conflict on a shared
+  key was reported while the canonical value still governed.
+  **Residual:** this closes the *egress* key only. `consent.lan` and
+  `consent.cloud_llm` are read and reported but gate nothing yet — `# allow_localhost`
+  is never self-grantable (B-21) and willow-mcp makes no cloud-LLM calls. The
+  lease semantics (turn / session / ≤3h, FRANK `cc553729`) are **not** implemented:
+  consent here is a standing boolean, not a leased grant that expires. See B-32
+  for why a boolean the agent can also write is a mitigation rather than a fix.
 
 - **B-26 · P2 (this session)** — the task queue had no way to answer "is anything
   going to run this?". `task_submit` returned `{"status": "pending"}` whether a
@@ -338,3 +550,20 @@ log carries a one-line entry and points there rather than duplicating.
 
 - **B-08 · L-REQ-01** — predates the `pyproject.toml` layout; no `requirements.txt` exists.
 - **B-09 · L-AUTH-01** — `openclaw_sap_gate` removed in the manifest-ACL rewrite of `gate.py`.
+- **B-34 · orchestrator human gate** — filed P0 as "the gate does not exist"; the gate exists and
+  works. `human_session.py:41` reads `WILLOW_HUMAN_ORCHESTRATOR`; `server.py:201-202` calls
+  `orchestrator_write_denial()` and returns it for `dispatch_send` / `verify_handoff` /
+  `agent_clear`; the denial text `orchestrator_human_required` lives at `human_session.py:60`.
+  Confirmed empirically: it refused a live `dispatch_send` from the willow seat at
+  2026-07-09T12:26Z (FRANK `66bfd8b3`), which the withdrawn entry had claimed "rests on a misread."
+  The false alarm came from probing with `diagnostic_summary()` and no `app_id`, so
+  `is_orchestrator_app(None)` returned `False` and the check never ran — **the gate was tested by
+  not being the identity the gate guards.** `gate.permitted()` reading only `permissions` is true
+  and irrelevant: the ACL and the host attestation are separate layers. Withdrawn by root
+  2026-07-09 before any patch reached the code. FRANK `c4f7bec5` (adjudication), `e4759e8b`
+  (authorization).
+
+  *Kept, not deleted.* A false negative about a live membrane is more dangerous than a false
+  positive about a dead one: both of B-34's proposed remedies — "wire the key into `_gate`" or
+  "delete the field and the doc claim" — would have edited a boundary that already held. The
+  lesson is the probe, not the gate.

