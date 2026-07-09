@@ -12,6 +12,9 @@ Tools:
                    kb_at, kb_promote, kb_journal, kb_startup_continuity
   Tasks (PG):      task_submit, task_status, task_list
   Agent (PG):      agent_route, agent_dispatch_result
+  Dispatch (FS):   dispatch_send, dispatch_read, dispatch_list, dispatch_accept,
+                   handoff_write_v4, handoff_read, verify_handoff, agent_clear,
+                   session_read, session_enter, session_handoff_write
   Fleet (PG):      fleet_status, fleet_health
   Context (SQLite):context_save, context_get, context_list, context_expire
   Audit (SQLite):  receipts_tail
@@ -49,6 +52,8 @@ from .gate import permitted
 from .identity_binding import resolve_app_id
 from .receipts import ReceiptLog
 from . import schema_profile as sp
+from . import dispatch as dispatch_stack
+from . import handoff as handoff_stack
 
 _store = Store()
 _receipt_log = ReceiptLog()
@@ -187,6 +192,13 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
                 f"and lists this tool or a group that includes it."
             )
         }
+
+    from .human_session import orchestrator_write_denial
+
+    human_denial = orchestrator_write_denial(effective, tool_name, serve_mode=_SERVE_MODE)
+    if human_denial:
+        return None, {"error": human_denial}
+
     return effective, None
 
 
@@ -1058,6 +1070,154 @@ def agent_dispatch_result(
     except Exception as e:
         return {"error": f"routing_unavailable: {e}"}
     return {"routing_id": routing_id, "status": status} if updated else {"error": "not_found"}
+
+
+# ── Dispatch packet stack (filesystem — no Postgres required) ─────────────────
+
+@mcp.tool()
+@_guarded("dispatch_send")
+def dispatch_send(
+    app_id: str,
+    to_app: str,
+    assignment_md: str,
+    role: str = "",
+    reply_to: str = "willow",
+    summary: str = "",
+    phase: str = "operate",
+    priority: str = "normal",
+    context_refs: Optional[list] = None,
+) -> dict:
+    """Create a dispatch packet: meta.json + assignment.md + status pending under $WILLOW_HOME/dispatch/."""
+    return dispatch_stack.dispatch_send(
+        from_app=app_id,
+        to_app=to_app,
+        assignment_md=assignment_md,
+        role=role,
+        reply_to=reply_to,
+        summary=summary,
+        phase=phase,
+        priority=priority,
+        context_refs=context_refs,
+    )
+
+
+@mcp.tool()
+@_guarded("dispatch_read")
+def dispatch_read(app_id: str, dispatch_id: str) -> dict:
+    """Read dispatch meta, status, and assignment.md body."""
+    return dispatch_stack.dispatch_read(dispatch_id)
+
+
+@mcp.tool()
+@_guarded("dispatch_list")
+def dispatch_list(
+    app_id: str,
+    to_app: str = "",
+    from_app: str = "",
+    status: str = "",
+    limit: int = 20,
+) -> dict:
+    """List dispatch packets, newest first."""
+    return dispatch_stack.dispatch_list(
+        to_app=to_app, from_app=from_app, status=status, limit=limit
+    )
+
+
+@mcp.tool()
+@_guarded("dispatch_accept")
+def dispatch_accept(
+    app_id: str,
+    dispatch_id: str,
+    session_id: str = "",
+) -> dict:
+    """Specialist accepts packet: pending → working."""
+    return dispatch_stack.dispatch_accept(dispatch_id, app_id, session_id)
+
+
+@mcp.tool()
+@_guarded("handoff_write_v4")
+def handoff_write_v4(
+    app_id: str,
+    dispatch_id: str,
+    findings: Optional[list] = None,
+    narrative: str = "",
+    checklist_resolved: bool = True,
+    envelope_clean: bool = True,
+) -> dict:
+    """Complete dispatch work — writes handoff.json + closeout.md, status → complete."""
+    return handoff_stack.handoff_write_v4(
+        app_id,
+        dispatch_id,
+        findings=findings,
+        narrative=narrative,
+        checklist_resolved=checklist_resolved,
+        envelope_clean=envelope_clean,
+    )
+
+
+@mcp.tool()
+@_guarded("handoff_read")
+def handoff_read(app_id: str, dispatch_id: str) -> dict:
+    """Read structured handoff and closeout markdown for a dispatch."""
+    return handoff_stack.handoff_read(dispatch_id)
+
+
+@mcp.tool()
+@_guarded("verify_handoff")
+def verify_handoff(app_id: str, dispatch_id: str) -> dict:
+    """Orchestrator verifies complete handoff — checklist, envelope, findings."""
+    return handoff_stack.verify_handoff(dispatch_id)
+
+
+@mcp.tool()
+@_guarded("agent_clear")
+def agent_clear(
+    app_id: str,
+    target_app: str,
+    dispatch_id: str,
+    session_id: str = "",
+) -> dict:
+    """Clear specialist after verified handoff — ready for next packet."""
+    return dispatch_stack.agent_clear(target_app, dispatch_id, session_id)
+
+
+@mcp.tool()
+@_guarded("session_read")
+def session_read(app_id: str, session_id: str) -> dict:
+    """Read thin session state file for an app/session pair."""
+    return dispatch_stack.session_read(app_id, session_id)
+
+
+@mcp.tool()
+@_guarded("session_enter")
+def session_enter(
+    app_id: str,
+    session_id: str,
+    dispatch_id: str = "",
+) -> dict:
+    """Resolve entry mode: human prompt (no id) vs dispatch id path (assignment + v4 closeout)."""
+    return dispatch_stack.session_enter(app_id, session_id, dispatch_id)
+
+
+@mcp.tool()
+@_guarded("session_handoff_write")
+def session_handoff_write(
+    app_id: str,
+    session_id: str,
+    narrative: str,
+    summary: str = "",
+    findings: Optional[list] = None,
+    next_bite: str = "",
+) -> dict:
+    """Human-entry session closeout — markdown handoff, no dispatch_id."""
+    return dispatch_stack.session_handoff_write(
+        app_id,
+        session_id,
+        narrative=narrative,
+        summary=summary,
+        findings=findings,
+        next_bite=next_bite,
+    )
 
 
 # ── Fleet read tools ───────────────────────────────────────────────────────────
