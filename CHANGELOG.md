@@ -23,6 +23,19 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   `full_access`, because the server-process lane is strictly more privileged
   than the sandbox lane. `integration_call` is likewise excluded from
   `full_access`. See `docs/design/integrations.md` for the earn rule.
+- **`willow-mcp tree` / `tree_view.build_tree()` — the integration seam for a real
+  dashboard.** `docs/design/*.html` sketches a client UI as a tree (trunk/sap/
+  canopy/roots/rings/leaves/litter/stomata) with fabricated numbers; `tree`
+  makes it real, one call returning every part in that shape instead of a
+  dashboard assembling `fleet_status`/`fleet_health`/`kb_startup_continuity`/
+  `receipts_tail`/`gates` itself. `sap`/`canopy`/`leaves` call straight into the
+  same `@_guarded` tool functions an MCP client would reach (gating, rate
+  limiting, and receipt logging all still apply) and degrade to
+  `{"error": "postgres_unavailable"}` with no database configured, matching
+  those tools' existing shape. `roots`/`rings`/`litter`/`stomata` read local
+  SQLite/filesystem state directly and work with no Postgres at all. Adds
+  `Store.list_collections()` (factored out of `search_all`'s own enumeration)
+  as the `roots` data source.
 - **`willow-mcp gates` — every authorization gate as one on/off panel, egress-lease
   shaped.** Diagnosing a denial meant knowing which of a dozen-plus gates to check
   (manifest permissions, `task_net`, `integration_net`, `consent.*`, egress lease,

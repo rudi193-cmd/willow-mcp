@@ -212,6 +212,29 @@ class Store:
             results.append(record)
         return results
 
+    def list_collections(self, scope: Optional[list] = None) -> list[str]:
+        """Every collection under this store root, or only those matching
+        `scope` if given — the same enumeration `search_all` walks, factored
+        out so a caller that only wants "what collections exist" (e.g. a
+        dashboard's roots/storage view) doesn't have to run a query to get it.
+        """
+        names = []
+        for db_file in sorted(self.root.rglob("store.db")):
+            col = str(db_file.parent.relative_to(self.root))
+            if col.startswith("."):
+                continue
+            try:
+                _validate_collection(col)
+            except ValueError:
+                # An on-disk directory that predates _validate_collection or
+                # was created outside this class — skip it rather than let
+                # one bad entry crash enumeration.
+                continue
+            if not collection_in_scope(col, scope):
+                continue
+            names.append(col)
+        return names
+
     def search_all(self, query: str, scope: Optional[list] = None) -> list[dict]:
         """Search every collection, or only those matching `scope` if given.
 
@@ -223,19 +246,7 @@ class Store:
         same collections its other store_* calls are restricted to.
         """
         results = []
-        for db_file in sorted(self.root.rglob("store.db")):
-            col = str(db_file.parent.relative_to(self.root))
-            if col.startswith("."):
-                continue
-            try:
-                _validate_collection(col)
-            except ValueError:
-                # An on-disk directory that predates _validate_collection or
-                # was created outside this class — skip it rather than let
-                # one bad entry crash the whole search_all call.
-                continue
-            if not collection_in_scope(col, scope):
-                continue
+        for col in self.list_collections(scope):
             for record in self.search(col, query):
                 record["_collection"] = col
                 results.append(record)

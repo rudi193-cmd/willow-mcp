@@ -158,6 +158,30 @@ human-orchestrator attestation are environment variables read once at
 process start, so their rows name the env var to set and restart with,
 rather than pretending a live toggle exists.
 
+#### `tree` — the integration seam for a real dashboard
+
+`docs/design/*.html` sketches a client UI as a tree — trunk (overall
+health), sap (task queue), canopy (agent fleet), roots (SOIL store), rings
+(schema-mapping confirmation), leaves (knowledge atoms), litter (activity
+log), and stomata (the gates above). `willow-mcp tree` is what makes that
+real: one call that returns every part in that same shape, instead of a
+dashboard assembling `fleet_status`/`fleet_health`/`kb_startup_continuity`/
+`receipts_tail`/`gates` itself.
+
+```console
+$ willow-mcp tree myapp              # short text summary
+$ willow-mcp tree myapp --json       # full data, for a real dashboard to consume
+```
+
+It's a thin CLI wrapper over `willow_mcp.tree_view.build_tree(app_id)`,
+which a Python dashboard can also import and call directly. `sap`, `canopy`,
+and `leaves` go through the same `@_guarded` MCP tool functions a client
+would reach over the protocol — gating, rate limiting, and receipt logging
+all still apply — and degrade to `{"error": "postgres_unavailable"}` with no
+database configured, same as those tools already do. `roots`, `rings`,
+`litter`, and `stomata` read local SQLite/filesystem state directly, so they
+work with no Postgres at all.
+
 #### The residual, stated plainly
 
 On a host where the agent and the MCP server run as the same uid, the agent can

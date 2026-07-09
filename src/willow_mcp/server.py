@@ -2436,6 +2436,18 @@ def _cmd_gates(args) -> None:
         print(f"\nwrote {out}")
 
 
+def _cmd_tree(args) -> None:
+    """`willow-mcp tree` — every tree part in one call, for a real dashboard."""
+    from . import tree_view
+
+    eff_app_id = args.app_id or _DEFAULT_APP_ID
+    tree = tree_view.build_tree(eff_app_id)
+    if args.json:
+        print(json.dumps(tree, indent=2, default=str))
+    else:
+        print(tree_view.render_summary(tree))
+
+
 def _cmd_set_permission(args, *, granted: bool) -> None:
     """`willow-mcp allow-permission` / `deny-permission` — flip one manifest
     permission for one app. Local/stdio-only, exactly like `grant-net`: no
@@ -2534,6 +2546,14 @@ def main():
     deny_p.add_argument("app_id")
     deny_p.add_argument("permission")
 
+    tree_p = subparsers.add_parser(
+        "tree",
+        help="Dump every tree part (trunk/sap/canopy/roots/rings/leaves/litter/stomata) "
+             "as one call — the integration seam for a real dashboard",
+    )
+    tree_p.add_argument("app_id", nargs="?", default=os.environ.get("WILLOW_APP_ID", ""))
+    tree_p.add_argument("--json", action="store_true", help="print raw JSON, no summary")
+
     compile_p = subparsers.add_parser(
         "compile-agents",
         help="Compile mcp_apps/*/manifest.json from specialists registry",
@@ -2587,6 +2607,9 @@ def main():
         return
     if args.command == "deny-permission":
         _cmd_set_permission(args, granted=False)
+        return
+    if args.command == "tree":
+        _cmd_tree(args)
         return
     if args.command == "compile-agents":
         from pathlib import Path
