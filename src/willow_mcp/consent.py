@@ -21,10 +21,26 @@ as an explicit `true` is `false`. An absent file is not consent. An unparseable
 file is not consent. A `"yes"` where a bool belongs is not consent.
 
 Precedence follows the writer's own loader: canonical `settings.global.json` wins
-when present; the legacy flat `consent.json` is consulted only when the canonical
-file is absent (mirroring `load_global_settings`'s first-load import). A canonical
-file that exists but cannot be parsed denies — it does NOT fall back to legacy,
+when present; the flat `consent.json` is consulted only when the canonical file is
+absent (mirroring `load_global_settings`'s first-load import). A canonical file
+that exists but cannot be parsed denies — it does NOT fall back to the flat file,
 because a corrupt policy must not be silently replaced by an older, laxer one.
+
+**`consent.json` is a mirror, not a leftover** (B-30). It is tempting to call it
+"legacy" and reason no further: we only *read* it as a fallback, so it looks inert.
+It is not. willow-2.0's `save_global_settings(..., sync_legacy=True)` — the default,
+and what every caller passes — rewrites `consent.json` from the canonical block on
+**every save**, and Grove's settings pane mirrors it on every consent toggle. So the
+file is continuously *written* and almost never *read*.
+
+That asymmetry is the whole hazard. A write-only mirror drifts silently: hand-edit
+`consent.json` and nothing reads your edit, nothing corrects it, and the file sits
+there looking exactly like an off switch until the next unrelated save quietly
+overwrites it. Deleting it does not help — the next save recreates it. What makes it
+safe is that any divergence is *reported*: `read_consent()` compares the keys both
+files declare and `diagnostic_summary` raises an `error` naming both values. Surface
+the disagreement; never resolve it. Which file states the operator's intent is the
+operator's call, and a gate that guesses is not a gate.
 """
 from __future__ import annotations
 
@@ -52,7 +68,11 @@ def settings_path() -> Path:
 
 
 def legacy_path() -> Path:
-    """The pre-settings.global.json flat file: {"internet": true, ...}."""
+    """The flat mirror file: {"internet": true, ...}.
+
+    Named `legacy` for the read precedence it has (fallback only), not for its
+    lifecycle — willow-2.0 still writes it on every save. See the module header.
+    """
     return _willow_home() / "consent.json"
 
 

@@ -1515,17 +1515,27 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
             # canonical file is what willow-mcp obeys; say so, and say what the
             # other one claims, so a stale `internet: false` cannot look like a
             # setting that is doing something.
+            #
+            # Do NOT advise deleting consent.json (B-30). It is a mirror, not a
+            # leftover: willow-2.0's save_global_settings(sync_legacy=True) — the
+            # default — recreates it from the canonical block on every save, as does
+            # Grove's consent toggle. A delete looks like a fix and comes back.
             keys = ", ".join(disagreement["keys"])
             problems.append({
                 "severity": "error", "check": "consent",
                 "detail": (f"consent disagrees between files on: {keys}. "
                            f"canonical={disagreement['canonical']} "
                            f"legacy={disagreement['legacy']}. willow-mcp obeys the "
-                           f"canonical file; the legacy file is read only when the "
-                           f"canonical one is absent, so its values are inert."),
-                "fix": (f"reconcile {consent.get('legacy_path')} with "
-                        f"{consent.get('canonical_path')} — edit the canonical file "
-                        "(or delete the legacy one) so one statement of intent remains")})
+                           f"canonical file. {consent.get('legacy_path')} is a mirror "
+                           f"willow-2.0 rewrites on every save and reads only when the "
+                           f"canonical file is absent — so it is a stale mirror, not an "
+                           f"inert file, and deleting it will not keep it gone."),
+                "fix": ("decide which value states your intent. To keep the canonical "
+                        "one, re-sync the mirror: `python -c \"from "
+                        "willow.fylgja.global_settings import read_consent, "
+                        "_write_legacy_consent as w; w(read_consent())\"`. To change "
+                        f"policy, edit {consent.get('canonical_path')} — the mirror "
+                        "follows on the next save.")})
     if net_lease:
         lease_state = net_lease.get("lease", {})
         status = lease_state.get("status")
