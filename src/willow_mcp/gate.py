@@ -133,28 +133,53 @@ def authorized(app_id: str) -> bool:
     return _load_manifest(app_id) is not None
 
 
-def store_scope(app_id: str) -> Optional[list]:
-    """Return this app's manifest `store_scope` list, or None if unset.
+#: Returned when a scope cannot be established. `[]` denies every collection
+#: (see db.collection_in_scope), so an unreadable policy confines rather than
+#: releases. Distinct from None, which means "no policy declared".
+_DENY_ALL: list = []
 
-    None means unrestricted — the store_* tools default to today's behavior
-    (the SOIL store is deliberately shared with the wider Willow fleet via
-    WILLOW_STORE_ROOT). An operator opts an app into isolation by adding a
-    `store_scope` array to its manifest.json, e.g. `["myapp_*"]` or
-    `["mcp_smoke_test"]`. See B-24 / SECURITY_AUDIT.md L-ISO-01.
+
+def store_scope(app_id: str) -> Optional[list]:
+    """Return this app's manifest `store_scope` list.
+
+    Three outcomes, and the difference between them is the whole point:
+
+    * **Field absent, or explicitly `null` → `None` → unrestricted.** The store
+      is deliberately shared with the wider Willow fleet via WILLOW_STORE_ROOT,
+      so an app that never opted into isolation keeps seeing what it always saw.
+      An explicit `null` is a declaration of no policy, not a broken one.
+    * **Field present and well-formed → that list.** Exact names and/or
+      `prefix*` wildcards; `[]` denies everything.
+    * **Scope undeterminable → `[]` → deny-all.** A bad app_id, a missing or
+      unreadable manifest, or a malformed `store_scope` cannot be read as
+      consent. Returning None here would hand full store access to an operator
+      who typed `"store_scope": "myapp_*"` (a string, the obvious typo for this
+      field) and believes the app is confined. The app breaks loudly instead,
+      which is the only outcome that reaches a human.
+
+    This module fails closed on missing app_id, missing manifest, and empty
+    permissions (see header). Scope now does too. See B-24 / L-ISO-01.
     """
     try:
         app_id = _validate_app_id(app_id)
     except ValueError:
-        return None
+        logger.warning("gate: invalid app_id %r for store_scope — denying all collections", app_id)
+        return list(_DENY_ALL)
     manifest = _load_manifest(app_id)
     if manifest is None:
-        return None
+        logger.warning("gate: no readable manifest for %r — denying all collections", app_id)
+        return list(_DENY_ALL)
     scope = manifest.get("store_scope")
     if scope is None:
         return None
     if not isinstance(scope, list) or not all(isinstance(p, str) for p in scope):
-        logger.warning("gate: malformed store_scope for %r — ignoring, treating as unrestricted", app_id)
-        return None
+        logger.error(
+            "gate: malformed store_scope for %r (expected a list of strings, got %r) "
+            "— denying all collections",
+            app_id,
+            type(scope).__name__,
+        )
+        return list(_DENY_ALL)
     return scope
 
 

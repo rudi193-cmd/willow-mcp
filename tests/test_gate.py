@@ -74,8 +74,14 @@ def test_store_scope_none_when_unset(apps_root):
     assert gate.store_scope("unscoped") is None
 
 
-def test_store_scope_none_when_no_manifest(apps_root):
-    assert gate.store_scope("ghost") is None
+def test_store_scope_explicit_null_is_unrestricted(apps_root):
+    # An explicit `null` declares "no policy", same as omitting the field.
+    app_dir = apps_root / "nulled"
+    app_dir.mkdir()
+    (app_dir / "manifest.json").write_text(
+        json.dumps({"permissions": ["full_access"], "store_scope": None})
+    )
+    assert gate.store_scope("nulled") is None
 
 
 def test_store_scope_returns_manifest_list(apps_root):
@@ -83,16 +89,55 @@ def test_store_scope_returns_manifest_list(apps_root):
     assert gate.store_scope("scoped") == ["myapp_*", "shared_notes"]
 
 
-def test_store_scope_malformed_treated_as_unrestricted(apps_root):
-    # A non-list or non-string-list store_scope is a manifest authoring bug,
-    # not a caller-triggerable error — fail open to "unrestricted" (today's
-    # default) rather than let a typo silently deny everything, but log it.
+# ── fail-closed: a scope that cannot be read is not consent ──────────────────
+
+def test_store_scope_no_manifest_denies_all(apps_root):
+    # gate.py fails closed on a missing manifest everywhere else; scope too.
+    assert gate.store_scope("ghost") == []
+    assert gate.collection_permitted("ghost", "agents") is False
+
+
+def test_store_scope_invalid_app_id_denies_all(apps_root):
+    assert gate.store_scope("../../etc") == []
+    assert gate.collection_permitted("../../etc", "agents") is False
+
+
+def test_store_scope_malformed_denies_all(apps_root):
+    # `"store_scope": "myapp_*"` — a string, not a list — is the obvious typo
+    # for this field. Reading it as "unrestricted" would hand full store access
+    # to an operator who believes the app is confined. Deny, and break loudly.
     app_dir = apps_root / "bad"
     app_dir.mkdir()
     (app_dir / "manifest.json").write_text(
         json.dumps({"permissions": ["full_access"], "store_scope": "not-a-list"})
     )
-    assert gate.store_scope("bad") is None
+    assert gate.store_scope("bad") == []
+    assert gate.collection_permitted("bad", "myapp_notes") is False
+    assert gate.collection_permitted("bad", "agents") is False
+
+
+def test_store_scope_non_string_entries_deny_all(apps_root):
+    app_dir = apps_root / "mixed"
+    app_dir.mkdir()
+    (app_dir / "manifest.json").write_text(
+        json.dumps({"permissions": ["full_access"], "store_scope": ["myapp_*", 7]})
+    )
+    assert gate.store_scope("mixed") == []
+    assert gate.collection_permitted("mixed", "myapp_notes") is False
+
+
+def test_store_scope_unreadable_manifest_denies_all(apps_root):
+    app_dir = apps_root / "corrupt"
+    app_dir.mkdir()
+    (app_dir / "manifest.json").write_text("{ this is not json")
+    assert gate.store_scope("corrupt") == []
+    assert gate.collection_permitted("corrupt", "agents") is False
+
+
+def test_store_scope_denied_list_is_not_shared_mutable_state(apps_root):
+    a = gate.store_scope("ghost")
+    a.append("agents")
+    assert gate.store_scope("ghost") == []
 
 
 def test_collection_permitted_unrestricted_when_no_scope(apps_root):

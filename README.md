@@ -278,6 +278,15 @@ only searches the matching collections instead of every collection in the
 store. Omit the field entirely for today's unrestricted behavior — an empty
 list (`"store_scope": []`) means "no collections," not "unrestricted."
 
+**A scope the gate cannot read denies everything.** If `store_scope` is present
+but malformed — most likely `"store_scope": "myapp_*"`, a string where a list
+belongs — the app is confined to *no* collections rather than granted all of
+them. The same holds for an unreadable manifest or an invalid `app_id`. This is
+deliberate: an operator who mistypes the field believes the app is confined, and
+a policy that cannot be parsed is not consent. The app fails loudly, an `ERROR`
+is logged naming the field and the type it got, and nothing leaks while the typo
+is being found. Omit the field (or set it to `null`) to declare no policy.
+
 In [HTTP serve mode](#http-serve-mode-oauth), the `app_id` is not taken from
 the call — it is resolved from the caller's confirmed OAuth identity binding,
 then checked against that same manifest ACL.
