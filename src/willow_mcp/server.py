@@ -2416,6 +2416,44 @@ def _cmd_net_status(args) -> None:
             print(f"  {f['key']}: {f['path']}")
 
 
+def _cmd_gates(args) -> None:
+    """`willow-mcp gates` — every authorization gate as one on/off panel."""
+    from . import gates_panel
+
+    rows = gates_panel.collect(args.app_id or "")
+
+    if args.json:
+        print(json.dumps([r.__dict__ for r in rows], indent=2))
+        return
+
+    if not args.no_tui or not args.html:
+        print(gates_panel.render_tui(rows))
+
+    if args.html:
+        html = gates_panel.render_html(rows, datetime.now(timezone.utc).isoformat())
+        out = Path(args.html).expanduser()
+        out.write_text(html, encoding="utf-8")
+        print(f"\nwrote {out}")
+
+
+def _cmd_set_permission(args, *, granted: bool) -> None:
+    """`willow-mcp allow-permission` / `deny-permission` — flip one manifest
+    permission for one app. Local/stdio-only, exactly like `grant-net`: no
+    MCP tool can reach this, so an agent can never grant itself a permission
+    it was just denied.
+    """
+    from . import manifest_admin
+
+    try:
+        manifest = manifest_admin.set_permission(args.app_id, args.permission, granted)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    verb = "granted to" if granted else "revoked from"
+    print(f"Permission {args.permission!r} {verb} app_id={args.app_id!r}.")
+    print(f"  permissions now: {manifest['permissions']}")
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(prog="willow-mcp")
@@ -2469,6 +2507,33 @@ def main():
         "net-status", help="Show egress leases and which trust-root keys this process can forge")
     status_p.add_argument("app_id", nargs="?", default="")
 
+    gates_p = subparsers.add_parser(
+        "gates",
+        help="Show every authorization gate (consent, manifest permissions, egress "
+             "lease, identity bindings, worker...) as one on/off panel, egress-lease shaped",
+    )
+    gates_p.add_argument("app_id", nargs="?", default="",
+                          help="scope to one app_id (default: every app under mcp_apps/)")
+    gates_p.add_argument("--html", nargs="?", const="willow-gates.html", default=None,
+                          metavar="PATH",
+                          help="write a static HTML snapshot instead of (or as well as) "
+                               "the terminal table; defaults to ./willow-gates.html")
+    gates_p.add_argument("--json", action="store_true", help="print raw JSON, no table")
+    gates_p.add_argument("--no-tui", action="store_true",
+                          help="with --html, skip printing the terminal table")
+
+    allow_p = subparsers.add_parser(
+        "allow-permission",
+        help="Add a permission group (or the task_net capability) to an app's manifest")
+    allow_p.add_argument("app_id")
+    allow_p.add_argument("permission")
+
+    deny_p = subparsers.add_parser(
+        "deny-permission",
+        help="Remove a permission group (or the task_net capability) from an app's manifest")
+    deny_p.add_argument("app_id")
+    deny_p.add_argument("permission")
+
     compile_p = subparsers.add_parser(
         "compile-agents",
         help="Compile mcp_apps/*/manifest.json from specialists registry",
@@ -2513,6 +2578,15 @@ def main():
         return
     if args.command == "net-status":
         _cmd_net_status(args)
+        return
+    if args.command == "gates":
+        _cmd_gates(args)
+        return
+    if args.command == "allow-permission":
+        _cmd_set_permission(args, granted=True)
+        return
+    if args.command == "deny-permission":
+        _cmd_set_permission(args, granted=False)
         return
     if args.command == "compile-agents":
         from pathlib import Path

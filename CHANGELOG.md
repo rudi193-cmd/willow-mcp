@@ -23,6 +23,24 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   `full_access`, because the server-process lane is strictly more privileged
   than the sandbox lane. `integration_call` is likewise excluded from
   `full_access`. See `docs/design/integrations.md` for the earn rule.
+- **`willow-mcp gates` — every authorization gate as one on/off panel, egress-lease
+  shaped.** Diagnosing a denial meant knowing which of a dozen-plus gates to check
+  (manifest permissions, `task_net`, `integration_net`, `consent.*`, egress lease,
+  identity bindings, strict trust root, severance, human-orchestrator attestation,
+  worker liveness) and which file or CLI command controlled it. `gates` shows all
+  of them at once, each rendered the way the egress lease already renders itself:
+  on/off, plus how long the "on" is good for — `standing` for gates with no expiry,
+  `process-lifetime` for env-var gates that only change at restart, or a live
+  countdown for the lease. `--html` writes a self-contained static snapshot with a
+  client-side ticking countdown and copy-to-clipboard action buttons; `--json`
+  dumps raw rows for scripting. New `allow-permission` / `deny-permission`
+  subcommands give manifest permission groups the operator-only local-CLI
+  affordance they lacked before (only hand-editing `manifest.json` or a full
+  `compile-agents` regenerate existed prior) — local-CLI-only and never MCP tools,
+  the same sudo-invariant boundary as `grant-net`/`confirm-binding`, so an agent can
+  never grant itself a permission it was just denied. `consent.*` rows are
+  read-only by design (willow-mcp never writes that policy) and never show a
+  command.
 - **Time-boxed egress leases** (B-32 / L-NET-02). `task_submit(allow_net=True)` now
   needs a **third** key: an unexpired lease issued by the operator with
   `willow-mcp grant-net <app_id> --ttl 30m --reason ...` (ceiling 3h, per FRANK

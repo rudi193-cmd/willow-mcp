@@ -125,6 +125,39 @@ silently, and **deleting it does not keep it gone** — the next save recreates 
 If the two disagree, `diagnostic_summary` reports an error naming both values
 rather than quietly obeying one of them (B-30).
 
+#### `gates` — every gate, on/off, egress-lease shaped
+
+Diagnosing a denial today means knowing which of a dozen-plus gates to check
+and which file or CLI command controls it. `willow-mcp gates` shows all of
+them at once, each rendered the way the egress lease already renders
+itself — on/off, plus how long the "on" is good for:
+
+```console
+$ willow-mcp gates                    # every app under mcp_apps/
+$ willow-mcp gates myapp              # scoped to one app
+$ willow-mcp gates --html             # writes ./willow-gates.html, a live-countdown snapshot
+$ willow-mcp gates --json             # raw rows, for scripting
+```
+
+Every row that has an existing operator-only local CLI to flip it (the
+egress lease, an identity binding) prints that exact command. Manifest
+permission groups — which had no CLI before, only hand-editing
+`manifest.json` or regenerating it via `compile-agents` — get a new pair for
+the same purpose:
+
+```console
+$ willow-mcp allow-permission myapp store_read
+$ willow-mcp deny-permission myapp store_read
+```
+
+Both are local-CLI-only, never MCP tools, for the same reason `grant-net`
+isn't: an agent must never be able to grant itself a permission it was just
+denied. `consent.*` rows never show a command — willow-mcp only reads that
+policy (see above) — and `strict_trust_root` / severance /
+human-orchestrator attestation are environment variables read once at
+process start, so their rows name the env var to set and restart with,
+rather than pretending a live toggle exists.
+
 #### The residual, stated plainly
 
 On a host where the agent and the MCP server run as the same uid, the agent can
