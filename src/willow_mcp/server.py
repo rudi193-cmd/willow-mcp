@@ -2467,6 +2467,24 @@ def _cmd_set_permission(args, *, granted: bool) -> None:
 
 
 def main():
+    """Entry point. Wraps `_main` so a downstream reader closing early
+    (`willow-mcp gates | head`, `... | grep -q`) exits clean instead of an
+    unhandled `BrokenPipeError` traceback — several of these subcommands
+    (`gates`, `net-status`, `tree`) print multiple lines and are exactly the
+    shape someone pipes into `head`/`grep`."""
+    try:
+        _main()
+    except BrokenPipeError:
+        # Standard recipe (see Python docs, "brokenpipeerror-example"): the
+        # reader is gone, so redirect our still-open stdout to devnull before
+        # exiting — otherwise Python's own shutdown flush re-raises trying to
+        # write to the closed pipe and prints a second, spurious traceback.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(1)
+
+
+def _main():
     import argparse
     parser = argparse.ArgumentParser(prog="willow-mcp")
     parser.add_argument("--serve", action="store_true", help="Run as HTTP server with OAuth")

@@ -136,6 +136,14 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 - Dockerfile and GitHub Actions test workflow (runs against a Postgres service).
 
 ### Fixed
+- **`willow-mcp gates`/`net-status`/`tree` crashed with an unhandled
+  `BrokenPipeError` traceback when piped into something that closes early**
+  (`willow-mcp gates | head`, `willow-mcp net-status app | grep -q active`) —
+  found by wiring the CLI into a CI smoke test. These subcommands print
+  multiple lines and are exactly the shape someone pipes into `head`/
+  `grep -q`; a downstream reader closing before the writer finishes raises
+  `BrokenPipeError` on the next write, which Python does not handle for you.
+  `main()` now wraps its dispatch and exits clean (code 1) instead.
 - **`pip install willow-mcp[worker]` was advertised but never existed (B-27).**
   The worker's "kartikeya is missing" errors, its `--help` text, and
   `task_queue.py`'s docstring all pointed at a `[worker]` extra; `pyproject.toml`
