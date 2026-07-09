@@ -114,3 +114,20 @@ def compile_agents_main(
         "force": force,
         **result,
     }
+
+
+def compile_cli_main() -> None:
+    """Console entry for `willow-mcp-compile` (avoids fleet `willow-mcp` shim)."""
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(
+        prog="willow-mcp-compile",
+        description="Compile mcp_apps manifests from specialists registry",
+    )
+    parser.add_argument("--force", action="store_true", help="overwrite existing manifests")
+    parser.add_argument("--dry-run", action="store_true", help="report paths only")
+    parser.add_argument("--registry", default="", help="path to specialists.json")
+    args = parser.parse_args()
+    reg = Path(args.registry).expanduser() if args.registry else None
+    print(json.dumps(compile_agents_main(force=args.force, dry_run=args.dry_run, registry_file=reg), indent=2))

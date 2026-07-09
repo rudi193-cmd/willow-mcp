@@ -26,6 +26,7 @@ dependencies = [
 [project.scripts]
 willow-mcp = "willow_mcp.server:main"
 willow-mcp-init = "willow_mcp.home_init:main"
+willow-mcp-compile = "willow_mcp.registry:compile_cli_main"
 
 [project.urls]
 Homepage = "https://github.com/rudi193-cmd/willow-mcp"
