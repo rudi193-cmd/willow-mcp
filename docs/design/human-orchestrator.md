@@ -1,10 +1,12 @@
-# Human-only orchestrator (LOCKED)
+# Human-only orchestrator gate (LOCKED)
 
-*Status: **LOCKED** — 2026-07-09 · complements `product-layout.md`, `session-lifecycle.md` §2a*
+*Status: **LOCKED** — 2026-07-09 · **Spike doc** (breaks `AGENTS*` median on purpose)*
+
+*Complements `product-layout.md`, `session-lifecycle.md` §2a. Operational moves: [`docs/AGENTS.md`](../AGENTS.md) § Orchestrator seat.*
 
 ## Rule
 
-**Willow (`app_id=willow`) is the orchestrator seat. Only a human operator may run it. No agent may.**
+**Willow (`app_id=willow`) is the orchestrator seat. Only a human operator may run dispatch writes. No agent may.**
 
 | Actor | May call `session_enter(willow)`? | May call `dispatch_send` as willow? |
 |-------|-----------------------------------|-------------------------------------|
@@ -36,10 +38,10 @@ The orchestrator is not a faster worker. It is the **human's proxy** for separat
 
 ```text
 session_enter("willow", …)  →  entry_mode: human_orchestrator
+                               agent_doc: docs/AGENTS.md (section: orchestrator)
                                closeout: session_handoff_write
-                               agent_doc: orchestrator orient (not specialist guide)
 
-session_enter("hanuman", dispatch_id="")  →  human or dispatch per rules
+session_enter("hanuman", …)  →  agent_doc: docs/AGENTS.md (section: specialist)
 ```
 
 ---
@@ -52,7 +54,7 @@ These require **human host attestation** in stdio mode:
 - `verify_handoff`
 - `agent_clear`
 
-**Stdio:** `WILLOW_HUMAN_ORCHESTRATOR=1` on the MCP server process environment — set **only** in the orchestrator workspace `.cursor/mcp.json` / Claude MCP config. Specialist project configs must omit it.
+**Stdio:** `WILLOW_HUMAN_ORCHESTRATOR=1` on the MCP server process environment — set **only** in the orchestrator workspace MCP config. Specialist project configs must omit it.
 
 **PGP (planned):** Same operator fingerprint signs manifests, session attestations, and dispatches. No product dev-bypass — see [`pgp-and-persona.md`](pgp-and-persona.md). Env attestation is interim until session `.sig` lands.
 
@@ -62,9 +64,7 @@ Read tools (`dispatch_list`, `dispatch_read`) remain available to any manifest t
 
 ---
 
-## Injection hygiene (orchestrator reading packets)
-
-When the human orchestrator reads specialist output:
+## Injection hygiene (reading packets)
 
 | Source | Trust model |
 |--------|-------------|
@@ -78,8 +78,8 @@ When the human orchestrator reads specialist output:
 
 ## Wiring checklist (operator)
 
-1. Orchestrator seat (`~/github/willow`): MCP env includes `"WILLOW_HUMAN_ORCHESTRATOR": "1"`.
-2. Specialist seats (willow-mcp repo, etc.): **no** `WILLOW_HUMAN_ORCHESTRATOR`; `app_id` defaults to specialist.
+1. Orchestrator workspace MCP env includes `"WILLOW_HUMAN_ORCHESTRATOR": "1"`.
+2. Specialist workspaces: **no** `WILLOW_HUMAN_ORCHESTRATOR`; `app_id` defaults to specialist.
 3. `mcp_apps/willow/manifest.json`: `"human_only": true`, `"permissions": ["orchestrator", …]`.
 4. Never add `orchestrator` permission group to specialist manifests.
 

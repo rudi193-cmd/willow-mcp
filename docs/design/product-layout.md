@@ -180,8 +180,8 @@ Release maintainer syncs from repo root `skills/`, `hooks/`, `docs/templates/` i
 
 | Nest / charter name | Product location |
 |---------------------|------------------|
-| Charter `ORIENT.md` | `docs/ORIENT_ORCHESTRATOR.md` or `skills/orchestrator-orient.md` |
-| Charter `AGENTS.md` | `docs/AGENTS_SPECIALIST.md` or `skills/agents-specialist.md` |
+| Charter `ORIENT.md` | **Spike** — stays in charter repo; do not overwrite with product copy |
+| Charter `AGENTS.md` | `docs/AGENTS.md` (participant-neutral; seat sections) |
 | Charter `envelopes/pre-approved.json` | **Not** `config/persona_envelopes.json` — different semantics |
 
 ---

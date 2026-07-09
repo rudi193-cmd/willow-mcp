@@ -20,6 +20,8 @@ from .registry import persona_context
 from .seed_loader import seed_context
 from .roles import VALID_STATUSES
 
+_AGENT_DOC = "docs/AGENTS.md"
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -262,7 +264,8 @@ def session_enter(
             "app_id": app_id,
             "session_id": session_id,
             "dispatch_id": None,
-            "agent_doc": "docs/ORIENT_ORCHESTRATOR.md",
+            "agent_doc": _AGENT_DOC,
+            "agent_doc_section": "orchestrator",
             "closeout_tools": ["session_handoff_write"],
             "message": (
                 "Human orchestrator entry. Desk: dispatch_list. "
@@ -292,7 +295,8 @@ def session_enter(
             "app_id": app_id,
             "session_id": session_id,
             "dispatch_id": None,
-            "agent_doc": "docs/AGENTS_SPECIALIST.md",
+            "agent_doc": _AGENT_DOC,
+            "agent_doc_section": "specialist",
             "closeout_tools": ["context_save", "session_handoff_write"],
             "message": "Human entry — no dispatch_id. Use human-facing agent and output.",
             **persona_context(app_id),
@@ -322,6 +326,8 @@ def session_enter(
         "app_id": app_id,
         "session_id": session_id,
         "dispatch_id": did,
+        "agent_doc": _AGENT_DOC,
+        "agent_doc_section": "specialist",
         "role": pkt.get("meta", {}).get("role"),
         "assignment": pkt.get("assignment", ""),
         "summary": pkt.get("meta", {}).get("summary", ""),

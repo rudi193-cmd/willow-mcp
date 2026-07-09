@@ -16,7 +16,7 @@ session_enter("willow", session_id)  →  entry_mode: human_orchestrator
 
 Orchestrator MCP config must set `WILLOW_HUMAN_ORCHESTRATOR=1`. Specialist configs must not.
 
-See `docs/design/human-orchestrator.md`.
+See `docs/AGENTS.md` § Orchestrator seat and spike `docs/design/human-orchestrator.md` (why the gate exists).
 
 ## Specialists
 

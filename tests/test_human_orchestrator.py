@@ -16,7 +16,8 @@ def test_session_enter_willow_human_only(home):
     out = ds.session_enter("willow", "sess-orch")
     assert out["entry_mode"] == "human_orchestrator"
     assert out["dispatch_id"] is None
-    assert "ORIENT_ORCHESTRATOR" in out["agent_doc"]
+    assert out["agent_doc"] == "docs/AGENTS.md"
+    assert out["agent_doc_section"] == "orchestrator"
 
 
 def test_session_enter_willow_rejects_dispatch_id(home):
