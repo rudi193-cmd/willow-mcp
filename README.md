@@ -125,6 +125,69 @@ silently, and **deleting it does not keep it gone** — the next save recreates 
 If the two disagree, `diagnostic_summary` reports an error naming both values
 rather than quietly obeying one of them (B-30).
 
+#### `gates` — every gate, on/off, egress-lease shaped
+
+Diagnosing a denial today means knowing which of a dozen-plus gates to check
+and which file or CLI command controls it. `willow-mcp gates` shows all of
+them at once, each rendered the way the egress lease already renders
+itself — on/off, plus how long the "on" is good for:
+
+```console
+$ willow-mcp gates                    # every app under mcp_apps/
+$ willow-mcp gates myapp              # scoped to one app
+$ willow-mcp gates --html             # writes ./willow-gates.html, a live-countdown snapshot
+$ willow-mcp gates --json             # raw rows, for scripting
+```
+
+Every row that has an existing operator-only local CLI to flip it (the
+egress lease, an identity binding) prints that exact command. Manifest
+permission groups — which had no CLI before, only hand-editing
+`manifest.json` or regenerating it via `compile-agents` — get a new pair for
+the same purpose:
+
+```console
+$ willow-mcp allow-permission myapp store_read
+$ willow-mcp deny-permission myapp store_read
+```
+
+Both are local-CLI-only, never MCP tools, for the same reason `grant-net`
+isn't: an agent must never be able to grant itself a permission it was just
+denied. `consent.*` rows never show a command — willow-mcp only reads that
+policy (see above) — and `strict_trust_root` / severance /
+human-orchestrator attestation are environment variables read once at
+process start, so their rows name the env var to set and restart with,
+rather than pretending a live toggle exists.
+
+`task_net` and `integration_net` both show up as their own capability rows
+(neither is folded into `full_access`), and both are authorized by the same
+per-app egress lease below them — one `grant-net`/`revoke-net` covers Kart
+sandbox egress and server-process integration calls together, since a lease
+is scoped to the app, not to which capability is asking.
+
+#### `tree` — the integration seam for a real dashboard
+
+`docs/design/*.html` sketches a client UI as a tree — trunk (overall
+health), sap (task queue), canopy (agent fleet), roots (SOIL store), rings
+(schema-mapping confirmation), leaves (knowledge atoms), litter (activity
+log), and stomata (the gates above). `willow-mcp tree` is what makes that
+real: one call that returns every part in that same shape, instead of a
+dashboard assembling `fleet_status`/`fleet_health`/`kb_startup_continuity`/
+`receipts_tail`/`gates` itself.
+
+```console
+$ willow-mcp tree myapp              # short text summary
+$ willow-mcp tree myapp --json       # full data, for a real dashboard to consume
+```
+
+It's a thin CLI wrapper over `willow_mcp.tree_view.build_tree(app_id)`,
+which a Python dashboard can also import and call directly. `sap`, `canopy`,
+and `leaves` go through the same `@_guarded` MCP tool functions a client
+would reach over the protocol — gating, rate limiting, and receipt logging
+all still apply — and degrade to `{"error": "postgres_unavailable"}` with no
+database configured, same as those tools already do. `roots`, `rings`,
+`litter`, and `stomata` read local SQLite/filesystem state directly, so they
+work with no Postgres at all.
+
 #### The residual, stated plainly
 
 On a host where the agent and the MCP server run as the same uid, the agent can

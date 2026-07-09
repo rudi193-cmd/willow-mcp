@@ -902,6 +902,43 @@
       <div class="card-header">
         <div class="card-title-group">
           <span class="card-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c-4 3-7 6.5-7 10.5a7 7 0 0 0 14 0C19 9.5 16 6 12 3Z"/><path d="M12 21v-7"/></svg>
+          </span>
+          <div>
+            <div class="card-title">Egress</div>
+            <div class="card-subtitle">stomata · consent + task_net + lease, three keys</div>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="ring-list">
+          <div class="ring-row">
+            <span class="ring-dot unconfirmed"></span>
+            <span class="ring-name mono">consent.internet</span>
+            <span class="ring-status unconfirmed">Closed, fleet-wide</span>
+          </div>
+          <div class="ring-row">
+            <span class="ring-dot confirmed"></span>
+            <span class="ring-name mono">skirnir</span>
+            <span class="ring-status confirmed">Lease active · 8m12s</span>
+          </div>
+          <div class="ring-row">
+            <span class="ring-dot unconfirmed"></span>
+            <span class="ring-name mono dim">ganas1</span>
+            <span class="ring-status unconfirmed">task_net not granted</span>
+          </div>
+        </div>
+        <div class="callout">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          <div class="callout-text"><strong>Closed fleet-wide —</strong> skirnir's lease is still counting down, but a per-app lease alone never opens a pore. An operator has to flip <span class="mono">consent.internet</span> first.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title-group">
+          <span class="card-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M4 15a4 4 0 0 1 4-4h12"/><path d="M8 15v-9"/></svg>
           </span>
           <div>
@@ -926,7 +963,11 @@
       </div>
     </div>
 
-    <div class="card">
+  </div>
+
+  <div class="grid-2">
+
+    <div class="card full-row">
       <div class="card-header">
         <div class="card-title-group">
           <span class="card-icon">
@@ -980,6 +1021,15 @@
           <div class="row-main">
             <div class="activity-text"><span class="mono">task_submit</span></div>
             <div class="activity-meta">queued, unread</div>
+          </div>
+        </div>
+        <div class="activity-row">
+          <span class="activity-icon warn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c-4 3-7 6.5-7 10.5a7 7 0 0 0 14 0C19 9.5 16 6 12 3Z"/></svg>
+          </span>
+          <div class="row-main">
+            <div class="activity-text"><span class="mono">grant-net skirnir</span></div>
+            <div class="activity-meta">lease issued · ttl 30m · consent still closed</div>
           </div>
         </div>
       </div>
