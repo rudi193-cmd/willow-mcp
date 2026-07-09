@@ -53,33 +53,6 @@ Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 | `receipts_tail` | Read your own most-recent tool-call receipts — a self-audit trail scoped to your `app_id` |
 | `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/worker/env health, with a verdict and named fixes. Ungated — see below |
 
-### Egress needs two keys
-
-A task that reaches the network requires **both** of these, and either one
-missing denies before anything is written:
-
-| Key | Question | Where | Turned by |
-|---|---|---|---|
-| `task_net` | May this app *ever* request egress? | `mcp_apps/<app_id>/manifest.json` | operator, granted once |
-| `consent.internet` | Is egress permitted *right now*? | `$WILLOW_HOME/settings.global.json` | operator, flipped freely |
-
-```jsonc
-// $WILLOW_HOME/settings.global.json — the off switch
-{ "consent": { "internet": false, "cloud_llm": true, "lan": false } }
-```
-
-Setting `consent.internet` to `false` stops network tasks **fleet-wide**,
-immediately, without editing a single manifest. `task_net` is a capability
-(rarely granted, deliberately excluded from `full_access`); `consent.internet` is
-a switch. An agent may *request* egress and may never *grant it to itself*.
-
-Consent is read **fail-closed**: a missing file, an unparseable file, or a
-non-boolean value (`"true"`, `1`) all read as denied. Absence is not consent.
-willow-mcp only reads this policy — it is authored by willow-2.0's
-`global_settings.py`. If the legacy `consent.json` and the canonical
-`settings.global.json` disagree, `diagnostic_summary` reports it as an error
-rather than quietly obeying one of them.
-
 ### Running the task worker
 
 `task_submit` only *queues* a task. A worker process executes it, sandboxed with

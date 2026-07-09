@@ -636,11 +636,6 @@ def test_task_submit_writes_mapped_columns_after_confirm(app_id, monkeypatch):
 
 def _app_with_perms(tmp_path, monkeypatch, name, perms):
     apps_root = tmp_path / "mcp_apps"
-    # Pin WILLOW_HOME too: consent (and the worker heartbeat) resolve from it, and
-    # a test that reads the developer's real ~/.willow passes or fails on the state
-    # of that machine rather than on the code.
-    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
-    monkeypatch.delenv("WILLOW_SETTINGS_GLOBAL", raising=False)
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / name
     app_dir.mkdir(parents=True)
@@ -648,18 +643,9 @@ def _app_with_perms(tmp_path, monkeypatch, name, perms):
     return name
 
 
-def _operator_consents(tmp_path, *, internet=True):
-    """Write the standing consent policy the two-key egress gate reads."""
-    (tmp_path / "settings.global.json").write_text(
-        json.dumps({"version": 1, "consent": {"internet": internet,
-                                              "cloud_llm": True, "lan": True}})
-    )
-
-
 def test_task_submit_allow_net_denied_without_task_net_permission(tmp_path, monkeypatch):
     # B-19: full_access grants task_submit but NOT the escalated net capability.
     app = _app_with_perms(tmp_path, monkeypatch, "netless", ["full_access"])
-    _operator_consents(tmp_path)  # consent is ON — the manifest is what denies
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
 
@@ -674,7 +660,6 @@ def test_task_submit_allow_net_appends_directive_with_permission(tmp_path, monke
     # B-19: an app that holds task_net may run with network; the Kart worker's
     # `# allow_net` directive is appended to the task text.
     app = _app_with_perms(tmp_path, monkeypatch, "netapp", ["full_access", "task_net"])
-    _operator_consents(tmp_path)  # B-29: the second key
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
@@ -686,46 +671,6 @@ def test_task_submit_allow_net_appends_directive_with_permission(tmp_path, monke
     assert insert_sql.startswith("INSERT INTO tasks")
     # values dict order is task_id, task, ... so the task column value is params[1]
     assert params[1] == "curl https://example.com\n# allow_net"
-
-
-def test_task_submit_allow_net_denied_when_operator_consent_is_off(tmp_path, monkeypatch):
-    # B-29: task_net is necessary but not sufficient. The operator's standing
-    # consent.internet is the second key, and flipping it off stops egress
-    # without touching a single manifest.
-    app = _app_with_perms(tmp_path, monkeypatch, "netapp3", ["full_access", "task_net"])
-    _operator_consents(tmp_path, internet=False)
-    fake = _FakePg(columns=_TASKS_COLUMNS)
-    monkeypatch.setattr(server, "get_pg", lambda: fake)
-
-    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
-
-    assert "consent_denied" in result["error"]
-    assert not any("INSERT" in sql for sql, _ in fake.executed)
-
-
-def test_task_submit_allow_net_denied_when_consent_policy_is_absent(tmp_path, monkeypatch):
-    # B-29 fail-closed: no consent policy on disk is not consent. This is also the
-    # CI shape — no settings.global.json anywhere.
-    app = _app_with_perms(tmp_path, monkeypatch, "netapp4", ["full_access", "task_net"])
-    fake = _FakePg(columns=_TASKS_COLUMNS)
-    monkeypatch.setattr(server, "get_pg", lambda: fake)
-
-    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
-
-    assert "consent_denied" in result["error"]
-
-
-def test_task_submit_without_allow_net_ignores_consent(tmp_path, monkeypatch):
-    # Consent gates egress, not the queue. An isolated task runs with consent off.
-    app = _app_with_perms(tmp_path, monkeypatch, "netapp5", ["full_access"])
-    _operator_consents(tmp_path, internet=False)
-    fake = _FakePg(columns=_TASKS_COLUMNS)
-    monkeypatch.setattr(server, "get_pg", lambda: fake)
-    server.schema_confirm_mapping(app_id=app, table="tasks")
-
-    result = server.task_submit(app_id=app, task="echo hi")
-
-    assert result["status"] == "pending"
 
 
 def test_task_submit_no_net_directive_by_default(tmp_path, monkeypatch):
@@ -777,7 +722,6 @@ def test_task_submit_permitted_net_survives_caller_directive_dedup(tmp_path, mon
     # B-21: even when the caller also embeds the directive, a task_net-permitted
     # allow_net=True submit stores exactly one canonical `# allow_net` line.
     app = _app_with_perms(tmp_path, monkeypatch, "netapp2", ["full_access", "task_net"])
-    _operator_consents(tmp_path)  # B-29: the second key
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
