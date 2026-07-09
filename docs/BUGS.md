@@ -37,7 +37,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-29 | P0 | Fixed | gate / consent | `allow_net` egress was gated **only** by the `task_net` manifest capability — the operator's standing `consent.internet` gated nothing. The fleet flag `consent_internet_gates_allow_net` was declared `implemented: false, status: deferred`, so the switch existed and was wired to nothing. Fixed: two-key gate (`task_net` **and** `consent.internet`), read fail-closed | egress-membrane design; FRANK `cc553729`; this session |
 | B-30 | P1 | Open | consent / config | The two consent files **disagree** and the one an operator would naturally edit is inert. `consent.json` says `internet: false, lan: false`; `settings.global.json` says `true, true`. `load_global_settings()` imports the legacy file only when the canonical one is *absent*, so the legacy values never applied. Operator-gated: willow-mcp does not author this policy | observed live; this session |
 | B-31 | P1 | Open | consent / willow-2.0 | `global_settings.py` **fails open**: `DEFAULT_CONSENT` is all-`True`, and `_normalize_consent()` returns those defaults for any non-dict — a missing, truncated, or malformed consent block resolves to *all permitted*. Same inversion as B-25. willow-mcp now reads fail-closed independently; the writer is unfixed and out of this repo | cross-repo (willow-2.0); this session |
-| B-32 | P1 | Open | gate / sudo invariant | A **host-side agent can self-grant `task_net`** by writing the manifest with its own file tools, then use it. B-14 made `mcp_apps/` `bound_ro` to the *sandbox*; nothing constrains the host-side agent. This violates the sudo invariant (FRANK `90e52ab7`): *a model may REQUEST egress, never CONFIRM it — request and confirm are separate authorities*. Demonstrated in this session, with operator approval, but the mechanism did not require it | FRANK `90e52ab7`; §0.1/§0.3; this session |
+| B-32 | P1 | Open | gate / sudo invariant | A **host-side agent can self-grant `task_net`** by writing the manifest with its own file tools, then use it. B-14 made `mcp_apps/` `bound_ro` to the *sandbox*; nothing constrains the host-side agent. This violates the sudo invariant (FRANK `90e52ab7`): *a model may REQUEST egress, never CONFIRM it — request and confirm are separate authorities*. **Mitigated, not closed:** egress is now a time-boxed operator-issued lease (`willow-mcp grant-net`, ≤3h, no MCP tool can mint one), the sandbox lane is closed outright, and `diagnostic_summary` names every key the process could forge. The host lane needs `chown` + `WILLOW_MCP_STRICT_TRUST_ROOT=1` — a deployment step, operator-gated | FRANK `90e52ab7`; §0.1/§0.3; L-NET-02; this session |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -88,28 +88,80 @@ log carries a one-line entry and points there rather than duplicating.
   the two-line fix is `DEFAULT_CONSENT` all-`False` plus returning deny-all from
   `_normalize_consent` on a non-dict.
 
-- **B-32 · P1** — **a host-side agent can self-grant `task_net`.** B-14 made
-  `$WILLOW_HOME/mcp_apps` `bound_ro` inside the Kart sandbox precisely so an
-  untrusted runtime could not rewrite the ACL that gates it. But the *host-side*
-  agent — the one driving the session — holds ordinary file tools and can simply
-  write `"task_net"` into its own manifest, then call
-  `task_submit(allow_net=True)`. B-14 closed the sandbox door; the host door was
-  never closed. This inverts the **sudo invariant** (FRANK `90e52ab7`): *the
-  model may REQUEST egress, never CONFIRM it; request and confirm are separate
-  authorities.* Under §0.1 the witness may not be the actor; under §0.3 nothing
-  may extend its own reach. Demonstrated this session: the agent granted itself
-  `task_net`, pushed a branch, and revoked it. The operator did approve each
-  step in chat — but the *mechanism* never required that approval, and an
-  approval the machine cannot check is not a control. **Not fixed here.** Real
-  fixes are structural, not a patch: (a) the confirm authority lives outside the
-  agent's write reach (root-owned manifest, or an `mcp_apps` the agent's own
-  process cannot write); (b) `task_net` becomes an operator-issued, time-boxed
-  **lease** (FRANK `cc553729`: turn / session / ≤3h) that the agent may request
-  but not mint; (c) at minimum, egress requires the operator-owned
-  `consent.internet`, which **B-29 now implements** — a self-granted `task_net`
-  alone no longer buys egress. (c) is a genuine mitigation, not a fix: it means
-  self-escalation now requires forging *two* files instead of one, and the second
-  is the one the operator actually watches.
+- **B-32 · P1** — **a host-side agent can self-grant `task_net`.** *Mitigated this
+  session; the last step is the operator's.* B-14 made `$WILLOW_HOME/mcp_apps`
+  `bound_ro` inside the Kart sandbox precisely so an untrusted runtime could not
+  rewrite the ACL that gates it. But the *host-side* agent — the one driving the
+  session — holds ordinary file tools and can simply write `"task_net"` into its
+  own manifest, then call `task_submit(allow_net=True)`. B-14 closed the sandbox
+  door; the host door was never closed. This inverts the **sudo invariant** (FRANK
+  `90e52ab7`): *the model may REQUEST egress, never CONFIRM it; request and confirm
+  are separate authorities.* Under §0.1 the witness may not be the actor; under
+  §0.3 nothing may extend its own reach. Demonstrated in a prior session: the agent
+  granted itself `task_net`, pushed a branch, and revoked it. The operator did
+  approve each step in chat — but the *mechanism* never required that approval, and
+  an approval the machine cannot check is not a control.
+
+  The three structural fixes named when this was filed were (a) put the confirm
+  authority outside the agent's write reach; (b) make `task_net` a time-boxed
+  lease the agent may request but not mint; (c) require the operator-owned
+  `consent.internet`. **(c) landed in B-29. (b) landed here. (a) is now
+  *supported and checked*, but it is a `chown`, so it remains the operator's.**
+
+  **What landed (B-32, this session):**
+  - **`lease.py` — egress is a time-boxed grant.** `task_net` is demoted to a
+    capability: *this app may ever ask*. The grant itself is a record at
+    `mcp_apps/_net_leases/<app_id>.json` carrying an issuer, a reason, and a
+    deadline capped at **3h** (FRANK `cc553729`: turn / session / ≤3h). A
+    self-granted lease **expires** and **leaves an attributed record**, where a
+    self-granted boolean persisted silently and forever.
+  - **No MCP tool can mint one.** Issuance is `willow-mcp grant-net` — local CLI
+    only, exactly as `confirm-binding` is (L-AUTH-02). Plus `revoke-net` and
+    `net-status`. A regression test asserts the server exports no such tool.
+  - **Read fail-closed**, in the spirit of `consent.py`: absent, unparseable,
+    expired, `ttl_seconds` above the ceiling, an `expires_at` with **no timezone**
+    (a deadline without a zone is a wish), or a record whose `app_id` names a
+    *different* app than the file it sits in — every one denies. *A name is not an
+    identity:* the filename is where we looked, not what the record claims.
+  - **The sandbox lane is now closed outright.** Leases live under `mcp_apps/`, so
+    they inherit B-14's `bound_ro` mount. Verified live: `lease.grant()` from
+    inside the Kart sandbox raises `OSError(EROFS)` and no file appears.
+  - **The residual is measured, not implied away.**
+    `diagnostic_summary.checks.net_lease.self_writable` lists exactly which
+    authorizing keys the running process could forge — on a single-uid host, all of
+    them. `WILLOW_MCP_STRICT_TRUST_ROOT=1` turns that into a refusal
+    (`trust_root_denied`). It is **off by default**: enabling it before uid
+    separation exists would deny egress on every install that exists today. That
+    default is a statement about deployments, not about policy — and it is *not*
+    the B-31 inversion, because the policy is read perfectly well; what is absent
+    is the OS enforcing who may have authored it.
+  - **The PreToolUse hook blocks the crossing** — `grant-net`, a write under
+    `_net_leases/`, or an edit adding `task_net` to a manifest. A hook lives in the
+    agent's own harness and is a guardrail, never a control; it makes the boundary
+    visible at the moment it would be crossed.
+
+  **A bug found in the fix, by running it rather than testing it.** `_leases_root()`
+  called `mkdir()` unconditionally, so the *read* path created the trust root too —
+  meaning on exactly the hardened, read-only deployment this work argues for,
+  `read_lease()` would raise `OSError(EROFS)` instead of denying. A reader that
+  mutates the trust root, and dies when it cannot, has the failure mode backwards.
+  Only `grant()` creates now; `self_writable_trust_paths()` asks whether the
+  *nearest existing ancestor* is writable, since an absent directory this process
+  could create is not hardening. Regression tests pin both.
+
+  **Still not closed.** On a single-uid host the agent can write the lease. It must
+  now forge a *third* artifact, with a clock, under audit — but the operating
+  system is not stopping it. The genuine fix is ownership:
+
+  ```console
+  $ sudo chown -R willow-operator ~/.willow/mcp_apps   # a uid the agent is not
+  $ export WILLOW_MCP_STRICT_TRUST_ROOT=1
+  ```
+
+  That is a deployment step this repo can support and check but must not perform —
+  same class as B-28 and B-30. Until it is taken, requesting egress and confirming
+  it are separated by convention, not by the kernel. Full writeup: `SECURITY_AUDIT.md`
+  L-NET-02.
 
 - **B-28 · P3** — `completed_at` is never set on **failed** tasks. B-17 added the
   column plus a `set_task_completed_at()` trigger to the shared fleet DB, but the

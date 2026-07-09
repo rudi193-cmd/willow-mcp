@@ -1,4 +1,4 @@
-"""Standing operator consent — the outer key of the two-key egress gate.
+"""Standing operator consent — the fleet-wide key of the three-key egress gate.
 
 The property under test: **anything we cannot read as an explicit `true` denies.**
 willow-2.0's writer defaults consent to all-True and returns those defaults for a

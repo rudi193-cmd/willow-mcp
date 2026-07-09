@@ -1,11 +1,12 @@
-"""Standing operator consent — the outer ring of the two-key egress gate.
+"""Standing operator consent — the fleet-wide ring of the three-key egress gate.
 
 `task_net` in an app's manifest says *this app may ever request egress*.
 `consent.internet` in `$WILLOW_HOME/settings.global.json` says *the operator
-permits egress right now*. A network-bearing task needs **both**. The manifest
-key is a capability, granted once and rarely; the consent key is a switch the
-operator flips, and flipping it off must stop egress fleet-wide without editing
-a single manifest.
+permits egress right now*. An egress lease (`lease.py`) says *this app, until
+this time*. A network-bearing task needs **all three**. The manifest key is a
+capability, granted once and rarely; the consent key is a switch the operator
+flips, and flipping it off must stop egress fleet-wide without editing a single
+manifest; the lease is a time-boxed grant that expires on its own.
 
 This module only ever **reads**. `settings.global.json` is authored by
 willow-2.0's `willow/fylgja/global_settings.py`; willow-mcp is a consumer, and a
@@ -159,5 +160,6 @@ def permitted(key: str) -> bool:
 
 
 def internet_permitted() -> bool:
-    """The outer key of the two-key egress gate. See `task_net` for the inner."""
+    """The fleet-wide key of the three-key egress gate. See `gate.NET_PERMISSION`
+    for the capability and `lease.active` for the time-boxed grant."""
     return permitted("internet")
