@@ -68,7 +68,7 @@ def _draw(stdscr, rows: list, selected: int, status: str, scroll: int) -> int:
         y = 2 + i
         is_selected = idx == selected
         button = f"[{row.state.upper():^4}]"
-        rest = f" {row.scope:<16} {row.label:<24} {_timer_text(row):<26} {row.detail}"
+        rest = f" {row.scope:<16} {row.friendly:<30} {_timer_text(row):<26} {row.label} — {row.detail}"
         line = (button + rest)[: w - 1].ljust(w - 1)
 
         # Whole line first (plain, or reverse-video if this is the focused

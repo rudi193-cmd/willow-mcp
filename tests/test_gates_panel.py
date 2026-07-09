@@ -10,6 +10,11 @@ import json
 import pytest
 
 from willow_mcp import gates_panel, lease, manifest_admin
+from willow_mcp.gate import (
+    INTEGRATION_NET_PERMISSION,
+    NET_PERMISSION,
+    PERMISSION_GROUPS,
+)
 
 
 @pytest.fixture
@@ -130,3 +135,66 @@ def test_render_html_escapes_embedded_script_close_tag(apps_root):
     # must not survive render_html's escaping.
     assert html.count("</script>") == 1  # only the template's own closing tag
     assert "<\\/script>" in html  # the payload's literal close-tag was neutralized
+
+
+# ── friendly labels — display-only translation, never the acted-on identity ──
+
+def test_every_permission_group_and_capability_has_a_friendly_label():
+    """Regression: a permission group added to gate.py without a matching
+    FRIENDLY_LABELS entry silently falls back to _humanize() — not wrong,
+    but worth catching so translations don't quietly lag the real gate list."""
+    all_names = set(PERMISSION_GROUPS) | {NET_PERMISSION, INTEGRATION_NET_PERMISSION}
+    missing = all_names - set(gates_panel.FRIENDLY_LABELS)
+    assert not missing, f"no FRIENDLY_LABELS entry for: {sorted(missing)}"
+
+
+def test_friendly_defaults_from_label_when_not_given():
+    row = gates_panel.GateRow(id="x", label="store_read", scope="app", state="off", detail="")
+    assert row.friendly == "View saved notes"
+
+
+def test_friendly_explicit_override_wins():
+    row = gates_panel.GateRow(id="x", label="raw", scope="app", state="off", detail="",
+                               friendly="Custom text")
+    assert row.friendly == "Custom text"
+
+
+def test_humanize_fallback_for_unmapped_name():
+    row = gates_panel.GateRow(id="x", label="some_future_group", scope="app",
+                               state="off", detail="")
+    assert row.friendly == "Some future group"
+
+
+def test_collect_rows_all_have_friendly_text(apps_root):
+    manifest_admin.set_permission("testapp", "full_access", True)
+    rows = gates_panel.collect("testapp")
+    assert all(r.friendly for r in rows)
+
+
+def test_binding_row_friendly_names_the_issuer(apps_root):
+    from willow_mcp import identity_binding
+
+    identity_binding.propose_binding("google", "sub1", "u@e.com")
+    row = _row(gates_panel.collect("testapp"), "binding.google__sub1")
+    assert "google" in row.friendly.lower()
+    assert row.label == "identity binding (google)"  # exact technical form kept
+
+
+def test_render_tui_includes_friendly_names_and_raw_labels(apps_root):
+    manifest_admin.set_permission("testapp", "store_read", True)
+    rows = gates_panel.collect("testapp")
+    out = gates_panel.render_tui(rows, color=False)
+    assert "View saved notes" in out
+    assert "store_read" in out  # raw name still visible for CLI/scripting use
+
+
+def test_render_html_payload_includes_friendly_field(apps_root):
+    manifest_admin.set_permission("testapp", "store_read", True)
+    rows = gates_panel.collect("testapp")
+    html = gates_panel.render_html(rows, "2026-01-01T00:00:00+00:00")
+    start = html.index("const ROWS = ") + len("const ROWS = ")
+    end = html.index(";\n", start)
+    payload = json.loads(html[start:end])
+    row = next(r for r in payload if r["id"] == "perm.testapp.store_read")
+    assert row["friendly"] == "View saved notes"
+    assert row["label"] == "store_read"

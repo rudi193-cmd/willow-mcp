@@ -61,8 +61,10 @@ _PAGE = """<!doctype html>
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 1rem; display: flex; flex-direction: column; gap: .55rem; min-width: 0;
   }
-  .card-head { display: flex; align-items: center; gap: .6rem; }
+  .card-head { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+  .card-head-text { min-width: 0; }
   .label { font-weight: 600; overflow-wrap: anywhere; }
+  .tech { font-size: .72rem; color: var(--muted); font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
   .btn {
     appearance: none; border: none; border-radius: 999px; padding: .3rem .85rem;
     font-weight: 700; font-size: .72rem; letter-spacing: .05em; color: #fff; cursor: default;
@@ -178,10 +180,16 @@ async function renderFromServer() {
       btn.className = "btn " + row.state + (actionable ? " actionable" : "");
       btn.textContent = row.state.toUpperCase();
       btn.disabled = !actionable;
+      const textWrap = document.createElement("div");
+      textWrap.className = "card-head-text";
       const label = document.createElement("div");
       label.className = "label";
-      label.textContent = row.label;
-      head.appendChild(btn); head.appendChild(label);
+      label.textContent = row.friendly;
+      const tech = document.createElement("div");
+      tech.className = "tech";
+      tech.textContent = row.label;
+      textWrap.appendChild(label); textWrap.appendChild(tech);
+      head.appendChild(btn); head.appendChild(textWrap);
       card.appendChild(head);
       const timer = document.createElement("div");
       timer.className = "timer";
