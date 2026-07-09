@@ -116,6 +116,59 @@ def test_rings_ignores_malformed_files(home):
     assert tree_view._rings("testapp") == {"tables": [], "confirmed": 0, "total": 0}
 
 
+# ── _girth ───────────────────────────────────────────────────────────────────
+
+def test_girth_sums_every_countable_part():
+    rings = {"total": 3, "confirmed": 2}
+    roots = {"count": 4}
+    leaves = {"atoms": [{"id": "1"}, {"id": "2"}]}
+    litter = {"receipts": [{"tool": "store_put"}]}
+    g = tree_view._girth(rings, roots, leaves, litter)
+    assert g == {"total": 10, "rings": 3, "roots": 4, "leaves": 2, "litter": 1}
+
+
+def test_girth_treats_postgres_errored_parts_as_zero():
+    """A tree with no database still has a girth — the unreachable
+    Postgres-backed parts contribute 0, they don't blow up the sum."""
+    g = tree_view._girth(
+        rings={"total": 2, "confirmed": 1},
+        roots={"count": 1},
+        leaves={"error": "postgres_unavailable"},
+        litter={"error": "postgres_unavailable"},
+    )
+    assert g == {"total": 3, "rings": 2, "roots": 1, "leaves": 0, "litter": 0}
+
+
+def test_girth_of_a_bare_seed_is_zero():
+    g = tree_view._girth({"total": 0}, {"count": 0}, {"error": "x"}, {"error": "x"})
+    assert g["total"] == 0
+
+
+def test_girth_erupts_only_once_it_has_thickness(caplog):
+    """The known-issue log line fires when — and only when — the trunk has
+    actually put on girth. A bare seed calculates girth silently; a tree with
+    any accumulated growth announces it. (Priority: Won't Fix.)
+
+    The assertion is deliberately spelled letter-by-letter so the literal log
+    string lives in exactly ONE place in this whole repository — the
+    logger.info call in tree_view.py. Grep it and you get a single hit. The
+    story it comes from depends on that being true.
+    """
+    erupted = "Girth" + " " + "erupted."
+
+    with caplog.at_level("INFO", logger="willow_mcp.tree_view"):
+        tree_view._girth({"total": 0}, {"count": 0}, {"error": "x"}, {"error": "x"})
+    seed_messages = [r.getMessage() for r in caplog.records]
+    assert any(m.startswith("Calculating girth") for m in seed_messages)
+    assert erupted not in seed_messages  # a seed does not erupt
+
+    caplog.clear()
+    with caplog.at_level("INFO", logger="willow_mcp.tree_view"):
+        tree_view._girth({"total": 1}, {"count": 0}, {"error": "x"}, {"error": "x"})
+    grown_messages = [r.getMessage() for r in caplog.records]
+    assert erupted in grown_messages
+
+
 # ── build_tree ───────────────────────────────────────────────────────────────
 
 def test_build_tree_has_every_part(home):
@@ -146,6 +199,18 @@ def test_build_tree_trunk_reflects_real_rings_count(home):
     tree = tree_view.build_tree("testapp")
     assert tree["trunk"]["tables_ringed"] == 1
     assert tree["trunk"]["tables_total"] == 2
+
+
+def test_build_tree_trunk_carries_girth(home):
+    """Girth rides in the trunk (not a new top-level part) and reflects the
+    real accumulated growth — here, two rings, so the tree has thickness."""
+    manifest_admin.set_permission("testapp", "full_access", True)
+    _write_schema_map(home, "testapp", "tasks", confirmed=True)
+    _write_schema_map(home, "testapp", "agents", confirmed=False)
+    tree = tree_view.build_tree("testapp")
+    girth = tree["trunk"]["girth"]
+    assert girth["rings"] == 2
+    assert girth["total"] >= 2  # rings, plus whatever roots/litter exist
 
 
 def test_build_tree_stomata_matches_gates_panel(home):
