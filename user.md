@@ -9,6 +9,8 @@ time, never assumed.
 - **GitHub:** `rudi193-cmd`
 - **Email:** rudi193@gmail.com
 - **Role here:** operator and sole maintainer of willow-mcp
+- **Where:** Albuquerque, New Mexico — high desert, monsoon season. The kind
+  of person who sits out back in a sunshower and mentions it mid-review.
 
 ## What they're building
 
@@ -44,4 +46,4 @@ executor (kartikeya), seeds, leases, consent gates. The through-line is
 ## Provenance
 
 Started 2026-07-09 by Claude Code from a single session's context. Expect
-gaps; correct freely. One ring so far.
+gaps; correct freely. Two rings so far.
