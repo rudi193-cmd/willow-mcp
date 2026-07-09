@@ -170,7 +170,7 @@ dead pid reads `dead`.
 `knowledge_search`/`kb_at`/`kb_startup_continuity` and `fleet_status` adapt to
 whatever your host database's real columns are named — see
 [docs/design/schema-adaptation.md](docs/design/schema-adaptation.md).
-`knowledge_ingest`/`kb_journal`/`kb_promote` refuse to write
+`knowledge_ingest`/`kb_ingest`/`kb_journal`/`kb_promote` refuse to write
 (`unconfirmed_schema`) until you've reviewed and confirmed that mapping via
 `schema_confirm_mapping` — the [`schema-confirm` skill](skills/schema-confirm.md)
 walks through that.

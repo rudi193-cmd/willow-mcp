@@ -8,7 +8,7 @@ Modes:
 Tools:
   Store (SQLite):  store_put, store_get, store_list, store_update, store_search,
                    store_delete, store_search_all
-  Knowledge (PG):  knowledge_ingest, knowledge_search,
+  Knowledge (PG):  knowledge_ingest, knowledge_search, kb_ingest,
                    kb_at, kb_promote, kb_journal, kb_startup_continuity
   Tasks (PG):      task_submit, task_status, task_list
   Agent (PG):      agent_route, agent_dispatch_result
@@ -902,6 +902,48 @@ def kb_journal(
     )
     cur.close()
     return {"id": kid, "domain": "journal"}
+
+
+@mcp.tool()
+@_guarded("kb_ingest")
+def kb_ingest(
+    app_id: str,
+    agent_id: str,
+    slice: str = "work_context",
+    sensitivity: str = "sensitive",
+    tier: str = "canonical",
+    supersede: bool = True,
+) -> dict:
+    """Promote a ratified agent_seed slice to Postgres KB (source_type: agent_seed).
+
+    Requires ratified + trusted seed at $WILLOW_HOME/seeds/{agent_id}.json.
+    slice: voice_only | work_context | full (full denied for operator kind).
+    Never promotes persona.cast or context.personal_note.
+    """
+    from . import seed_kb as skb
+
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
+    if "error" in mapping:
+        return mapping
+    unconfirmed = _require_confirmed(mapping)
+    if unconfirmed:
+        return unconfirmed
+
+    kid = str(uuid.uuid4())[:8].upper()
+    return skb.promote_seed_to_kb(
+        pg,
+        mapping["fields"],
+        agent_id=agent_id,
+        slice_name=slice,
+        sensitivity=sensitivity,
+        tier=tier,
+        supersede=supersede,
+        new_id=kid,
+    )
 
 
 @mcp.tool()
