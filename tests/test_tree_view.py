@@ -32,6 +32,13 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("WILLOW_STORE_ROOT", str(tmp_path / "store"))
     monkeypatch.setenv("WILLOW_MCP_RECEIPT_DB", str(tmp_path / "receipts.db"))
     monkeypatch.delenv("WILLOW_HUMAN_ORCHESTRATOR", raising=False)
+    # Hermetic: this suite exercises the `postgres_unavailable` degradation path
+    # (see module docstring). Force it regardless of whether a Postgres happens
+    # to be reachable on the machine running the tests — otherwise a live local
+    # Postgres flips sap/canopy/leaves to real data and auto-writes a schema-map
+    # artifact (inflating rings["total"]), making results depend on the dev's
+    # environment rather than the code.
+    monkeypatch.setattr(server, "get_pg", lambda: None)
     return tmp_path
 
 
