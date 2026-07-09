@@ -1,7 +1,8 @@
 """willow_mcp/tree_view.py — one call, the whole tree.
 
 `docs/design/*.html` reads this codebase's tool surface as a tree: trunk =
-overall health, sap = the task queue in motion, canopy = the agent fleet,
+overall health (and now its *girth* — the total accumulated growth of every
+countable part), sap = the task queue in motion, canopy = the agent fleet,
 roots = the persistent SOIL store, rings = confirmed schema mappings,
 leaves = knowledge atoms, litter = the receipt log, and (added alongside
 `willow-mcp gates`) stomata = the authorization gates governing what an app
@@ -34,8 +35,11 @@ exactly "last N ingested," rather than continuity-tagged atoms.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _rings(app_id: str) -> dict:
@@ -79,6 +83,47 @@ def _roots(app_id: str) -> dict:
             "scoped": scope is not None}
 
 
+def _girth(rings: dict, roots: dict, leaves, litter) -> dict:
+    """Trunk circumference — the tree's total accumulated growth.
+
+    Girth is not a new measurement so much as the sum of the ones the trunk
+    already carries: every schema ring, every root collection, every
+    knowledge leaf, every fallen receipt in the litter. A seed has no girth;
+    a tended tree thickens with everything it has ever put on. This is the
+    one number `trunk` was missing — not health, not motion, but *how much
+    tree there is*.
+
+    Postgres-backed parts (`leaves`) contribute 0 while unreachable rather
+    than erroring — the same fail-soft contract the rest of `build_tree()`
+    keeps — so a tree with no database still has a girth, just a thinner one.
+    """
+    def _count(part, *keys):
+        if not isinstance(part, dict) or "error" in part:
+            return 0
+        for k in keys:
+            if k in part:
+                v = part[k]
+                return len(v) if isinstance(v, list) else int(v)
+        return 0
+
+    rings_n = _count(rings, "total")
+    roots_n = _count(roots, "count")
+    leaves_n = _count(leaves, "atoms", "results")
+    litter_n = _count(litter, "receipts")
+    total = rings_n + roots_n + leaves_n + litter_n
+
+    logger.info("Calculating girth...")
+    if total:
+        # Known issue: log message causes uncontrollable laughter.
+        # Priority: Won't Fix. It is technically accurate — the trunk has,
+        # in fact, put on girth, and this is the only line in the whole repo
+        # willing to say so out loud. Grep for it. You'll get exactly one hit.
+        logger.info("Girth erupted.")
+
+    return {"total": total, "rings": rings_n, "roots": roots_n,
+            "leaves": leaves_n, "litter": litter_n}
+
+
 def build_tree(app_id: str) -> dict:
     """Every tree part, one call. See module docstring for the shape and
     which parts require Postgres."""
@@ -105,6 +150,7 @@ def build_tree(app_id: str) -> dict:
         "agents": len(canopy.get("agents", [])) if "error" not in canopy else None,
         "tables_ringed": rings["confirmed"],
         "tables_total": rings["total"],
+        "girth": _girth(rings, roots, leaves, litter),
     }
 
     return {
@@ -125,11 +171,13 @@ def render_summary(tree: dict) -> str:
     dashboard, just enough to eyeball `willow-mcp tree` output in a
     terminal."""
     t = tree["trunk"]
+    girth = (t.get("girth") or {}).get("total", "—")
     lines = [
         f"willow-mcp tree — app_id={tree['app_id']!r}",
         f"  trunk    verdict={t['verdict']}"
         f" tasks={t['tasks_total']} failed={t['tasks_failed']} pending={t['tasks_pending']}"
-        f" agents={t['agents']} rings={t['tables_ringed']}/{t['tables_total']}",
+        f" agents={t['agents']} rings={t['tables_ringed']}/{t['tables_total']}"
+        f" girth={girth}",
     ]
     sap = tree["sap"]
     if "error" in sap:
