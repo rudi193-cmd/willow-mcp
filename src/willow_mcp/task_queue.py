@@ -6,10 +6,11 @@ willow-mcp's *adopted* `tasks` table (Postgres, via the schema-adaptation layer)
 and, when no Postgres is configured, falls back to kartikeya's bundled
 `SqliteTaskQueue` — so `willow-mcp worker` runs tasks with or without a DB.
 
-`kartikeya` is an OPTIONAL dependency (`pip install willow-mcp[worker]`); it is
-imported lazily so importing willow-mcp never requires it. `WillowMcpTaskQueue`
-duck-types the seam (it does not subclass `kartikeya.TaskQueue`) precisely so
-this module imports cleanly when kartikeya is absent.
+`kartikeya` is a HARD dependency (B-22 close-out — see `pyproject.toml`), so a
+base `pip install willow-mcp` ships a working drainer. It is nonetheless imported
+lazily, and `WillowMcpTaskQueue` duck-types the seam rather than subclassing
+`kartikeya.TaskQueue`, so this module still imports cleanly in the one case that
+survives: a source checkout whose dependencies were never installed.
 """
 from __future__ import annotations
 
@@ -32,8 +33,9 @@ def _require_kartikeya():
         return kartikeya
     except ModuleNotFoundError as e:  # pragma: no cover - exercised where absent
         raise RuntimeError(
-            "the task worker requires the 'kartikeya' package — "
-            "install it with `pip install willow-mcp[worker]`"
+            "the task worker requires the 'kartikeya' package, which willow-mcp "
+            "depends on — reinstall with `pip install willow-mcp`, or "
+            "`pip install -e .` from a source checkout"
         ) from e
 
 

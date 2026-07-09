@@ -31,6 +31,9 @@ log carries a one-line entry and points there rather than duplicating.
 | B-23 | P3 | Fixed | process / skills+hooks | Task-queue surface (`task_submit`/`task_net`, B-19; `# allow_net` footgun, B-21) shipped with no skill or hook, violating the "hooks/skills ship with the tool" rule (`docs/design/hooks-and-skills.md` §2). Fixed: added `skills/kart-tasks.md` + a `task_submit` matcher on `pre_tool_use.py` warning on hand-embedded net directives | this session; operator-caught |
 | B-24 | P0 | Fixed | db / store | `store_*` tools (put/get/list/update/search/delete/search_all) had no cross-app isolation — `app_id` was discarded after the permission gate, `db.py` never scoped by it, so any app with `store_read`/`store_write`/`full_access` could read/write/delete every other app's SOIL data. Fixed: opt-in `store_scope` manifest field (exact/prefix-wildcard collection allowlist), checked by all six single-collection tools + `store_search_all`; unscoped apps keep the shared-fleet-store default | L-ISO-01; PR #31 review §2b; this session |
 | B-25 | P1 | Fixed | gate / store | `gate.store_scope()` **failed open**: an invalid `app_id`, a missing/unparseable manifest, or a malformed `store_scope` all returned `None` — *unrestricted* — with only a log warning. `"store_scope": "myapp_*"` (a string, the obvious typo for this field) silently granted full store access to an operator who believed the app was confined, inverting `gate.py`'s own header contract ("Fail-closed: missing app_id, missing manifest … → deny"). Fixed: all three paths return `[]` (deny-all); explicit `null` still means "no policy declared". Malformed scope logs at `ERROR` | follow-up to B-24; this session |
+| B-26 | P2 | Fixed | task interface / worker | Task queue had **no liveness signal** — `task_submit` returned `{"status":"pending"}` identically whether a worker was about to run it or none existed, so a stranded queue was indistinguishable from a busy one. Fixed: `willow-mcp worker` publishes a heartbeat via kartikeya's `on_heartbeat` seam; `fleet_health` gains `workers`/`stranded`, `diagnostic_summary` gains a `worker` check | Kart lift stage 4; this session |
+| B-27 | P3 | Fixed | packaging / docs | Three code paths told operators to `pip install willow-mcp[worker]` — an extra that **does not exist**; `kartikeya` has been a hard dependency since B-22, so the advice was unrunnable | found during B-26; this session |
+| B-28 | P3 | Open | schema / tasks | `completed_at` stays null on **failed** tasks. B-17's `set_task_completed_at()` trigger fires only on `NEW.status = 'completed'`, so a failed task never records when it finished (willow-mcp's own `mark_done` sets it correctly; the shared-DB trigger is the gap). Fix requires an `ALTER`/`CREATE OR REPLACE` on the shared fleet Postgres — **operator-gated**, not applied unilaterally | observed live, probe `1T8G5WG5`; follow-up to B-17 |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -47,9 +50,69 @@ log carries a one-line entry and points there rather than duplicating.
 
 ## Open
 
-_None — all tracked bugs are Fixed, Documented, or Stale._
+- **B-28 · P3** — `completed_at` is never set on **failed** tasks. B-17 added the
+  column plus a `set_task_completed_at()` trigger to the shared fleet DB, but the
+  trigger's guard is `NEW.status = 'completed'`, so a task that ends `failed`
+  keeps a null completion time. Observed live: probe `1T8G5WG5` returned
+  `status: failed`, `completed_at: null`. willow-mcp's own `WillowMcpTaskQueue.mark_done`
+  is not at fault — it sets `completed_at = now()` for both terminal states; the
+  trigger simply never fires for `failed`. The fix is one statement:
+  ```sql
+  -- widen the guard to any terminal status
+  IF NEW.status IN ('completed','failed') AND NEW.completed_at IS NULL
+     AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) THEN
+  ```
+  **Not applied.** It mutates a trigger on the *shared fleet Postgres* (`willow_20`),
+  which other fleet members read and write. That is an operator decision, not a
+  side effect of a willow-mcp feature branch. Forward-only either way — existing
+  failed rows have no recoverable completion time.
 
 ## Fixed
+
+- **B-26 · P2 (this session)** — the task queue had no way to answer "is anything
+  going to run this?". `task_submit` returned `{"status": "pending"}` whether a
+  worker was one poll away from claiming the row or no worker existed anywhere,
+  and `fleet_health` reported only queue depth — a `pending: 40` could mean a
+  healthy backlog or a dead fleet. `skills/kart-tasks.md` had to warn about this
+  in prose because there was no signal to check. Stage 4 of the Kart lift spec
+  (`docs/design/kart-lift-spec.md` §8) called for exactly this and was left open
+  when B-22 closed. **Fix:** `kartikeya`'s worker loop already calls an
+  `on_heartbeat(lane=…, tick_ok=…)` seam every tick and willow-mcp passed nothing;
+  new `heartbeat.py` implements it as an atomic per-process JSON write under
+  `$WILLOW_HOME/worker_heartbeat/`, wired into `_cmd_worker` (with `reap()` on
+  start and `close()` on exit). `read_workers()` classifies each record `alive` /
+  `stale` (process up, loop wedged) / `dead` (pid gone). `fleet_health` gains
+  `workers` and a `stranded` boolean (**pending work + zero live workers**);
+  `diagnostic_summary` gains a `worker` check and raises a named `worker` problem
+  with the `willow-mcp worker` command as its fix.
+  **Deliberate:** the problem fires only on `alive == 0 AND pending > 0`. Warning
+  on "no worker" alone would make `degraded` the resting verdict for every
+  store/knowledge-only install — the same false-positive class B-18 removed.
+  **Security posture:** heartbeats are advisory telemetry, never authorization. No
+  gate reads them. `$WILLOW_HOME` is `bound_rw` to the Kart sandbox, so a sandboxed
+  task *can* forge a heartbeat file; reads therefore verify the recorded pid is a
+  live process on the recording host, so a forged file naming a dead pid reads
+  `dead`. The trust root remains `mcp_apps/`, which is `bound_ro` (B-14).
+  **Verified** end-to-end against a real `kartikeya` worker draining a real
+  SqliteTaskQueue: heartbeat `alive` while running → task `completed` → clean
+  `close()` removes the file (absent, not stale) → a forged fresh record with a
+  dead pid reads `dead`, `alive: 0`, and is reaped. 22 new tests
+  (`tests/test_heartbeat.py`, plus `fleet_health` stranded/not-stranded cases in
+  `test_server.py`); suite 257 → 279, all passing.
+
+- **B-27 · P3 (this session)** — `pip install willow-mcp[worker]` appeared in three
+  places (`task_queue.py`'s module docstring and `_require_kartikeya`'s error,
+  `server.py`'s `_cmd_worker` error and the `worker` subcommand help) as the
+  remedy for a missing `kartikeya`. **No such extra exists.** `pyproject.toml` has
+  no `[project.optional-dependencies]` at all, and B-22's close-out made
+  `kartikeya>=0.0.1,<0.1.0` a *hard* dependency precisely so a base install ships a
+  drainer. So the one message an operator sees when the worker can't start told
+  them to run a command that errors. Residue of the pre-B-22 draft, where the
+  extra was the plan. **Fix:** all four sites now say `pip install willow-mcp` (or
+  `pip install -e .` from a checkout), and the docstring states the dependency is
+  hard, explaining that the lazy import survives only for an uninstalled source
+  checkout. Found by checking the docstring against `pyproject.toml` rather than
+  trusting it — it read as stale prose and was in fact a broken instruction.
 
 - **B-24 · P0 (this session)** — `store_*` tools had no cross-app isolation.
   Any app granted `store_read`/`store_write`/`store_all`/`full_access` could

@@ -45,13 +45,43 @@ Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 | `agent_route` | Route a task to a target agent, recording the decision |
 | `agent_dispatch_result` | Record the result of a dispatched agent task |
 | `fleet_status` | List agents registered in the fleet |
-| `fleet_health` | Task queue counts by status |
+| `fleet_health` | Task queue counts by status, live worker heartbeats, and whether the queue is `stranded` |
 | `context_save` | Save ephemeral per-identity working state under a key, with an optional TTL (SOIL-backed, no Postgres) |
 | `context_get` | Read a saved context; `expired` (and purged) once its TTL passes |
 | `context_list` | List your saved context keys and expiry times (expired ones skipped) |
 | `context_expire` | Delete a saved context before its TTL |
 | `receipts_tail` | Read your own most-recent tool-call receipts — a self-audit trail scoped to your `app_id` |
-| `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/env health, with a verdict and named fixes. Ungated — see below |
+| `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/worker/env health, with a verdict and named fixes. Ungated — see below |
+
+### Running the task worker
+
+`task_submit` only *queues* a task. A worker process executes it, sandboxed with
+bubblewrap. Without one running, tasks stay `pending` forever:
+
+```bash
+willow-mcp worker --lane fast     # daemon; polls until stopped
+willow-mcp worker --once          # drain what's queued, then exit
+```
+
+The engine is [`kartikeya`](https://pypi.org/project/kartikeya/), a hard
+dependency — a base `pip install willow-mcp` ships a working drainer.
+
+A running worker publishes a heartbeat under `$WILLOW_HOME/worker_heartbeat/`,
+which `fleet_health` reads back:
+
+```json
+{"pending": 3, "running": 0, "completed": 12, "failed": 0, "total": 15,
+ "workers": {"alive": 0, "workers": [{"pid": 4242, "state": "dead", ...}]},
+ "stranded": true}
+```
+
+**`stranded: true` means there is pending work and no live worker** — the
+distinction between "queued, it'll run" and "queued, nothing is listening."
+`diagnostic_summary` raises the same condition as a named `worker` problem. A
+worker is `alive` (ticking), `stale` (process up, loop wedged), or `dead` (pid
+gone). Heartbeats are advisory telemetry: no permission decision reads them, and
+reads verify the recorded pid is a live local process, so a forged file naming a
+dead pid reads `dead`.
 
 `knowledge_search`/`kb_at`/`kb_startup_continuity` and `fleet_status` adapt to
 whatever your host database's real columns are named — see
