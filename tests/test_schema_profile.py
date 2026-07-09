@@ -306,100 +306,100 @@ def test_trap_flag_survives_guards_and_keeps_its_replacement():
 # ── deployment-wide learned mappings ─────────────────────────────────────
 
 @pytest.fixture
-def lessons_store(tmp_path, monkeypatch):
-    p = tmp_path / "schema_lessons.json"
-    monkeypatch.setenv("WILLOW_MCP_SCHEMA_LESSONS", str(p))
+def rings_store(tmp_path, monkeypatch):
+    p = tmp_path / "schema_rings.json"
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS", str(p))
     return p
 
 
-def test_propose_without_lessons_is_unchanged(lessons_store):
+def test_propose_without_rings_is_unchanged(rings_store):
     # Purity/back-compat: omitting lessons must reproduce the name+alias result.
     cols = sp.introspect(_FakeConn(LEGACY_TASKS_COLUMNS), "tasks")
     assert sp.propose_mapping(cols, TASK_CANON) == sp.propose_mapping(cols, TASK_CANON, None)
 
 
-def test_record_and_load_lessons_skips_trivial_matches(lessons_store):
+def test_grow_ring_skips_trivial_matches(rings_store):
     fields = {
         "task_id": {"column": "jobno"},      # non-trivial -> learned
         "task": {"column": "task"},          # trivial (col == field) -> skipped
         "status": {"column": "stat"},        # non-trivial -> learned
     }
-    sp.record_lessons(fields)
-    lessons = sp.load_lessons()
+    sp.grow_ring(fields)
+    lessons = sp.read_rings()
     assert lessons["jobno"] == {"task_id": 1}
     assert lessons["stat"] == {"status": 1}
     assert "task" not in lessons  # the trap self-match teaches nothing
 
 
-def test_learned_tier_maps_terse_columns_and_counts(lessons_store):
-    sp.record_lessons({"submitter": {"column": "submitter"}})  # trivial, ignored
-    sp.record_lessons({"submitted_by": {"column": "requestor"}})
-    sp.record_lessons({"submitted_by": {"column": "requestor"}})  # count -> 2
+def test_rooted_tier_maps_terse_columns_and_counts(rings_store):
+    sp.grow_ring({"submitter": {"column": "submitter"}})  # trivial, ignored
+    sp.grow_ring({"submitted_by": {"column": "requestor"}})
+    sp.grow_ring({"submitted_by": {"column": "requestor"}})  # count -> 2
     cols = sp.introspect(_FakeConn({"requestor": "text", "task": "text"}), "tasks")
-    m = sp.propose_mapping(cols, TASK_CANON, sp.load_lessons())
+    m = sp.propose_mapping(cols, TASK_CANON, sp.read_rings())
     assert m["submitted_by"]["column"] == "requestor"
-    assert m["submitted_by"]["tier"] == "learned"
+    assert m["submitted_by"]["tier"] == "rooted"
     assert m["submitted_by"]["confidence"] == 0.95
 
 
-def test_learned_applies_across_tables_deployment_wide(lessons_store):
+def test_rings_apply_across_tables_deployment_wide(rings_store):
     # Lessons are keyed by column name, not by table/db — a lesson learned on
     # one table maps a same-named column on a different one.
-    sp.record_lessons({"domain": {"column": "subj"}})
+    sp.grow_ring({"domain": {"column": "subj"}})
     cols = sp.introspect(_FakeConn({"subj": "character varying", "content": "text"}), "other_table")
-    m = sp.propose_mapping(cols, KNOW_CANON, sp.load_lessons())
-    assert m["domain"]["column"] == "subj" and m["domain"]["tier"] == "learned"
+    m = sp.propose_mapping(cols, KNOW_CANON, sp.read_rings())
+    assert m["domain"]["column"] == "subj" and m["domain"]["tier"] == "rooted"
 
 
-def test_exact_name_still_outranks_learned(lessons_store):
+def test_exact_name_still_outranks_rooted(rings_store):
     # A learned lesson must not override an exact-named column — the content
     # trap residual is honest: only data can beat an exact-name collision.
-    sp.record_lessons({"content": {"column": "abstract"}})
+    sp.grow_ring({"content": {"column": "abstract"}})
     cols = sp.introspect(_FakeConn({"content": "text", "abstract": "text"}), "knowledge")
-    m = sp.propose_mapping(cols, KNOW_CANON, sp.load_lessons())
+    m = sp.propose_mapping(cols, KNOW_CANON, sp.read_rings())
     assert m["content"]["column"] == "content" and m["content"]["tier"] == "exact"
 
 
-def test_confirm_records_lessons(home, lessons_store):
+def test_confirm_grows_a_ring(home, rings_store):
     conn = _FakeConn(LEGACY_TASKS_COLUMNS)
     sp.confirm(conn, "app", "tasks", TASK_CANON,
                overrides={"task": "cmd_line", "submitted_by": "submitter"})
-    lessons = sp.load_lessons()
+    lessons = sp.read_rings()
     assert lessons["cmd_line"]["task"] == 1
     assert lessons["submitter"]["submitted_by"] == 1
 
 
 # ── bound & prune ─────────────────────────────────────────────────────────
 
-def test_store_is_bounded_by_cap(lessons_store, monkeypatch):
-    monkeypatch.setenv("WILLOW_MCP_SCHEMA_LESSONS_MAX", "10")
+def test_canopy_is_bounded_by_cap(rings_store, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS_MAX", "10")
     for i in range(50):  # 50 distinct one-off column names -> would be 50 pairs
-        sp.record_lessons({"task_id": {"column": f"legacy_id_{i}"}})
-    stats = sp.lessons_stats()
+        sp.grow_ring({"task_id": {"column": f"legacy_id_{i}"}})
+    stats = sp.girth()
     assert stats["pairs"] <= 10  # never exceeds the cap
     assert stats["cap"] == 10
 
 
-def test_prune_evicts_least_confirmed_first(lessons_store, monkeypatch):
-    monkeypatch.setenv("WILLOW_MCP_SCHEMA_LESSONS_MAX", "5")
+def test_prune_cuts_thinnest_rings_first(rings_store, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS_MAX", "5")
     # A frequently-confirmed common name...
     for _ in range(20):
-        sp.record_lessons({"submitted_by": {"column": "submitter"}})
+        sp.grow_ring({"submitted_by": {"column": "submitter"}})
     # ...then a flood of one-off names to force eviction.
     for i in range(40):
-        sp.record_lessons({"submitted_by": {"column": f"oneoff_{i}"}})
-    lessons = sp.load_lessons()
+        sp.grow_ring({"submitted_by": {"column": f"oneoff_{i}"}})
+    lessons = sp.read_rings()
     assert "submitter" in lessons  # high-count survivor is never evicted
     assert lessons["submitter"]["submitted_by"] == 20
-    assert sp.lessons_stats()["pairs"] <= 5
+    assert sp.girth()["pairs"] <= 5
 
 
-def test_prune_keeps_more_recent_among_equal_counts(lessons_store, monkeypatch):
-    monkeypatch.setenv("WILLOW_MCP_SCHEMA_LESSONS_MAX", "3")
+def test_prune_keeps_recent_among_equal_rings(rings_store, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS_MAX", "3")
     order = ["a", "b", "c", "d", "e", "f"]  # each count-1, ascending recency
     for name in order:
-        sp.record_lessons({"status": {"column": name}})
-    survivors = set(sp.load_lessons().keys())
+        sp.grow_ring({"status": {"column": name}})
+    survivors = set(sp.read_rings().keys())
     # oldest count-1 names evicted first; the most-recent survive
     assert "f" in survivors and "a" not in survivors
 
@@ -464,19 +464,19 @@ def test_correct_content_column_does_not_false_trap():
     assert [s for s in refined["suggestions"] if s["field"] == "content"] == []
 
 
-def test_legacy_v1_store_is_read_and_upgraded(lessons_store):
+def test_legacy_v1_store_is_read_and_upgraded(rings_store):
     # An old int-valued store must load and keep working, then upgrade on write.
     import json
-    lessons_store.write_text(json.dumps({
+    rings_store.write_text(json.dumps({
         "format": "schema_lessons_v1",
         "columns": {"submitter": {"submitted_by": 3}},
     }))
-    assert sp.load_lessons()["submitter"]["submitted_by"] == 3  # int contract intact
-    sp.record_lessons({"status": {"column": "stat"}})           # triggers upgrade
-    data = json.loads(lessons_store.read_text())
-    assert data["format"] == "schema_lessons_v2"
+    assert sp.read_rings()["submitter"]["submitted_by"] == 3  # int contract intact
+    sp.grow_ring({"status": {"column": "stat"}})           # triggers upgrade
+    data = json.loads(rings_store.read_text())
+    assert data["format"] == "growth_rings_v1"
     assert data["columns"]["submitter"]["submitted_by"]["n"] == 3  # count preserved
-    assert sp.load_lessons()["stat"]["status"] == 1
+    assert sp.read_rings()["stat"]["status"] == 1
 
 
 # ── db_fingerprint ──────────────────────────────────────────────────────

@@ -101,49 +101,50 @@ def introspect(conn, table: str) -> list[ColumnInfo]:
     return [ColumnInfo(name=r[0], data_type=r[1]) for r in rows]
 
 
-# ── deployment-wide learned mappings (docs/design/schema-adaptation.md §7) ──
-# The 2004-archive test proved static heuristics don't transfer across schemas:
-# `subj`->domain, `provenance`->source, `kw`->tags have no name or shape tell —
-# the only thing that ever finds them is "someone in this deployment confirmed
-# that column->field once." confirm() is already a labeled example; this store
-# accumulates those examples (deployment-wide, keyed by column name) so the next
-# unfamiliar table maps itself. It feeds PROPOSALS at high-but-sub-exact
-# confidence — a learned mapping is still witnessed at confirm time, never
-# auto-applied (principle 3: writes may not guess; a remembered human decision
-# is not the same as an unattended one).
+# ── the rings: deployment-wide learned mappings (schema-adaptation.md §7) ────
+# Dendrochronology, basically. The 2004-archive test proved static heuristics
+# don't transfer across schemas: `subj`->domain, `provenance`->source, `kw`->tags
+# have no name or shape tell — the only thing that ever finds them is "someone in
+# this deployment confirmed that column->field once." confirm() is a labeled
+# example; each one grows a RING. The tree of accumulated rings is keyed by column
+# name, deployment-wide, so the next unfamiliar table maps itself from what the
+# tree already knows. Rings feed PROPOSALS at high-but-sub-exact confidence (tier
+# `rooted`) — a rooted mapping is still witnessed at confirm time, never auto-
+# applied (principle 3: writes may not guess; a remembered decision is not an
+# unattended one).
+#
+# The canopy is BOUNDED: an open column-name vocabulary would grow it without
+# limit (a churny deployment keeps inventing names), so past the cap we PRUNE by
+# LFU with an LRU tie-break — thinnest rings first (least-confirmed), oldest-
+# among-ties next — keeping the load-bearing heartwood and letting stale one-off
+# names from felled schemas rot away. A logical `tick` (not wall-clock:
+# deterministic, restart-stable) dates each ring. Over-pruning only costs a re-
+# learn (one cold miss), so the canopy cap is generous by default, env-overridable.
+_CANOPY_CAP_DEFAULT = 5000
 
-# The store is BOUNDED: an open column-name vocabulary would otherwise grow it
-# without limit (a churny deployment keeps inventing names). When it exceeds the
-# cap, prune by LFU with an LRU tie-break — evict the least-confirmed
-# (column,field) lessons first, oldest-among-ties next — so the common, load-
-# bearing vocabulary survives and stale one-off names from decommissioned
-# schemas fade. A logical `tick` (not wall-clock: deterministic, restart-stable)
-# stamps recency. Over-eviction only costs a re-learn (one cold miss), so the cap
-# is generous by default and env-overridable.
-_LESSONS_CAP_DEFAULT = 5000
 
-
-def _lessons_path() -> Path:
-    env = os.environ.get("WILLOW_MCP_SCHEMA_LESSONS")
+def _rings_path() -> Path:
+    env = os.environ.get("WILLOW_MCP_SCHEMA_RINGS")
     if env:
         return Path(env)
     home = Path(os.environ.get("WILLOW_HOME", Path.home() / ".willow"))
-    return home / "schema_lessons.json"
+    return home / "schema_rings.json"
 
 
-def _lessons_cap() -> int:
+def _canopy_cap() -> int:
     try:
-        return max(1, int(os.environ.get("WILLOW_MCP_SCHEMA_LESSONS_MAX", _LESSONS_CAP_DEFAULT)))
+        return max(1, int(os.environ.get("WILLOW_MCP_SCHEMA_RINGS_MAX", _CANOPY_CAP_DEFAULT)))
     except ValueError:
-        return _LESSONS_CAP_DEFAULT
+        return _CANOPY_CAP_DEFAULT
 
 
-def _load_lessons_raw() -> dict:
-    """Load the rich store: {"tick": int, "columns": {col: {field: {"n","t"}}}}.
-    Normalizes the legacy v1 shape ({col: {field: count_int}}) on read, so an old
-    store keeps working and gets upgraded on the next write. Missing/unreadable
-    is an empty store — lessons are an optimization, never load-bearing."""
-    path = _lessons_path()
+def _core_sample() -> dict:
+    """Drill a core and read the full rings: {"tick": int, "columns": {col:
+    {field: {"n","t"}}}}. Normalizes the legacy int shape ({col: {field: count}})
+    on read, so an old tree keeps growing and upgrades on the next ring. A
+    missing/unreadable tree is a sapling (empty) — rings are an optimization,
+    never load-bearing."""
+    path = _rings_path()
     empty = {"tick": 0, "columns": {}}
     if not path.exists():
         return empty
@@ -167,52 +168,52 @@ def _load_lessons_raw() -> dict:
     return {"tick": int(data.get("tick", 0)), "columns": cols}
 
 
-def load_lessons() -> dict:
-    """Public view of the store: {column_name: {field: count}} (ints, recency
+def read_rings() -> dict:
+    """Public view of the tree: {column_name: {field: count}} (ints, dates
     dropped) — the stable contract propose_mapping and callers read."""
     return {col: {f: e["n"] for f, e in fields.items()}
-            for col, fields in _load_lessons_raw()["columns"].items()}
+            for col, fields in _core_sample()["columns"].items()}
 
 
-def lessons_stats() -> dict:
-    """Size/health of the store — {columns, pairs, cap, tick}. For diagnostics
-    and for asserting the bound holds."""
-    raw = _load_lessons_raw()
-    pairs = sum(len(v) for v in raw["columns"].values())
-    return {"columns": len(raw["columns"]), "pairs": pairs,
-            "cap": _lessons_cap(), "tick": raw["tick"]}
+def girth() -> dict:
+    """How big the tree has grown — {columns, pairs, cap, tick}. For diagnostics
+    and for asserting the canopy bound holds."""
+    core = _core_sample()
+    pairs = sum(len(v) for v in core["columns"].values())
+    return {"columns": len(core["columns"]), "pairs": pairs,
+            "cap": _canopy_cap(), "tick": core["tick"]}
 
 
-def _prune_lessons(cols: dict, cap: int) -> int:
-    """Evict lowest-value (column,field) pairs until size <= 90% of cap (the 10%
-    hysteresis avoids pruning on every write near the boundary). Value order:
-    fewest confirmations first, then least-recently-confirmed. Returns the count
-    evicted. Mutates `cols` in place, dropping any column left with no fields."""
+def _prune(cols: dict, cap: int) -> int:
+    """Thin the canopy: cut lowest-value (column,field) rings until size <= 90%
+    of cap (the 10% hysteresis avoids pruning on every ring near the boundary).
+    Cut order: thinnest rings first (fewest confirmations), then oldest. Returns
+    the count cut. Mutates `cols` in place, felling any column left ringless."""
     pairs = [(e["n"], e["t"], col, field)
              for col, fields in cols.items() for field, e in fields.items()]
     if len(pairs) <= cap:
         return 0
     target = max(1, int(cap * 0.9))
-    pairs.sort()  # ascending by (n, t): least-confirmed, then oldest, first
-    evicted = 0
+    pairs.sort()  # ascending by (n, t): thinnest ring, then oldest, first to fall
+    cut = 0
     for _n, _t, col, field in pairs[: len(pairs) - target]:
         del cols[col][field]
         if not cols[col]:
             del cols[col]
-        evicted += 1
-    return evicted
+        cut += 1
+    return cut
 
 
-def record_lessons(fields: dict) -> None:
-    """Persist the non-trivial (column != field) mappings of a CONFIRMED record
-    as deployment lessons, incrementing a per-(column,field) count and stamping
-    recency. Trivial exact self-matches (column name == canonical field) teach
-    nothing and are skipped — so confirming the naive `task`->`task` trap never
-    records a lesson, only a human override to `cmd_line` does. Prunes to the cap
-    after recording so the store stays bounded in an open vocabulary."""
-    raw = _load_lessons_raw()
-    cols = raw["columns"]
-    tick = raw["tick"] + 1
+def grow_ring(fields: dict) -> None:
+    """Grow a ring from a CONFIRMED record — persist its non-trivial (column !=
+    field) mappings, thickening a per-(column,field) count and dating it. Trivial
+    exact self-matches (column name == canonical field) teach nothing and are
+    skipped — so confirming the naive `task`->`task` trap grows no ring, only a
+    human override to `cmd_line` does. Prunes the canopy after growing so the tree
+    stays bounded in an open vocabulary."""
+    core = _core_sample()
+    cols = core["columns"]
+    tick = core["tick"] + 1
     changed = False
     for field, m in fields.items():
         col = m.get("column")
@@ -224,19 +225,19 @@ def record_lessons(fields: dict) -> None:
         changed = True
     if not changed:
         return
-    _prune_lessons(cols, _lessons_cap())
-    path = _lessons_path()
+    _prune(cols, _canopy_cap())
+    path = _rings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    _write_json_atomic(path, {"format": "schema_lessons_v2", "tick": tick, "columns": cols})
+    _write_json_atomic(path, {"format": "growth_rings_v1", "tick": tick, "columns": cols})
 
 
-def _best_learned_column(lessons: dict, field: str, by_name: dict, taken: set) -> Optional[str]:
-    """The present, not-yet-taken column most-confirmed for `field` in this
-    deployment, or None. Deterministic: highest count wins, column name breaks
-    ties."""
+def _deepest_root(rings: dict, field: str, by_name: dict, taken: set) -> Optional[str]:
+    """The present, not-yet-taken column whose ring for `field` is thickest in
+    this deployment, or None. Deterministic: thickest ring wins, column name
+    breaks ties."""
     candidates = [
         (counts.get(field, 0), col)
-        for col, counts in lessons.items()
+        for col, counts in rings.items()
         if col in by_name and col not in taken and counts.get(field, 0) > 0
     ]
     if not candidates:
@@ -246,16 +247,17 @@ def _best_learned_column(lessons: dict, field: str, by_name: dict, taken: set) -
 
 
 def propose_mapping(columns: list[ColumnInfo], canonical_fields: list[str],
-                    lessons: Optional[dict] = None) -> dict:
-    """Heuristic pass: exact name -> deployment-learned -> known alias -> unmapped.
+                    rings: Optional[dict] = None) -> dict:
+    """Heuristic pass: exact name -> rooted (deployment rings) -> known alias ->
+    unmapped.
 
-    Returns {field: {"column": str|None, "tier": "exact"|"learned"|"alias"|
+    Returns {field: {"column": str|None, "tier": "exact"|"rooted"|"alias"|
     "unmapped", "confidence": float, "data_type": str|None}}. Pure function of
-    its arguments — with `lessons=None` (the default) the learned tier is
-    skipped and the result is identical to the original name+alias behaviour, so
-    callers that want determinism without deployment state just omit it."""
+    its arguments — with `rings=None` (the default) the rooted tier is skipped
+    and the result is identical to the original name+alias behaviour, so callers
+    that want determinism without deployment state just omit it."""
     by_name = {c.name: c for c in columns}
-    lessons = lessons or {}
+    rings = rings or {}
     taken: set = set()
     mapping: dict = {}
     for field in canonical_fields:
@@ -267,12 +269,12 @@ def propose_mapping(columns: list[ColumnInfo], canonical_fields: list[str],
                 "confidence": 1.0, "data_type": col.data_type,
             }
             continue
-        learned = _best_learned_column(lessons, field, by_name, taken) if lessons else None
-        if learned is not None:
-            taken.add(learned)
+        rooted = _deepest_root(rings, field, by_name, taken) if rings else None
+        if rooted is not None:
+            taken.add(rooted)
             mapping[field] = {
-                "column": learned, "tier": "learned",
-                "confidence": 0.95, "data_type": by_name[learned].data_type,
+                "column": rooted, "tier": "rooted",
+                "confidence": 0.95, "data_type": by_name[rooted].data_type,
             }
             continue
         found = None
@@ -631,7 +633,7 @@ def resolve(conn, app_id: str, table: str, canonical_fields: list[str]) -> dict:
 
     fingerprint = db_fingerprint(conn)
     existing = load_mapping(app_id, fingerprint, table)
-    fresh_fields = propose_mapping(columns, canonical_fields, load_lessons())
+    fresh_fields = propose_mapping(columns, canonical_fields, read_rings())
 
     if existing and existing.get("confirmed"):
         by_name = {c.name for c in columns}
@@ -731,7 +733,7 @@ def preview(conn, app_id: str, table: str, canonical_fields: list[str],
     by_name = {c.name: c for c in columns}
     fingerprint = db_fingerprint(conn)
     existing = load_mapping(app_id, fingerprint, table)
-    base_fields = (existing or {}).get("fields") or propose_mapping(columns, canonical_fields, load_lessons())
+    base_fields = (existing or {}).get("fields") or propose_mapping(columns, canonical_fields, read_rings())
     fields, err = _apply_overrides(base_fields, overrides, by_name, canonical_fields)
     if err:
         err["table"] = table
@@ -776,7 +778,7 @@ def confirm(
 
     fingerprint = db_fingerprint(conn)
     existing = load_mapping(app_id, fingerprint, table)
-    base_fields = (existing or {}).get("fields") or propose_mapping(columns, canonical_fields, load_lessons())
+    base_fields = (existing or {}).get("fields") or propose_mapping(columns, canonical_fields, read_rings())
     fields, err = _apply_overrides(base_fields, overrides, by_name, canonical_fields)
     if err:
         err["table"] = table
@@ -795,7 +797,7 @@ def confirm(
     # A confirmed mapping is a labeled example — remember its non-trivial
     # column->field pairs deployment-wide so the next unfamiliar table maps
     # itself (the durable generalization lever the 2004 test argued for).
-    record_lessons(fields)
+    grow_ring(fields)
     return record
 
 
