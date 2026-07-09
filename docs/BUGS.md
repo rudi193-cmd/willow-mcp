@@ -29,7 +29,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-21 | P0 | Fixed | task interface / Kart | `task_net` gate bypassable via task text — the worker reads egress policy from a `# allow_net` line in the stored task, but `task_submit` gated & appended that line only behind `if allow_net:`, so a `task_queue`-only caller could embed the directive with `allow_net=False` and get ungated egress (also `# allow_localhost`). Fixed: strip caller-supplied directive lines unconditionally before the gated append | this session; L-NET-01; PR #32; PR #31 review §2a |
 | B-22 | P1 | Fixed | packaging / Kart | Product shipped **no task executor** — `pyproject` advertised a "Kart task queue" but no worker/sandbox was in the package; a clean `pip install` left every task `pending`. Fixed: Kart extracted as the published **`kartikeya`** package (PyPI) and made a hard dependency; `willow-mcp worker` + `WillowMcpTaskQueue` (Pg/SQLite) drain the queue | this session; `docs/design/kart-lift-spec.md`; PRs #35, #36; kartikeya 0.0.1 |
 | B-23 | P3 | Fixed | process / skills+hooks | Task-queue surface (`task_submit`/`task_net`, B-19; `# allow_net` footgun, B-21) shipped with no skill or hook, violating the "hooks/skills ship with the tool" rule (`docs/design/hooks-and-skills.md` §2). Fixed: added `skills/kart-tasks.md` + a `task_submit` matcher on `pre_tool_use.py` warning on hand-embedded net directives | this session; operator-caught |
-| B-24 | P0 | Open | db / store | `store_*` tools (put/get/list/update/search/delete/search_all) have no cross-app isolation — `app_id` is discarded after the permission gate, `db.py` never scopes by it, so any app with `store_read`/`store_write`/`full_access` can read/write/delete every other app's SOIL data. `context_*` already namespaces per app (`ctx__<app_id>`); `store_*` never got the same treatment | L-ISO-01; PR #31 review §2b; re-confirmed this session |
+| B-24 | P0 | Fixed | db / store | `store_*` tools (put/get/list/update/search/delete/search_all) had no cross-app isolation — `app_id` was discarded after the permission gate, `db.py` never scoped by it, so any app with `store_read`/`store_write`/`full_access` could read/write/delete every other app's SOIL data. Fixed: opt-in `store_scope` manifest field (exact/prefix-wildcard collection allowlist), checked by all six single-collection tools + `store_search_all`; unscoped apps keep the shared-fleet-store default | L-ISO-01; PR #31 review §2b; this session |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -46,21 +46,39 @@ log carries a one-line entry and points there rather than duplicating.
 
 ## Open
 
-- **B-24 · P0** — `store_*` tools have no cross-app isolation. Any app granted
-  `store_read`/`store_write`/`store_all`/`full_access` can read, write, or
-  delete **every other app's** SOIL store data, not just its own —
-  `store_search_all` makes this explicit by searching across all collections
-  by design. `context_*` solved this correctly (`ctx__<app_id>` prefix,
-  `server.py:1047-1048`); `store_*` never got the same treatment. First
-  flagged in an external review (`docs/design/mcp-review-2026-07-08.md` §2b)
-  as "worth a decision, not asserted as a bug" since it might be intentional
-  shared scratch space; re-confirmed on a follow-up pass with no README or
-  code comment anywhere stating that's the intent, so it's logged as a gap
-  rather than assumed-fine. See `SECURITY_AUDIT.md` L-ISO-01 for the full
-  writeup and a recommended fix (namespace `store_*` per app, or add an
-  explicit opt-in sharing primitive if cross-app scratch space is wanted).
+_None — all tracked bugs are Fixed, Documented, or Stale._
 
 ## Fixed
+
+- **B-24 · P0 (this session)** — `store_*` tools had no cross-app isolation.
+  Any app granted `store_read`/`store_write`/`store_all`/`full_access` could
+  read, write, or delete **every other app's** SOIL store data, not just its
+  own — `store_search_all` made this explicit by searching across all
+  collections by design. `context_*` solved this correctly (`ctx__<app_id>`
+  prefix, `server.py:1047-1048`); `store_*` never got the same treatment.
+  First flagged in an external review (`docs/design/mcp-review-2026-07-08.md`
+  §2b) as "worth a decision, not asserted as a bug" since it might be
+  intentional shared scratch space; re-confirmed on a follow-up pass with no
+  README or code comment anywhere stating that's the intent. **Fix:** rather
+  than a blanket per-app rename (which would have broken the *documented,
+  intentional* fleet-sharing use of `WILLOW_STORE_ROOT` — confirmed live via
+  `diagnostic_summary` that collections like `agents`/`hanuman`/`knowledge`/
+  `session` are genuinely shared with the wider fleet, not an accident), added
+  an **opt-in** `store_scope` manifest field: `db.collection_in_scope()`
+  matches exact names or `prefix*` wildcards; `gate.collection_permitted()`
+  reads it from the manifest; all six single-collection `store_*` tools check
+  it before touching storage; `store_search_all` confines its sweep to the
+  scope instead of searching everything. Unscoped apps (no `store_scope` in
+  their manifest) are completely unaffected — the shared-fleet-store default
+  is preserved, verified by a dedicated regression test. Documented in
+  README's Authorization section with a worked example. See `SECURITY_AUDIT.md`
+  L-ISO-01 for the full writeup. 24 new tests across `test_gate.py`/
+  `test_store.py`/`test_server.py` (252 total, all passing).
+  **Residual (not blocking, deliberate):** this closes the *mechanism* gap,
+  not the *default* — an app with `full_access` and no `store_scope` still
+  sees everything, same as before. Flipping the default to isolate-by-default
+  would be a breaking change requiring every existing manifest to be migrated
+  and is left as a follow-up decision, not bundled into this fix.
 
 - **B-22 · P1 (this session)** — willow-mcp shipped **no Kart executor**: the
   package advertised a "Kart task queue" and exposed `task_submit`/`task_status`/

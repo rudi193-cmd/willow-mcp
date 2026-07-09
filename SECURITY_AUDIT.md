@@ -235,11 +235,12 @@ The gate never runs (it is keyed off the *argument*, not the *text*), the direct
 
 ---
 
-### P0: L-ISO-01 — `store_*` tools have no cross-app isolation — OPEN
+### P0: L-ISO-01 — `store_*` tools have no cross-app isolation — RESOLVED
 
 **Severity:** P0
-**Status:** Open
+**Status:** Resolved
 **Found:** 2026-07-08, external session-based review (`docs/design/mcp-review-2026-07-08.md` §2b), re-confirmed 2026-07-08 on a second pass after B-21/B-22/B-23 landed — untouched by that diff.
+**Fixed:** 2026-07-08
 
 `context_*` tools are correctly namespaced per app: `_ctx_collection(app_id)` returns `f"ctx__{app_id}"` (`server.py:1047-1048`), so one app can never see another's context records. `store_*` tools have no equivalent. `store_put`/`store_get`/`store_list`/`store_update`/`store_search`/`store_delete` (`server.py:428-488`) all take `app_id` only for the `_guarded` gate/rate-limit check, then call into `db.py`'s `Store` methods with the bare, caller-supplied `collection` string and nothing else — `app_id` is discarded before it ever reaches storage. `db.py` has zero references to `app_id` anywhere (confirmed via repo-wide search). `_validate_collection` (`db.py:24-30`) only checks the string is filesystem-safe, not that it belongs to the calling app.
 
@@ -247,7 +248,15 @@ The gate never runs (it is keyed off the *argument*, not the *text*), the direct
 
 **Impact:** Any app whose manifest grants `store_read`/`store_write`/`store_all`/`full_access` can read, write, or delete **every other app's** SOIL store data, not just its own — either by guessing/enumerating collection names or trivially via `store_search_all`. This is a full defeat of per-app data isolation for one of the two persistent-storage primitives this server exposes (the other, `context_*`, has the isolation `store_*` lacks). Unlike L-NET-01/L-AUTH-02, this does not require chaining through a separate permission — any legitimate, intentionally-scoped `store_read` grant is sufficient to read data the granter never intended to expose.
 
-**Recommended fix:** Namespace `store_*` collections per app the same way `context_*` already does (e.g. prefix the physical collection with `app_id`, or add an `owner_app_id` column enforced at the `Store` layer, not just at the tool layer) — with either an explicit opt-in cross-app-sharing primitive for the cases where shared scratch space is actually wanted, or a documented, deliberate exception if unscoped-by-design is the intended behavior for this collection type. Currently there is no README or code comment stating this is intentional, so the safer default is to treat it as a gap.
+**Fix applied:** Added an opt-in `store_scope` manifest field rather than a blanket per-app rename — `context_*`'s `ctx__<app_id>` prefix approach would have silently broken the *documented, intentional* fleet-sharing use of `WILLOW_STORE_ROOT` (README's "share data" note; confirmed live via `diagnostic_summary` that pre-existing collections like `agents`/`hanuman`/`knowledge`/`session` are genuinely shared with the wider Willow fleet, not an accident). Instead:
+- `db.collection_in_scope(collection, scope)` (`db.py`) — `scope=None` (unset) stays unrestricted, today's default; a list of exact names and/or `prefix*` wildcards confines matches; an empty list denies everything.
+- `gate.store_scope(app_id)` / `gate.collection_permitted(app_id, collection)` (`gate.py`) — reads an optional `store_scope` array from the app's manifest.
+- All six single-collection tools (`store_put`/`get`/`list`/`update`/`search`/`delete`, `server.py`) now check `gate.collection_permitted` before touching storage, returning `collection_denied` (list-shaped for list-returning tools, matching the existing `list_error` convention) rather than silently proceeding.
+- `store_search_all` now passes the app's `store_scope` into `Store.search_all(query, scope=...)`, so a scoped app's search confines to its own collections instead of the whole store — closing the specific blast-radius amplifier called out above.
+- Documented in README's Authorization section (`store_scope` subsection) with a worked example.
+- An app with no `store_scope` is completely unaffected — verified via a dedicated regression test (`test_store_put_unscoped_app_unaffected`) so this fix cannot regress the shared-fleet-store default.
+
+**Residual:** this is opt-in, not a retroactive lockdown — an app with `full_access` and no `store_scope` still sees everything, exactly as before. Closing the *default* posture (e.g. isolate-by-default with an explicit opt-in for sharing) would be a breaking change requiring migration of every existing manifest and is left as a deliberate follow-up decision, not bundled into this fix. Tests: `tests/test_gate.py` (8 new), `tests/test_store.py` (7 new), `tests/test_server.py` (9 new) — 252 total, all passing.
 
 ---
 
@@ -255,29 +264,31 @@ The gate never runs (it is keyed off the *argument*, not the *text*), the direct
 
 | Priority | Count | Items |
 |---|---|---|
-| P0 | 1 open, 2 resolved | L-ISO-01 (**open**), L-AUTH-02 (resolved), L-NET-01 (resolved) |
+| P0 | 0 open, 3 resolved | L-ISO-01 (resolved), L-AUTH-02 (resolved), L-NET-01 (resolved) |
 | P1 | 0 | — (L-INT-01 resolved) |
 | P2 | 0 open, 6 resolved-or-stale | L-REQ-01 (stale), L-AUTH-01 (stale), L-DOS-01 (resolved), L-BUG-01 (resolved), L-CONC-01 (resolved), L-TEST-01 (resolved) |
 | P3 | 0 | — (L-DOC-01 resolved) |
 
-**One P0 is open: L-ISO-01 (`store_*` cross-app isolation).** Everything else from this audit — including the four found during the 2026-07-08 full-repo follow-up pass and L-NET-01 from the subsequent external review — is resolved or confirmed stale. Summary of what changed on 2026-07-08:
+**All findings from this audit are resolved or confirmed stale**, including L-ISO-01 — the last open P0 — via an opt-in `store_scope` manifest field rather than a breaking default change. Summary of what changed on 2026-07-08:
 - **L-AUTH-02 (P0)** — serve-mode identity binding implemented (`identity_binding.py` + `oauth.py`/`gate.py`/`server.py` wiring + `willow-mcp confirm-binding` CLI). Verified end-to-end.
+- **L-NET-01 (P0)** — `task_submit` now strips caller-supplied net directives unconditionally before the permission-gated append.
+- **L-ISO-01 (P0)** — `store_*` tools gained opt-in per-app collection scoping (`store_scope` manifest field); unscoped apps keep today's shared-fleet-store default.
 - **L-INT-01 (P1)** — `safe_integration.py` added.
 - **L-DOS-01, L-BUG-01, L-CONC-01, L-TEST-01 (P2)** — all fixed; see each finding's "Fix applied" note.
 - **L-REQ-01, L-AUTH-01 (P2)** — confirmed stale (already superseded by an earlier rewrite, no action needed).
 - **L-DOC-01 (P3)** — `willow-mcp setup` and `willow-mcp confirm-binding` CLI subcommands implemented.
-- Test suite grew from 12 tests (1 file) to 44 tests (6 files) — all passing.
+- Test suite grew from 12 tests (1 file) to 252 tests — all passing.
 
-**Assessment:** Both stdio mode (default) and serve mode (HTTP + OAuth) meet the same bar on everything except L-ISO-01:
+**Assessment:** Both stdio mode (default) and serve mode (HTTP + OAuth) now meet the same bar:
 - ✅ Parameterized SQL queries (no injection)
 - ✅ Manifest-based auth gating on all tools, fail-closed — in serve mode, gated on a confirmed identity binding, not a caller-supplied argument
 - ✅ Store operations serialized correctly under concurrency
-- ❌ Store operations are **not** isolated per app — see L-ISO-01 (open)
+- ✅ Store operations can be isolated per app via opt-in `store_scope` (default remains shared, by design — see L-ISO-01)
 - ✅ No eval/exec/dynamic imports
 - ✅ Proper use of MCP SDK, including its auth-context primitives
 - ✅ safe_integration.py present for fleet orchestration visibility
 - ✅ Meaningful test coverage across all seven source files
 
-**Recommendation:** L-ISO-01 should be closed before any deployment where multiple apps with only partial trust in each other share one willow-mcp instance — a `store_read` grant currently implies read access to every app's data, not just the granter's own. Single-operator, single-trust-domain deployments are unaffected in practice (the same accepted trust model noted for stdio `app_id` elsewhere in this doc) but should not rely on that as a substitute for a fix, since manifests are written per-app specifically to scope trust. Once L-ISO-01 is closed, re-run a fresh audit pass specifically against serve mode's current (now-fixed) state — this document's rubric was written stdio-first and augmented for serve mode reactively; a clean-slate pass would catch anything this incremental process missed.
+**Recommendation:** L-ISO-01's fix is opt-in, not a new default — any deployment running multiple apps with only partial trust in each other on one willow-mcp instance should add `store_scope` to each app's manifest rather than relying on the unscoped default, since `full_access`/`store_read` without it still implies read access to every other app's data (single-operator, single-trust-domain deployments are unaffected either way, the same accepted trust model noted for stdio `app_id` elsewhere in this doc). No open items from this audit block a serve-mode deployment or PyPI publish with OAuth enabled. Before publishing, re-run a fresh audit pass specifically against serve mode's current (now-fixed) state — this document's rubric was written stdio-first and augmented for serve mode reactively; a clean-slate pass would catch anything this incremental process missed.
 
 *ΔΣ=42*
