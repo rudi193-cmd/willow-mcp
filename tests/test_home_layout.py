@@ -20,6 +20,11 @@ def test_all_layout_dirs_under_home(home):
     assert "seeds" in names
 
 
+def test_home_init_writes_exposure_json(home):
+    hi.ensure_home_layout()
+    assert paths.exposure_config_path().is_file()
+
+
 def test_ensure_home_layout_idempotent(home):
     first = hi.ensure_home_layout()
     second = hi.ensure_home_layout()

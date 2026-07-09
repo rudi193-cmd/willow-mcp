@@ -141,6 +141,18 @@ def load_agent_seed(agent_id: str, *, include_full: bool = False) -> dict[str, A
     return block
 
 
-def seed_context(agent_id: str) -> dict[str, Any]:
-    """session_enter payload wrapper."""
-    return {"agent_seed": load_agent_seed(agent_id)}
+def seed_context(agent_id: str, *, destination: str = "session_enter") -> dict[str, Any]:
+    """session_enter payload wrapper with exposure slice (AS-8)."""
+    from . import exposure as exp
+
+    block: dict[str, Any] = {"agent_seed": load_agent_seed(agent_id)}
+    sliced = exp.build_exposure_slice(agent_id, destination=destination)
+    if sliced.get("ok"):
+        block["agent_seed_exposure"] = {
+            "destination": sliced["destination"],
+            "preset": sliced["preset"],
+            "resolved_from": sliced["resolved_from"],
+            "fields": sliced.get("fields"),
+            "body": sliced["body"],
+        }
+    return block

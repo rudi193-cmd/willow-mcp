@@ -117,7 +117,7 @@ def test_build_kb_atom_blocks_operator_full(home, monkeypatch):
     monkeypatch.delenv("WILLOW_PGP_FINGERPRINT", raising=False)
     _write_ratified_seed(home, "sean", identity={"agent_id": "sean", "kind": "operator"})
     out = skb.build_kb_atom("sean", slice_name="full")
-    assert out["error"] == "full_slice_denied_for_operator"
+    assert out["error"] in {"full_slice_denied_for_operator", "preset_denied"}
 
 
 def test_promote_seed_to_kb_inserts(home, monkeypatch):

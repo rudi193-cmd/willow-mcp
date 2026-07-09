@@ -64,6 +64,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "dispatch_read": frozenset({
         "dispatch_read", "dispatch_list", "handoff_read", "session_read", "session_enter",
         "specialist_list", "specialist_get", "agent_seed_mirror",
+        "exposure_config_get", "exposure_slice",
     }),
     "dispatch_write": frozenset({
         "dispatch_send", "dispatch_accept", "handoff_write_v4",
@@ -76,6 +77,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "fleet_status", "fleet_health", "context_save", "context_get",
         "context_list", "knowledge_search", "kb_ingest", "store_get", "store_search",
         "specialist_list", "specialist_get", "agent_seed_mirror",
+        "exposure_config_get", "exposure_slice",
     }),
     "fleet_read": frozenset({
         "fleet_status", "fleet_health",
@@ -109,6 +111,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "handoff_write_v4", "handoff_read", "verify_handoff", "agent_clear",
         "session_read", "session_enter", "session_handoff_write",
         "agent_seed_mirror",
+        "exposure_config_get", "exposure_slice",
         # Fleet (read-only)
         "fleet_status", "fleet_health",
         # Schema admin

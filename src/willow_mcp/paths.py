@@ -61,6 +61,10 @@ def rotation_path() -> Path:
     return config_dir() / "rotation.json"
 
 
+def exposure_config_path() -> Path:
+    return config_dir() / "exposure.json"
+
+
 # ── dispatch / sessions / handoffs ────────────────────────────────────────────
 
 def dispatch_root() -> Path:
