@@ -622,23 +622,36 @@ def knowledge_search(
 def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = False) -> dict:
     """Submit a task to the Kart sandboxed execution queue. Returns task_id for polling.
 
-    Tasks run network-isolated by default. Pass allow_net=True to run with
-    network access — this requires the 'task_net' capability permission in the
-    app's manifest (it is NOT included in task_queue or full_access; grant it
-    explicitly). When granted, the Kart worker's `# allow_net` directive is
-    appended to the task so the sandbox is created with egress enabled.
+    Tasks run network-isolated by default. Egress needs TWO keys, and both must
+    be held: the 'task_net' capability permission in the app's manifest (it is
+    NOT included in task_queue or full_access; grant it explicitly), and the
+    operator's standing `consent.internet` in $WILLOW_HOME/settings.global.json.
+    The manifest key says *this app may ever request egress*; the consent key
+    says *the operator permits egress right now*, and turning it off stops egress
+    fleet-wide without touching a manifest. Only when both hold is the Kart
+    worker's `# allow_net` directive appended so the sandbox gets egress.
     """
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
 
     if allow_net:
-        from . import gate
+        from . import consent, gate
+        # Inner key: is this app allowed to ask at all? (capability)
         if not gate.permitted(app_id, gate.NET_PERMISSION):
             return {"error": (
                 f"net_denied: allow_net requires the '{gate.NET_PERMISSION}' permission in "
                 f"this app's manifest ($WILLOW_HOME/mcp_apps/{app_id or '<app_id>'}/manifest.json). "
                 "It is not granted by task_queue or full_access — add it explicitly.")}
+        # Outer key: does the operator permit egress right now? (standing consent)
+        # Read fail-closed — an absent or unparseable policy is not consent.
+        if not consent.internet_permitted():
+            return {"error": (
+                "consent_denied: allow_net also requires the operator's standing "
+                f"'consent.internet' in {consent.settings_path()}. This app holds "
+                f"'{gate.NET_PERMISSION}', but egress is switched off (or the consent "
+                "policy could not be read, which denies). Only the operator may turn it "
+                "on — an agent may request egress, never grant it to itself.")}
 
     mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
     if "error" in mapping:
@@ -1369,17 +1382,27 @@ def _diag_worker(app_id: str) -> dict:
     return check
 
 
+def _diag_consent() -> dict:
+    """Standing operator consent — the outer key of the two-key egress gate.
+
+    Read-only and fail-closed: willow-mcp never authors this policy, and anything
+    it cannot read as an explicit `true` reads as denial."""
+    from . import consent
+    return consent.read_consent()
+
+
 def _diag_env() -> dict:
     # Config-bearing env, set-or-None. A var showing None here (its default in
     # effect) while data lives elsewhere is the serve-mode env footgun: the
     # systemd --user unit does not inherit a shell `export`.
     keys = ["WILLOW_HOME", "WILLOW_PG_DB", "WILLOW_PG_USER", "WILLOW_STORE_ROOT",
-            "WILLOW_APP_ID", "WILLOW_MCP_APPS_ROOT", "WILLOW_MCP_HOST", "WILLOW_MCP_PORT"]
+            "WILLOW_APP_ID", "WILLOW_MCP_APPS_ROOT", "WILLOW_MCP_HOST", "WILLOW_MCP_PORT",
+            "WILLOW_SETTINGS_GLOBAL"]
     return {k: os.environ.get(k) for k in keys}
 
 
 def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
-                     worker: dict | None = None) -> list[dict]:
+                     worker: dict | None = None, consent: dict | None = None) -> list[dict]:
     """Pure: turn raw check dicts into actionable problems. Unit-tested without
     a live DB — this is where the empty-DB footgun becomes a named diagnosis."""
     problems: list[dict] = []
@@ -1432,6 +1455,32 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
             problems.append({"severity": "warn", "check": "worker", "detail": detail,
                              "fix": "start a worker: `willow-mcp worker --lane fast` "
                                     "(or `--once` to drain and exit)"})
+    if consent:
+        if consent.get("status") == "fail":
+            problems.append({
+                "severity": "error", "check": "consent",
+                "detail": (f"consent policy at {consent.get('canonical_path')} is "
+                           f"{consent.get('error')} — every consent key is denied, so "
+                           "allow_net tasks will be refused"),
+                "fix": f"repair or remove {consent.get('canonical_path')}"})
+        disagreement = consent.get("disagreement")
+        if disagreement:
+            # Never resolved silently: the two files are both plausible statements
+            # of operator intent, and picking one is the operator's call. The
+            # canonical file is what willow-mcp obeys; say so, and say what the
+            # other one claims, so a stale `internet: false` cannot look like a
+            # setting that is doing something.
+            keys = ", ".join(disagreement["keys"])
+            problems.append({
+                "severity": "error", "check": "consent",
+                "detail": (f"consent disagrees between files on: {keys}. "
+                           f"canonical={disagreement['canonical']} "
+                           f"legacy={disagreement['legacy']}. willow-mcp obeys the "
+                           f"canonical file; the legacy file is read only when the "
+                           f"canonical one is absent, so its values are inert."),
+                "fix": (f"reconcile {consent.get('legacy_path')} with "
+                        f"{consent.get('canonical_path')} — edit the canonical file "
+                        "(or delete the legacy one) so one statement of intent remains")})
     return problems
 
 
@@ -1490,9 +1539,10 @@ def diagnostic_summary(app_id: str = "") -> dict:
     manifest = _diag_manifest(eff)
     bindings = _diag_bindings()
     worker = _diag_worker(eff)
+    consent = _diag_consent()
     env = _diag_env()
 
-    problems = _derive_problems(store, postgres, manifest, mode, worker)
+    problems = _derive_problems(store, postgres, manifest, mode, worker, consent)
     verdict = _derive_verdict(problems)
 
     report = {
@@ -1502,7 +1552,7 @@ def diagnostic_summary(app_id: str = "") -> dict:
         "app_id": eff or None,
         "checks": {"store": store, "postgres": postgres, "schema": schema,
                    "manifest": manifest, "identity_bindings": bindings,
-                   "worker": worker, "env": env},
+                   "worker": worker, "consent": consent, "env": env},
         "problems": problems,
     }
     if redact:
