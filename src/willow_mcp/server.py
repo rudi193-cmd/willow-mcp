@@ -44,6 +44,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from functools import wraps
+from pathlib import Path
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -53,6 +54,7 @@ from .db import Store, get_pg
 from .gate import permitted
 from .identity_binding import resolve_app_id
 from .receipts import ReceiptLog
+from . import paths
 from . import schema_profile as sp
 from . import dispatch as dispatch_stack
 from . import handoff as handoff_stack
@@ -443,8 +445,9 @@ def _guarded(tool_name: str, *, list_error: bool = False):
 # ── Store tools ────────────────────────────────────────────────────────────────
 #
 # Collection-level scoping (B-24 / SECURITY_AUDIT.md L-ISO-01): the SOIL store
-# is deliberately shared with the wider Willow fleet by default (WILLOW_STORE_
-# ROOT, README's "share data" note) — store_* tools have no isolation unless
+# shares the wider Willow fleet's store by default (WILLOW_STORE_ROOT) — a
+# default, not a design commitment; point it elsewhere and diagnostic_summary's
+# `severance` check confirms the cut — store_* tools have no isolation unless
 # an app's manifest opts in via a `store_scope` list (gate.store_scope /
 # gate.collection_permitted). Unscoped apps keep today's unrestricted access;
 # this only closes the gap for apps an operator explicitly chooses to confine.
@@ -1826,15 +1829,105 @@ def _diag_net_lease(app_id: str) -> dict:
     On a single-uid host that is all of them, which is exactly B-32."""
     from . import gate, lease
     holds_capability = bool(app_id) and gate.permitted(app_id, gate.NET_PERMISSION)
+    forgeable = lease.self_writable_trust_paths(app_id)
     return {
         "lease_root": str(lease._leases_root()),
         "max_ttl_seconds": lease.MAX_TTL_SECONDS,
         "strict_trust_root": lease.strict_trust_root(),
         "holds_task_net": holds_capability,
         "lease": lease.read_lease(app_id) if app_id else {"status": "none"},
-        "self_writable": lease.self_writable_trust_paths(app_id),
-        "status": "ok",
+        "self_writable": forgeable,
+        # A sub-check that lists the keys this process could forge and then calls
+        # itself "ok" is asserting a membrane it just measured a hole in. The
+        # verdict still turns on _derive_problems (a lone `warn` here would make
+        # `degraded` every install's resting state, B-18) — but this field now
+        # says what it found.
+        "status": "ok" if not forgeable else "warn",
     }
+
+
+def _under(child: Path, parent: Path) -> bool:
+    """Is `child` the same inode as `parent`, or inside it — after symlinks?
+
+    Compares resolved paths. `~/.willow` is commonly a symlink into a fleet tree,
+    so a string prefix test reports "severed" for two names of one directory."""
+    try:
+        c, p = child.resolve(), parent.resolve()
+    except OSError:
+        return False
+    return c == p or p in c.parents
+
+
+def _diag_severance(store: dict, postgres: dict, net_lease: dict | None) -> dict:
+    """Can this install still see the fleet it claims to be cut off from?
+
+    Three properties, each independently checkable from inside the process:
+
+      store      — the SOIL store is not the fleet's store
+      postgres   — the database is not the fleet's database
+      trust_root — this process cannot rewrite the ACLs that gate it
+
+    The first two are DATA: someone who writes them corrupts records. The third
+    is AUTHORITY: someone who writes it grants themselves egress. Only the third
+    can turn a severed install into a compromised one, so only it is an `error`.
+
+    Reports `not_asserted` when the operator has named no fleet. That is not a
+    failure — a single-trust-domain install is complete without severance, and
+    an install that has never claimed to be cut off cannot be caught lying."""
+    fleet_home = paths.fleet_home()
+    fleet_db = paths.fleet_pg_db()
+
+    if fleet_home is None and not fleet_db:
+        return {"status": "not_asserted",
+                "detail": ("no fleet named — set WILLOW_MCP_FLEET_HOME and "
+                           "WILLOW_MCP_FLEET_PG_DB to assert this install is severed from one"),
+                "surfaces": {}}
+
+    surfaces: dict = {}
+
+    # ── data: store ───────────────────────────────────────────────────────────
+    store_root = store.get("root")
+    if fleet_home is None:
+        surfaces["store"] = {"severed": None, "reason": "WILLOW_MCP_FLEET_HOME unset"}
+    elif not store_root:
+        surfaces["store"] = {"severed": None, "reason": "store root unresolved"}
+    else:
+        shared = _under(Path(store_root), fleet_home)
+        surfaces["store"] = {
+            "path": store_root, "severed": not shared,
+            "reason": f"resolves inside {fleet_home}" if shared else None}
+
+    # ── data: postgres ────────────────────────────────────────────────────────
+    dbname = postgres.get("dbname")
+    if not fleet_db:
+        surfaces["postgres"] = {"severed": None, "reason": "WILLOW_MCP_FLEET_PG_DB unset"}
+    else:
+        shared = bool(dbname) and dbname == fleet_db
+        surfaces["postgres"] = {
+            "dbname": dbname, "severed": not shared,
+            "reason": f"is the fleet database '{fleet_db}'" if shared else None}
+
+    # ── authority: trust root ─────────────────────────────────────────────────
+    # Reuses the paths _diag_net_lease already computes. A trust root this
+    # process can write is a gate it can open, whether or not it holds task_net
+    # today — B-32 (host self-grant) and B-33 (sandbox writes consent) are both
+    # this property, observed at two different callers.
+    forgeable = (net_lease or {}).get("self_writable") or []
+    apps_root = paths.mcp_apps_root()
+    inside_fleet = fleet_home is not None and _under(apps_root, fleet_home)
+    surfaces["trust_root"] = {
+        "apps_root": str(apps_root),
+        "self_writable": [f["path"] for f in forgeable],
+        "inside_fleet_home": inside_fleet,
+        "severed": not forgeable and not inside_fleet,
+    }
+
+    violated = [k for k, v in surfaces.items() if v.get("severed") is False]
+    unknown = [k for k, v in surfaces.items() if v.get("severed") is None]
+    status = "violated" if violated else ("partial" if unknown else "ok")
+    return {"status": status, "fleet_home": str(fleet_home) if fleet_home else None,
+            "fleet_pg_db": fleet_db or None, "violated": violated,
+            "unknown": unknown, "surfaces": surfaces}
 
 
 def _diag_env() -> dict:
@@ -1843,13 +1936,13 @@ def _diag_env() -> dict:
     # systemd --user unit does not inherit a shell `export`.
     keys = ["WILLOW_HOME", "WILLOW_PG_DB", "WILLOW_PG_USER", "WILLOW_STORE_ROOT",
             "WILLOW_APP_ID", "WILLOW_MCP_APPS_ROOT", "WILLOW_MCP_HOST", "WILLOW_MCP_PORT",
-            "WILLOW_SETTINGS_GLOBAL"]
+            "WILLOW_SETTINGS_GLOBAL", "WILLOW_MCP_FLEET_HOME", "WILLOW_MCP_FLEET_PG_DB"]
     return {k: os.environ.get(k) for k in keys}
 
 
 def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                      worker: dict | None = None, consent: dict | None = None,
-                     net_lease: dict | None = None) -> list[dict]:
+                     net_lease: dict | None = None, severance: dict | None = None) -> list[dict]:
     """Pure: turn raw check dicts into actionable problems. Unit-tested without
     a live DB — this is where the empty-DB footgun becomes a named diagnosis."""
     problems: list[dict] = []
@@ -1977,6 +2070,48 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                              "Request and confirm are not yet separate authorities here (B-32)."),
                 "fix": "chown the lease root (and manifest) to a uid the agent does not run as, "
                        "then set WILLOW_MCP_STRICT_TRUST_ROOT=1 to enforce it"})
+    if severance and severance.get("status") not in (None, "not_asserted"):
+        surfaces = severance.get("surfaces", {})
+        # A severed install that reports `ok` while wired to the fleet is worse
+        # than no check at all. Once the operator has named a fleet, every surface
+        # that still resolves into it is a named problem.
+        for name in severance.get("violated", []):
+            surf = surfaces.get(name, {})
+            if name == "trust_root":
+                # AUTHORITY, not data. This process can rewrite the ACLs that gate
+                # it: the manifest that grants task_net, the lease root, the consent
+                # file. Severance from a fleet whose gate you still hold the pen for
+                # is not severance. B-32 (host lane) and B-33 (sandbox lane).
+                writable = ", ".join(surf.get("self_writable", [])) or surf.get("apps_root", "")
+                problems.append({
+                    "severity": "error", "check": "severance",
+                    "detail": ("this install claims severance but its trust root is within "
+                               "reach: " + writable + ". A process that can write its own "
+                               "manifest, lease root, or consent file can grant itself the "
+                               "egress the cut was supposed to deny."),
+                    "fix": ("move the trust root outside every path this process and the Kart "
+                            "sandbox can write (WILLOW_MCP_APPS_ROOT), and chown it to a uid "
+                            "the agent does not run as")})
+            else:
+                # DATA. Corruptible, not authority-bearing. Degrades; does not break.
+                problems.append({
+                    "severity": "warn", "check": "severance",
+                    "detail": (f"{name} is not severed from the fleet named by "
+                               f"WILLOW_MCP_FLEET_HOME/WILLOW_MCP_FLEET_PG_DB: "
+                               f"{surf.get('reason')}"),
+                    "fix": (f"point WILLOW_STORE_ROOT at a store outside "
+                            f"{severance.get('fleet_home')}" if name == "store"
+                            else f"set WILLOW_PG_DB to a database other than "
+                                 f"'{severance.get('fleet_pg_db')}'")})
+        for name in severance.get("unknown", []):
+            # Half a claim. The operator asserted severance from *something* but
+            # left the other coordinate unnamed, so this surface cannot be checked
+            # either way. Fail closed: an unverifiable claim is not a passing one.
+            problems.append({
+                "severity": "warn", "check": "severance",
+                "detail": (f"severance is asserted but {name} cannot be checked: "
+                           f"{surfaces.get(name, {}).get('reason')}"),
+                "fix": "set both WILLOW_MCP_FLEET_HOME and WILLOW_MCP_FLEET_PG_DB, or neither"})
     return problems
 
 
@@ -2012,10 +2147,15 @@ def diagnostic_summary(app_id: str = "") -> dict:
     whether willow-mcp's tables are present), schema-mapping confirmation state,
     your app_id's manifest + resolved permissions, identity bindings, whether a
     task worker is alive to drain the queue, your egress lease and which of the
-    keys authorizing it this process could forge, and the config-bearing
+    keys authorizing it this process could forge, whether this install is still
+    wired to a fleet it claims to be severed from, and the config-bearing
     environment — then a verdict (ok/degraded/broken) with named problems and
     fixes. Ungated on purpose: it must answer even when your manifest or database
-    is misconfigured. Reveals only your own config, never fleet rows or vault secrets."""
+    is misconfigured. Reveals only your own config, never fleet rows or vault secrets.
+
+    Severance is asserted, never assumed: name a fleet with WILLOW_MCP_FLEET_HOME
+    and WILLOW_MCP_FLEET_PG_DB and every shared surface becomes a named problem.
+    Name none and the check reports `not_asserted` and changes nothing."""
     mode = "serve" if _SERVE_MODE else "stdio"
     redact = False
     if _SERVE_MODE:
@@ -2038,9 +2178,11 @@ def diagnostic_summary(app_id: str = "") -> dict:
     worker = _diag_worker(eff)
     consent = _diag_consent()
     net_lease = _diag_net_lease(eff)
+    severance = _diag_severance(store, postgres, net_lease)
     env = _diag_env()
 
-    problems = _derive_problems(store, postgres, manifest, mode, worker, consent, net_lease)
+    problems = _derive_problems(store, postgres, manifest, mode, worker, consent,
+                                net_lease, severance)
     verdict = _derive_verdict(problems)
 
     report = {
@@ -2051,7 +2193,7 @@ def diagnostic_summary(app_id: str = "") -> dict:
         "checks": {"store": store, "postgres": postgres, "schema": schema,
                    "manifest": manifest, "identity_bindings": bindings,
                    "worker": worker, "consent": consent, "net_lease": net_lease,
-                   "env": env},
+                   "severance": severance, "env": env},
         "problems": problems,
     }
     if redact:
