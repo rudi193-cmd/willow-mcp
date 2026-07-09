@@ -2465,7 +2465,23 @@ def _cmd_net_status(args) -> None:
 
 
 def _cmd_gates(args) -> None:
-    """`willow-mcp gates` — every authorization gate as one on/off panel."""
+    """`willow-mcp gates` — every authorization gate as one on/off panel.
+
+    Bare `willow-mcp gates` in a real terminal launches the interactive
+    curses TUI (navigate, press enter/space to actually flip a gate) — the
+    static text/JSON/HTML outputs below are for piping, scripting, and CI,
+    where there is no terminal to be interactive in anyway.
+    """
+    if args.serve:
+        from . import gates_serve
+        gates_serve.run(host=args.host, port=args.port, app_id=args.app_id or "")
+        return
+
+    if not args.static and not args.json and not args.html and sys.stdout.isatty():
+        from . import gates_tui
+        gates_tui.run(args.app_id or "")
+        return
+
     from . import gates_panel
 
     rows = gates_panel.collect(args.app_id or "")
@@ -2599,6 +2615,15 @@ def _main():
     gates_p.add_argument("--json", action="store_true", help="print raw JSON, no table")
     gates_p.add_argument("--no-tui", action="store_true",
                           help="with --html, skip printing the terminal table")
+    gates_p.add_argument("--static", action="store_true",
+                          help="force the one-shot text printout instead of the interactive "
+                               "TUI, even when run in a real terminal")
+    gates_p.add_argument("--serve", action="store_true",
+                          help="serve a live local HTML dashboard with working buttons "
+                               "(127.0.0.1 by default) instead of a one-shot snapshot")
+    gates_p.add_argument("--host", default="127.0.0.1",
+                          help="bind host for --serve (default: 127.0.0.1 — localhost only)")
+    gates_p.add_argument("--port", type=int, default=8788, help="bind port for --serve")
 
     allow_p = subparsers.add_parser(
         "allow-permission",

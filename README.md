@@ -140,20 +140,38 @@ rather than quietly obeying one of them (B-30).
 Diagnosing a denial today means knowing which of a dozen-plus gates to check
 and which file or CLI command controls it. `willow-mcp gates` shows all of
 them at once, each rendered the way the egress lease already renders
-itself — on/off, plus how long the "on" is good for:
+itself — on/off, plus how long the "on" is good for. Run it in a real
+terminal and it's interactive — arrow keys / j-k to move, enter/space to
+actually flip the highlighted gate, no second command to copy anywhere:
 
 ```console
-$ willow-mcp gates                    # every app under mcp_apps/
-$ willow-mcp gates myapp              # scoped to one app
-$ willow-mcp gates --html             # writes ./willow-gates.html, a live-countdown snapshot
+$ willow-mcp gates                    # interactive TUI (every app under mcp_apps/)
+$ willow-mcp gates myapp              # interactive TUI, scoped to one app
+$ willow-mcp gates --serve            # live local HTML dashboard, working buttons
+$ willow-mcp gates --serve --port 9000 --host 127.0.0.1
+$ willow-mcp gates --static           # one-shot text printout instead of the TUI
+$ willow-mcp gates --html             # writes ./willow-gates.html, a read-only snapshot
 $ willow-mcp gates --json             # raw rows, for scripting
 ```
 
-Every row that has an existing operator-only local CLI to flip it (the
-egress lease, an identity binding) prints that exact command. Manifest
-permission groups — which had no CLI before, only hand-editing
-`manifest.json` or regenerating it via `compile-agents` — get a new pair for
-the same purpose:
+`--static`/`--json`/`--html` are unchanged from before and still the right
+choice for scripting, CI, or a file you want to keep — `--static` is also
+what runs automatically whenever stdout isn't a real terminal (piped,
+redirected), so nothing here breaks existing scripts.
+
+The interactive TUI and `--serve`'s live dashboard share one action layer
+(`gates_actions.py`) with the CLI subcommands below — pressing a row (or
+clicking its button) calls the exact same functions `allow-permission`/
+`grant-net`/`confirm-binding` do, nothing new. `--serve` binds
+`127.0.0.1`-only by default; it's a mutation-capable local admin surface
+with no authentication of its own, so widening `--host` prints a warning
+rather than doing it quietly. The one exception is the `worker` row's
+action: it drains the queue **once** (like `worker --once`), never launches
+the persistent daemon — that would block the TUI/dashboard forever.
+
+Manifest permission groups — which had no CLI before, only hand-editing
+`manifest.json` or regenerating it via `compile-agents` — get their own
+pair, usable standalone or as what the TUI/dashboard call underneath:
 
 ```console
 $ willow-mcp allow-permission myapp store_read
@@ -162,11 +180,14 @@ $ willow-mcp deny-permission myapp store_read
 
 Both are local-CLI-only, never MCP tools, for the same reason `grant-net`
 isn't: an agent must never be able to grant itself a permission it was just
-denied. `consent.*` rows never show a command — willow-mcp only reads that
-policy (see above) — and `strict_trust_root` / severance /
-human-orchestrator attestation are environment variables read once at
-process start, so their rows name the env var to set and restart with,
-rather than pretending a live toggle exists.
+denied — and that boundary holds for the TUI and `--serve` too, since
+neither is reachable except by an operator running them on the host that
+owns `$WILLOW_HOME`. `consent.*` rows never show a command or a working
+button — willow-mcp only reads that policy (see above) — and
+`strict_trust_root` / severance / human-orchestrator attestation are
+environment variables read once at process start, so their rows name the
+env var to set and restart with, rather than pretending a live toggle
+exists.
 
 `task_net` and `integration_net` both show up as their own capability rows
 (neither is folded into `full_access`), and both are authorized by the same

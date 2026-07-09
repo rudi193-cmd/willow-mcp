@@ -57,6 +57,11 @@ from .human_session import ORCHESTRATOR_APP_ID, human_orchestrator_attested
 @dataclass
 class GateRow:
     id: str
+    #: The real, exact identifier — a permission group name, a manifest
+    #: capability, etc. Never change what this holds: gates_actions.py reads
+    #: it to know *what to actually toggle* (e.g. which permission string to
+    #: pass to manifest_admin.set_permission), and action_cli commands quote
+    #: it verbatim. `friendly` below is the display-only translation.
     label: str
     scope: str                       # "global" or an app_id
     state: str                       # "on" | "off" | "warn"
@@ -68,6 +73,67 @@ class GateRow:
     timer_shape: str = "n/a"
     action_cli: Optional[str] = None
     action_note: Optional[str] = None
+    #: Plain-language translation of `label`, for someone who doesn't know
+    #: what a "manifest permission group" is. Display-only — every renderer
+    #: shows this as the heading and `label` as a secondary technical
+    #: reference, never the other way around, so `--json`/CLI output stays
+    #: exact. Falls back to a humanized version of `label` for anything
+    #: `FRIENDLY_LABELS` doesn't yet cover (see `_friendly()`).
+    friendly: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.friendly:
+            self.friendly = _friendly(self.label)
+
+
+#: Plain-language translation for every permission group / capability name a
+#: `perm.*` row can carry (see `gate.PERMISSION_GROUPS` and the two
+#: capability flags). Keyed on the exact string so it stays in sync with
+#: whatever gate.py actually grants — a name added there without an entry
+#: here just falls back to `_humanize()` rather than erroring.
+FRIENDLY_LABELS: dict[str, str] = {
+    "store_read": "View saved notes",
+    "store_write": "Save and edit notes",
+    "store_all": "Full access to saved notes",
+    "knowledge_read": "Search what it has learned",
+    "knowledge_write": "Teach it new things",
+    "task_queue": "Run tasks",
+    "agent_dispatch": "Assign work to helpers",
+    "dispatch_read": "See assigned work",
+    "dispatch_write": "Assign and complete work",
+    "orchestrator": "Direct the whole team",
+    "fleet_read": "See the helper team",
+    "context": "Remember short-term notes",
+    "audit": "See its own activity log",
+    "gap_read": "See open questions",
+    "gap_write": "Log and answer open questions",
+    "gap_promote": "Make an answer official knowledge",
+    "schema_admin": "Configure database field mapping",
+    "full_access": "Full access to everything",
+    "integration_read": "Check outside-service status",
+    "integration_call": "Talk to outside services",
+    "task_net": "Request internet access (for tasks)",
+    "integration_net": "Request internet access (for outside services)",
+    "consent.internet": "Allow internet access, fleet-wide",
+    "consent.cloud_llm": "Allow cloud AI access, fleet-wide",
+    "consent.lan": "Allow local network access, fleet-wide",
+    "strict_trust_root": "Extra-strict security mode",
+    "severance": "Kept separate from other Willow installs",
+    "human_orchestrator": "Requires a human in charge",
+    "task worker": "Task runner",
+    "egress lease": "Temporary internet access",
+}
+
+
+def _humanize(name: str) -> str:
+    """Fallback for any technical name with no entry in FRIENDLY_LABELS:
+    snake_case / dotted -> "Title case words". Not a translation, just
+    something less alarming than a raw identifier until one is added above."""
+    return name.replace("_", " ").replace(".", " ").strip().capitalize()
+
+
+def _friendly(label: str) -> str:
+    return FRIENDLY_LABELS.get(label, _humanize(label))
 
 
 def list_app_ids() -> list[str]:
@@ -110,10 +176,11 @@ def _global_rows() -> list[GateRow]:
 
     asserted = paths.severance_asserted()
     rows.append(GateRow(
-        id="severance", label="severance (fleet isolation claim)", scope="global",
+        id="severance", label="severance", scope="global",
         state="on" if asserted else "off",
-        detail=(f"fleet_home={paths.fleet_home()}, fleet_pg_db={paths.fleet_pg_db() or None}"
-                if asserted else "not asserted — single-trust-domain install"),
+        detail=(f"fleet isolation claim — fleet_home={paths.fleet_home()}, "
+                f"fleet_pg_db={paths.fleet_pg_db() or None}"
+                if asserted else "fleet isolation claim — not asserted, single-trust-domain install"),
         timer_shape="process",
         action_note=("set WILLOW_MCP_FLEET_HOME / WILLOW_MCP_FLEET_PG_DB in the "
                      "server's environment and restart"),
@@ -121,7 +188,7 @@ def _global_rows() -> list[GateRow]:
 
     attested = human_orchestrator_attested()
     rows.append(GateRow(
-        id="human_orchestrator", label="human_orchestrator attestation", scope="global",
+        id="human_orchestrator", label="human_orchestrator", scope="global",
         state="on" if attested else "off",
         detail=f"gates dispatch_send/verify_handoff/agent_clear for app_id={ORCHESTRATOR_APP_ID!r}",
         timer_shape="process",
@@ -198,12 +265,14 @@ def _binding_rows() -> list[GateRow]:
         detail = f"subject={record.get('subject_id')} email={record.get('email')}"
         if record.get("email_drift"):
             detail += " — EMAIL DRIFT, verify before trusting"
+        issuer = record.get("issuer")
         rows.append(GateRow(
-            id=f"binding.{f.stem}", label=f"identity binding ({record.get('issuer')})",
+            id=f"binding.{f.stem}", label=f"identity binding ({issuer})",
+            friendly=f"Signed-in account (via {issuer})",
             scope=record.get("app_id") or "(unbound)",
             state="on" if confirmed else "off", detail=detail, timer_shape="standing",
             action_cli=(None if confirmed else
-                        f"willow-mcp confirm-binding --issuer {record.get('issuer')} "
+                        f"willow-mcp confirm-binding --issuer {issuer} "
                         f"--subject {record.get('subject_id')} --app-id <app_id>"),
         ))
     return rows
@@ -244,15 +313,15 @@ def _timer_text(row: GateRow) -> str:
 def render_tui(rows: list[GateRow], color: bool = True) -> str:
     lines = ["willow-mcp gates — every authorization gate, egress-lease shaped\n"]
     scope_w = max((len(r.scope) for r in rows), default=6)
-    label_w = max((len(r.label) for r in rows), default=6)
+    label_w = max((len(r.friendly) for r in rows), default=6)
     timer_w = max((len(_timer_text(r)) for r in rows), default=6)
     for r in rows:
         button = _button_text(r.state)
         if color:
             button = f"{_ANSI.get(r.state, '')}{button}{_ANSI['reset']}"
         lines.append(
-            f"[{button}] {r.scope:<{scope_w}}  {r.label:<{label_w}}  "
-            f"{_timer_text(r):<{timer_w}}  {r.detail}"
+            f"[{button}] {r.scope:<{scope_w}}  {r.friendly:<{label_w}}  "
+            f"{_timer_text(r):<{timer_w}}  {r.label} — {r.detail}"
         )
         if r.action_cli:
             lines.append(f"{'':>{9}}-> {r.action_cli}")
@@ -291,8 +360,10 @@ _HTML_TEMPLATE = """<!doctype html>
     background: var(--card); border: 1px solid var(--border); border-radius: 12px;
     padding: 1rem; display: flex; flex-direction: column; gap: .55rem; min-width: 0;
   }}
-  .card-head {{ display: flex; align-items: center; gap: .6rem; }}
+  .card-head {{ display: flex; align-items: center; gap: .6rem; min-width: 0; }}
+  .card-head-text {{ min-width: 0; }}
   .label {{ font-weight: 600; overflow-wrap: anywhere; }}
+  .tech {{ font-size: .72rem; color: var(--muted); font-family: ui-monospace, monospace; overflow-wrap: anywhere; }}
   .btn {{
     appearance: none; border: none; border-radius: 999px; padding: .3rem .85rem;
     font-weight: 700; font-size: .72rem; letter-spacing: .05em; color: #fff; cursor: default;
@@ -382,10 +453,16 @@ function render() {{
       const btn = document.createElement("span");
       btn.className = "btn " + row.state;
       btn.textContent = row.state.toUpperCase();
+      const textWrap = document.createElement("div");
+      textWrap.className = "card-head-text";
       const label = document.createElement("div");
       label.className = "label";
-      label.textContent = row.label;
-      head.appendChild(btn); head.appendChild(label);
+      label.textContent = row.friendly;
+      const tech = document.createElement("div");
+      tech.className = "tech";
+      tech.textContent = row.label;
+      textWrap.appendChild(label); textWrap.appendChild(tech);
+      head.appendChild(btn); head.appendChild(textWrap);
       card.appendChild(head);
       const timer = document.createElement("div");
       timer.className = "timer";
@@ -435,8 +512,8 @@ setInterval(() => {{
 def render_html(rows: list[GateRow], generated_at: str) -> str:
     rows_payload = [
         {
-            "id": r.id, "label": r.label, "scope": r.scope, "state": r.state,
-            "detail": r.detail, "remaining_seconds": r.remaining_seconds,
+            "id": r.id, "label": r.label, "friendly": r.friendly, "scope": r.scope,
+            "state": r.state, "detail": r.detail, "remaining_seconds": r.remaining_seconds,
             "timer_shape": r.timer_shape, "action_cli": r.action_cli,
             "action_note": r.action_note,
         }
