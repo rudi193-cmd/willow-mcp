@@ -34,6 +34,7 @@ Same operator key signs:
 | Human session attestation | `sessions/willow-{session_id}.json` (canonical blob + `.sig`) |
 | Dispatch packet (phase P3) | `dispatch/{id}/meta.json` + `.sig` |
 | Optional persona roster changes | `config/persona_roster.json` + `.sig` |
+| Agent seed (ratified) | `$WILLOW_HOME/seeds/{agent_id}.json` + `.sig` — see `agent-seed.md` |
 
 **Rule:** `gpg --verify` → parse `VALIDSIG` primary fingerprint → compare to
 `WILLOW_PGP_FINGERPRINT`. Mismatch = deny. No alternate trusted keys in product.

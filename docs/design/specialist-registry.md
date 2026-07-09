@@ -3,7 +3,7 @@
 *Status: **DRAFT** — 2026-07-09*  
 *Permissions per role: **NOT DECIDED** — placeholders only; do not treat as policy.*
 
-Companion: `pgp-and-persona.md` · `human-orchestrator.md` · `product-layout.md` · `session-lifecycle.md`
+Companion: `agent-seed.md` · `pgp-and-persona.md` · `human-orchestrator.md` · `product-layout.md` · `session-lifecycle.md`
 
 ---
 

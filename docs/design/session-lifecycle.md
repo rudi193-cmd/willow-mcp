@@ -11,6 +11,8 @@
 
 **Specialists:** [`specialist-registry.md`](specialist-registry.md) (DRAFT) — unified Function/Name/Roles/persona schema; **tool permissions per role not decided yet**.
 
+**Participant model:** [`agent-seed.md`](agent-seed.md) (DRAFT) — `agent_seed_v1` cognitive boot; orthogonal to registry permissions.
+
 **Principle:** JSON for routing and machine state. **Markdown for assignments, findings, and narrative.**
 
 ---
