@@ -10,16 +10,6 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
-- **Two-key egress gate** (B-29). `task_submit(allow_net=True)` now requires the
-  operator's standing `consent.internet` from `$WILLOW_HOME/settings.global.json`
-  **in addition to** the app's `task_net` capability. Either one missing denies
-  (`net_denied` / `consent_denied`) before any write. Flipping `consent.internet`
-  to `false` stops egress fleet-wide without editing a single manifest. The new
-  `consent.py` reads that policy **fail-closed** — an absent file, an unparseable
-  file, or a non-boolean value all read as denied — and only ever reads it; the
-  policy is authored by willow-2.0. `diagnostic_summary` gains a `consent` check
-  that raises an error when the legacy `consent.json` and canonical
-  `settings.global.json` disagree, rather than silently obeying one.
 - **Worker liveness** (Kart lift stage 4, B-26). `willow-mcp worker` publishes a
   heartbeat through kartikeya's `on_heartbeat` seam. `fleet_health` now reports
   `workers` (each `alive` / `stale` / `dead`) and a `stranded` boolean — true when
