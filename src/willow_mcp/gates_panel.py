@@ -4,8 +4,9 @@ lease's shape: on/off, plus how long the "on" is good for.
 `lease.py` is the one gate in this codebase with a clock on it — a
 `willow-mcp net-status` reader sees "active, expires in 1743s" instead of a
 bare boolean. Every other gate (manifest permissions, `task_net`,
-`consent.*`, identity bindings, schema-mapping confirmation, strict trust
-root, severance, human-orchestrator attestation) is a standing boolean
+`integration_net`, `consent.*`, identity bindings, schema-mapping
+confirmation, strict trust root, severance, human-orchestrator attestation)
+is a standing boolean
 scattered across its own file and its own CLI command or hand-edit, and the
 only place that reads all of them together is `diagnostic_summary`'s
 problem list — built for "why did a call just fail", not "show me
@@ -42,7 +43,13 @@ from html import escape as _esc
 from typing import Optional
 
 from . import consent, lease, paths
-from .gate import NET_PERMISSION, PERMISSION_GROUPS, _apps_root, _load_manifest
+from .gate import (
+    INTEGRATION_NET_PERMISSION,
+    NET_PERMISSION,
+    PERMISSION_GROUPS,
+    _apps_root,
+    _load_manifest,
+)
 from .heartbeat import read_workers
 from .human_session import ORCHESTRATOR_APP_ID, human_orchestrator_attested
 
@@ -142,10 +149,11 @@ def _app_rows(app_id: str) -> list[GateRow]:
     manifest = _load_manifest(app_id)
     perms = set((manifest or {}).get("permissions") or [])
 
-    for group in sorted(PERMISSION_GROUPS) + [NET_PERMISSION]:
+    capability_flags = (NET_PERMISSION, INTEGRATION_NET_PERMISSION)
+    for group in sorted(PERMISSION_GROUPS) + list(capability_flags):
         on = group in perms
         detail = ("capability flag — see also this app's egress lease below"
-                   if group == NET_PERMISSION else "manifest permission group")
+                   if group in capability_flags else "manifest permission group")
         rows.append(GateRow(
             id=f"perm.{app_id}.{group}", label=group, scope=app_id,
             state="on" if on else "off", detail=detail, timer_shape="standing",

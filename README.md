@@ -158,6 +158,12 @@ human-orchestrator attestation are environment variables read once at
 process start, so their rows name the env var to set and restart with,
 rather than pretending a live toggle exists.
 
+`task_net` and `integration_net` both show up as their own capability rows
+(neither is folded into `full_access`), and both are authorized by the same
+per-app egress lease below them — one `grant-net`/`revoke-net` covers Kart
+sandbox egress and server-process integration calls together, since a lease
+is scoped to the app, not to which capability is asking.
+
 #### `tree` — the integration seam for a real dashboard
 
 `docs/design/*.html` sketches a client UI as a tree — trunk (overall
