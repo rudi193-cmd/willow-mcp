@@ -235,8 +235,8 @@ session_enter(hanuman, session_id)
 | S-R2 | `config/specialists.json` seed (identity/mandate only; empty permissions) | — |
 | S-R3 | `compile-agents` → manifests | **done** |
 | S-R4 | PG table + seed migration | permissions decision |
-| S-R5 | `session_enter` loads `persona_path` from registry | bundle personas |
-| S-R6 | `specialist_list` / `specialist_get` MCP tools | — |
+| S-R5 | `session_enter` loads `persona_path` from registry | **done** |
+| S-R6 | `specialist_list` / `specialist_get` MCP tools | **done** |
 | S-R7 | Gate enforces registry `permissions` + `deny_tools` | **done** |
 
 ---

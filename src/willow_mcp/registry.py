@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterator
 
-from .paths import bundle_dir, mcp_app_dir, specialists_config_path, willow_home
+from .paths import bundle_dir, mcp_app_dir, personas_dir, specialists_config_path, willow_home
 
 REGISTRY_FORMAT = "specialist_registry_v1"
 
@@ -131,3 +131,106 @@ def compile_cli_main() -> None:
     args = parser.parse_args()
     reg = Path(args.registry).expanduser() if args.registry else None
     print(json.dumps(compile_agents_main(force=args.force, dry_run=args.dry_run, registry_file=reg), indent=2))
+
+
+# ── Specialist lookup + persona (S-R5 / S-R6) ───────────────────────────────
+
+_PUBLIC_LIST_FIELDS = (
+    "agent_id",
+    "function",
+    "display_name",
+    "role",
+    "roles",
+    "job",
+    "not_job",
+    "persona_path",
+    "entry_mode",
+    "receive_dispatch",
+    "human_only",
+    "sort_order",
+)
+
+
+def specialist_row(agent_id: str, *, registry: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    key = (agent_id or "").strip().lower()
+    if not key:
+        return None
+    for row in iter_registry_rows(registry or load_registry()):
+        if str(row.get("agent_id", "")).lower() == key:
+            return dict(row)
+    return None
+
+
+def _row_for_public(row: dict[str, Any], *, include_permissions: bool = False) -> dict[str, Any]:
+    out = {k: row[k] for k in _PUBLIC_LIST_FIELDS if k in row}
+    if include_permissions:
+        out["permissions"] = list(row.get("permissions") or [])
+        out["deny_tools"] = list(row.get("deny_tools") or [])
+        scope = row.get("store_scope")
+        if scope is not None:
+            out["store_scope"] = list(scope)
+    return out
+
+
+def list_specialists(*, include_permissions: bool = False) -> list[dict[str, Any]]:
+    rows = list(iter_registry_rows(load_registry()))
+    rows.sort(key=lambda r: (int(r.get("sort_order") or 0), str(r.get("agent_id") or "")))
+    return [_row_for_public(r, include_permissions=include_permissions) for r in rows]
+
+
+def get_specialist(agent_id: str, *, include_permissions: bool = True) -> dict[str, Any] | None:
+    row = specialist_row(agent_id)
+    if not row:
+        return None
+    out = _row_for_public(row, include_permissions=include_permissions)
+    out["namespace"] = row.get("namespace", "")
+    out["grove_sender"] = row.get("grove_sender", row.get("agent_id", ""))
+    out["model_hint"] = row.get("model_hint", "")
+    return out
+
+
+def resolve_persona_path(agent_id: str) -> Path | None:
+    """Resolve persona .md on disk: $WILLOW_HOME/personas/ then bundle."""
+    row = specialist_row(agent_id)
+    if not row:
+        return None
+    rel = (row.get("persona_path") or "").strip()
+    if not rel:
+        return None
+    rel_path = Path(rel)
+    candidates = [
+        personas_dir() / rel_path.name,
+        personas_dir() / rel_path,
+        bundle_dir() / rel_path,
+    ]
+    if rel_path.parts and rel_path.parts[0] == "personas":
+        candidates.append(personas_dir() / Path(*rel_path.parts[1:]))
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
+def read_persona_text(agent_id: str) -> str | None:
+    path = resolve_persona_path(agent_id)
+    if not path:
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def persona_context(agent_id: str) -> dict[str, Any]:
+    """Session-enter payload: registry row + loaded persona voice."""
+    row = specialist_row(agent_id)
+    if not row:
+        return {}
+    path = resolve_persona_path(agent_id)
+    return {
+        "display_name": row.get("display_name", ""),
+        "role": row.get("role", ""),
+        "function": row.get("function", ""),
+        "job": row.get("job", ""),
+        "not_job": row.get("not_job", ""),
+        "persona_path": row.get("persona_path", ""),
+        "persona_file": str(path) if path else None,
+        "persona": read_persona_text(agent_id) or "",
+    }

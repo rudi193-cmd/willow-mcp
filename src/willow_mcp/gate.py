@@ -63,6 +63,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     }),
     "dispatch_read": frozenset({
         "dispatch_read", "dispatch_list", "handoff_read", "session_read", "session_enter",
+        "specialist_list", "specialist_get",
     }),
     "dispatch_write": frozenset({
         "dispatch_send", "dispatch_accept", "handoff_write_v4",
@@ -74,6 +75,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "session_read", "session_enter", "session_handoff_write", "agent_route", "agent_dispatch_result",
         "fleet_status", "fleet_health", "context_save", "context_get",
         "context_list", "knowledge_search", "store_get", "store_search",
+        "specialist_list", "specialist_get",
     }),
     "fleet_read": frozenset({
         "fleet_status", "fleet_health",

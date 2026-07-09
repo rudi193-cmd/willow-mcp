@@ -58,3 +58,21 @@ def test_compile_agents_force_overwrites(home, monkeypatch):
     assert "mcp_apps/hanuman/manifest.json" in out["written"]
     manifest = json.loads(path.read_text())
     assert "full_access" not in manifest["permissions"]
+
+
+def test_list_specialists_sorted(home):
+    rows = reg.list_specialists()
+    assert rows[0]["agent_id"] == "willow"
+    assert any(r["agent_id"] == "hanuman" for r in rows)
+
+
+def test_get_specialist_includes_permissions(home):
+    row = reg.get_specialist("loki")
+    assert row["agent_id"] == "loki"
+    assert "knowledge_read" in row["permissions"]
+    assert "task_submit" in row["deny_tools"]
+
+
+def test_read_persona_text_from_bundle(home):
+    text = reg.read_persona_text("jeles")
+    assert text and "Jeles" in text

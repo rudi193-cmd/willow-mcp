@@ -15,6 +15,7 @@ Tools:
   Dispatch (FS):   dispatch_send, dispatch_read, dispatch_list, dispatch_accept,
                    handoff_write_v4, handoff_read, verify_handoff, agent_clear,
                    session_read, session_enter, session_handoff_write
+  Registry:        specialist_list, specialist_get
   Fleet (PG):      fleet_status, fleet_health
   Context (SQLite):context_save, context_get, context_list, context_expire
   Audit (SQLite):  receipts_tail
@@ -1218,6 +1219,38 @@ def session_handoff_write(
         findings=findings,
         next_bite=next_bite,
     )
+
+
+# ── Specialist registry (desk) ───────────────────────────────────────────────
+
+@mcp.tool()
+@_guarded("specialist_list")
+def specialist_list(app_id: str, include_permissions: bool = False) -> dict:
+    """List specialists from config/specialists.json (orchestrator desk / routing)."""
+    from . import registry as reg
+
+    return {
+        "registry": str(reg.registry_path()),
+        "specialists": reg.list_specialists(include_permissions=include_permissions),
+        "total": len(reg.list_specialists(include_permissions=False)),
+    }
+
+
+@mcp.tool()
+@_guarded("specialist_get")
+def specialist_get(app_id: str, agent_id: str, include_permissions: bool = True) -> dict:
+    """Fetch one specialist registry row by agent_id."""
+    from . import registry as reg
+
+    row = reg.get_specialist(agent_id, include_permissions=include_permissions)
+    if not row:
+        return {"error": "not_found", "agent_id": agent_id}
+    persona = reg.read_persona_text(agent_id)
+    if persona is not None:
+        row["persona"] = persona
+        path = reg.resolve_persona_path(agent_id)
+        row["persona_file"] = str(path) if path else None
+    return row
 
 
 # ── Fleet read tools ───────────────────────────────────────────────────────────
