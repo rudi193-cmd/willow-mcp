@@ -429,7 +429,10 @@
           <span class="k">sap flow</span><span class="v bad">stalled · 0 workers</span>
         </div>
         <div class="boot-line" data-k="rings confirmed" data-v="2 / 4 tables" data-cls="">
-          <span class="k">rings confirmed</span><span class="v">2 / 4 tables<span class="boot-cursor" id="boot-cursor"></span></span>
+          <span class="k">rings confirmed</span><span class="v">2 / 4 tables</span>
+        </div>
+        <div class="boot-line" data-k="stomata" data-v="closed · consent.internet off" data-cls="bad">
+          <span class="k">stomata</span><span class="v bad">closed · consent.internet off<span class="boot-cursor" id="boot-cursor"></span></span>
         </div>
       </div>
     </div>
@@ -458,6 +461,17 @@
     falling into <b>litter</b>, the receipt log, once they're acted on.
   </p>
 
+  <p class="lede">
+    A seventh part joined once egress got its own gate: <b>stomata</b>, the
+    pores that decide whether an app may exchange anything with the world
+    outside the tree at all. <code>consent.internet</code> is the operator's
+    standing switch, <code>task_net</code> is the capability to ever ask, and
+    an egress lease is the time-boxed grant that actually opens one — all
+    three, or the pore stays shut. Unlike sap, roots, and the rest, stomata
+    aren't a mockup: <code>willow-mcp gates</code> renders this same three-key
+    state today, on/off, egress-lease shaped.
+  </p>
+
   <svg class="frond-rule" viewBox="0 0 600 22" preserveAspectRatio="none" aria-hidden="true">
     <path d="M0,11 C 40,2 70,20 110,10 S 180,2 220,11 S 290,20 330,10 S 400,2 440,11 S 510,20 550,10 S 600,3 600,11"
           fill="none" stroke="#8a6528" stroke-width="1.4" stroke-linecap="round"/>
@@ -482,6 +496,7 @@
           <div class="nav-item"><span class="k">4</span> Rings</div>
           <div class="nav-item"><span class="k">5</span> Leaves</div>
           <div class="nav-item"><span class="k">6</span> Litter</div>
+          <div class="nav-item"><span class="k">7</span> Stomata</div>
         </nav>
         <main class="term-main">
           <div class="status-line">
@@ -582,6 +597,21 @@
           <div class="leaf fresh">509084FA · mcp_smoke_test<div class="meta">ingested this session · domain confirmed</div></div>
           <div class="leaf">grove_msg_111 · github channel<div class="meta">source: grove_message</div></div>
           <div class="leaf">L8A5A · migrated from willow-1.7<div class="meta">source: file_location</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Stomata</h3>
+        <div class="sub">consent · task_net · egress lease — three keys, app by app</div>
+        <div class="agent-row"><span>fleet consent.internet</span><span class="chip bad">closed</span></div>
+        <div class="agent-row"><span>skirnir</span><span class="chip wait">lease active · 8m12s</span></div>
+        <div class="agent-row"><span>ganas1</span><span class="chip mute">task_net not granted</span></div>
+        <div class="agent-row" style="border-bottom:none;">
+          <span style="color:var(--parchment-dim); font-size:11.5px; line-height:1.5;">
+            closed fleet-wide — skirnir's lease is still counting down, but a
+            per-app lease alone never opens a pore. an operator has to flip
+            <code style="color:var(--sap)">consent.internet</code> first.
+          </span>
         </div>
       </div>
 
