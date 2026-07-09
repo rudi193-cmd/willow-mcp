@@ -2032,6 +2032,22 @@ def main():
         "net-status", help="Show egress leases and which trust-root keys this process can forge")
     status_p.add_argument("app_id", nargs="?", default="")
 
+    compile_p = subparsers.add_parser(
+        "compile-agents",
+        help="Compile mcp_apps/*/manifest.json from specialists registry",
+    )
+    compile_p.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite existing manifests (default: only missing)",
+    )
+    compile_p.add_argument("--dry-run", action="store_true", help="report paths only")
+    compile_p.add_argument(
+        "--registry",
+        default="",
+        help="path to specialists.json (default: $WILLOW_HOME/config or bundle)",
+    )
+
     args, _ = parser.parse_known_args()
 
     if args.command == "setup":
@@ -2051,6 +2067,19 @@ def main():
         return
     if args.command == "net-status":
         _cmd_net_status(args)
+        return
+    if args.command == "compile-agents":
+        from pathlib import Path
+
+        from .registry import compile_agents_main
+
+        reg = Path(args.registry).expanduser() if args.registry else None
+        result = compile_agents_main(
+            force=args.force,
+            dry_run=args.dry_run,
+            registry_file=reg,
+        )
+        print(json.dumps(result, indent=2))
         return
 
     if args.serve or _SERVE_MODE:

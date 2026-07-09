@@ -242,4 +242,12 @@ def permitted(app_id: str, tool_name: str) -> bool:
         logger.info("gate: %r denied tool %r (permissions=%r)", app_id, tool_name, perms)
         return False
 
+    deny: list = manifest.get("deny_tools") or []
+    if not isinstance(deny, list):
+        logger.error("gate: malformed deny_tools for %r — denying %r", app_id, tool_name)
+        return False
+    if tool_name in deny:
+        logger.info("gate: %r denied tool %r (deny_tools)", app_id, tool_name)
+        return False
+
     return True

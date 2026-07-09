@@ -217,7 +217,7 @@ willow-mcp worker            # Kart queue drainer
 | `bundle/` seeds | **done** (minimal) |
 | Specialist registry schema + seed | **done** — `specialist-registry.md`, `bundle/config/specialists.json` |
 | Agent seed schema (`agent_seed_v1`) | **draft** — `agent-seed.md`, `agent-seed-template.json`; `$WILLOW_HOME/seeds/` |
-| Registry → manifest compile + gate deny_tools | **not started** |
+| Registry → manifest compile + gate deny_tools | **done** — `registry.py`, `willow-mcp compile-agents` |
 | `projects/` + DAG tools | S6 |
 | `packages/` loader | future |
 | `ledgers/` writer | future |

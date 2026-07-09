@@ -23,6 +23,7 @@ Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 
 ```bash
 willow-mcp-init    # scaffold $WILLOW_HOME (idempotent)
+willow-mcp compile-agents   # compile manifests from specialists registry
 ```
 
 Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (LOCKED).

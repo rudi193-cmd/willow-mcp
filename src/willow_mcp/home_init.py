@@ -19,16 +19,14 @@ from .paths import (
     all_layout_dirs,
     bundle_dir,
     layout_version_path,
-    mcp_app_dir,
     persona_envelopes_path,
     personas_dir,
     rotation_path,
     seeds_dir,
-    specialists_config_path,
     settings_global_path,
     willow_home,
 )
-from .human_session import ORCHESTRATOR_APP_ID
+from .registry import compile_manifests, load_registry
 
 _DEFAULT_ROSTER: dict[str, Any] = {
     "format": "agent_roster_v1",
@@ -66,76 +64,6 @@ _DEFAULT_ROTATION: dict[str, Any] = {
     "providers": {},
 }
 
-_DEFAULT_WILLOW_MANIFEST: dict[str, Any] = {
-    "app_id": ORCHESTRATOR_APP_ID,
-    "human_only": True,
-    "role": "orchestrator",
-    "permissions": ["orchestrator", "dispatch_read", "context", "store_read", "knowledge_read"],
-    "store_scope": ["willow_*", "projects_*"],
-}
-
-
-def _load_bundle_specialists() -> dict[str, Any]:
-    path = bundle_dir() / "config" / "specialists.json"
-    if not path.is_file():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _manifest_from_registry_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "app_id": row["agent_id"],
-        "human_only": bool(row.get("human_only", False)),
-        "role": row.get("role", ""),
-        "permissions": list(row.get("permissions") or []),
-        "store_scope": list(row.get("store_scope") or []),
-    }
-
-
-def _copy_bundle_file_if_missing(src: Path, dest: Path) -> bool:
-    if not src.is_file() or dest.exists():
-        return False
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
-    return True
-
-
-def _materialize_registry() -> dict[str, list[str]]:
-    """Copy specialists registry, personas, seed template, and per-agent manifests."""
-    created: list[str] = []
-    registry = _load_bundle_specialists()
-    if registry and _write_json_if_missing(specialists_config_path(), registry):
-        created.append(str(specialists_config_path().relative_to(willow_home())))
-
-    personas_copied = _copy_bundle_tree("personas", personas_dir())
-    seeds_copied: list[str] = []
-    seed_tpl = bundle_dir() / "seeds" / "agent-seed-template.json"
-    seed_dest = seeds_dir() / "agent-seed-template.json"
-    if _copy_bundle_file_if_missing(seed_tpl, seed_dest):
-        seeds_copied.append(str(seed_dest.relative_to(willow_home())))
-
-    manifests_created: list[str] = []
-    rows: list[dict[str, Any]] = list(registry.get("specialists") or [])
-    orch = registry.get("orchestrator_seat")
-    if isinstance(orch, dict):
-        rows.append(orch)
-
-    for row in rows:
-        agent_id = row.get("agent_id")
-        if not agent_id:
-            continue
-        manifest_path = mcp_app_dir(str(agent_id)) / "manifest.json"
-        manifest = _manifest_from_registry_row(row)
-        if _write_json_if_missing(manifest_path, manifest):
-            manifests_created.append(str(manifest_path.relative_to(willow_home())))
-
-    return {
-        "registry_config_created": created,
-        "personas_copied": personas_copied,
-        "seeds_copied": seeds_copied,
-        "manifests_created": manifests_created,
-    }
-
 
 def _write_json_if_missing(path: Path, data: dict) -> bool:
     if path.exists():
@@ -165,6 +93,40 @@ def _copy_bundle_tree(subdir: str, dest: Path) -> list[str]:
     return copied
 
 
+def _copy_bundle_file_if_missing(src: Path, dest: Path) -> bool:
+    if not src.is_file() or dest.exists():
+        return False
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    return True
+
+
+def _materialize_registry() -> dict[str, list[str]]:
+    """Copy specialists registry, personas, seed template, and per-agent manifests."""
+    from .paths import specialists_config_path
+
+    created: list[str] = []
+    bundle_registry = load_registry(prefer_home=False)
+    if bundle_registry and _write_json_if_missing(specialists_config_path(), bundle_registry):
+        created.append(str(specialists_config_path().relative_to(willow_home())))
+
+    personas_copied = _copy_bundle_tree("personas", personas_dir())
+    seeds_copied: list[str] = []
+    seed_tpl = bundle_dir() / "seeds" / "agent-seed-template.json"
+    seed_dest = seeds_dir() / "agent-seed-template.json"
+    if _copy_bundle_file_if_missing(seed_tpl, seed_dest):
+        seeds_copied.append(str(seed_dest.relative_to(willow_home())))
+
+    compile_result = compile_manifests(load_registry(), only_missing=True)
+
+    return {
+        "registry_config_created": created,
+        "personas_copied": personas_copied,
+        "seeds_copied": seeds_copied,
+        "manifests_created": compile_result.get("written") or [],
+    }
+
+
 def ensure_home_layout(home: Path | None = None) -> dict[str, Any]:
     """Create the locked product tree under $WILLOW_HOME. Safe to call repeatedly."""
     if home is not None:
@@ -191,10 +153,6 @@ def ensure_home_layout(home: Path | None = None) -> dict[str, Any]:
     review_q = willow_home() / "constitutional" / "review_queue.json"
     if _write_json_if_missing(review_q, {"format": "review_queue_v1", "items": []}):
         config_created.append(str(review_q.relative_to(willow_home())))
-
-    manifest_path = mcp_app_dir(ORCHESTRATOR_APP_ID) / "manifest.json"
-    if _write_json_if_missing(manifest_path, _DEFAULT_WILLOW_MANIFEST):
-        config_created.append(str(manifest_path.relative_to(willow_home())))
 
     registry_result = _materialize_registry()
     # orchestrator manifest may also be created by registry pass; dedupe in output

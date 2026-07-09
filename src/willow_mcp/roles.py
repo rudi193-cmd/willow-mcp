@@ -1,51 +1,37 @@
 """Canonical fleet roles — loader for specialist registry.
 
-Identity, mandate, and persona paths: docs/design/specialist-registry.md
-Tool permissions per role: NOT DECIDED — allow/deny lists below are legacy sketches only.
+Identity, mandate, permissions: docs/design/specialist-registry.md
+Tool policy: docs/design/permissions-matrix.md
 """
 
 from __future__ import annotations
 
-ROLE_ENVELOPES: dict[str, dict] = {
-    "willow": {
-        "title": "Orchestrator",
-        "job": "Own DAG, dispatch, verify, report to operator",
-        "not": "Implementation without envelope grant",
-    },
-    "hanuman": {
-        "title": "Builder",
-        "job": "Code, builds, tests, Kart — worktree + PR",
-        "not": "Direct master commits",
-        "allow_tools": ["task_submit", "task_status", "task_list", "context_save", "context_get"],
-        "deny_tools": ["kb_promote", "knowledge_ingest"],
-    },
-    "jeles": {
-        "title": "Head Librarian",
-        "job": "Retrieval, citation, sourced synthesis, KB verification",
-        "not": "Designer, builder, ADR author",
-        "allow_tools": ["knowledge_search", "kb_at", "handoff_write_v4", "context_save", "context_get"],
-        "deny_tools": ["task_submit", "knowledge_ingest", "kb_journal", "kb_promote"],
-    },
-    "loki": {
-        "title": "Auditor",
-        "job": "Gap analysis, adversarial review, specific findings",
-        "not": "Build, KB writes",
-        "allow_tools": ["knowledge_search", "kb_at", "handoff_write_v4", "context_save", "context_get"],
-        "deny_tools": ["task_submit", "knowledge_ingest", "knowledge_ingest", "store_put", "store_update"],
-    },
-    "ada": {
-        "title": "Keeper of Quiet Uptime",
-        "job": "Monitor-first, diagnostics, Almanac reachability",
-        "not": "Change agent",
-        "allow_tools": ["fleet_health", "fleet_status", "diagnostic_summary", "handoff_write_v4"],
-        "deny_tools": ["task_submit", "store_put", "store_update", "knowledge_ingest"],
-    },
-}
+from .registry import iter_registry_rows, load_registry
 
 VALID_STATUSES = frozenset({
     "pending", "working", "complete", "verified", "cleared", "closed", "failed",
 })
 
 
+def _row_as_role_info(row: dict) -> dict:
+    return {
+        "title": row.get("display_name") or row.get("agent_id", ""),
+        "job": row.get("job", ""),
+        "not": row.get("not_job", ""),
+        "allow_tools": list(row.get("permissions") or []),
+        "deny_tools": list(row.get("deny_tools") or []),
+    }
+
+
 def role_info(role: str) -> dict | None:
-    return ROLE_ENVELOPES.get((role or "").lower())
+    """Lookup by agent_id or primary role tag."""
+    key = (role or "").strip().lower()
+    if not key:
+        return None
+    for row in iter_registry_rows(load_registry()):
+        agent_id = str(row.get("agent_id", "")).lower()
+        primary = str(row.get("role", "")).lower()
+        roles = [str(r).lower() for r in (row.get("roles") or [])]
+        if key in (agent_id, primary) or key in roles:
+            return _row_as_role_info(row)
+    return None

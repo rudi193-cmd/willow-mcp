@@ -1,7 +1,7 @@
 # Specialist registry — schema (DRAFT)
 
 *Status: **DRAFT** — 2026-07-09*  
-*Permissions per role: **NOT DECIDED** — placeholders only; do not treat as policy.*
+*Permissions: **RATIFIED** — see `permissions-matrix.md`; compiled via `willow-mcp compile-agents`.*
 
 Companion: `agent-seed.md` · `pgp-and-persona.md` · `human-orchestrator.md` · `product-layout.md` · `session-lifecycle.md`
 
@@ -32,8 +32,8 @@ Today this is scattered across `roles.py`, `agent_roster.json`, `persona_envelop
 | **Display** | `display_name` | — | Human label: "Hanuman", "Jeles". |
 | **Roles** | `roles` | Roles | Tag list for routing, envelopes, meta.json. Primary in `role`. |
 | **Role (primary)** | `role` | — | Single default for packets: `builder`, `auditor`, `librarian`, … |
-| **Tool permissions** | `permissions` | Tool use | Gate permission groups. **⚠️ NOT DECIDED — TBD per role.** |
-| **Deny tools** | `deny_tools` | — | Explicit tool denials overlay. **⚠️ NOT DECIDED — TBD per role.** |
+| **Tool permissions** | `permissions` | Tool use | Gate permission groups. See `permissions-matrix.md`. |
+| **Deny tools** | `deny_tools` | — | Explicit tool denials overlay (wins over allows). |
 | **Persona file** | `persona_path` | Persona | Path to voice `.md` (relative to bundle or `$WILLOW_HOME/personas/`). |
 | **Persona preload** | `persona_bundle` | — | Copy into wheel bundle on publish. |
 | **Entry mode** | `entry_mode` | — | Default `dispatch`; `human` allowed for freeform resume. |
@@ -71,10 +71,9 @@ role       primary tag        one default per packet
 
 ---
 
-## 4. Specialist rows (identity + mandate — permissions TBD)
+## 4. Specialist rows (identity + mandate)
 
-> **Operator note:** `permissions`, `deny_tools`, and `store_scope` below are **structural placeholders**.
-> Values like `dispatch_write` in examples illustrate the schema only — **not ratified policy**.
+> Policy: `permissions-matrix.md`. Registry seed: `bundle/config/specialists.json`.
 
 ### Core five (+ extended fleet identities)
 
@@ -87,18 +86,14 @@ role       primary tag        one default per packet
 | EMISSARY | `skirnir` | Skirnir | gate, witness | `personas/skirnir.md` | Gate-witness, emissary | — |
 | ARCHITECT | `vishwakarma` | Vishwakarma | architect, safe | `personas/vishwakarma.md` | SAFE / app-store architecture | Implementation default |
 
-### Permissions (explicitly undecided)
+### Permissions (ratified 2026-07-09)
 
-| Name | `permissions` | `deny_tools` | `store_scope` |
-|------|---------------|--------------|---------------|
-| hanuman | **TBD** | **TBD** | **TBD** |
-| loki | **TBD** | **TBD** | **TBD** |
-| jeles | **TBD** | **TBD** | **TBD** |
-| ada | **TBD** | **TBD** | **TBD** |
-| skirnir | **TBD** | **TBD** | **TBD** |
-| vishwakarma | **TBD** | **TBD** | **TBD** |
+See **`permissions-matrix.md`** for the full allow/deny/scope table. Compile after edits:
 
-When decided: update registry → recompile manifests → sign with operator PGP fingerprint.
+```bash
+willow-mcp compile-agents          # missing manifests only
+willow-mcp compile-agents --force  # overwrite all
+```
 
 ---
 
@@ -238,11 +233,11 @@ session_enter(hanuman, session_id)
 |-------|-------------|------------|
 | S-R1 | This doc + JSON schema `specialist_registry_v1` | — |
 | S-R2 | `config/specialists.json` seed (identity/mandate only; empty permissions) | — |
-| S-R3 | `compile-agents` → manifests | permissions decision |
+| S-R3 | `compile-agents` → manifests | **done** |
 | S-R4 | PG table + seed migration | permissions decision |
 | S-R5 | `session_enter` loads `persona_path` from registry | bundle personas |
 | S-R6 | `specialist_list` / `specialist_get` MCP tools | — |
-| S-R7 | Gate enforces registry `permissions` | **permissions decision** |
+| S-R7 | Gate enforces registry `permissions` + `deny_tools` | **done** |
 
 ---
 
@@ -259,7 +254,7 @@ session_enter(hanuman, session_id)
 
 ## 13. Open decisions (operator)
 
-1. **Permissions per role** — not decided; blocks S-R3, S-R4, S-R7.
+1. ~~**Permissions per role**~~ — ratified in `permissions-matrix.md` (2026-07-09).
 2. **Registry source of truth** — JSON in `$WILLOW_HOME` vs PG-primary vs repo-tracked bundle.
 3. **Default bundle** — core five only vs full extended fleet in product wheel.
 4. **User persona overlays** — allowed on charter only vs all projects.
