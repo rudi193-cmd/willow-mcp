@@ -77,6 +77,9 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `context_get` | Read a saved context; `expired` (and purged) once its TTL passes |
 | `context_list` | List your saved context keys and expiry times (expired ones skipped) |
 | `context_expire` | Delete a saved context before its TTL |
+| `integration_list` | The integration ledger: every outbound adapter, live or **declared stub**, with credential *source* (never the value) |
+| `integration_status` | Offline readiness readout for one adapter — live/stub, credential presence, and whether the egress gate would pass. No network call |
+| `integration_call` | Call an external API through a registered adapter — behind the three-key egress gate, keyed on `integration_net` (own line, never implied by `task_net` or `full_access`) |
 | `receipts_tail` | Read your own most-recent tool-call receipts — a self-audit trail scoped to your `app_id` |
 | `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/worker/consent/egress-lease/env health, with a verdict and named fixes. Ungated — see below |
 
@@ -122,6 +125,69 @@ silently, and **deleting it does not keep it gone** — the next save recreates 
 If the two disagree, `diagnostic_summary` reports an error naming both values
 rather than quietly obeying one of them (B-30).
 
+#### `gates` — every gate, on/off, egress-lease shaped
+
+Diagnosing a denial today means knowing which of a dozen-plus gates to check
+and which file or CLI command controls it. `willow-mcp gates` shows all of
+them at once, each rendered the way the egress lease already renders
+itself — on/off, plus how long the "on" is good for:
+
+```console
+$ willow-mcp gates                    # every app under mcp_apps/
+$ willow-mcp gates myapp              # scoped to one app
+$ willow-mcp gates --html             # writes ./willow-gates.html, a live-countdown snapshot
+$ willow-mcp gates --json             # raw rows, for scripting
+```
+
+Every row that has an existing operator-only local CLI to flip it (the
+egress lease, an identity binding) prints that exact command. Manifest
+permission groups — which had no CLI before, only hand-editing
+`manifest.json` or regenerating it via `compile-agents` — get a new pair for
+the same purpose:
+
+```console
+$ willow-mcp allow-permission myapp store_read
+$ willow-mcp deny-permission myapp store_read
+```
+
+Both are local-CLI-only, never MCP tools, for the same reason `grant-net`
+isn't: an agent must never be able to grant itself a permission it was just
+denied. `consent.*` rows never show a command — willow-mcp only reads that
+policy (see above) — and `strict_trust_root` / severance /
+human-orchestrator attestation are environment variables read once at
+process start, so their rows name the env var to set and restart with,
+rather than pretending a live toggle exists.
+
+`task_net` and `integration_net` both show up as their own capability rows
+(neither is folded into `full_access`), and both are authorized by the same
+per-app egress lease below them — one `grant-net`/`revoke-net` covers Kart
+sandbox egress and server-process integration calls together, since a lease
+is scoped to the app, not to which capability is asking.
+
+#### `tree` — the integration seam for a real dashboard
+
+`docs/design/*.html` sketches a client UI as a tree — trunk (overall
+health), sap (task queue), canopy (agent fleet), roots (SOIL store), rings
+(schema-mapping confirmation), leaves (knowledge atoms), litter (activity
+log), and stomata (the gates above). `willow-mcp tree` is what makes that
+real: one call that returns every part in that same shape, instead of a
+dashboard assembling `fleet_status`/`fleet_health`/`kb_startup_continuity`/
+`receipts_tail`/`gates` itself.
+
+```console
+$ willow-mcp tree myapp              # short text summary
+$ willow-mcp tree myapp --json       # full data, for a real dashboard to consume
+```
+
+It's a thin CLI wrapper over `willow_mcp.tree_view.build_tree(app_id)`,
+which a Python dashboard can also import and call directly. `sap`, `canopy`,
+and `leaves` go through the same `@_guarded` MCP tool functions a client
+would reach over the protocol — gating, rate limiting, and receipt logging
+all still apply — and degrade to `{"error": "postgres_unavailable"}` with no
+database configured, same as those tools already do. `roots`, `rings`,
+`litter`, and `stomata` read local SQLite/filesystem state directly, so they
+work with no Postgres at all.
+
 #### The residual, stated plainly
 
 On a host where the agent and the MCP server run as the same uid, the agent can
@@ -141,6 +207,32 @@ Strict mode is **off by default** because turning it on before that separation
 exists would deny egress on every current install. This is tracked as B-32 in
 `docs/BUGS.md`; requesting egress and confirming it are separate authorities, and
 until the filesystem says so, only convention does.
+
+### Integrations (outbound adapters)
+
+`integration_call` lets the **server process** call external HTTP APIs through
+registered adapters — a second egress lane, beside the Kart sandbox's. It uses
+the same three-key gate, but keyed on its **own** capability, `integration_net`:
+the server egresses as its own uid with its own filesystem view, a strictly more
+privileged lane than the network-namespaced sandbox, so `task_net` never implies
+it (and vice versa). `integration_call` itself is also excluded from
+`full_access` — even the attempt surface is opt-in.
+
+Adapters are **earned, not scaffolded**. Two are live (`github`,
+`huggingface`); six are *declared stubs* (`gmail`, `slack`, `notion`,
+`google-drive`, `datadog`, `jira`) that refuse fail-closed, each naming what it
+needs and what earns its implementation. `integration_list` is the ledger — see
+[`docs/design/integrations.md`](docs/design/integrations.md) for the earn rule.
+
+Credentials resolve environment-variable-first (e.g. `WILLOW_GITHUB_TOKEN`,
+then `GITHUB_TOKEN`), then the vault under `integration/<name>/token`. No tool
+ever returns a credential — only its *source*.
+
+```console
+$ willow-mcp-integrations list                # the ledger, live + stubs
+$ willow-mcp-integrations check github --app-id myapp   # offline: creds? keys? no network call
+$ willow-mcp-integrations set-token github   # prompted + hidden, stored in the vault
+```
 
 ### Running the task worker
 

@@ -94,6 +94,17 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "gap_write": frozenset({
         "gap_log", "gap_resolve",
     }),
+    "integration_read": frozenset({
+        "integration_list", "integration_status",
+    }),
+    # integration_call is its own group and deliberately NOT in full_access:
+    # it is the only tool whose entire purpose is server-process egress, so it
+    # is granted on its own line — same spirit as NET_PERMISSION below. (The
+    # actual egress still needs the integration_net capability + consent +
+    # lease; this keeps even the *attempt* surface opt-in.)
+    "integration_call": frozenset({
+        "integration_call",
+    }),
     # Landing a gap as trusted knowledge is a more consequential act than
     # logging or resolving one, so it's gated as its own group rather than
     # folded into gap_write — same reasoning as schema_admin below.
@@ -134,6 +145,8 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "receipts_tail",
         # Gap backlog
         "gap_log", "gap_list", "gap_resolve", "gap_promote",
+        # Integrations (read-only ledger; integration_call stays own-line)
+        "integration_list", "integration_status",
     }),
 }
 
@@ -147,6 +160,14 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
 # silently carries net access with it (B-19; same spirit as B-14's trust-root
 # separation).
 NET_PERMISSION = "task_net"
+
+# Same shape, different lane: NET_PERMISSION authorizes egress from inside the
+# network-namespaced Kart sandbox; INTEGRATION_NET_PERMISSION authorizes the
+# server process itself calling out via integration adapters — a strictly more
+# privileged lane (server uid, full filesystem view), so holding one must never
+# imply the other. Checked by integrations.egress_denial alongside
+# consent.internet and a live lease (the same three-key gate task_submit uses).
+INTEGRATION_NET_PERMISSION = "integration_net"
 
 
 def _load_manifest(app_id: str) -> Optional[dict]:

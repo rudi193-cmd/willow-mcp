@@ -20,7 +20,7 @@ them.
 | `willow-linux-ricer.html` | Tiling-WM / r/unixporn dotfiles | Catppuccin Mocha, Polybar-style top bar with workspace pips, a neofetch-style summary block, thin borders, sharp corners. Environment as identity. |
 | `willow-mac-native.html` | Mac user, platform-as-promise | SF Pro/SF Mono, traffic-light chrome, sidebar vibrancy blur, full light **and** dark themes (this audience notices immediately if dark mode is naive or missing). Trust through polish. |
 | `willow-windows-mmc.html` | Enterprise IT / Windows admin | Classic MMC three-pane console (tree / details / actions), Segoe UI, Fluent-light palette, ListView-style tables. Looks managed, not personal. |
-| `willow-saas-dashboard.html` | Funded-startup SaaS | Vercel/Linear house style — near-black, one accent color, `rounded-lg` cards, tabular-nums stat tiles. The one file where that look is the deliberate target, not the cliché to avoid. |
+| `willow-saas-dashboard.html` | Funded-startup SaaS | Vercel/Linear house style — near-black, one accent color, `rounded-lg` cards, tabular-nums stat tiles. The one file where that look is the deliberate target, not the cliché to avoid. Also the second file (after `willow-dev-tui.html`) with an **Egress** card for the stomata/gates layer — see `ui-concepts.md`. |
 | `willow-vim-buffer.html` | Vim/Emacs power user | Gruvbox dark, near-zero chrome, a line-number gutter, all state packed into one inverted bottom statusline. Decoration reads as condescending to this audience. |
 | `willow-bbs-ansi.html` | Dial-up BBS / ANSI art culture | Full 16-color ANSI palette on black, numbered SYSOP-voiced main menu, CRT scanline overlay, a skippable connect-handshake sequence. Warmth through obsolescence. |
 
@@ -34,3 +34,16 @@ that's the one persona that would treat a missing dark mode as a defect.
 Same use case as the first pair: not a spec, a palette/chrome/information-
 density menu to pull ideas from when a real client UI direction gets
 picked.
+
+## Known gap: stomata / the gates layer
+
+`willow-dev-tui.html` and `willow-saas-dashboard.html` are the only two of
+the ten mockups with a slot for authorization state (consent, `task_net`,
+egress leases, manifest permissions — collectively "stomata," see
+`ui-concepts.md`). The other eight — SCO/CDE, Turbo C++/DOS, the ricer, Mac,
+Windows MMC, Vim, BBS, and the general-audience file — predate `willow-mcp
+gates` and don't represent it at all. That's a real hole, not a stylistic
+choice: an operator using any of those eight personas today would have no
+visual answer to "is this app allowed to do the thing it's trying to do, and
+for how long." Worth closing the same way the first two were, when one of
+these personas is picked for real.
