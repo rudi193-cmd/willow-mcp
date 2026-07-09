@@ -15,7 +15,7 @@ from .seed_loader import SEED_FORMAT, load_agent_seed, load_seed_document, seed_
 # Flat SOIL collection mirroring docs/design/agent-seed.md § agents/seeds
 MIRROR_COLLECTION = "willow_agents_seeds"
 
-_SLICE_PRESETS = frozenset({"full", "voice_only", "work_context"})
+SLICE_PRESETS = frozenset({"full", "voice_only", "work_context"})
 
 
 def _utc_now() -> str:
@@ -53,8 +53,8 @@ def apply_slice(data: dict[str, Any], slice_name: str) -> dict[str, Any]:
 def build_mirror_record(agent_id: str, *, slice_name: str = "full") -> dict[str, Any]:
     """Build mirror payload from home canonical seed (does not write store)."""
     key = (agent_id or "").strip()
-    if slice_name not in _SLICE_PRESETS:
-        return {"ok": False, "error": f"unsupported slice: {slice_name}", "allowed": sorted(_SLICE_PRESETS)}
+    if slice_name not in SLICE_PRESETS:
+        return {"ok": False, "error": f"unsupported slice: {slice_name}", "allowed": sorted(SLICE_PRESETS)}
 
     loaded = load_agent_seed(key)
     if not loaded.get("present"):
