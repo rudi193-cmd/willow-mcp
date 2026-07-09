@@ -404,6 +404,66 @@ def test_prune_keeps_more_recent_among_equal_counts(lessons_store, monkeypatch):
     assert "f" in survivors and "a" not in survivors
 
 
+# ── citation-vs-prose (the exact-name content trap) ──────────────────────
+
+_CITATIONS = [
+    "Cormen, T. et al. (2001). Introduction to Algorithms, 2nd ed. MIT Press. OCLC#47297975.",
+    "Shannon, C. (1948). A Mathematical Theory of Communication. Bell Sys. Tech. J. 27:379-423.",
+]
+_PROSE = [
+    "A comprehensive treatment of modern algorithms including divide and conquer, dynamic "
+    "programming, and graph methods, with rigorous proofs of correctness and running-time bounds.",
+    "Establishes the mathematical foundations of information theory, introducing entropy as a "
+    "measure of information and the noisy-channel coding theorem that underpins digital communication.",
+]
+
+
+def test_classify_shape_reference_vs_prose():
+    assert sp.classify_shape(_CITATIONS) == "reference"
+    assert sp.classify_shape(_PROSE) == "prose"
+
+
+def test_short_or_ambiguous_freetext_stays_freetext():
+    # The guard: don't mislabel ordinary short freetext as prose/reference.
+    assert sp.classify_shape(["settlement OK: 4,182 txns posted to the ledger today"]) == "freetext"
+    assert sp.classify_shape(["Interlibrary Loan / MIT Libraries", "Bell Labs microfiche"]) == "freetext"
+
+
+# A knowledge table where the exact-named `content` column holds CITATIONS and
+# the real body is in `abstract` — the design doc's marquee trap.
+_KNOW_TRAP_COLUMNS = {
+    "rec_no": "integer", "accession": "character varying",
+    "content": "text", "abstract": "text", "subj": "character varying",
+}
+_KNOW_TRAP_ROWS = [
+    (1, "ACC-1", _CITATIONS[0], _PROSE[0], "Computer Science"),
+    (2, "ACC-2", _CITATIONS[1], _PROSE[1], "Information Theory"),
+]
+
+
+def test_content_citation_trap_is_finally_caught():
+    conn = _FakeSQLConn(_KNOW_TRAP_COLUMNS, _KNOW_TRAP_ROWS)
+    cols = sp.introspect(conn, "knowledge")
+    fields = sp.propose_mapping(cols, KNOW_CANON)  # content -> content (exact, the trap)
+    refined = sp.refine_with_data(conn, "knowledge", fields, KNOW_CANON, columns=cols)
+    assert refined["shapes"]["content"] == "reference"
+    assert refined["shapes"]["abstract"] == "prose"
+    trap = [s for s in refined["suggestions"] if s["field"] == "content"]
+    assert trap and trap[0]["severity"] == "trap"
+    assert trap[0]["suggested_column"] == "abstract"
+
+
+def test_correct_content_column_does_not_false_trap():
+    # If `content` actually holds the prose body, no trap should fire.
+    cols_ok = {"rec_no": "integer", "content": "text", "subj": "character varying"}
+    rows_ok = [(1, _PROSE[0], "Computer Science"), (2, _PROSE[1], "Information Theory")]
+    conn = _FakeSQLConn(cols_ok, rows_ok)
+    cols = sp.introspect(conn, "knowledge")
+    fields = sp.propose_mapping(cols, KNOW_CANON)
+    refined = sp.refine_with_data(conn, "knowledge", fields, KNOW_CANON, columns=cols)
+    assert [s for s in refined["suggestions"] if s["field"] == "content"] == []
+
+
 def test_legacy_v1_store_is_read_and_upgraded(lessons_store):
     # An old int-valued store must load and keep working, then upgrade on write.
     import json

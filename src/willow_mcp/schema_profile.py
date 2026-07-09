@@ -315,20 +315,23 @@ _IDENTIFIER_RE = re.compile(r"[A-Za-z]{0,10}[-_]?\d{1,12}$")
 # Shapes each canonical field is expected to carry. A column whose sampled shape
 # is outside this set (and non-empty) is a mismatch worth flagging.
 _EXPECTED_SHAPES: dict[str, frozenset] = {
-    "task": frozenset({"command", "freetext"}),
+    "task": frozenset({"command", "freetext", "prose"}),
     "task_id": frozenset({"identifier", "integer"}),
     "status": frozenset({"flag", "enum"}),
     "steps": frozenset({"integer"}),
     "created_at": frozenset({"timestamp"}),
     "completed_at": frozenset({"timestamp"}),
     "agent": frozenset({"enum", "identifier"}),
-    "submitted_by": frozenset({"identifier", "enum", "freetext"}),
-    "result": frozenset({"freetext", "command"}),
-    # knowledge side
-    "content": frozenset({"freetext", "command"}),
+    "submitted_by": frozenset({"identifier", "enum", "freetext", "prose"}),
+    "result": frozenset({"freetext", "command", "prose", "reference"}),
+    # knowledge side. `content` is the one field that expects prose but NOT
+    # reference — a content column full of citations is the trap, so it flags.
+    # Everyone else accepts reference too (permissive), so splitting freetext
+    # never creates a NEW false mismatch for them.
+    "content": frozenset({"prose", "freetext", "command"}),
     "domain": frozenset({"enum", "identifier"}),
-    "source": frozenset({"enum", "identifier", "freetext"}),
-    "tags": frozenset({"enum", "freetext"}),
+    "source": frozenset({"enum", "identifier", "freetext", "prose", "reference"}),
+    "tags": frozenset({"enum", "freetext", "prose"}),
 }
 
 
@@ -344,6 +347,47 @@ def _looks_command(s: str) -> bool:
     if _SCRIPT_EXT_RE.search(s):
         return True
     return bool(_PATH_FLAG_RE.search(s))
+
+
+# Citation-vs-prose signals — the last trap the earlier passes couldn't see: a
+# `content` column holding a bibliographic CITATION (short, structured) while the
+# real body prose lives in `abstract`. Both were generic `freetext`, so no
+# mismatch fired. These split freetext into `reference` and `prose` when
+# confident (else stay `freetext`), which lets `content` expect prose-not-
+# reference and finally flag the citation trap.
+_YEAR_PAREN = re.compile(r"\(\s*(1[89]\d\d|20\d\d)[a-z]?\s*\)")     # (2001), (1948)
+_PAGE_RANGE = re.compile(r"\b\d+\s*[-:]\s*\d+\b")                    # 379-423, 27:379
+_VOL_ISSUE = re.compile(r"\b\d+\(\d+\)")                             # 11(3), 13(6)
+_CITE_TOKENS = re.compile(
+    r"(\bpp?\.|\bvol\.?|\bno\.|\beds?\.|\bet al\.?|\bproc\.|\bOCLC|\bDOI|\bISBN|\bLoC\b|\bCACM\b|\bibid\b)",
+    re.I,
+)
+_FUNC_WORDS = frozenset({
+    "the", "of", "and", "that", "with", "for", "to", "a", "in", "is", "as",
+    "an", "on", "by", "are", "which", "from", "this", "its", "into",
+})
+
+
+def _looks_reference(s: str) -> bool:
+    """Short, structured bibliographic text — two-plus citation tells and not
+    long enough to be a body paragraph."""
+    if len(s) > 220:
+        return False
+    hits = sum(bool(rx.search(s)) for rx in (_YEAR_PAREN, _PAGE_RANGE, _VOL_ISSUE, _CITE_TOKENS))
+    return hits >= 2
+
+
+def _looks_prose(s: str) -> bool:
+    """Substantial running prose — long, many words, function-word rich, and not
+    digit-dense (which would signal a reference/record rather than a paragraph)."""
+    if len(s) < 120:
+        return False
+    toks = re.findall(r"[a-z]+", s.lower())
+    if len(toks) < 18:
+        return False
+    func = sum(1 for t in toks if t in _FUNC_WORDS)
+    digit_ratio = sum(c.isdigit() for c in s) / len(s)
+    return func >= 3 and digit_ratio < 0.05
 
 
 def classify_shape(values: list, data_type: Optional[str] = None) -> str:
@@ -376,6 +420,13 @@ def classify_shape(values: list, data_type: Optional[str] = None) -> str:
         return "identifier"
     if len(distinct) <= max(2, n // 2) and all(len(s) <= 16 and " " not in s for s in strs):
         return "enum"
+    # freetext, refined into reference/prose only on a clear majority — an
+    # ambiguous column stays plain freetext rather than being mislabeled.
+    half = max(1, (n + 1) // 2)
+    if sum(1 for s in strs if _looks_reference(s)) >= half:
+        return "reference"
+    if sum(1 for s in strs if _looks_prose(s)) >= half:
+        return "prose"
     return "freetext"
 
 

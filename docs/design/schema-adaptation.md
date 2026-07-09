@@ -489,7 +489,14 @@ bug into an allow-list-shaped design.
   §3.2) reads a sample of real values to FLAG a name-match whose data is the
   wrong kind, and — guarded by discriminating-shape + name-affinity + no column
   reuse — to HINT a replacement; on a shape-poor table it stays silent rather
-  than guessing. The learned store is **bounded** (`WILLOW_MCP_SCHEMA_LESSONS_MAX`,
+  than guessing. It classifies command / enum / flag / identifier / integer /
+  timestamp, and splits freetext into **reference** vs **prose** — which is what
+  finally catches the marquee trap: a `content` column holding a bibliographic
+  citation (short, year-in-parens, page ranges, `OCLC`/`DOI`) while the real body
+  prose sits in `abstract`. `content` is the one field that expects prose but not
+  reference, so it flags and points at the prose column; every other text field
+  accepts both, so the split adds no false mismatches. The learned store is
+  **bounded** (`WILLOW_MCP_SCHEMA_LESSONS_MAX`,
   default 5000 pairs): an open, churning column-name vocabulary would otherwise
   grow it without limit, so when it exceeds the cap it prunes by LFU with an
   LRU tie-break (fewest confirmations first, oldest-among-ties next), keeping the
