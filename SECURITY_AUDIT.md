@@ -366,7 +366,11 @@ exhaustion + missing-destructive patterns added to `kartikeya`'s `security_scan`
 (fork bomb / spin / disk-fill / `find / -delete` / raw-device write), verified
 against a live worker. (2) OPEN — a `memory.max`/`pids.max`/`cpu.max` cgroup cap
 on the sandbox child, the only defense for the non-pattern-detectable memory-hog
-class and any novel bomb the denylist misses.
+class and any novel bomb the denylist misses. Also DONE — willow-mcp's
+`task_submit` now runs `check_kart_task` at **submit time**, before any DB work,
+so a scanner-refused task is denied before it ever occupies a queue slot (the
+worker still re-scans at execution). Verified live: a fork bomb is refused at
+submit and creates no queue row.
 
 #### P3: L-CMD-01 — Kart scanner destructive-class gaps — OPEN (fix at source)
 

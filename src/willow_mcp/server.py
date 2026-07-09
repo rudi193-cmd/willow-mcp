@@ -757,7 +757,25 @@ def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = F
     permitted right now*, fleet-wide; the lease says *this app, until this time*.
     Only when all three hold is the Kart worker's `# allow_net` directive appended
     so the sandbox gets egress. No MCP tool can issue a lease.
+
+    Task text is security-scanned at SUBMIT time (defense-in-depth): a task the
+    Kart scanner would refuse — destructive, exfiltration, secret access, obfusc-
+    ation, or resource-exhaustion (fork bomb / spin / disk-fill) — is rejected
+    here before it ever occupies a queue slot, not only when the worker later
+    picks it up. The worker re-scans at execution regardless; this just denies
+    earlier and keeps a bomb from sitting `pending`.
     """
+    # Submit-time scan, before any DB work — a dangerous task is refused even if
+    # Postgres is down. kartikeya is a hard dependency, but degrade open (worker
+    # still scans) rather than crash the tool if it is somehow unimportable.
+    try:
+        from kartikeya import check_kart_task
+        blocked = check_kart_task(task or "")
+    except Exception:
+        blocked = None
+    if blocked:
+        return blocked
+
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
