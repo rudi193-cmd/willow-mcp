@@ -65,15 +65,30 @@ task_submit(app_id=..., task="echo hello", agent="kart")
 `task` is shell. Keep it a real command; the worker extracts and runs it in the
 sandbox. Returns a `task_id` for polling.
 
-## 2. The network model — and its footguns
+## 2. The network model — two keys, and its footguns
 
-Tasks run **network-isolated by default**. Egress is opt-in and gated:
+Tasks run **network-isolated by default**. Egress is opt-in and needs **two
+separate keys**, held at once (B-29):
 
-- To run with network access, pass **`allow_net=True`**. This requires the
-  **`task_net`** capability permission in the app's manifest. It is **not**
-  included in `task_queue` or `full_access` — it must be granted explicitly
-  (same separation as B-14/B-19). Without it, `allow_net=True` returns
-  `net_denied` before anything is written.
+| Key | Question it answers | Where it lives | Who turns it |
+|---|---|---|---|
+| `task_net` | *May this app ever request egress?* | `mcp_apps/<app>/manifest.json` | operator, granted once |
+| `consent.internet` | *Is egress permitted right now?* | `$WILLOW_HOME/settings.global.json` | operator, flipped freely |
+
+- Pass **`allow_net=True`**. Without the **`task_net`** capability you get
+  `net_denied`; with `task_net` but `consent.internet: false` you get
+  `consent_denied`. Neither writes anything first. `task_net` is **not** included
+  in `task_queue` or `full_access` — grant it explicitly (same separation as
+  B-14/B-19).
+- **Consent is read fail-closed.** No policy file, an unparseable one, or
+  `"internet": "true"` (a string) all read as **denied**. Absence is not consent.
+- Flipping `consent.internet` to `false` stops egress **fleet-wide**, instantly,
+  without editing a single manifest. That is the intended off switch — reach for
+  it rather than revoking capabilities one app at a time.
+- **An agent may request egress; it may never grant itself egress.** If you find
+  yourself about to write `task_net` into a manifest so that your own next call
+  succeeds, stop: that is the escalation the gate exists to prevent (B-32), and
+  `consent.internet` is deliberately not yours to flip.
 - **Do not hand-embed `# allow_net` or `# allow_localhost` lines in `task`
   text.** The Kart worker reads its network policy from exactly those directive
   lines, so it's tempting to add one directly — but the server **strips any
@@ -83,8 +98,9 @@ Tasks run **network-isolated by default**. Egress is opt-in and gated:
   permission-checked `allow_net=True` path; `# allow_localhost` cannot be
   self-granted at all. The PreToolUse hook warns if you try.
 
-So: **network = `allow_net=True` + `task_net` in the manifest. Never a directive
-in the task string.**
+So: **network = `allow_net=True` + `task_net` in the manifest + `consent.internet`
+from the operator. Never a directive in the task string, and never a manifest you
+edited yourself to make your own call succeed.**
 
 ## 3. Polling
 
@@ -105,6 +121,9 @@ between "queued, a worker will get to it" and "queued, nothing is listening."
 ## What this skill will not do
 
 It will not tell you to keep polling a `pending` task when `fleet_health` reports
-`stranded: true`, and it will not add a `# allow_net` directive to task text as a
+`stranded: true`. It will not add a `# allow_net` directive to task text as a
 shortcut around the `task_net` permission — that path is closed by design (B-21),
-and the correct move is to grant the permission.
+and the correct move is to ask the operator to grant the permission. And it will
+not edit a manifest or a consent file to make your own egress call succeed:
+requesting egress and confirming it are separate authorities, and you hold only
+the first.
