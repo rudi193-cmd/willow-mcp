@@ -33,13 +33,16 @@ def _validate_collection(collection: str) -> str:
 def collection_in_scope(collection: str, scope: Optional[list]) -> bool:
     """True if `collection` is allowed under a manifest's optional `store_scope`.
 
-    `scope=None` means unrestricted (today's default — the store is shared
-    with the wider Willow fleet via WILLOW_STORE_ROOT by design, see README's
-    "share data" note, so unscoped apps keep seeing everything they always
-    could; this is opt-in isolation, not a retroactive lockdown). A pattern
-    ending in "*" matches by prefix (e.g. "myapp_*"); otherwise it's an exact
-    match. Empty list means "no collections" (deny-all), not "unrestricted" —
-    callers that want unrestricted must omit the field entirely.
+    `scope=None` means unrestricted *within this install's own store* — unscoped
+    apps keep seeing everything they always could; this is opt-in isolation, not
+    a retroactive lockdown. Which store that is depends on WILLOW_STORE_ROOT: an
+    install may share the wider fleet's store or hold its own, and
+    `diagnostic_summary`'s `severance` check reports which. Sharing is a default,
+    not a design commitment — an unscoped grant's blast radius is whatever store
+    this process resolved. A pattern ending in "*" matches by prefix (e.g.
+    "myapp_*"); otherwise it's an exact match. Empty list means "no collections"
+    (deny-all), not "unrestricted" — callers that want unrestricted must omit the
+    field entirely.
     """
     if scope is None:
         return True
@@ -213,7 +216,9 @@ class Store:
         """Search every collection, or only those matching `scope` if given.
 
         `scope=None` preserves today's default: search everything under this
-        store root, including collections shared with the wider fleet. Pass a
+        store root — which is the wider fleet's store unless WILLOW_STORE_ROOT
+        says otherwise, so the reach of an unscoped search is whatever store this
+        process resolved (`diagnostic_summary`'s `severance` check). Pass a
         manifest's `store_scope` list to confine an app's search_all to the
         same collections its other store_* calls are restricted to.
         """

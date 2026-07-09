@@ -181,9 +181,10 @@ def store_scope(app_id: str) -> Optional[list]:
 
     Three outcomes, and the difference between them is the whole point:
 
-    * **Field absent, or explicitly `null` → `None` → unrestricted.** The store
-      is deliberately shared with the wider Willow fleet via WILLOW_STORE_ROOT,
-      so an app that never opted into isolation keeps seeing what it always saw.
+    * **Field absent, or explicitly `null` → `None` → unrestricted.** An app that
+      never opted into isolation keeps seeing what it always saw — every
+      collection in whatever store WILLOW_STORE_ROOT resolved to, which may or
+      may not be the wider fleet's (see `diagnostic_summary`'s `severance` check).
       An explicit `null` is a declaration of no policy, not a broken one.
     * **Field present and well-formed → that list.** Exact names and/or
       `prefix*` wildcards; `[]` denies everything.
