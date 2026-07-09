@@ -342,6 +342,8 @@ just ask to turn serve mode on or off.
 | `WILLOW_PG_DB` | `willow` | Postgres database name (serve mode won't see a shell `export` — see [serve env note](#turning-serve-mode-on-and-off)) |
 | `WILLOW_PG_USER` | `$USER` | Postgres user (Unix socket auth) |
 | `WILLOW_STORE_ROOT` | `~/.willow/store` | SQLite store directory — set to willow-2.0's store root to share data |
+| `WILLOW_MCP_FLEET_HOME` | *(unset)* | The fleet home this install claims to be **severed** from. Unset = no claim. See [Severance](#severance) |
+| `WILLOW_MCP_FLEET_PG_DB` | *(unset)* | The fleet database this install claims to be severed from |
 | `WILLOW_APP_ID` | `willow-mcp` | Default app_id if not passed per-call |
 | `WILLOW_HOME` | `~/.willow` | Root for manifests, vault, and identity bindings |
 | `WILLOW_MCP_HOST` | `127.0.0.1` | Serve-mode bind host (`--host` overrides) |
@@ -380,14 +382,20 @@ call also needs the operator's `consent.internet` and a live egress lease
 
 ### `store_scope` — confining an app to its own collections
 
-By default, `store_*` tools are **unrestricted across collections** — the
-SOIL store is deliberately shared with the wider Willow fleet (see
+By default, `store_*` tools are **unrestricted across collections** — and by
+default the SOIL store is the wider Willow fleet's store (see
 `WILLOW_STORE_ROOT` in [Configuration](#configuration) above), so an app with
 `store_read`/`store_write`/`full_access` can see every collection any other
 app or fleet process has written, the same way it always could. That's the
 right default for a single-operator, single-trust-domain install, but it
 means a `store_read` grant to one app is implicitly a grant to read every
 other app's data too.
+
+Sharing is a default, not a design commitment. An install that should be cut
+off from the fleet can point `WILLOW_STORE_ROOT` at its own store and name the
+fleet it is severed from — see [Severance](#severance) below, which turns the
+cut into something `diagnostic_summary` checks rather than something the docs
+assert.
 
 An operator who wants an app confined to its own data adds an optional
 `store_scope` array to that app's manifest:
@@ -415,6 +423,48 @@ is being found. Omit the field (or set it to `null`) to declare no policy.
 In [HTTP serve mode](#http-serve-mode-oauth), the `app_id` is not taken from
 the call — it is resolved from the caller's confirmed OAuth identity binding,
 then checked against that same manifest ACL.
+
+## Severance
+
+A willow-mcp install can share a Willow fleet's store, database, and trust root,
+or it can be cut off from them. Both are legitimate. What is not legitimate is
+*claiming* the cut and not having it — a server that reports `ok` while wired to
+the fleet is worse than one with no check at all.
+
+Severance is **asserted, never assumed.** Name the fleet you are severed from:
+
+```bash
+export WILLOW_MCP_FLEET_HOME=/home/you/github/.willow
+export WILLOW_MCP_FLEET_PG_DB=willow_20
+```
+
+`diagnostic_summary` then reports a `severance` check over three surfaces:
+
+| Surface | Kind | Violation |
+|---|---|---|
+| `store` | data | `WILLOW_STORE_ROOT` resolves inside the fleet home → `degraded` |
+| `postgres` | data | `WILLOW_PG_DB` is the fleet database → `degraded` |
+| `trust_root` | **authority** | `mcp_apps/` is inside the fleet home, or is writable by this process → `broken` |
+
+The distinction is the whole design. Store and database hold **data**: someone
+who writes them corrupts records. `mcp_apps/` holds **authority** — the manifest
+that grants `task_net`, the lease root, the consent file. Someone who writes
+*those* grants themselves the egress the cut was supposed to deny. Only the third
+can turn a severed install into a compromised one, so only it breaks the verdict.
+
+Consequently the trust root must live somewhere neither this process nor the Kart
+sandbox can write. A repo directory is the wrong place for it, however convenient:
+repos are bound read-write into task sandboxes. Put data in the repo; put the gate
+outside it, owned by a uid the agent does not run as.
+
+Symlinks are resolved before comparison. `~/.willow` is frequently a symlink into
+a fleet tree, and two names for one directory are not two directories.
+
+Leave both variables unset and the check reports `not_asserted` and changes
+nothing — a single-trust-domain install is complete without severance, and one
+that never claimed to be cut off cannot be caught lying about it. Set one and not
+the other and the unnamed surface reports `unknown`, which degrades: an
+unverifiable claim is not a passing one.
 
 ## Hooks and skills (Claude Code)
 
