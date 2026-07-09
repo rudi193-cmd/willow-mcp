@@ -297,7 +297,7 @@ Registry slice **S-R*** for permissions remains blocked until operator ratifies 
 | AS-4 | `sign-seed` CLI + `.sig` verify in loader | **done** |
 | AS-5 | SOIL `agents/seeds` mirror tool | **done** (`willow_agents_seeds` + `agent_seed_mirror`) |
 | AS-6 | `kb_ingest` slice promotion (`source_type: agent_seed`) | **done** |
-| AS-7 | `compile-persona` seed → `.md` | — |
+| AS-7 | `compile-persona` seed → `.md` | **done** (`willow-mcp-compile-persona`) |
 | AS-8 | Exposure picker + `exposure.json` | UI slice |
 
 ---
