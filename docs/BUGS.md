@@ -35,7 +35,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-27 | P3 | Fixed | packaging / docs | Three code paths told operators to `pip install willow-mcp[worker]` — an extra that **does not exist**; `kartikeya` has been a hard dependency since B-22, so the advice was unrunnable | found during B-26; this session |
 | B-28 | P3 | Open | schema / tasks | `completed_at` stays null on **failed** tasks. B-17's `set_task_completed_at()` trigger fires only on `NEW.status = 'completed'`, so a failed task never records when it finished (willow-mcp's own `mark_done` sets it correctly; the shared-DB trigger is the gap). Fix requires an `ALTER`/`CREATE OR REPLACE` on the shared fleet Postgres — **operator-gated**, not applied unilaterally | observed live, probe `1T8G5WG5`; follow-up to B-17 |
 | B-29 | P0 | Fixed | gate / consent | `allow_net` egress was gated **only** by the `task_net` manifest capability — the operator's standing `consent.internet` gated nothing. The fleet flag `consent_internet_gates_allow_net` was declared `implemented: false, status: deferred`, so the switch existed and was wired to nothing. Fixed: two-key gate (`task_net` **and** `consent.internet`), read fail-closed | egress-membrane design; FRANK `cc553729`; this session |
-| B-30 | P1 | Open | consent / config | The two consent files **disagree** and the one an operator would naturally edit is inert. `consent.json` says `internet: false, lan: false`; `settings.global.json` says `true, true`. `load_global_settings()` imports the legacy file only when the canonical one is *absent*, so the legacy values never applied. Operator-gated: willow-mcp does not author this policy | observed live; this session |
+| B-30 | P1 | Fixed | consent / config | The two consent files **disagreed** and the one an operator would naturally edit appeared inert. `consent.json` said `internet: false, lan: false`; `settings.global.json` said `true, true`. **First diagnosis was wrong:** `consent.json` is not a legacy leftover but a **write-only mirror** — `save_global_settings(sync_legacy=True)` (the default) and Grove's consent toggle both rewrite it on every save, while it is *read* only when the canonical file is absent. So it drifts silently and a delete does not stick. Resolved by re-syncing the mirror from canonical; the misleading "delete the legacy file" advice is gone from `diagnostic_summary` and `consent.py` | observed live; corrected 2026-07-09 |
 | B-31 | P1 | Open | consent / willow-2.0 | `global_settings.py` **fails open**: `DEFAULT_CONSENT` is all-`True`, and `_normalize_consent()` returns those defaults for any non-dict — a missing, truncated, or malformed consent block resolves to *all permitted*. Same inversion as B-25. willow-mcp now reads fail-closed independently; the writer is unfixed and out of this repo | cross-repo (willow-2.0); this session |
 | B-32 | P1 | Open | gate / sudo invariant | A **host-side agent can self-grant `task_net`** by writing the manifest with its own file tools, then use it. B-14 made `mcp_apps/` `bound_ro` to the *sandbox*; nothing constrains the host-side agent. This violates the sudo invariant (FRANK `90e52ab7`): *a model may REQUEST egress, never CONFIRM it — request and confirm are separate authorities*. **Mitigated, not closed:** egress is now a time-boxed operator-issued lease (`willow-mcp grant-net`, ≤3h, no MCP tool can mint one), the sandbox lane is closed outright, and `diagnostic_summary` names every key the process could forge. The host lane needs `chown` + `WILLOW_MCP_STRICT_TRUST_ROOT=1` — a deployment step, operator-gated | FRANK `90e52ab7`; §0.1/§0.3; L-NET-02; this session |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
@@ -53,23 +53,6 @@ log carries a one-line entry and points there rather than duplicating.
 | B-09 | P2 | Stale | gate | Silent fallback on missing SAP gate — `openclaw_sap_gate` gone in rewritten `gate.py` | L-AUTH-01 |
 
 ## Open
-
-- **B-30 · P1** — **the two consent files disagree, and the one you'd edit is
-  inert.** On this host:
-  ```
-  consent.json          (legacy)     internet: false,  lan: false
-  settings.global.json  (canonical)  internet: true,   lan: true
-  ```
-  `load_global_settings()` (willow-2.0) imports the legacy flat file **only when
-  the canonical file is absent** — a first-load migration. The canonical file is
-  present, so a hand-edited `internet: false` in `consent.json` has been read by
-  nothing and has overridden nothing. A file that looks exactly like the off
-  switch, doing nothing, is worse than no file. **Not resolved here:** both
-  values are plausible statements of operator intent and picking one is the
-  operator's call, not a side effect of a willow-mcp change. willow-mcp obeys the
-  canonical file and now raises the conflict as an **error**-severity `consent`
-  problem in `diagnostic_summary`, naming both values, so the inert file cannot
-  keep looking authoritative. Fix: reconcile the two, or delete the legacy file.
 
 - **B-31 · P1** — **willow-2.0's consent reader fails open.**
   ```python
@@ -181,6 +164,59 @@ log carries a one-line entry and points there rather than duplicating.
   failed rows have no recoverable completion time.
 
 ## Fixed
+
+- **B-30 · P1 (2026-07-09)** — **the two consent files disagreed, and the first
+  diagnosis of *why* was wrong.** On this host:
+  ```
+  consent.json          internet: false,  lan: false
+  settings.global.json  internet: true,   lan: true    <- governs
+  ```
+  **What this bug was originally recorded as:** a legacy flat file, imported by
+  `load_global_settings()` only when the canonical file is absent, therefore inert
+  — "a file that looks exactly like the off switch, doing nothing." The suggested
+  fix was *reconcile the two, or delete the legacy file.*
+
+  **What it actually is.** `consent.json` is a **mirror**, and a live one:
+  ```python
+  def save_global_settings(data, *, path=None, sync_legacy: bool = True) -> None:
+      ...
+      if sync_legacy:
+          _write_legacy_consent(out["consent"])     # rewritten on EVERY save
+  ```
+  Every caller in `global_settings.py` passes `sync_legacy=True`, and Grove's
+  settings pane (`panes/settings.py`) mirrors it on every consent toggle. So the
+  file is continuously **written** and almost never **read** — read only as the
+  canonical file's absent-fallback.
+
+  That asymmetry is the hazard, and it is a sharper one than "inert." A write-only
+  mirror **drifts silently**: hand-edit it and nothing reads your edit, nothing
+  corrects it, and it sits looking authoritative until some unrelated save quietly
+  overwrites it. The disagreement observed here was not a dead file — it was a
+  **stale mirror**, produced by a hand-edit that no subsequent save had yet clobbered.
+  And the advice to "delete the legacy file" was *wrong*: the next
+  `save_global_settings()` or Grove toggle recreates it. A delete that looks like a
+  fix and silently comes back is worse than no advice.
+
+  **Resolved** by re-syncing the mirror from the canonical block via willow-2.0's own
+  writer (`_write_legacy_consent(read_consent())`) — canonical untouched, effective
+  policy unchanged, `diagnostic_summary` back to `ok` with `disagreement: null`.
+  Note the one real consequence: `consent.json` is willow-mcp's fallback if
+  `settings.global.json` ever goes missing, and that fallback went from `false`
+  (deny) to `true` (permit). Consistent with the operator's stated intent, and
+  academic anyway given B-31 (willow-2.0's `DEFAULT_CONSENT` is all-`True`), but it
+  is a permission-raising side effect of a "cosmetic" repair and is recorded as one.
+
+  **Fixed in code, not just on this host:** `consent.py`'s header and `legacy_path()`
+  no longer describe the file as a leftover; `diagnostic_summary`'s `consent` problem
+  now says *stale mirror*, warns that deleting it will not keep it gone, and gives
+  the re-sync one-liner as the fix. The `error` severity stays — a divergence still
+  means one of the two files is lying about the operator's intent, and willow-mcp
+  still refuses to guess which.
+
+  **Lesson.** "Legacy" was a word in a docstring, believed without reading the
+  writer. The read path was checked; the write path was not. Same class as B-27
+  (`pip install willow-mcp[worker]` — an extra that never existed, believed because
+  it was written down).
 
 - **B-29 · P0 (this session)** — **operator consent gated nothing.** Egress was
   authorized solely by the `task_net` capability in an app's manifest. The

@@ -106,7 +106,11 @@ def test_settings_global_env_override_is_honoured(home, tmp_path, monkeypatch):
 # ── disagreement is surfaced, never resolved ─────────────────────────────────
 
 def test_disagreement_is_reported_not_resolved(home):
-    """The live bug: consent.json says off, settings.global.json says on."""
+    """The live bug: consent.json says off, settings.global.json says on.
+
+    B-30: the flat file is a *stale mirror*, not an inert leftover — willow-2.0
+    rewrites it on every save and reads it only as the canonical file's fallback.
+    """
     _canonical(home, internet=True, cloud_llm=True, lan=True)
     _legacy(home, internet=False, cloud_llm=True, lan=False)
     out = consent.read_consent()
@@ -115,6 +119,27 @@ def test_disagreement_is_reported_not_resolved(home):
     assert out["disagreement"]["legacy"] == {"internet": False, "lan": False}
     # canonical still governs — reporting the conflict does not change the answer
     assert consent.internet_permitted() is True
+
+
+def test_disagreement_fix_does_not_advise_deleting_the_mirror(home):
+    """B-30: `rm consent.json` looks like a fix and comes back on the next save.
+
+    Pinning the *advice*, not just the detection — the wrong remedy shipped in this
+    field once already, and a docstring is not a test.
+    """
+    from willow_mcp import server
+    _canonical(home, internet=True, cloud_llm=True, lan=True)
+    _legacy(home, internet=False, cloud_llm=True, lan=False)
+
+    problems = server._derive_problems(
+        {"status": "ok"}, {"status": "ok"}, {"status": "ok"}, "stdio",
+        None, consent.read_consent(), None,
+    )
+    [p] = [p for p in problems if p["check"] == "consent"]
+    assert p["severity"] == "error"
+    assert "mirror" in p["detail"]
+    assert "delete" not in p["fix"].lower()
+    assert "_write_legacy_consent" in p["fix"]     # the remedy that actually holds
 
 
 def test_agreement_reports_no_disagreement(home):

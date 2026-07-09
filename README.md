@@ -88,9 +88,12 @@ file, a non-boolean value (`"true"`, `1`), a lease past its deadline, a deadline
 with no timezone, or a lease record naming a *different* app than the file it sits
 in — all read as denied. Absence is not consent, and a name is not an identity.
 willow-mcp only reads the consent policy — it is authored by willow-2.0's
-`global_settings.py`. If the legacy `consent.json` and the canonical
-`settings.global.json` disagree, `diagnostic_summary` reports it as an error
-rather than quietly obeying one of them.
+`global_settings.py`. That module also keeps a flat `consent.json` **mirror**,
+rewritten on every save; willow-mcp reads it only when the canonical file is
+absent. Because it is written constantly and read almost never, it can drift
+silently, and **deleting it does not keep it gone** — the next save recreates it.
+If the two disagree, `diagnostic_summary` reports an error naming both values
+rather than quietly obeying one of them (B-30).
 
 #### The residual, stated plainly
 
