@@ -7,3 +7,7 @@ logs/
 *.log
 .env
 .venv/
+
+# Local sandbox: scaffolded WILLOW_HOME + ad-hoc MCP probe harness (runtime state, not source)
+.willow/
+.willow-probe/
