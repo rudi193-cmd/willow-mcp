@@ -15,7 +15,8 @@ Tools:
   Dispatch (FS):   dispatch_send, dispatch_read, dispatch_list, dispatch_accept,
                    handoff_write_v4, handoff_read, verify_handoff, agent_clear,
                    session_read, session_enter, session_handoff_write
-  Registry:        specialist_list, specialist_get, agent_seed_mirror
+  Registry:        specialist_list, specialist_get, agent_seed_mirror,
+                   exposure_config_get, exposure_slice
   Fleet (PG):      fleet_status, fleet_health
   Context (SQLite):context_save, context_get, context_list, context_expire
   Audit (SQLite):  receipts_tail
@@ -909,7 +910,7 @@ def kb_journal(
 def kb_ingest(
     app_id: str,
     agent_id: str,
-    slice: str = "work_context",
+    slice: str = "",
     sensitivity: str = "sensitive",
     tier: str = "canonical",
     supersede: bool = True,
@@ -917,7 +918,7 @@ def kb_ingest(
     """Promote a ratified agent_seed slice to Postgres KB (source_type: agent_seed).
 
     Requires ratified + trusted seed at $WILLOW_HOME/seeds/{agent_id}.json.
-    slice: voice_only | work_context | full (full denied for operator kind).
+    slice: voice_only | work_context | full (omit to use exposure.json default for kb_ingest).
     Never promotes persona.cast or context.personal_note.
     """
     from . import seed_kb as skb
@@ -1296,12 +1297,53 @@ def specialist_get(app_id: str, agent_id: str, include_permissions: bool = True)
 
 
 @mcp.tool()
+@_guarded("exposure_config_get")
+def exposure_config_get(app_id: str) -> dict:
+    """Read standing exposure defaults ($WILLOW_HOME/config/exposure.json, AS-8)."""
+    from . import exposure as exp
+    from .paths import exposure_config_path, willow_home
+
+    path = exposure_config_path()
+    cfg = exp.load_exposure_config()
+    return {
+        "format": exp.EXPOSURE_FORMAT,
+        "path": str(path.relative_to(willow_home())) if path.is_file() else None,
+        "exists": path.is_file(),
+        "config": cfg,
+    }
+
+
+@mcp.tool()
+@_guarded("exposure_slice")
+def exposure_slice(
+    app_id: str,
+    agent_id: str,
+    destination: str = "session_enter",
+    preset: str = "",
+    fields: list[str] | None = None,
+) -> dict:
+    """Resolve and apply an exposure preset for a seed destination (AS-8).
+
+    destination: session_enter | kb_ingest | agent_seed_mirror | grove | cloud_llm | dispatch.
+    preset: override standing default. fields: custom dotted paths (checkbox IDs).
+    """
+    from . import exposure as exp
+
+    return exp.build_exposure_slice(
+        agent_id,
+        destination=destination,
+        preset=preset,
+        fields=fields,
+    )
+
+
+@mcp.tool()
 @_guarded("agent_seed_mirror")
-def agent_seed_mirror(app_id: str, agent_id: str, slice: str = "full") -> dict:
+def agent_seed_mirror(app_id: str, agent_id: str, slice: str = "") -> dict:
     """Mirror a ratified home seed into SOIL collection willow_agents_seeds (AS-5).
 
     Requires ratified status; when WILLOW_PGP_FINGERPRINT is set the detached
-    .sig must verify. slice: full | voice_only | work_context.
+    .sig must verify. slice: full | voice_only | work_context (omit for exposure.json default).
     """
     from . import gate
     from . import seed_mirror as sm

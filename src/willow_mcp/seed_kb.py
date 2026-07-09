@@ -1,6 +1,7 @@
 """AS-6: promote ratified agent_seed slices to Postgres KB (source_type: agent_seed).
 
 See docs/design/agent-seed.md § KB atom (slice promotion).
+Slice defaults resolved via exposure.py (AS-8) when slice is omitted.
 """
 
 from __future__ import annotations
@@ -10,16 +11,25 @@ from typing import Any
 
 from psycopg2.extras import Json
 
+from .exposure import SLICE_PRESETS, apply_slice, preset_denied, resolve_preset
 from .seed_loader import SEED_FORMAT, load_agent_seed, load_seed_document, seed_trusted
-from .seed_mirror import SLICE_PRESETS, apply_slice
 
 SOURCE_TYPE = "agent_seed"
+KB_DESTINATION = "kb_ingest"
 DEFAULT_SLICE = "work_context"
 _FORBIDDEN_KINDS_FOR_FULL = frozenset({"operator"})
+_KB_PRESETS = frozenset(p for p in SLICE_PRESETS if p != "custom")
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _effective_slice(agent_id: str, slice_name: str) -> str:
+    if (slice_name or "").strip():
+        return slice_name.strip()
+    preset, _ = resolve_preset(agent_id, KB_DESTINATION)
+    return "full" if preset == "full_seed" else preset
 
 
 def _forbidden_body_reason(body: dict[str, Any]) -> str | None:
@@ -35,18 +45,23 @@ def _forbidden_body_reason(body: dict[str, Any]) -> str | None:
 def build_kb_atom(
     agent_id: str,
     *,
-    slice_name: str = DEFAULT_SLICE,
+    slice_name: str = "",
     sensitivity: str = "sensitive",
     tier: str = "canonical",
 ) -> dict[str, Any]:
     """Validate seed and build KB payload (does not write Postgres)."""
     key = (agent_id or "").strip()
-    if slice_name not in SLICE_PRESETS:
+    slice_key = _effective_slice(key, slice_name)
+    if slice_key not in _KB_PRESETS:
         return {
             "ok": False,
-            "error": f"unsupported slice: {slice_name}",
-            "allowed": sorted(SLICE_PRESETS),
+            "error": f"unsupported slice: {slice_key}",
+            "allowed": sorted(_KB_PRESETS),
         }
+
+    deny = preset_denied(key, slice_key)
+    if deny:
+        return {"ok": False, "error": "preset_denied", "reason": deny, "agent_id": key}
 
     loaded = load_agent_seed(key)
     if not loaded.get("present"):
@@ -74,7 +89,7 @@ def build_kb_atom(
 
     identity = data.get("identity") or {}
     kind = str(identity.get("kind") or "").lower()
-    if slice_name == "full" and kind in _FORBIDDEN_KINDS_FOR_FULL:
+    if slice_key in {"full", "full_seed"} and kind in _FORBIDDEN_KINDS_FOR_FULL:
         return {
             "ok": False,
             "error": "full_slice_denied_for_operator",
@@ -82,12 +97,12 @@ def build_kb_atom(
             "kind": kind,
         }
 
-    body = apply_slice(data, slice_name)
+    body = apply_slice(data, slice_key)
     forbidden = _forbidden_body_reason(body)
     if forbidden:
         return {"ok": False, "error": "forbidden_body_field", "reason": forbidden, "agent_id": key}
 
-    if slice_name == "full":
+    if slice_key in {"full", "full_seed"}:
         forbidden = _forbidden_body_reason(data)
         if forbidden:
             return {"ok": False, "error": "forbidden_body_field", "reason": forbidden, "agent_id": key}
@@ -95,8 +110,8 @@ def build_kb_atom(
     rat = (data.get("seed") or {}).get("ratification") or {}
     display = str(identity.get("display_name") or key).strip() or key
     source_id = f"seeds/{key}.json"
-    title = f"Agent seed — {display} ({slice_name} slice)"
-    summary = f"Ratified {slice_name} excerpt from {source_id}"
+    title = f"Agent seed — {display} ({slice_key} slice)"
+    summary = f"Ratified {slice_key} excerpt from {source_id}"
 
     content: dict[str, Any] = {
         "kind": SEED_FORMAT,
@@ -105,7 +120,7 @@ def build_kb_atom(
         "tier": tier,
         "sensitivity": sensitivity,
         "agent_id": key,
-        "slice": slice_name,
+        "slice": slice_key,
         "source_id": source_id,
         "body": body,
         "ratification": rat,
@@ -114,14 +129,14 @@ def build_kb_atom(
     if loaded.get("verify") is not None:
         content["verify"] = loaded["verify"]
 
-    tags = ["agent_seed", key, slice_name, tier]
+    tags = ["agent_seed", key, slice_key, tier]
     if sensitivity:
         tags.append(f"sensitivity:{sensitivity}")
 
     return {
         "ok": True,
         "agent_id": key,
-        "slice": slice_name,
+        "slice": slice_key,
         "source_type": SOURCE_TYPE,
         "source_id": source_id,
         "title": title,
@@ -176,7 +191,7 @@ def promote_seed_to_kb(
     fields: dict[str, Any],
     *,
     agent_id: str,
-    slice_name: str = DEFAULT_SLICE,
+    slice_name: str = "",
     sensitivity: str = "sensitive",
     tier: str = "canonical",
     supersede: bool = True,
@@ -192,10 +207,11 @@ def promote_seed_to_kb(
     if not built.get("ok"):
         return built
 
+    slice_key = built["slice"]
     if fields["id"]["column"] is None or fields["content"]["column"] is None:
         return {"ok": False, "error": "schema_unusable: knowledge table missing id or content"}
 
-    existing_id = _find_existing_atom_id(pg, fields, built["agent_id"], slice_name) if supersede else None
+    existing_id = _find_existing_atom_id(pg, fields, built["agent_id"], slice_key) if supersede else None
     atom_id = existing_id or new_id
     action = "updated" if existing_id else "created"
 
@@ -231,7 +247,7 @@ def promote_seed_to_kb(
         "action": action,
         "id": atom_id,
         "agent_id": built["agent_id"],
-        "slice": slice_name,
+        "slice": slice_key,
         "source_type": SOURCE_TYPE,
         "source_id": built["source_id"],
         "title": built["title"],

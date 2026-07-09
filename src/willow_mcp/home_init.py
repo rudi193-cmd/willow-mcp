@@ -18,6 +18,7 @@ from .paths import (
     agent_roster_path,
     all_layout_dirs,
     bundle_dir,
+    exposure_config_path,
     layout_version_path,
     persona_envelopes_path,
     personas_dir,
@@ -26,6 +27,7 @@ from .paths import (
     settings_global_path,
     willow_home,
 )
+from .exposure import default_exposure_config
 from .registry import compile_manifests, load_registry
 
 _DEFAULT_ROSTER: dict[str, Any] = {
@@ -149,6 +151,8 @@ def ensure_home_layout(home: Path | None = None) -> dict[str, Any]:
         config_created.append(str(persona_envelopes_path().relative_to(willow_home())))
     if _write_json_if_missing(rotation_path(), _DEFAULT_ROTATION):
         config_created.append(str(rotation_path().relative_to(willow_home())))
+    if _write_json_if_missing(exposure_config_path(), default_exposure_config()):
+        config_created.append(str(exposure_config_path().relative_to(willow_home())))
 
     review_q = willow_home() / "constitutional" / "review_queue.json"
     if _write_json_if_missing(review_q, {"format": "review_queue_v1", "items": []}):
