@@ -474,6 +474,37 @@ bug into an allow-list-shaped design.
 - **Aliasing dictionary scope.** Should common aliases (`source`/`source_type`/
   `origin`) ship as a static built-in list, or be per-deployment configurable?
   Static-but-extensible seems right; a config override file is cheap to add.
+  *Resolved (both).* The static list stays as a cold-start prior, but the
+  durable answer is a **deployment-wide ring tier** (dendrochronology metaphor —
+  see `schema_profile.py`): every `confirm()` grows a RING (`grow_ring`) recording
+  each non-trivial `column → field` mapping to `$WILLOW_HOME/schema_rings.json`,
+  and `propose_mapping` reads the rings (`read_rings`) between the exact and alias
+  tiers (`exact → rooted → alias → unmapped`, tier `rooted`, confidence 0.95).
+  This is what actually generalizes — an adversarial test on a legacy schema the
+  heuristics had never seen mapped 0/5 cold, then 4/5 automatically on a
+  *different* database in the same deployment after one confirmation. A rooted
+  mapping is still a proposal a human confirms; it never auto-applies, and it
+  never overrides an exact-named column (so an exact-name trap — a `content` column
+  holding a citation — is beaten only by the data-shape pass, not by names or
+  memory). A separate **data-shape** pass (`classify_shape` / `refine_with_data`,
+  §3.2) reads a sample of real values to FLAG a name-match whose data is the
+  wrong kind, and — guarded by discriminating-shape + name-affinity + no column
+  reuse — to HINT a replacement; on a shape-poor table it stays silent rather
+  than guessing. It classifies command / enum / flag / identifier / integer /
+  timestamp, and splits freetext into **reference** vs **prose** — which is what
+  finally catches the marquee trap: a `content` column holding a bibliographic
+  citation (short, year-in-parens, page ranges, `OCLC`/`DOI`) while the real body
+  prose sits in `abstract`. `content` is the one field that expects prose but not
+  reference, so it flags and points at the prose column; every other text field
+  accepts both, so the split adds no false mismatches. The ring store — the tree's
+  canopy — is **bounded** (`WILLOW_MCP_SCHEMA_RINGS_MAX`,
+  default 5000 pairs): an open, churning column-name vocabulary would otherwise
+  grow it without limit, so past the cap `_prune` thins the canopy by LFU with an
+  LRU tie-break (thinnest rings first, oldest-among-ties next), keeping the common
+  load-bearing heartwood and letting stale one-off names rot. `girth()` reports
+  the tree's size/health. Coverage degrades gracefully if the cap is squeezed
+  below the working set (a re-learn costs one cold miss); the default sits well
+  above realistic working sets.
 - **Who can call `schema_confirm_mapping`?** Presumably gated at least as
   strictly as `knowledge_write` — arguably its own permission group, since
   confirming a mapping is a more consequential act than a single write.

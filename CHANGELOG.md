@@ -10,6 +10,88 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Integration adapters** (`integrations.py`) — outbound HTTP adapters with a
+  shared base (env→vault credential resolution, bounded stdlib transport with
+  Retry-After-honoring retries, credential-scrubbed errors). Two live adapters
+  (`github`, `huggingface`) and six **declared stubs** (`gmail`, `slack`,
+  `notion`, `google-drive`, `datadog`, `jira`) that refuse fail-closed and name
+  what earns their implementation. New tools `integration_list`,
+  `integration_status`, `integration_call`; new operator CLI
+  `willow-mcp-integrations` (`list` / `check` / `set-token`). Live calls are the
+  fourth consumer of the three-key egress gate, keyed on a new
+  `integration_net` capability — its own line, never implied by `task_net` or
+  `full_access`, because the server-process lane is strictly more privileged
+  than the sandbox lane. `integration_call` is likewise excluded from
+  `full_access`. See `docs/design/integrations.md` for the earn rule.
+- **`willow-mcp tree` / `tree_view.build_tree()` — the integration seam for a real
+  dashboard.** `docs/design/*.html` sketches a client UI as a tree (trunk/sap/
+  canopy/roots/rings/leaves/litter/stomata) with fabricated numbers; `tree`
+  makes it real, one call returning every part in that shape instead of a
+  dashboard assembling `fleet_status`/`fleet_health`/`kb_startup_continuity`/
+  `receipts_tail`/`gates` itself. `sap`/`canopy`/`leaves` call straight into the
+  same `@_guarded` tool functions an MCP client would reach (gating, rate
+  limiting, and receipt logging all still apply) and degrade to
+  `{"error": "postgres_unavailable"}` with no database configured, matching
+  those tools' existing shape. `roots`/`rings`/`litter`/`stomata` read local
+  SQLite/filesystem state directly and work with no Postgres at all. Adds
+  `Store.list_collections()` (factored out of `search_all`'s own enumeration)
+  as the `roots` data source.
+- **`willow-mcp gates` — every authorization gate as one on/off panel, egress-lease
+  shaped.** Diagnosing a denial meant knowing which of a dozen-plus gates to check
+  (manifest permissions, `task_net`, `integration_net`, `consent.*`, egress lease,
+  identity bindings, strict trust root, severance, human-orchestrator attestation,
+  worker liveness) and which file or CLI command controlled it. `gates` shows all
+  of them at once, each rendered the way the egress lease already renders itself:
+  on/off, plus how long the "on" is good for — `standing` for gates with no expiry,
+  `process-lifetime` for env-var gates that only change at restart, or a live
+  countdown for the lease. `--html` writes a self-contained static snapshot with a
+  client-side ticking countdown and copy-to-clipboard action buttons; `--json`
+  dumps raw rows for scripting. New `allow-permission` / `deny-permission`
+  subcommands give manifest permission groups the operator-only local-CLI
+  affordance they lacked before (only hand-editing `manifest.json` or a full
+  `compile-agents` regenerate existed prior) — local-CLI-only and never MCP tools,
+  the same sudo-invariant boundary as `grant-net`/`confirm-binding`, so an agent can
+  never grant itself a permission it was just denied. `consent.*` rows are
+  read-only by design (willow-mcp never writes that policy) and never show a
+  command.
+- **Time-boxed egress leases** (B-32 / L-NET-02). `task_submit(allow_net=True)` now
+  needs a **third** key: an unexpired lease issued by the operator with
+  `willow-mcp grant-net <app_id> --ttl 30m --reason ...` (ceiling 3h, per FRANK
+  `cc553729`). `task_net` is demoted to a capability — *this app may ever ask* —
+  while the lease is the grant itself, carrying an issuer, a reason, and a deadline.
+  **No MCP tool can mint a lease**: issuance is local-CLI-only, exactly as
+  `confirm-binding` is. New `revoke-net` and `net-status` subcommands. Leases are
+  read fail-closed — absent, unparseable, expired, over-ceiling, a deadline with no
+  timezone, or a record naming a different `app_id` than the file it sits in all
+  deny. Because leases live under `mcp_apps/`, they inherit B-14's `bound_ro`
+  sandbox mount: a sandboxed task cannot mint one (verified — `OSError(EROFS)`).
+  `diagnostic_summary` gains a `net_lease` check whose `self_writable` field names
+  every authorizing key the running process could forge, and the PreToolUse hook
+  blocks an agent from writing any of them. **The residual is real and deliberate:**
+  on a single-uid host the agent can still write the lease, so this narrows and
+  audits the self-grant rather than preventing it. Set
+  `WILLOW_MCP_STRICT_TRUST_ROOT=1` after `chown`ing the trust root to a uid the
+  agent does not run as, and egress is refused whenever the keys are self-writable.
+  Off by default, because enabling it before that separation exists would deny
+  egress on every current install.
+- **Two-key egress gate** (B-29). `task_submit(allow_net=True)` now requires the
+  operator's standing `consent.internet` from `$WILLOW_HOME/settings.global.json`
+  **in addition to** the app's `task_net` capability. Either one missing denies
+  (`net_denied` / `consent_denied`) before any write. Flipping `consent.internet`
+  to `false` stops egress fleet-wide without editing a single manifest. The new
+  `consent.py` reads that policy **fail-closed** — an absent file, an unparseable
+  file, or a non-boolean value all read as denied — and only ever reads it; the
+  policy is authored by willow-2.0. `diagnostic_summary` gains a `consent` check
+  that raises an error when the legacy `consent.json` and canonical
+  `settings.global.json` disagree, rather than silently obeying one.
+- **Worker liveness** (Kart lift stage 4, B-26). `willow-mcp worker` publishes a
+  heartbeat through kartikeya's `on_heartbeat` seam. `fleet_health` now reports
+  `workers` (each `alive` / `stale` / `dead`) and a `stranded` boolean — true when
+  there is pending work and no live worker — and `diagnostic_summary` gains a
+  `worker` check that names the condition and its fix. Previously a submitted task
+  looked identical whether a worker was about to claim it or none existed.
+  Heartbeats are advisory telemetry, never authorization: no gate reads them, and
+  reads verify the recorded pid is a live local process.
 - **HTTP serve mode** (`--serve`) with OAuth 2.0 + PKCE against Google/Apple as
   the upstream IdP, plus a local credential vault (`willow-mcp setup`).
 - **Identity binding**: serve-mode sign-ins propose an unconfirmed
@@ -54,6 +136,20 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 - Dockerfile and GitHub Actions test workflow (runs against a Postgres service).
 
 ### Fixed
+- **`willow-mcp gates`/`net-status`/`tree` crashed with an unhandled
+  `BrokenPipeError` traceback when piped into something that closes early**
+  (`willow-mcp gates | head`, `willow-mcp net-status app | grep -q active`) —
+  found by wiring the CLI into a CI smoke test. These subcommands print
+  multiple lines and are exactly the shape someone pipes into `head`/
+  `grep -q`; a downstream reader closing before the writer finishes raises
+  `BrokenPipeError` on the next write, which Python does not handle for you.
+  `main()` now wraps its dispatch and exits clean (code 1) instead.
+- **`pip install willow-mcp[worker]` was advertised but never existed (B-27).**
+  The worker's "kartikeya is missing" errors, its `--help` text, and
+  `task_queue.py`'s docstring all pointed at a `[worker]` extra; `pyproject.toml`
+  declares no extras at all, and `kartikeya` has been a hard dependency since the
+  B-22 close-out. The one message shown when a worker can't start told operators
+  to run a command that errors. All four sites now say `pip install willow-mcp`.
 - **Schema confirmation could accept a name match as truth (#20).**
   `schema_confirm_mapping` mapped canonical fields to real columns by name and
   confirmed without ever showing the data — so a `content` column that actually

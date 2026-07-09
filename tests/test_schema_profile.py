@@ -113,6 +113,372 @@ def test_propose_mapping_is_pure_and_deterministic():
     assert a == b
 
 
+# ── legacy-alias mapping (2000s job-scheduler house style) ───────────────
+
+TASK_CANON = ["task_id", "task", "submitted_by", "agent", "status", "result",
+              "steps", "created_at", "completed_at"]
+
+# A 2002 batch table: terse legacy names, a `task` column that holds a job
+# CLASS (not a command), and both a surrogate `id` and a real key `jobno`.
+LEGACY_TASKS_COLUMNS = {
+    "id": "integer", "jobno": "character varying", "task": "character varying",
+    "cmd_line": "text", "submitter": "character varying", "agent": "character varying",
+    "stat": "character", "result": "text", "nsteps": "integer",
+    "created_at": "timestamp without time zone", "fin_dt": "timestamp without time zone",
+}
+
+
+def test_legacy_aliases_map_terse_columns():
+    cols = sp.introspect(_FakeConn(LEGACY_TASKS_COLUMNS), "tasks")
+    m = sp.propose_mapping(cols, TASK_CANON)
+    assert m["submitted_by"]["column"] == "submitter" and m["submitted_by"]["tier"] == "alias"
+    assert m["status"]["column"] == "stat"
+    assert m["steps"]["column"] == "nsteps"
+    assert m["completed_at"]["column"] == "fin_dt"
+
+
+def test_business_key_alias_outranks_bare_id():
+    # jobno is listed before id in the task_id alias tuple, so it must win when
+    # both are present — the real key beats the surrogate.
+    cols = sp.introspect(_FakeConn(LEGACY_TASKS_COLUMNS), "tasks")
+    m = sp.propose_mapping(cols, TASK_CANON)
+    assert m["task_id"]["column"] == "jobno"
+
+
+def test_bare_id_still_maps_task_id_when_no_business_key():
+    # test_server's fake tasks table has only `id` — id remains a valid fallback.
+    cols = sp.introspect(_FakeConn({"id": "text", "task": "text", "agent": "text"}), "tasks")
+    m = sp.propose_mapping(cols, TASK_CANON)
+    assert m["task_id"]["column"] == "id" and m["task_id"]["tier"] == "alias"
+
+
+def test_exact_name_still_beats_alias_even_when_it_is_a_trap():
+    # An exact `task` column wins over the `cmd_line` alias — which is exactly
+    # why the name tiers can't catch this trap and the data-shape pass must.
+    cols = sp.introspect(_FakeConn(LEGACY_TASKS_COLUMNS), "tasks")
+    m = sp.propose_mapping(cols, TASK_CANON)
+    assert m["task"]["column"] == "task" and m["task"]["tier"] == "exact"
+
+
+# ── data-shape classifier ────────────────────────────────────────────────
+
+def test_classify_shape_command():
+    assert sp.classify_shape(["/usr/local/bin/eod.pl --batch", "perl gen.pl -m 200202"]) == "command"
+
+
+def test_classify_shape_enum_and_flag():
+    assert sp.classify_shape(["NIGHTLY", "ADHOC", "NIGHTLY"]) == "enum"
+    assert sp.classify_shape(["P", "R", "C", "F"]) == "flag"
+
+
+def test_classify_shape_identifier_integer_timestamp():
+    assert sp.classify_shape(["JOB0041", "JOB0042"]) == "identifier"
+    assert sp.classify_shape([1, 2, 3]) == "integer"
+    assert sp.classify_shape(["2002-03-14 02:15:00"], data_type="timestamp without time zone") == "timestamp"
+
+
+def test_classify_shape_empty_and_freetext():
+    assert sp.classify_shape([None, None]) == "empty"
+    assert sp.classify_shape(["settlement OK: 4,182 txns posted to the ledger today"]) == "freetext"
+
+
+# ── data-shape refinement (the trap-catcher) ─────────────────────────────
+
+class _FakeSQLConn:
+    """Serves both the information_schema introspection and a `SELECT ... LIMIT`
+    sample, dispatching on the SQL so refine_with_data sees real rows."""
+    def __init__(self, columns: dict, rows: list, host="localhost", dbname="legacy2002"):
+        self._columns = columns
+        self._rows = rows
+        self._host, self._dbname = host, dbname
+
+    def cursor(self):
+        return _FakeSQLConn._Cur(self)
+
+    def get_dsn_parameters(self):
+        return {"host": self._host, "dbname": self._dbname}
+
+    class _Cur:
+        def __init__(self, conn):
+            self.conn, self._out = conn, []
+
+        def execute(self, sql, params=None):
+            if "information_schema.columns" in sql:
+                self._out = list(self.conn._columns.items())
+            else:
+                self._out = list(self.conn._rows)
+
+        def fetchall(self):
+            return self._out
+
+        def close(self):
+            pass
+
+
+# rows aligned to LEGACY_TASKS_COLUMNS insertion order
+_LEGACY_ROWS = [
+    (1, "JOB0041", "NIGHTLY", "/usr/local/bin/eod_settlement.pl --batch", "jsmith", "crond", "C", "settlement OK: 4182 txns posted", 7, "2002-03-14 02:15:00", "2002-03-14 02:47:33"),
+    (2, "JOB0042", "NIGHTLY", "perl /opt/reports/gen_stmts.pl -m 200202", "jsmith", "crond", "C", "18904 statements spooled to LPT3", 3, "2002-03-14 03:00:00", "2002-03-14 03:52:10"),
+    (3, "JOB0043", "ADHOC", "sh /home/mfg/reindex_parts.sh", "awong", "operator", "F", "ORA-01652 unable to extend temp segment", 2, "2002-03-15 11:22:41", "2002-03-15 11:23:05"),
+]
+
+
+def test_refine_flags_the_task_class_trap_and_suggests_the_command_column():
+    conn = _FakeSQLConn(LEGACY_TASKS_COLUMNS, _LEGACY_ROWS)
+    cols = sp.introspect(conn, "tasks")
+    fields = sp.propose_mapping(cols, TASK_CANON)  # task -> task (the trap)
+    refined = sp.refine_with_data(conn, "tasks", fields, TASK_CANON, columns=cols)
+
+    task_sugg = [s for s in refined["suggestions"] if s["field"] == "task"]
+    assert len(task_sugg) == 1
+    assert task_sugg[0]["suggested_column"] == "cmd_line"
+    assert task_sugg[0]["severity"] == "trap"
+    assert refined["shapes"]["task"] == "enum"
+    assert refined["shapes"]["cmd_line"] == "command"
+
+
+def test_refine_does_not_poach_well_placed_columns():
+    # Fields whose name-mapped column already fits its expected shape must not
+    # generate spurious suggestions.
+    conn = _FakeSQLConn(LEGACY_TASKS_COLUMNS, _LEGACY_ROWS)
+    cols = sp.introspect(conn, "tasks")
+    fields = sp.propose_mapping(cols, TASK_CANON)
+    refined = sp.refine_with_data(conn, "tasks", fields, TASK_CANON, columns=cols)
+    noisy = {s["field"] for s in refined["suggestions"]}
+    assert "created_at" not in noisy and "result" not in noisy and "steps" not in noisy
+
+
+def test_refine_degrades_to_empty_on_no_data():
+    conn = _FakeSQLConn(LEGACY_TASKS_COLUMNS, [])  # no rows
+    cols = sp.introspect(conn, "tasks")
+    fields = sp.propose_mapping(cols, TASK_CANON)
+    refined = sp.refine_with_data(conn, "tasks", fields, TASK_CANON, columns=cols)
+    assert refined["suggestions"] == []
+
+
+# ── guarded hints (2004-archive regression) ──────────────────────────────
+
+KNOW_CANON = ["id", "content", "domain", "source", "tags"]
+
+# A freetext-heavy archive table: many columns share the `freetext` shape, so an
+# unguarded "first well-shaped column" hint fires confidently-wrong. `content`
+# holds a citation (still freetext), the body is in `abstract`, and `lang` is a
+# 2-letter noise column.
+ARCHIVE_COLUMNS = {
+    "rec_no": "integer", "accession": "character varying", "content": "text",
+    "abstract": "text", "subj": "character varying", "provenance": "character varying",
+    "kw": "text", "lang": "character", "added_on": "date",
+}
+_ARCHIVE_ROWS = [
+    (1, "ACC-2004-0912", "Cormen, T. et al. (2001). Intro to Algorithms. OCLC#47297975.",
+     "A comprehensive treatment of modern algorithms with rigorous proofs of correctness and running time.",
+     "Computer Science", "Interlibrary Loan / MIT", "algorithms;complexity", "en", "2004-02-11"),
+    (2, "ACC-2004-1033", "Knuth, D. (1997). TAOCP Vol.1. LoC QA76.6.K64.",
+     "The foundational volume on fundamental algorithms and the analysis of basic programming techniques.",
+     "Computer Science", "Donated by A. Turing Estate", "analysis;combinatorics", "en", "2004-03-04"),
+]
+
+
+def test_guarded_hints_stay_silent_on_freetext_heavy_table():
+    # The 2004 regression: unguarded hints suggested lang/accession for
+    # domain/source/tags. With the discriminating-shape + name-affinity guards,
+    # a shape-poor table must produce NO hints rather than confident-wrong ones.
+    conn = _FakeSQLConn(ARCHIVE_COLUMNS, _ARCHIVE_ROWS)
+    cols = sp.introspect(conn, "knowledge")
+    fields = sp.propose_mapping(cols, KNOW_CANON)
+    refined = sp.refine_with_data(conn, "knowledge", fields, KNOW_CANON, columns=cols)
+    hints = [s for s in refined["suggestions"] if s["severity"] == "hint"]
+    assert hints == []
+
+
+def test_trap_flag_survives_guards_and_keeps_its_replacement():
+    # The tasks trap must still fire WITH a replacement: cmd_line is the only
+    # command-shaped column (discriminating), and the trap path does not require
+    # name affinity.
+    conn = _FakeSQLConn(LEGACY_TASKS_COLUMNS, _LEGACY_ROWS)
+    cols = sp.introspect(conn, "tasks")
+    fields = sp.propose_mapping(cols, TASK_CANON)
+    refined = sp.refine_with_data(conn, "tasks", fields, TASK_CANON, columns=cols)
+    trap = [s for s in refined["suggestions"] if s["field"] == "task"]
+    assert trap and trap[0]["severity"] == "trap" and trap[0]["suggested_column"] == "cmd_line"
+
+
+# ── deployment-wide learned mappings ─────────────────────────────────────
+
+@pytest.fixture
+def rings_store(tmp_path, monkeypatch):
+    p = tmp_path / "schema_rings.json"
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS", str(p))
+    return p
+
+
+def test_propose_without_rings_is_unchanged(rings_store):
+    # Purity/back-compat: omitting lessons must reproduce the name+alias result.
+    cols = sp.introspect(_FakeConn(LEGACY_TASKS_COLUMNS), "tasks")
+    assert sp.propose_mapping(cols, TASK_CANON) == sp.propose_mapping(cols, TASK_CANON, None)
+
+
+def test_grow_ring_skips_trivial_matches(rings_store):
+    fields = {
+        "task_id": {"column": "jobno"},      # non-trivial -> learned
+        "task": {"column": "task"},          # trivial (col == field) -> skipped
+        "status": {"column": "stat"},        # non-trivial -> learned
+    }
+    sp.grow_ring(fields)
+    lessons = sp.read_rings()
+    assert lessons["jobno"] == {"task_id": 1}
+    assert lessons["stat"] == {"status": 1}
+    assert "task" not in lessons  # the trap self-match teaches nothing
+
+
+def test_rooted_tier_maps_terse_columns_and_counts(rings_store):
+    sp.grow_ring({"submitter": {"column": "submitter"}})  # trivial, ignored
+    sp.grow_ring({"submitted_by": {"column": "requestor"}})
+    sp.grow_ring({"submitted_by": {"column": "requestor"}})  # count -> 2
+    cols = sp.introspect(_FakeConn({"requestor": "text", "task": "text"}), "tasks")
+    m = sp.propose_mapping(cols, TASK_CANON, sp.read_rings())
+    assert m["submitted_by"]["column"] == "requestor"
+    assert m["submitted_by"]["tier"] == "rooted"
+    assert m["submitted_by"]["confidence"] == 0.95
+
+
+def test_rings_apply_across_tables_deployment_wide(rings_store):
+    # Lessons are keyed by column name, not by table/db — a lesson learned on
+    # one table maps a same-named column on a different one.
+    sp.grow_ring({"domain": {"column": "subj"}})
+    cols = sp.introspect(_FakeConn({"subj": "character varying", "content": "text"}), "other_table")
+    m = sp.propose_mapping(cols, KNOW_CANON, sp.read_rings())
+    assert m["domain"]["column"] == "subj" and m["domain"]["tier"] == "rooted"
+
+
+def test_exact_name_still_outranks_rooted(rings_store):
+    # A learned lesson must not override an exact-named column — the content
+    # trap residual is honest: only data can beat an exact-name collision.
+    sp.grow_ring({"content": {"column": "abstract"}})
+    cols = sp.introspect(_FakeConn({"content": "text", "abstract": "text"}), "knowledge")
+    m = sp.propose_mapping(cols, KNOW_CANON, sp.read_rings())
+    assert m["content"]["column"] == "content" and m["content"]["tier"] == "exact"
+
+
+def test_confirm_grows_a_ring(home, rings_store):
+    conn = _FakeConn(LEGACY_TASKS_COLUMNS)
+    sp.confirm(conn, "app", "tasks", TASK_CANON,
+               overrides={"task": "cmd_line", "submitted_by": "submitter"})
+    lessons = sp.read_rings()
+    assert lessons["cmd_line"]["task"] == 1
+    assert lessons["submitter"]["submitted_by"] == 1
+
+
+# ── bound & prune ─────────────────────────────────────────────────────────
+
+def test_canopy_is_bounded_by_cap(rings_store, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS_MAX", "10")
+    for i in range(50):  # 50 distinct one-off column names -> would be 50 pairs
+        sp.grow_ring({"task_id": {"column": f"legacy_id_{i}"}})
+    stats = sp.girth()
+    assert stats["pairs"] <= 10  # never exceeds the cap
+    assert stats["cap"] == 10
+
+
+def test_prune_cuts_thinnest_rings_first(rings_store, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS_MAX", "5")
+    # A frequently-confirmed common name...
+    for _ in range(20):
+        sp.grow_ring({"submitted_by": {"column": "submitter"}})
+    # ...then a flood of one-off names to force eviction.
+    for i in range(40):
+        sp.grow_ring({"submitted_by": {"column": f"oneoff_{i}"}})
+    lessons = sp.read_rings()
+    assert "submitter" in lessons  # high-count survivor is never evicted
+    assert lessons["submitter"]["submitted_by"] == 20
+    assert sp.girth()["pairs"] <= 5
+
+
+def test_prune_keeps_recent_among_equal_rings(rings_store, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_SCHEMA_RINGS_MAX", "3")
+    order = ["a", "b", "c", "d", "e", "f"]  # each count-1, ascending recency
+    for name in order:
+        sp.grow_ring({"status": {"column": name}})
+    survivors = set(sp.read_rings().keys())
+    # oldest count-1 names evicted first; the most-recent survive
+    assert "f" in survivors and "a" not in survivors
+
+
+# ── citation-vs-prose (the exact-name content trap) ──────────────────────
+
+_CITATIONS = [
+    "Cormen, T. et al. (2001). Introduction to Algorithms, 2nd ed. MIT Press. OCLC#47297975.",
+    "Shannon, C. (1948). A Mathematical Theory of Communication. Bell Sys. Tech. J. 27:379-423.",
+]
+_PROSE = [
+    "A comprehensive treatment of modern algorithms including divide and conquer, dynamic "
+    "programming, and graph methods, with rigorous proofs of correctness and running-time bounds.",
+    "Establishes the mathematical foundations of information theory, introducing entropy as a "
+    "measure of information and the noisy-channel coding theorem that underpins digital communication.",
+]
+
+
+def test_classify_shape_reference_vs_prose():
+    assert sp.classify_shape(_CITATIONS) == "reference"
+    assert sp.classify_shape(_PROSE) == "prose"
+
+
+def test_short_or_ambiguous_freetext_stays_freetext():
+    # The guard: don't mislabel ordinary short freetext as prose/reference.
+    assert sp.classify_shape(["settlement OK: 4,182 txns posted to the ledger today"]) == "freetext"
+    assert sp.classify_shape(["Interlibrary Loan / MIT Libraries", "Bell Labs microfiche"]) == "freetext"
+
+
+# A knowledge table where the exact-named `content` column holds CITATIONS and
+# the real body is in `abstract` — the design doc's marquee trap.
+_KNOW_TRAP_COLUMNS = {
+    "rec_no": "integer", "accession": "character varying",
+    "content": "text", "abstract": "text", "subj": "character varying",
+}
+_KNOW_TRAP_ROWS = [
+    (1, "ACC-1", _CITATIONS[0], _PROSE[0], "Computer Science"),
+    (2, "ACC-2", _CITATIONS[1], _PROSE[1], "Information Theory"),
+]
+
+
+def test_content_citation_trap_is_finally_caught():
+    conn = _FakeSQLConn(_KNOW_TRAP_COLUMNS, _KNOW_TRAP_ROWS)
+    cols = sp.introspect(conn, "knowledge")
+    fields = sp.propose_mapping(cols, KNOW_CANON)  # content -> content (exact, the trap)
+    refined = sp.refine_with_data(conn, "knowledge", fields, KNOW_CANON, columns=cols)
+    assert refined["shapes"]["content"] == "reference"
+    assert refined["shapes"]["abstract"] == "prose"
+    trap = [s for s in refined["suggestions"] if s["field"] == "content"]
+    assert trap and trap[0]["severity"] == "trap"
+    assert trap[0]["suggested_column"] == "abstract"
+
+
+def test_correct_content_column_does_not_false_trap():
+    # If `content` actually holds the prose body, no trap should fire.
+    cols_ok = {"rec_no": "integer", "content": "text", "subj": "character varying"}
+    rows_ok = [(1, _PROSE[0], "Computer Science"), (2, _PROSE[1], "Information Theory")]
+    conn = _FakeSQLConn(cols_ok, rows_ok)
+    cols = sp.introspect(conn, "knowledge")
+    fields = sp.propose_mapping(cols, KNOW_CANON)
+    refined = sp.refine_with_data(conn, "knowledge", fields, KNOW_CANON, columns=cols)
+    assert [s for s in refined["suggestions"] if s["field"] == "content"] == []
+
+
+def test_legacy_v1_store_is_read_and_upgraded(rings_store):
+    # An old int-valued store must load and keep working, then upgrade on write.
+    import json
+    rings_store.write_text(json.dumps({
+        "format": "schema_lessons_v1",
+        "columns": {"submitter": {"submitted_by": 3}},
+    }))
+    assert sp.read_rings()["submitter"]["submitted_by"] == 3  # int contract intact
+    sp.grow_ring({"status": {"column": "stat"}})           # triggers upgrade
+    data = json.loads(rings_store.read_text())
+    assert data["format"] == "growth_rings_v1"
+    assert data["columns"]["submitter"]["submitted_by"]["n"] == 3  # count preserved
+    assert sp.read_rings()["stat"]["status"] == 1
+
+
 # ── db_fingerprint ──────────────────────────────────────────────────────
 
 def test_db_fingerprint_stable_for_same_host_dbname():

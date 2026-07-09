@@ -1,0 +1,716 @@
+<title>Willow — [Console Root]</title>
+<style>
+  :root{
+    --win-bg:#f3f3f3;
+    --panel:#ffffff;
+    --border:#e1e1e1;
+    --border-strong:#d2d0ce;
+    --text:#201f1e;
+    --text-secondary:#605e5c;
+    --accent:#0078d4;
+    --accent-dark:#005a9e;
+    --accent-tint:#e5f1fb;
+    --amber:#ffb900;
+    --red:#d13438;
+    --green:#107c10;
+    --row-alt:#f9f9f9;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;padding:0;height:100%;
+    background:var(--win-bg);
+    color:var(--text);
+    font-family:"Segoe UI Variable","Segoe UI",-apple-system,"Helvetica Neue",Arial,sans-serif;
+    font-size:13px;
+  }
+  a{color:var(--accent);text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  button{font-family:inherit;font-size:inherit;}
+  :focus-visible{
+    outline:2px solid var(--accent);
+    outline-offset:1px;
+  }
+
+  .mmc-window{
+    display:flex;
+    flex-direction:column;
+    height:100vh;
+    min-height:600px;
+    border:1px solid var(--border-strong);
+  }
+
+  /* Title bar */
+  .titlebar{
+    background:var(--panel);
+    border-bottom:1px solid var(--border);
+    padding:6px 10px;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    font-size:12.5px;
+    color:var(--text);
+  }
+  .titlebar .tb-icon{width:16px;height:16px;flex:0 0 auto;}
+  .titlebar strong{font-weight:600;}
+  .titlebar .console-name{color:var(--text-secondary);}
+
+  /* Menu bar */
+  .menubar{
+    background:var(--panel);
+    border-bottom:1px solid var(--border);
+    display:flex;
+    padding:0 6px;
+    font-size:12.5px;
+  }
+  .menubar button{
+    background:none;border:none;
+    padding:6px 10px;
+    color:var(--text);
+    cursor:default;
+    border-radius:2px;
+  }
+  .menubar button:hover{background:var(--accent-tint);}
+
+  /* Toolbar */
+  .toolbar{
+    background:var(--panel);
+    border-bottom:1px solid var(--border);
+    display:flex;
+    align-items:center;
+    gap:2px;
+    padding:4px 8px;
+  }
+  .toolbar button{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    background:none;
+    border:1px solid transparent;
+    padding:4px 8px;
+    border-radius:3px;
+    color:var(--text);
+    cursor:default;
+  }
+  .toolbar button:hover{
+    border-color:var(--border-strong);
+    background:var(--accent-tint);
+  }
+  .toolbar button svg{width:15px;height:15px;flex:0 0 auto;}
+  .toolbar .sep{
+    width:1px;height:20px;background:var(--border-strong);margin:0 6px;
+  }
+
+  /* Body: three panes */
+  .mmc-body{
+    flex:1;
+    display:flex;
+    min-height:0;
+  }
+
+  /* Console tree pane */
+  .tree-pane{
+    width:250px;
+    flex:0 0 auto;
+    background:var(--panel);
+    border-right:1px solid var(--border);
+    overflow-y:auto;
+    padding:6px 0;
+  }
+  .tree-node{
+    display:flex;
+    align-items:center;
+    gap:5px;
+    padding:4px 8px 4px 10px;
+    cursor:default;
+    white-space:nowrap;
+    color:var(--text);
+    user-select:none;
+  }
+  .tree-node .twisty{
+    width:10px;height:10px;flex:0 0 auto;
+    display:flex;align-items:center;justify-content:center;
+    color:var(--text-secondary);
+    font-size:9px;
+  }
+  .tree-node .node-icon{width:16px;height:16px;flex:0 0 auto;}
+  .tree-node.depth-0{padding-left:8px;font-weight:600;}
+  .tree-node.depth-1{padding-left:26px;}
+  .tree-node.depth-2{padding-left:44px;}
+  .tree-node:hover{background:#f3f3f3;}
+  .tree-node.selected{
+    background:var(--accent-tint);
+    outline:1px solid var(--accent);
+    outline-offset:-1px;
+  }
+  .tree-node a{color:inherit;display:flex;align-items:center;gap:5px;width:100%;}
+  .tree-node a:hover{text-decoration:none;}
+  .tree-badge{
+    margin-left:auto;
+    font-size:11px;
+    color:var(--text-secondary);
+    background:#f0f0f0;
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:0 6px;
+    line-height:15px;
+  }
+  .tree-badge.crit{color:#fff;background:var(--red);border-color:var(--red);}
+
+  /* Details pane */
+  .details-pane{
+    flex:1;
+    min-width:0;
+    background:var(--win-bg);
+    overflow-y:auto;
+    padding:16px 18px;
+  }
+  .details-header{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    margin-bottom:10px;
+  }
+  .details-header h1{
+    font-size:16px;
+    margin:0;
+    font-weight:600;
+  }
+  .details-header .breadcrumb{
+    font-size:11.5px;
+    color:var(--text-secondary);
+    margin-bottom:2px;
+  }
+  .status-strip{
+    display:flex;
+    gap:10px;
+    margin-bottom:16px;
+    flex-wrap:wrap;
+  }
+  .status-tile{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:3px;
+    padding:10px 14px;
+    min-width:150px;
+    box-shadow:0 1px 2px rgba(0,0,0,0.04);
+  }
+  .status-tile .label{
+    font-size:11px;
+    color:var(--text-secondary);
+    text-transform:uppercase;
+    letter-spacing:.03em;
+    margin-bottom:4px;
+  }
+  .status-tile .value{
+    font-size:20px;
+    font-weight:600;
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .pill{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    font-size:12px;
+    font-weight:600;
+    padding:2px 9px;
+    border-radius:10px;
+  }
+  .pill.degraded{background:#fff4ce;color:#7a5b00;border:1px solid var(--amber);}
+  .pill.healthy{background:#dff6dd;color:#0e5c0e;border:1px solid var(--green);}
+  .pill.critical{background:#fde7e9;color:#a4262c;border:1px solid var(--red);}
+  .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;}
+  .dot.amber{background:var(--amber);}
+  .dot.red{background:var(--red);}
+  .dot.green{background:var(--green);}
+  .dot.gray{background:#a19f9d;}
+
+  .panel-block{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:3px;
+    margin-bottom:16px;
+    box-shadow:0 1px 2px rgba(0,0,0,0.04);
+  }
+  .panel-block h2{
+    font-size:13px;
+    font-weight:600;
+    margin:0;
+    padding:9px 12px;
+    border-bottom:1px solid var(--border);
+    background:#fafafa;
+    border-radius:3px 3px 0 0;
+  }
+  .panel-block .note{
+    font-size:11.5px;
+    color:var(--text-secondary);
+    padding:8px 12px;
+    border-top:1px solid var(--border);
+    background:#fbfbfb;
+  }
+  .panel-block .note.flag{
+    color:#a4262c;
+    background:#fdf3f4;
+  }
+
+  table.listview{
+    width:100%;
+    border-collapse:collapse;
+    font-size:12.5px;
+  }
+  table.listview thead th{
+    text-align:left;
+    font-weight:600;
+    padding:6px 12px;
+    border-bottom:1px solid var(--border-strong);
+    background:#f6f6f6;
+    position:relative;
+    white-space:nowrap;
+  }
+  table.listview thead th .sort-arrow{
+    margin-left:4px;
+    font-size:9px;
+    color:var(--text-secondary);
+  }
+  table.listview tbody td{
+    padding:6px 12px;
+    border-bottom:1px solid var(--border);
+    vertical-align:middle;
+  }
+  table.listview tbody tr:nth-child(even){background:var(--row-alt);}
+  table.listview tbody tr:hover{background:var(--accent-tint);}
+  table.listview code{
+    font-family:"Cascadia Mono","Consolas",monospace;
+    font-size:11.5px;
+    background:#f0f0f0;
+    padding:1px 5px;
+    border-radius:2px;
+  }
+  .status-cell{display:flex;align-items:center;gap:6px;}
+  .role-badge{
+    font-size:11px;
+    font-weight:600;
+    padding:1px 7px;
+    border-radius:2px;
+    border:1px solid var(--border-strong);
+    background:#f6f6f6;
+    color:var(--text-secondary);
+  }
+  .role-badge.engineer{color:#005a9e;border-color:#a6d8ff;background:#eaf4fd;}
+  .role-badge.operator{color:#6b3fa0;border-color:#d6bdf0;background:#f3ebfa;}
+  .role-badge.worker{color:#605e5c;}
+
+  /* Actions pane */
+  .actions-pane{
+    width:180px;
+    flex:0 0 auto;
+    background:var(--panel);
+    border-left:1px solid var(--border);
+    padding:10px 0;
+    overflow-y:auto;
+  }
+  .actions-pane h3{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.03em;
+    color:var(--text-secondary);
+    margin:4px 12px 6px;
+  }
+  .action-link{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    padding:6px 12px;
+    color:var(--accent);
+    font-size:12.5px;
+    cursor:default;
+  }
+  .action-link svg{width:14px;height:14px;flex:0 0 auto;}
+  .action-link:hover{background:var(--accent-tint);text-decoration:underline;}
+  .actions-divider{height:1px;background:var(--border);margin:8px 12px;}
+
+  /* Status bar */
+  .statusbar{
+    background:var(--panel);
+    border-top:1px solid var(--border);
+    padding:4px 10px;
+    display:flex;
+    gap:18px;
+    font-size:11.5px;
+    color:var(--text-secondary);
+    align-items:center;
+  }
+  .statusbar .sb-item{display:flex;align-items:center;gap:5px;}
+
+  .hidden-section{display:none;}
+</style>
+
+<div class="mmc-window" role="application" aria-label="Willow Management Console">
+
+  <div class="titlebar">
+    <svg class="tb-icon" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="14" height="14" rx="2" fill="#0078d4"/><path d="M4 8h8M8 4v8" stroke="#fff" stroke-width="1.4"/></svg>
+    <strong>Willow</strong> <span class="console-name">— [Console Root\Willow] — Willow Management Console</span>
+  </div>
+
+  <div class="menubar" role="menubar">
+    <button type="button">File</button>
+    <button type="button">Action</button>
+    <button type="button">View</button>
+    <button type="button">Favorites</button>
+    <button type="button">Window</button>
+    <button type="button">Help</button>
+  </div>
+
+  <div class="toolbar" role="toolbar" aria-label="Console toolbar">
+    <button type="button" title="Refresh">
+      <svg viewBox="0 0 16 16" fill="none" stroke="#201f1e" stroke-width="1.3"><path d="M13 4.5A5.5 5.5 0 1 0 13.9 9"/><path d="M13 2v3h-3"/></svg>
+      Refresh
+    </button>
+    <span class="sep"></span>
+    <button type="button" title="Properties">
+      <svg viewBox="0 0 16 16" fill="none" stroke="#201f1e" stroke-width="1.3"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5 6h6M5 8.5h6M5 11h3.5"/></svg>
+      Properties
+    </button>
+    <button type="button" title="Export List">
+      <svg viewBox="0 0 16 16" fill="none" stroke="#201f1e" stroke-width="1.3"><path d="M8 2v8M5 7l3 3 3-3"/><path d="M2.5 12.5h11v1.5h-11z" fill="#201f1e" stroke="none"/></svg>
+      Export List
+    </button>
+    <span class="sep"></span>
+    <button type="button" title="Help">
+      <svg viewBox="0 0 16 16" fill="none" stroke="#201f1e" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><path d="M6.3 6.2a1.9 1.9 0 1 1 2.6 1.7c-.6.3-.9.7-.9 1.4"/><circle cx="8" cy="11.3" r="0.15" fill="#201f1e"/></svg>
+      Help
+    </button>
+  </div>
+
+  <div class="mmc-body">
+
+    <!-- CONSOLE TREE -->
+    <nav class="tree-pane" aria-label="Console tree">
+      <div class="tree-node depth-0">
+        <span class="twisty">▾</span>
+        <svg class="node-icon" viewBox="0 0 16 16" fill="none"><rect x="1" y="3" width="14" height="10" rx="1" fill="#f3d47a" stroke="#c9a227"/></svg>
+        Console Root
+      </div>
+      <div class="tree-node depth-1 selected">
+        <span class="twisty">▾</span>
+        <svg class="node-icon" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="2" fill="#0078d4"/><path d="M5 8h6M8 5v6" stroke="#fff" stroke-width="1.2"/></svg>
+        <a href="#overview">Willow</a>
+      </div>
+
+      <div class="tree-node depth-2">
+        <span class="twisty">▸</span>
+        <svg class="node-icon" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="3.5" width="13" height="9" rx="1" fill="#fff" stroke="#605e5c"/><path d="M3 6h10M3 8.3h10M3 10.6h6" stroke="#605e5c" stroke-width="0.8"/></svg>
+        <a href="#tasks">Task Queue<span class="tree-badge crit">357</span></a>
+      </div>
+      <div class="tree-node depth-2">
+        <span class="twisty">▸</span>
+        <svg class="node-icon" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5.5" r="2.2" fill="#fff" stroke="#605e5c"/><path d="M3.5 13c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" fill="#fff" stroke="#605e5c"/></svg>
+        <a href="#team">Managed Agents<span class="tree-badge">5</span></a>
+      </div>
+      <div class="tree-node depth-2">
+        <span class="twisty">▸</span>
+        <svg class="node-icon" viewBox="0 0 16 16" fill="none"><rect x="2" y="2.5" width="12" height="3.4" rx="0.8" fill="#fff" stroke="#605e5c"/><rect x="2" y="6.3" width="12" height="3.4" rx="0.8" fill="#fff" stroke="#605e5c"/><rect x="2" y="10.1" width="12" height="3.4" rx="0.8" fill="#fff" stroke="#605e5c"/></svg>
+        <a href="#memory">Data Store</a>
+      </div>
+      <div class="tree-node depth-2">
+        <span class="twisty">▸</span>
+        <svg class="node-icon" viewBox="0 0 16 16" fill="none"><path d="M8 2v5l3.5 3.5" stroke="#605e5c" stroke-width="1.3"/><circle cx="8" cy="8" r="6" fill="#fff" stroke="#605e5c"/></svg>
+        <a href="#activity">Event Log</a>
+      </div>
+      <div class="tree-node depth-2">
+        <span class="twisty">▸</span>
+        <svg class="node-icon" viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="5" height="5" fill="#fff" stroke="#605e5c"/><rect x="9" y="2" width="5" height="5" fill="#fff" stroke="#605e5c"/><rect x="2" y="9" width="5" height="5" fill="#fff" stroke="#605e5c"/><rect x="9" y="9" width="5" height="5" fill="#fff" stroke="#605e5c"/></svg>
+        <a href="#schema">Schema Bindings<span class="tree-badge">2/4</span></a>
+      </div>
+    </nav>
+
+    <!-- DETAILS PANE -->
+    <main class="details-pane">
+
+      <section id="overview">
+        <div class="details-header">
+          <div>
+            <div class="breadcrumb">Console Root &gt; Willow</div>
+            <h1>Willow — Overview</h1>
+          </div>
+        </div>
+
+        <div class="status-strip">
+          <div class="status-tile">
+            <div class="label">Overall Health</div>
+            <div class="value"><span class="pill degraded"><span class="dot amber"></span>DEGRADED</span></div>
+          </div>
+          <div class="status-tile">
+            <div class="label">Task Queue</div>
+            <div class="value">369 <span style="font-size:11px;color:var(--text-secondary);font-weight:400;">total</span></div>
+          </div>
+          <div class="status-tile">
+            <div class="label">Worker Heartbeat</div>
+            <div class="value" style="font-size:15px;"><span class="dot gray"></span>None detected</div>
+          </div>
+          <div class="status-tile">
+            <div class="label">Schema Bindings</div>
+            <div class="value">2 <span style="font-size:14px;color:var(--text-secondary);">/ 4 confirmed</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TASK QUEUE -->
+      <section id="tasks" class="panel-block">
+        <h2>Task Queue — Detail</h2>
+        <table class="listview">
+          <thead>
+            <tr>
+              <th>Status<span class="sort-arrow">▾</span></th>
+              <th>Count</th>
+              <th>Task ID</th>
+              <th>Description</th>
+              <th>Queued</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="status-cell"><span class="dot red"></span>Failed</td>
+              <td>357</td>
+              <td><code>—</code></td>
+              <td>Aggregate — see recent failures below</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td class="status-cell"><span class="dot amber"></span>Pending</td>
+              <td>2</td>
+              <td><code>—</code></td>
+              <td>Aggregate — see pending detail below</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td class="status-cell"><span class="dot gray"></span>Running</td>
+              <td>0</td>
+              <td>—</td>
+              <td>—</td>
+              <td>—</td>
+            </tr>
+            <tr>
+              <td class="status-cell"><span class="dot green"></span>Completed</td>
+              <td>0</td>
+              <td>—</td>
+              <td>—</td>
+              <td>—</td>
+            </tr>
+            <tr style="border-top:2px solid var(--border-strong);">
+              <td class="status-cell"><span class="dot amber"></span>Pending (detail)</td>
+              <td>—</td>
+              <td><code>2W1CHRFQ</code></td>
+              <td>echo smoke test</td>
+              <td>Queued recently</td>
+            </tr>
+            <tr>
+              <td class="status-cell"><span class="dot red"></span>Pending (detail)</td>
+              <td>—</td>
+              <td><code>8ED0A500</code></td>
+              <td>embed backfill</td>
+              <td>Queued since May 19 — long-stuck</td>
+            </tr>
+            <tr>
+              <td class="status-cell"><span class="dot red"></span>Failed (detail)</td>
+              <td>x2</td>
+              <td><code>—</code></td>
+              <td>Error: "no executable commands found"</td>
+              <td>—</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="note flag">Flag: no worker process has polled this queue this session (heartbeat: none). 369 tasks, 357 failed, 0 running.</div>
+      </section>
+
+      <!-- MANAGED AGENTS -->
+      <section id="team" class="panel-block">
+        <h2>Managed Agents</h2>
+        <table class="listview">
+          <thead>
+            <tr>
+              <th>Name<span class="sort-arrow">▾</span></th>
+              <th>Role</th>
+              <th>Function</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>skirnir</code></td>
+              <td><span class="role-badge engineer">ENGINEER</span></td>
+              <td>Emissary / gate-witness — closes loops</td>
+            </tr>
+            <tr>
+              <td><code>Auto</code></td>
+              <td><span class="role-badge operator">OPERATOR</span></td>
+              <td>Cursor IDE-integrated router</td>
+            </tr>
+            <tr>
+              <td><code>ganas1</code></td>
+              <td><span class="role-badge worker">WORKER</span></td>
+              <td>File intake / classification pipeline</td>
+            </tr>
+            <tr>
+              <td><code>ganas2</code></td>
+              <td><span class="role-badge worker">WORKER</span></td>
+              <td>Lightweight local model (qwen2.5:3b) test bed</td>
+            </tr>
+            <tr>
+              <td><code>ganas3</code></td>
+              <td><span class="role-badge worker">WORKER</span></td>
+              <td>Image generation (Imagen 4)</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- DATA STORE -->
+      <section id="memory" class="panel-block">
+        <h2>Data Store — Collections</h2>
+        <table class="listview">
+          <thead>
+            <tr>
+              <th>Collection<span class="sort-arrow">▾</span></th>
+              <th>Scope</th>
+              <th>Recent Activity</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>mcp_smoke_test</code></td>
+              <td><span class="dot gray"></span>Transient</td>
+              <td>Record written, read, then deleted this session</td>
+            </tr>
+            <tr>
+              <td><code>ctx__willow-mcp</code></td>
+              <td><span class="dot green"></span>App-scoped</td>
+              <td>Properly isolated to this application</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="note flag">Isolation gap: all other collections are visible to any application holding full access — not scoped per-app like <code>ctx__willow-mcp</code>.</div>
+
+        <h2 style="border-top:1px solid var(--border);border-radius:0;">Knowledge Atoms — Recent</h2>
+        <table class="listview">
+          <thead>
+            <tr>
+              <th>ID<span class="sort-arrow">▾</span></th>
+              <th>Origin</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>509084FA</code></td><td>Ingested this session</td></tr>
+            <tr><td><code>grove_msg_111</code></td><td>From a GitHub channel</td></tr>
+            <tr><td><code>L8A5A</code></td><td>Migrated from an older version</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- EVENT LOG -->
+      <section id="activity" class="panel-block">
+        <h2>Event Log — Recent</h2>
+        <table class="listview">
+          <thead>
+            <tr>
+              <th>Level<span class="sort-arrow">▾</span></th>
+              <th>Event</th>
+              <th>Detail</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="status-cell"><span class="dot green"></span>Info</td>
+              <td>store_put</td>
+              <td>ok</td>
+            </tr>
+            <tr>
+              <td class="status-cell"><span class="dot green"></span>Info</td>
+              <td>store_get</td>
+              <td>ok</td>
+            </tr>
+            <tr>
+              <td class="status-cell"><span class="dot green"></span>Info</td>
+              <td>store_delete</td>
+              <td>ok</td>
+            </tr>
+            <tr>
+              <td class="status-cell"><span class="dot green"></span>Info</td>
+              <td>schema_confirm_mapping</td>
+              <td>2 tables confirmed</td>
+            </tr>
+            <tr>
+              <td class="status-cell"><span class="dot amber"></span>Warning</td>
+              <td>task_submit</td>
+              <td>queued, unread</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- SCHEMA BINDINGS -->
+      <section id="schema" class="panel-block">
+        <h2>Schema Bindings</h2>
+        <table class="listview">
+          <thead>
+            <tr>
+              <th>Table<span class="sort-arrow">▾</span></th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>tasks</td><td class="status-cell"><span class="dot green"></span>Confirmed today</td></tr>
+            <tr><td>knowledge</td><td class="status-cell"><span class="dot green"></span>Confirmed today</td></tr>
+            <tr><td>agents</td><td class="status-cell"><span class="dot amber"></span>Unconfirmed</td></tr>
+            <tr><td>routing</td><td class="status-cell"><span class="dot amber"></span>Unconfirmed</td></tr>
+          </tbody>
+        </table>
+        <div class="note">2 of 4 tables confirmed today (tasks, knowledge); 2 remain unconfirmed (agents, routing).</div>
+      </section>
+
+    </main>
+
+    <!-- ACTIONS PANE -->
+    <aside class="actions-pane" aria-label="Actions">
+      <h3>Willow</h3>
+      <a class="action-link" href="#" tabindex="0">
+        <svg viewBox="0 0 16 16" fill="none" stroke="#0078d4" stroke-width="1.3"><path d="M13 4.5A5.5 5.5 0 1 0 13.9 9"/><path d="M13 2v3h-3"/></svg>
+        Refresh
+      </a>
+      <a class="action-link" href="#" tabindex="0">
+        <svg viewBox="0 0 16 16" fill="none" stroke="#0078d4" stroke-width="1.3"><path d="M8 2v8M5 7l3 3 3-3"/><path d="M2.5 12.5h11v1.5h-11z" fill="#0078d4" stroke="none"/></svg>
+        Export Report
+      </a>
+      <a class="action-link" href="#" tabindex="0">
+        <svg viewBox="0 0 16 16" fill="none" stroke="#0078d4" stroke-width="1.3"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5 6h6M5 8.5h6M5 11h3.5"/></svg>
+        View Properties
+      </a>
+      <div class="actions-divider"></div>
+      <h3>Task Queue</h3>
+      <a class="action-link" href="#tasks" tabindex="0">
+        <svg viewBox="0 0 16 16" fill="none" stroke="#0078d4" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><path d="M8 4.5v4l2.5 1.5"/></svg>
+        View Pending
+      </a>
+      <a class="action-link" href="#tasks" tabindex="0">
+        <svg viewBox="0 0 16 16" fill="none" stroke="#0078d4" stroke-width="1.3"><path d="M8 2v5l3.5 3.5" stroke-width="1.3"/><circle cx="8" cy="8" r="6"/></svg>
+        View Failures
+      </a>
+      <div class="actions-divider"></div>
+      <h3>Data Store</h3>
+      <a class="action-link" href="#memory" tabindex="0">
+        <svg viewBox="0 0 16 16" fill="none" stroke="#0078d4" stroke-width="1.3"><rect x="2" y="2.5" width="12" height="3.4" rx="0.8"/><rect x="2" y="6.3" width="12" height="3.4" rx="0.8"/><rect x="2" y="10.1" width="12" height="3.4" rx="0.8"/></svg>
+        Review Isolation
+      </a>
+    </aside>
+
+  </div>
+
+  <div class="statusbar">
+    <span class="sb-item"><span class="dot amber"></span>Status: DEGRADED</span>
+    <span class="sb-item">369 tasks (357 failed, 2 pending)</span>
+    <span class="sb-item">5 managed agents</span>
+    <span class="sb-item">Schema: 2/4 confirmed</span>
+    <span class="sb-item" style="margin-left:auto;">Willow Management Console — Console Root\Willow</span>
+  </div>
+
+</div>

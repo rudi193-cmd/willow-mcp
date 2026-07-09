@@ -1,0 +1,885 @@
+<title>Willow — a TUI grown from its own tools</title>
+<!--
+  you found the source. the trunk knows about all 357 of them.
+  try typing "sap" anywhere on the page.
+-->
+<style>
+  :root {
+    --bark: #0a0a0a;
+    --bark-raised: #141414;
+    --bark-line: #2b2b2b;
+    --parchment: #e8e6df;
+    --parchment-dim: #948f82;
+    --sap: #e2a13f;
+    --sap-dim: #8a6524;
+    --moss: #7ec26a;
+    --rust: #d1603f;
+    --lichen: #6a746c;
+    --radius: 3px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bark);
+    color: var(--parchment);
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  ::selection { background: var(--sap-dim); color: var(--parchment); }
+  a { color: var(--sap); }
+
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 28px 90px;
+  }
+
+  /* ================= hero band ================= */
+
+  .hero-band {
+    position: relative;
+    overflow: hidden;
+    min-height: 78vh;
+    background:
+      radial-gradient(ellipse 80% 60% at 78% 8%, rgba(226,161,63,0.10) 0%, transparent 60%),
+      linear-gradient(180deg, #050505 0%, var(--bark) 70%);
+    border-bottom: 1px solid var(--bark-line);
+    display: flex;
+    align-items: stretch;
+  }
+
+  #willow-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .hero-scrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(100deg, rgba(10,10,10,0.94) 0%, rgba(10,10,10,0.78) 32%, rgba(10,10,10,0.15) 58%, transparent 72%);
+    pointer-events: none;
+  }
+
+  .hero-inner {
+    position: relative;
+    z-index: 2;
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 28px 34px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 78vh;
+  }
+
+  .hero-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 11.5px;
+    color: var(--sap);
+  }
+  .eyebrow.build { color: var(--lichen); cursor: help; }
+
+  .hero-mid {
+    padding: 8px 0;
+  }
+
+  .hero-word {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-weight: 400;
+    font-size: clamp(52px, 9vw, 108px);
+    line-height: 0.95;
+    color: var(--parchment);
+    margin: 0;
+    text-wrap: balance;
+    transform: rotate(-0.6deg);
+    transform-origin: left bottom;
+  }
+  .hero-word .tail {
+    display: block;
+    font-family: ui-monospace, monospace;
+    font-size: 0.155em;
+    letter-spacing: 0.02em;
+    color: var(--sap);
+    margin-top: 10px;
+    transform: rotate(0.4deg);
+  }
+
+  .lede {
+    max-width: 56ch;
+    color: var(--parchment-dim);
+    font-size: 15.5px;
+    margin: 22px 0 0;
+  }
+  .lede b { color: var(--parchment); font-weight: 600; }
+
+  /* boot sequence */
+  .boot-lines {
+    margin-top: 30px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 13px;
+    max-width: 46ch;
+  }
+  .boot-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+  }
+  .boot-line.in { opacity: 1; transform: none; }
+  .boot-line .k { color: var(--lichen); }
+  .boot-line .v { color: var(--parchment); font-variant-numeric: tabular-nums; }
+  .boot-line .v.bad { color: var(--rust); }
+  .boot-line .v.ok { color: var(--moss); }
+  .boot-cursor {
+    display: inline-block;
+    width: 7px;
+    height: 13px;
+    background: var(--sap);
+    margin-left: 2px;
+    animation: blink 1s step-end infinite;
+    vertical-align: -2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .boot-line { transition: none; }
+    .boot-cursor { animation: none; opacity: 0.6; }
+  }
+  noscript .boot-line { opacity: 1 !important; transform: none !important; }
+
+  .hero-key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    margin-top: 36px;
+    padding-top: 18px;
+    border-top: 1px solid rgba(43,43,43,0.9);
+  }
+  .key-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 12.5px;
+    color: var(--parchment-dim);
+    white-space: nowrap;
+  }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+
+  /* trunk tooltip easter egg */
+  .trunk-tip {
+    position: absolute;
+    right: 8%;
+    bottom: 18%;
+    z-index: 3;
+    max-width: 220px;
+    background: var(--bark-raised);
+    border: 1px solid var(--sap-dim);
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: var(--parchment);
+    opacity: 0;
+    transform: translateY(6px);
+    pointer-events: none;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  .trunk-tip.show { opacity: 1; transform: none; }
+  .trunk-tip::after {
+    content: "";
+    position: absolute;
+    left: 50%; bottom: -6px;
+    width: 10px; height: 10px;
+    background: var(--bark-raised);
+    border-right: 1px solid var(--sap-dim);
+    border-bottom: 1px solid var(--sap-dim);
+    transform: translateX(-50%) rotate(45deg);
+  }
+
+  /* toast */
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 26px;
+    transform: translate(-50%, 12px);
+    z-index: 50;
+    background: var(--bark-raised);
+    border: 1px solid var(--sap-dim);
+    color: var(--parchment);
+    padding: 10px 16px;
+    border-radius: 20px;
+    font-size: 12.5px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast .dot { color: var(--sap); margin-right: 6px; }
+
+  /* hand-drawn divider */
+  .frond-rule { display: block; width: 100%; height: 22px; margin: 6px 0 40px; opacity: 0.55; }
+
+  /* ================= section framing ================= */
+
+  section.block { margin-bottom: 64px; }
+  .page > .lede-top { margin-top: 46px; }
+
+  .block-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .block-title {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 26px;
+    color: var(--parchment);
+    margin: 0;
+  }
+  .block-caption { color: var(--parchment-dim); font-size: 13px; max-width: 46ch; }
+
+  /* ================= terminal chrome ================= */
+
+  .terminal {
+    border: 1px solid var(--bark-line);
+    border-radius: 6px;
+    overflow: hidden;
+    background: #060606;
+    box-shadow: 0 30px 70px -30px rgba(0,0,0,0.8);
+  }
+  .term-titlebar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px;
+    background: var(--bark-raised);
+    border-bottom: 1px solid var(--bark-line);
+    font-size: 12px;
+    color: var(--parchment-dim);
+  }
+  .term-titlebar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bark-line); }
+  .term-titlebar .path { color: var(--sap); margin-left: 4px; }
+
+  .term-body { display: grid; grid-template-columns: 190px 1fr; min-height: 420px; }
+  @media (max-width: 720px) {
+    .term-body { grid-template-columns: 1fr; }
+    .term-nav { display: none; }
+  }
+
+  .term-nav { border-right: 1px solid var(--bark-line); padding: 14px 0; }
+  .term-nav .nav-item {
+    padding: 8px 16px; font-size: 13px; color: var(--parchment-dim);
+    display: flex; gap: 10px; border-left: 2px solid transparent;
+  }
+  .term-nav .nav-item .k { color: var(--sap-dim); }
+  .term-nav .nav-item.active {
+    color: var(--parchment); background: var(--bark-raised); border-left-color: var(--sap);
+  }
+  .term-nav .nav-item.active .k { color: var(--sap); }
+
+  .term-main { padding: 18px 22px 8px; display: flex; flex-direction: column; gap: 16px; }
+
+  .status-line {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    font-size: 12.5px; color: var(--parchment-dim);
+    padding-bottom: 12px; border-bottom: 1px solid var(--bark-line);
+  }
+  .status-line .verdict { color: var(--rust); font-weight: 600; }
+  .status-line b { color: var(--parchment); }
+
+  .pane-title { font-size: 13px; color: var(--sap); display: flex; align-items: center; gap: 8px; }
+  .pane-title .rule { flex: 1; height: 1px; background: var(--bark-line); }
+
+  .flow-row { display: flex; align-items: center; gap: 14px; font-size: 13px; }
+  .flow-track {
+    flex: 1; height: 8px; background: var(--bark-raised);
+    border: 1px solid var(--bark-line); border-radius: 5px; overflow: hidden; position: relative;
+  }
+  .flow-fill {
+    position: absolute; inset: 0; width: 0.5%;
+    background: linear-gradient(90deg, var(--sap-dim), var(--sap));
+    border-radius: 5px 0 0 5px;
+    transition: width 0.6s ease;
+  }
+  .flow-fill.stalled::after {
+    content: ""; position: absolute; right: -2px; top: -3px;
+    width: 6px; height: 14px; background: var(--rust); border-radius: 2px;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .flow-fill.gushing { width: 96% !important; background: linear-gradient(90deg, var(--sap-dim), var(--sap), var(--moss)); }
+  .flow-fill.gushing::after { display: none; }
+  @keyframes pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .flow-fill.stalled::after { animation: none; opacity: 0.8; }
+    .flow-fill { transition: none; }
+  }
+  #flow-note.gushing { color: var(--moss) !important; }
+
+  table.tui-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  table.tui-table th {
+    text-align: left; color: var(--parchment-dim); font-weight: 400; text-transform: uppercase;
+    font-size: 11px; letter-spacing: 0.06em; padding: 4px 10px 6px 0; border-bottom: 1px solid var(--bark-line);
+  }
+  table.tui-table td {
+    padding: 5px 10px 5px 0; border-bottom: 1px solid #1c1c1c;
+    color: var(--parchment-dim); font-variant-numeric: tabular-nums;
+  }
+  table.tui-table td.hi { color: var(--parchment); }
+  table.tui-table tr:last-child td { border-bottom: none; }
+
+  .chip { display: inline-flex; padding: 1px 7px; border-radius: 3px; font-size: 11px; letter-spacing: 0.02em; }
+  .chip.ok { background: rgba(126,194,106,0.15); color: var(--moss); }
+  .chip.bad { background: rgba(209,96,63,0.16); color: var(--rust); }
+  .chip.wait { background: rgba(226,161,63,0.15); color: var(--sap); }
+  .chip.mute { background: rgba(106,116,108,0.16); color: var(--lichen); }
+
+  .cmd-bar {
+    margin-top: auto; padding-top: 12px; border-top: 1px solid var(--bark-line);
+    font-size: 12px; color: var(--parchment-dim); display: flex; gap: 18px; flex-wrap: wrap;
+  }
+  .cmd-bar .k { color: var(--sap); }
+
+  /* ================= mirror (web dashboard) ================= */
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+  .card { background: var(--bark-raised); border: 1px solid var(--bark-line); border-radius: var(--radius); padding: 18px 20px; }
+  .card h3 {
+    margin: 0 0 4px; font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 17px; font-weight: 400; color: var(--parchment);
+  }
+  .card .sub { font-size: 12px; color: var(--parchment-dim); margin-bottom: 14px; }
+
+  .agent-row {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    font-size: 13px; padding: 6px 0; border-bottom: 1px solid #1c1c1c;
+  }
+  .agent-row:last-child { border-bottom: none; }
+  .agent-row .role { color: var(--parchment-dim); font-size: 11.5px; }
+
+  .ring-wrap { display: flex; align-items: center; gap: 18px; }
+  .ring-legend { font-size: 12.5px; color: var(--parchment-dim); display: flex; flex-direction: column; gap: 6px; }
+  .ring-legend .li { display: flex; gap: 8px; align-items: center; }
+
+  .leaf-list { display: flex; flex-direction: column; gap: 10px; }
+  .leaf { font-size: 12.5px; padding: 8px 10px; background: var(--bark); border-left: 2px solid var(--moss); border-radius: 0 3px 3px 0; }
+  .leaf.fresh { border-left-color: var(--sap); }
+  .leaf .meta { color: var(--parchment-dim); font-size: 11px; margin-top: 2px; }
+
+  .litter-list { display: flex; flex-direction: column; gap: 7px; font-size: 12px; }
+  .litter-list .row { display: flex; gap: 10px; color: var(--parchment-dim); }
+  .litter-list .row .t { color: var(--lichen); flex: none; }
+  .litter-list .row .tool { color: var(--parchment); }
+
+  .kpi-row { display: flex; gap: 26px; flex-wrap: wrap; }
+  .kpi { display: flex; flex-direction: column; gap: 2px; }
+  .kpi .n { font-size: 26px; color: var(--parchment); font-variant-numeric: tabular-nums; }
+  .kpi.rust .n { color: var(--rust); }
+  .kpi.sap .n { color: var(--sap); }
+  .kpi .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--parchment-dim); }
+
+  footer {
+    margin-top: 70px; padding-top: 20px; border-top: 1px solid var(--bark-line);
+    color: var(--parchment-dim); font-size: 12.5px; max-width: 62ch;
+  }
+  footer code { color: var(--sap); font-size: 12px; }
+</style>
+
+<div class="hero-band" id="hero">
+  <canvas id="willow-canvas" aria-hidden="true"></canvas>
+  <div class="hero-scrim"></div>
+
+  <div class="hero-inner">
+    <div class="hero-top">
+      <span class="eyebrow">design sketch · not a build</span>
+      <span class="eyebrow build" title="357 failed tasks, in hex. it's not a version number, it's a confession.">build 0x165</span>
+    </div>
+
+    <div class="hero-mid">
+      <h1 class="hero-word">Willow<span class="tail">// a tui, and its mirror</span></h1>
+
+      <div class="boot-lines" id="boot-lines">
+        <div class="boot-line" data-k="reading trunk…" data-v="done" data-cls="">
+          <span class="k">reading trunk…</span><span class="v">done</span>
+        </div>
+        <div class="boot-line" data-k="trunk verdict" data-v="degraded" data-cls="bad">
+          <span class="k">trunk verdict</span><span class="v bad">degraded</span>
+        </div>
+        <div class="boot-line" data-k="canopy" data-v="5 agents" data-cls="">
+          <span class="k">canopy</span><span class="v">5 agents</span>
+        </div>
+        <div class="boot-line" data-k="sap flow" data-v="stalled · 0 workers" data-cls="bad">
+          <span class="k">sap flow</span><span class="v bad">stalled · 0 workers</span>
+        </div>
+        <div class="boot-line" data-k="rings confirmed" data-v="2 / 4 tables" data-cls="">
+          <span class="k">rings confirmed</span><span class="v">2 / 4 tables</span>
+        </div>
+        <div class="boot-line" data-k="stomata" data-v="closed · consent.internet off" data-cls="bad">
+          <span class="k">stomata</span><span class="v bad">closed · consent.internet off<span class="boot-cursor" id="boot-cursor"></span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-key">
+      <div class="key-item"><span class="swatch" style="background:var(--rust)"></span>trunk verdict — degraded / broken</div>
+      <div class="key-item"><span class="swatch" style="background:var(--sap)"></span>sap flowing — active, granted, confirmed</div>
+      <div class="key-item"><span class="swatch" style="background:var(--moss)"></span>rooted — healthy, isolated, settled</div>
+      <div class="key-item"><span class="swatch" style="background:var(--lichen)"></span>dormant — unmapped, idle, unconfirmed</div>
+    </div>
+  </div>
+
+  <div class="trunk-tip" id="trunk-tip">357 tasks never made it past this knot.<br>no worker has listened since May 19.</div>
+</div>
+
+<div class="toast" id="toast"><span class="dot">●</span><span id="toast-text"></span></div>
+
+<div class="page">
+
+  <p class="lede lede-top">
+    The gate in this codebase is already named <b>sap</b>. So the whole
+    surface got read as a tree: the <b>trunk</b> is overall health,
+    <b>sap</b> is the task queue in motion (or not), <b>roots</b> are the
+    persistent store, <b>rings</b> are confirmed schema mappings,
+    <b>canopy</b> is the agent fleet, and <b>leaves</b> are knowledge atoms —
+    falling into <b>litter</b>, the receipt log, once they're acted on.
+  </p>
+
+  <p class="lede">
+    A seventh part joined once egress got its own gate: <b>stomata</b>, the
+    pores that decide whether an app may exchange anything with the world
+    outside the tree at all. <code>consent.internet</code> is the operator's
+    standing switch, <code>task_net</code> is the capability to ever ask, and
+    an egress lease is the time-boxed grant that actually opens one — all
+    three, or the pore stays shut. Unlike sap, roots, and the rest, stomata
+    aren't a mockup: <code>willow-mcp gates</code> renders this same three-key
+    state today, on/off, egress-lease shaped.
+  </p>
+
+  <svg class="frond-rule" viewBox="0 0 600 22" preserveAspectRatio="none" aria-hidden="true">
+    <path d="M0,11 C 40,2 70,20 110,10 S 180,2 220,11 S 290,20 330,10 S 400,2 440,11 S 510,20 550,10 S 600,3 600,11"
+          fill="none" stroke="#8a6528" stroke-width="1.4" stroke-linecap="round"/>
+  </svg>
+
+  <section class="block">
+    <div class="block-head">
+      <h2 class="block-title">The terminal</h2>
+      <p class="block-caption">A k9s-shaped session: nav down the left names the tree's parts, not the tables behind them. The status line reads the trunk's actual verdict from this afternoon's audit.</p>
+    </div>
+
+    <div class="terminal">
+      <div class="term-titlebar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="path">willow ssh://fleet · app: willow-mcp</span>
+      </div>
+      <div class="term-body">
+        <nav class="term-nav">
+          <div class="nav-item"><span class="k">1</span> Canopy</div>
+          <div class="nav-item active"><span class="k">2</span> Sap</div>
+          <div class="nav-item"><span class="k">3</span> Roots</div>
+          <div class="nav-item"><span class="k">4</span> Rings</div>
+          <div class="nav-item"><span class="k">5</span> Leaves</div>
+          <div class="nav-item"><span class="k">6</span> Litter</div>
+          <div class="nav-item"><span class="k">7</span> Stomata</div>
+        </nav>
+        <main class="term-main">
+          <div class="status-line">
+            <span>trunk: <span class="verdict">degraded</span></span>
+            <span><b>369</b> tasks total</span>
+            <span><b>357</b> failed</span>
+            <span>worker heartbeat: <span style="color:var(--rust)">none</span></span>
+            <span>13:52:11</span>
+          </div>
+
+          <div class="pane-title">sap flow — task queue<span class="rule"></span></div>
+          <div class="flow-row">
+            <span style="color:var(--parchment-dim)">pending 2</span>
+            <div class="flow-track"><div class="flow-fill stalled" id="flow-fill"></div></div>
+            <span style="color:var(--rust)" id="flow-note">stalled — no worker drinking from this line</span>
+          </div>
+
+          <table class="tui-table">
+            <tr><th>id</th><th>submitted by</th><th>status</th><th>note</th></tr>
+            <tr><td class="hi">2W1CHRFQ</td><td>willow-mcp</td><td><span class="chip wait">pending</span></td><td>echo smoke test — queued 19:52</td></tr>
+            <tr><td class="hi">8ED0A500</td><td>sap_startup</td><td><span class="chip wait">pending</span></td><td>embed backfill — queued since May 19</td></tr>
+            <tr><td class="hi">e03bb741…</td><td>willow</td><td><span class="chip bad">failed</span></td><td>no executable commands found</td></tr>
+            <tr><td class="hi">6271F39C</td><td>sap_startup</td><td><span class="chip bad">failed</span></td><td>no executable commands found</td></tr>
+          </table>
+
+          <div class="cmd-bar">
+            <span><span class="k">:submit</span> new task</span>
+            <span><span class="k">:cancel</span> — not implemented</span>
+            <span><span class="k">/</span> filter</span>
+            <span><span class="k">?</span> help</span>
+            <span><span class="k">q</span> quit</span>
+          </div>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <h2 class="block-title">The mirror</h2>
+      <p class="block-caption">Same tree, browser tab. Nothing here that the terminal couldn't show — just room to let the canopy, the rings, and the leaf litter breathe as their own shapes.</p>
+    </div>
+
+    <div class="grid">
+
+      <div class="card" style="grid-column: 1 / -1;">
+        <h3>Trunk</h3>
+        <div class="sub">overall verdict, read the moment you open the tab</div>
+        <div class="kpi-row">
+          <div class="kpi rust"><span class="n">degraded</span><span class="lbl">verdict</span></div>
+          <div class="kpi rust"><span class="n">357</span><span class="lbl">tasks failed</span></div>
+          <div class="kpi sap"><span class="n">2</span><span class="lbl">tasks pending</span></div>
+          <div class="kpi"><span class="n">5</span><span class="lbl">agents in canopy</span></div>
+          <div class="kpi"><span class="n">2 / 4</span><span class="lbl">tables ringed today</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Canopy</h3>
+        <div class="sub">fleet_status — five agents, ranked by trust</div>
+        <div class="agent-row"><span>skirnir</span><span class="role">ENGINEER</span></div>
+        <div class="agent-row"><span>Auto</span><span class="role">OPERATOR</span></div>
+        <div class="agent-row"><span>ganas1</span><span class="role">WORKER · nest intake</span></div>
+        <div class="agent-row"><span>ganas2</span><span class="role">WORKER · qwen2.5:3b</span></div>
+        <div class="agent-row"><span>ganas3</span><span class="role">WORKER · imagen 4</span></div>
+      </div>
+
+      <div class="card">
+        <h3>Rings</h3>
+        <div class="sub">schema_confirm_mapping — growth rings, one per table</div>
+        <div class="ring-wrap">
+          <svg width="96" height="96" viewBox="0 0 96 96" aria-hidden="true">
+            <circle cx="48" cy="48" r="44" fill="none" stroke="var(--bark-line)" stroke-width="1"/>
+            <circle cx="48" cy="48" r="34" fill="none" stroke="var(--moss)" stroke-width="7"/>
+            <circle cx="48" cy="48" r="22" fill="none" stroke="var(--sap)" stroke-width="7"/>
+            <circle cx="48" cy="48" r="10" fill="none" stroke="var(--lichen)" stroke-width="6" stroke-dasharray="3 4"/>
+          </svg>
+          <div class="ring-legend">
+            <div class="li"><span class="swatch" style="background:var(--moss)"></span>tasks — confirmed</div>
+            <div class="li"><span class="swatch" style="background:var(--sap)"></span>knowledge — confirmed</div>
+            <div class="li"><span class="swatch" style="background:var(--lichen)"></span>agents, routing — unconfirmed</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Roots</h3>
+        <div class="sub">SOIL store — collections, unfenced</div>
+        <div class="agent-row"><span>mcp_smoke_test</span><span class="role">put → get → deleted</span></div>
+        <div class="agent-row"><span>ctx__willow-mcp</span><span class="role">context, app-scoped</span></div>
+        <div class="agent-row"><span>(all others)</span><span class="role" style="color:var(--rust)">visible to any full_access app</span></div>
+      </div>
+
+      <div class="card">
+        <h3>Leaves</h3>
+        <div class="sub">knowledge base — most recent atoms</div>
+        <div class="leaf-list">
+          <div class="leaf fresh">509084FA · mcp_smoke_test<div class="meta">ingested this session · domain confirmed</div></div>
+          <div class="leaf">grove_msg_111 · github channel<div class="meta">source: grove_message</div></div>
+          <div class="leaf">L8A5A · migrated from willow-1.7<div class="meta">source: file_location</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Stomata</h3>
+        <div class="sub">consent · task_net · egress lease — three keys, app by app</div>
+        <div class="agent-row"><span>fleet consent.internet</span><span class="chip bad">closed</span></div>
+        <div class="agent-row"><span>skirnir</span><span class="chip wait">lease active · 8m12s</span></div>
+        <div class="agent-row"><span>ganas1</span><span class="chip mute">task_net not granted</span></div>
+        <div class="agent-row" style="border-bottom:none;">
+          <span style="color:var(--parchment-dim); font-size:11.5px; line-height:1.5;">
+            closed fleet-wide — skirnir's lease is still counting down, but a
+            per-app lease alone never opens a pore. an operator has to flip
+            <code style="color:var(--sap)">consent.internet</code> first.
+          </span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Litter</h3>
+        <div class="sub">receipts_tail — what actually happened, in order</div>
+        <div class="litter-list">
+          <div class="row"><span class="t">19:51</span><span class="tool">store_put</span><span>ok</span></div>
+          <div class="row"><span class="t">19:51</span><span class="tool">store_get</span><span>ok</span></div>
+          <div class="row"><span class="t">19:51</span><span class="tool">store_delete</span><span>ok</span></div>
+          <div class="row"><span class="t">19:52</span><span class="tool">schema_confirm_mapping</span><span>×2 confirmed</span></div>
+          <div class="row"><span class="t">19:52</span><span class="tool">task_submit</span><span>queued, unread</span></div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    Rendered dark-only, on purpose — a terminal doesn't get a light mode, and
+    the tree metaphor only works against something like a night sky. Palette:
+    <code>bark #0a0a0a</code>, <code>sap #e2a13f</code>, <code>moss #7ec26a</code>,
+    <code>rust #c05f42</code>. Display face is an old-style serif used only for
+    the wordmark and titles; every number and every table stays in monospace,
+    because in both the TUI and its mirror, the digits are the point.
+    <br><br>
+    Two things are hiding on this page. One of them types.
+  </footer>
+
+</div>
+
+<noscript>
+  <style>.boot-line { opacity: 1 !important; transform: none !important; } .boot-cursor { display: none; }</style>
+</noscript>
+
+<script>
+(function () {
+  "use strict";
+
+  var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  console.log("%cthe trunk remembers.", "color:#e2a13f;font-family:monospace;font-size:14px;");
+  console.log("%ctype 'sap' on the page if you want to see it move.", "color:#948f82;font-family:monospace;font-size:11px;");
+
+  /* ---------------- boot sequence ---------------- */
+  (function typeBoot() {
+    var lines = document.querySelectorAll("#boot-lines .boot-line");
+    if (reduceMotion) {
+      lines.forEach(function (l) { l.classList.add("in"); });
+      return;
+    }
+    lines.forEach(function (line, i) {
+      setTimeout(function () { line.classList.add("in"); }, 260 + i * 230);
+    });
+  })();
+
+  /* ---------------- willow canvas tree ---------------- */
+  var canvas = document.getElementById("willow-canvas");
+  var ctx = canvas.getContext("2d");
+  var hero = document.getElementById("hero");
+  var W = 0, H = 0;
+
+  var TRUNK_X_FRAC = 0.76;
+  var CANOPY_Y_FRAC = 0.30;
+  var TRUNK_BASE_FRAC = 0.94;
+
+  var fronds = [];
+  var particles = [];
+  var lastDripAt = 0;
+  var t0 = null;
+
+  function resize() {
+    W = hero.clientWidth;
+    H = hero.clientHeight;
+    canvas.width = W;
+    canvas.height = H;
+    buildFronds();
+  }
+
+  function buildFronds() {
+    fronds = [];
+    var canopyX = W * TRUNK_X_FRAC;
+    var canopyY = H * CANOPY_Y_FRAC;
+    var canopyWidth = Math.min(280, W * 0.28);
+    var canopyBulge = 46;
+    var n = 24;
+    for (var i = 0; i < n; i++) {
+      var t = i / (n - 1);
+      var anchorX = canopyX + (t - 0.5) * canopyWidth;
+      var anchorY = canopyY - Math.sin(t * Math.PI) * canopyBulge;
+      var droop = 90 + ((i * 37) % 90);
+      var drift = (t - 0.5) * 60 + (((i * 13) % 20) - 10);
+      fronds.push({
+        ax: anchorX, ay: anchorY,
+        droop: droop, drift: drift,
+        phase: i * 0.7,
+        speed: 0.6 + (i % 5) * 0.06,
+        leafSeed: i
+      });
+    }
+  }
+
+  function drawTrunk() {
+    var x = W * TRUNK_X_FRAC;
+    var topY = H * CANOPY_Y_FRAC;
+    var baseY = H * TRUNK_BASE_FRAC;
+    var baseHalf = 15, topHalf = 6;
+    var grad = ctx.createLinearGradient(0, topY, 0, baseY);
+    grad.addColorStop(0, "#3a3a3a");
+    grad.addColorStop(1, "#161616");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(x - baseHalf, baseY);
+    ctx.quadraticCurveTo(x - baseHalf * 0.7, (topY + baseY) / 2, x - topHalf, topY);
+    ctx.lineTo(x + topHalf, topY);
+    ctx.quadraticCurveTo(x + baseHalf * 0.7, (topY + baseY) / 2, x + baseHalf, baseY);
+    ctx.closePath();
+    ctx.fill();
+
+    /* two scaffold limbs so fronds don't seem to sprout from one point */
+    ctx.strokeStyle = "#3a3a3a";
+    ctx.lineWidth = 5;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x, topY + 4);
+    ctx.quadraticCurveTo(x - 46, topY - 6, x - 78, topY + 14);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, topY + 4);
+    ctx.quadraticCurveTo(x + 46, topY - 6, x + 78, topY + 14);
+    ctx.stroke();
+  }
+
+  function drawFronds(time) {
+    for (var i = 0; i < fronds.length; i++) {
+      var f = fronds[i];
+      var sway = reduceMotion ? 0 : Math.sin(time * 0.001 * f.speed + f.phase) * 7;
+      var ex = f.ax + f.drift + sway;
+      var ey = f.ay + f.droop;
+      var cx = f.ax + f.drift * 0.35 + sway * 0.5;
+      var cy = f.ay + f.droop * 0.55;
+
+      ctx.strokeStyle = "rgba(226,161,63,0.4)";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(f.ax, f.ay);
+      ctx.quadraticCurveTo(cx, cy, ex, ey);
+      ctx.stroke();
+
+      var leafColors = ["#7ec26a", "#5f9c4d", "#e2a13f"];
+      for (var j = 0; j < 3; j++) {
+        var lt = 0.55 + j * 0.16;
+        var lx = f.ax + (ex - f.ax) * lt + (((f.leafSeed + j) * 17) % 7 - 3);
+        var ly = f.ay + (ey - f.ay) * lt + (((f.leafSeed + j) * 11) % 7 - 3);
+        ctx.fillStyle = leafColors[(f.leafSeed + j) % leafColors.length];
+        ctx.globalAlpha = 0.75;
+        ctx.beginPath();
+        ctx.arc(lx, ly, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      f._tipX = ex; f._tipY = ey;
+    }
+  }
+
+  function spawnDrip() {
+    var f = fronds[(Math.random() * fronds.length) | 0];
+    if (!f || f._tipX == null) return;
+    particles.push({ x: f._tipX, y: f._tipY, vy: 0.35 + Math.random() * 0.25, alpha: 1 });
+  }
+
+  function drawParticles(dt) {
+    ctx.fillStyle = "#e2a13f";
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var p = particles[i];
+      p.y += p.vy * dt;
+      p.alpha -= 0.0009 * dt;
+      if (p.alpha <= 0 || p.y > H) { particles.splice(i, 1); continue; }
+      ctx.globalAlpha = Math.max(p.alpha, 0);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function frame(time) {
+    if (t0 === null) t0 = time;
+    var dt = Math.min(time - (frame._last || time), 48);
+    frame._last = time;
+
+    ctx.clearRect(0, 0, W, H);
+    drawTrunk();
+    drawFronds(time - t0);
+
+    if (!reduceMotion && time - lastDripAt > 1700) {
+      lastDripAt = time;
+      spawnDrip();
+    }
+    drawParticles(dt);
+
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener("resize", resize);
+  resize();
+  requestAnimationFrame(frame);
+
+  /* trunk click easter egg */
+  var trunkClicks = 0, trunkClickTimer = null;
+  var trunkTip = document.getElementById("trunk-tip");
+  canvas.addEventListener("click", function (e) {
+    var rect = canvas.getBoundingClientRect();
+    var x = e.clientX - rect.left;
+    var y = e.clientY - rect.top;
+    var tx = W * TRUNK_X_FRAC;
+    var topY = H * CANOPY_Y_FRAC;
+    var baseY = H * TRUNK_BASE_FRAC;
+    var inTrunk = Math.abs(x - tx) < 30 && y > topY && y < baseY;
+    if (!inTrunk) { trunkClicks = 0; return; }
+    trunkClicks++;
+    clearTimeout(trunkClickTimer);
+    trunkClickTimer = setTimeout(function () { trunkClicks = 0; }, 1200);
+    if (trunkClicks >= 3) {
+      trunkClicks = 0;
+      trunkTip.classList.add("show");
+      setTimeout(function () { trunkTip.classList.remove("show"); }, 4200);
+    }
+  });
+
+  /* "sap" keyboard easter egg */
+  var buf = "";
+  var flowFill = document.getElementById("flow-fill");
+  var flowNote = document.getElementById("flow-note");
+  var toast = document.getElementById("toast");
+  var toastText = document.getElementById("toast-text");
+  var toastTimer = null;
+
+  function showToast(msg) {
+    toastText.textContent = msg;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toast.classList.remove("show"); }, 3200);
+  }
+
+  window.addEventListener("keydown", function (e) {
+    if (e.key.length !== 1 || !/[a-z]/i.test(e.key)) return;
+    buf = (buf + e.key.toLowerCase()).slice(-10);
+    if (buf.indexOf("sap") !== -1) {
+      buf = "";
+      flowFill.classList.remove("stalled");
+      flowFill.classList.add("gushing");
+      flowNote.textContent = "flowing — a temp worker showed up";
+      flowNote.classList.add("gushing");
+      showToast("sap gate: temporary worker hired. flow restored for 3s.");
+      if (!reduceMotion) {
+        for (var i = 0; i < 22; i++) {
+          (function (delay) { setTimeout(spawnDrip, delay); })(i * 40);
+        }
+      }
+      setTimeout(function () {
+        flowFill.classList.remove("gushing");
+        flowFill.classList.add("stalled");
+        flowNote.textContent = "stalled — no worker drinking from this line";
+        flowNote.classList.remove("gushing");
+      }, 3000);
+    }
+  });
+})();
+</script>

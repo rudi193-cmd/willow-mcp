@@ -1,0 +1,827 @@
+<title>Willow</title>
+<style>
+  :root {
+    --window-bg: #f5f5f7;
+    --panel-bg: #ffffff;
+    --panel-bg-translucent: rgba(255, 255, 255, 0.72);
+    --sidebar-bg: rgba(246, 246, 248, 0.78);
+    --hairline: #e5e5e5;
+    --hairline-strong: #d8d8dc;
+    --text-primary: #1d1d1f;
+    --text-secondary: #6e6e73;
+    --text-tertiary: #98989d;
+    --accent: #c97f22;
+    --accent-soft: rgba(201, 127, 34, 0.14);
+    --accent-soft-strong: rgba(201, 127, 34, 0.22);
+    --red: #d84341;
+    --red-soft: rgba(216, 67, 65, 0.12);
+    --green: #34a853;
+    --green-soft: rgba(52, 168, 83, 0.12);
+    --yellow: #e0a419;
+    --yellow-soft: rgba(224, 164, 25, 0.14);
+    --blue: #3b82c4;
+    --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+    --shadow-window: 0 30px 80px rgba(0, 0, 0, 0.35), 0 4px 18px rgba(0, 0, 0, 0.18);
+    --traffic-red: #ff5f57;
+    --traffic-yellow: #febc2e;
+    --traffic-green: #28c840;
+    --traffic-border: rgba(0, 0, 0, 0.12);
+    --focus-ring: #3b82c4;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --window-bg: #1e1e1e;
+      --panel-bg: #2c2c2e;
+      --panel-bg-translucent: rgba(44, 44, 46, 0.7);
+      --sidebar-bg: rgba(30, 30, 30, 0.68);
+      --hairline: #3a3a3c;
+      --hairline-strong: #48484a;
+      --text-primary: #f5f5f7;
+      --text-secondary: #a1a1a6;
+      --text-tertiary: #7c7c80;
+      --accent: #e0983c;
+      --accent-soft: rgba(224, 152, 60, 0.18);
+      --accent-soft-strong: rgba(224, 152, 60, 0.28);
+      --red: #ff6b68;
+      --red-soft: rgba(255, 107, 104, 0.16);
+      --green: #4cd672;
+      --green-soft: rgba(76, 214, 114, 0.14);
+      --yellow: #f0b429;
+      --yellow-soft: rgba(240, 180, 41, 0.16);
+      --blue: #64b1e8;
+      --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+      --shadow-window: 0 30px 90px rgba(0, 0, 0, 0.6), 0 4px 18px rgba(0, 0, 0, 0.4);
+      --traffic-border: rgba(0, 0, 0, 0.4);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--window-bg);
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 32px 16px;
+  }
+
+  .window {
+    width: 100%;
+    max-width: 1080px;
+    height: 700px;
+    background: var(--window-bg);
+    border-radius: 14px;
+    box-shadow: var(--shadow-window);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--hairline);
+  }
+
+  .titlebar {
+    height: 52px;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    background: var(--sidebar-bg);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--hairline);
+    position: relative;
+  }
+
+  .traffic-lights {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .traffic-lights span {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    border: 1px solid var(--traffic-border);
+  }
+
+  .traffic-lights .red { background: var(--traffic-red); }
+  .traffic-lights .yellow { background: var(--traffic-yellow); }
+  .traffic-lights .green { background: var(--traffic-green); }
+
+  .titlebar-title {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 0.01em;
+  }
+
+  .body-split {
+    flex: 1 1 auto;
+    display: flex;
+    min-height: 0;
+  }
+
+  .sidebar {
+    width: 232px;
+    flex: 0 0 auto;
+    background: var(--sidebar-bg);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border-right: 1px solid var(--hairline);
+    padding: 18px 12px;
+    overflow-y: auto;
+  }
+
+  .sidebar-heading {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+    padding: 4px 10px 8px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 7px;
+    border: none;
+    background: transparent;
+    font-size: 13.5px;
+    font-family: inherit;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    margin-bottom: 2px;
+  }
+
+  .nav-item .icon {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    color: var(--text-secondary);
+  }
+
+  .nav-item .icon svg {
+    width: 100%;
+    height: 100%;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .nav-item .label-main {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.25;
+  }
+
+  .nav-item .label-sub {
+    font-size: 10.5px;
+    color: var(--text-tertiary);
+    font-weight: 400;
+  }
+
+  .nav-item:hover {
+    background: var(--hairline);
+  }
+
+  .nav-item.active {
+    background: var(--accent-soft-strong);
+  }
+
+  .nav-item.active .icon,
+  .nav-item.active .label-main {
+    color: var(--accent);
+  }
+
+  .nav-item:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+
+  .content {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 28px 36px 44px;
+    background: var(--window-bg);
+  }
+
+  .content-header {
+    margin-bottom: 22px;
+  }
+
+  .content-header h1 {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0 0 4px;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+
+  .content-header .subtitle {
+    font-size: 12.5px;
+    color: var(--text-tertiary);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .status-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--panel-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: var(--shadow-panel);
+    margin-bottom: 24px;
+  }
+
+  .status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--yellow);
+    box-shadow: 0 0 0 4px var(--yellow-soft);
+    flex: 0 0 auto;
+  }
+
+  .status-banner-text strong {
+    font-size: 15px;
+    display: block;
+  }
+
+  .status-banner-text span {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 14px;
+    margin-bottom: 26px;
+  }
+
+  .card {
+    background: var(--panel-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow-panel);
+  }
+
+  .card .card-label {
+    font-size: 11.5px;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+
+  .card .card-value {
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .card .card-value.red { color: var(--red); }
+  .card .card-value.yellow { color: var(--yellow); }
+  .card .card-value.green { color: var(--green); }
+
+  .card .card-note {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+  }
+
+  .section {
+    background: var(--panel-bg);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    box-shadow: var(--shadow-panel);
+    margin-bottom: 22px;
+    overflow: hidden;
+  }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--hairline);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .section-title .flavor {
+    font-weight: 400;
+    color: var(--text-tertiary);
+    font-size: 11.5px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .row:last-child { border-bottom: none; }
+
+  .row-main {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .row-title {
+    font-size: 13.5px;
+    font-weight: 500;
+  }
+
+  .row-sub {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+
+  .row-id {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    color: var(--text-tertiary);
+  }
+
+  .pill {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 20px;
+    flex: 0 0 auto;
+    letter-spacing: 0.01em;
+  }
+
+  .pill.red { background: var(--red-soft); color: var(--red); }
+  .pill.green { background: var(--green-soft); color: var(--green); }
+  .pill.yellow { background: var(--yellow-soft); color: var(--yellow); }
+  .pill.grey { background: var(--hairline); color: var(--text-secondary); }
+  .pill.accent { background: var(--accent-soft); color: var(--accent); }
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    flex: 0 0 auto;
+  }
+
+  .callout {
+    display: flex;
+    gap: 12px;
+    background: var(--yellow-soft);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 22px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .callout .icon {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    color: var(--yellow);
+    margin-top: 1px;
+  }
+
+  .callout .icon svg {
+    width: 100%;
+    height: 100%;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .callout strong { font-weight: 600; }
+
+  .pane { display: none; }
+  .pane.active { display: block; }
+
+  .progress-track {
+    height: 6px;
+    background: var(--hairline);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 8px;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 4px;
+  }
+
+  a { color: var(--accent); }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: var(--hairline-strong); border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+</style>
+  <div class="window" role="application" aria-label="Willow">
+    <div class="titlebar">
+      <div class="traffic-lights" aria-hidden="true">
+        <span class="red"></span>
+        <span class="yellow"></span>
+        <span class="green"></span>
+      </div>
+      <div class="titlebar-title">Willow</div>
+    </div>
+
+    <div class="body-split">
+      <nav class="sidebar" aria-label="Sections">
+        <div class="sidebar-heading">Willow</div>
+
+        <button class="nav-item active" data-pane="overview" aria-current="page">
+          <span class="icon"><svg viewBox="0 0 24 24"><path d="M4 12l7-8 9 8"/><path d="M6 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/></svg></span>
+          <span class="label-main">Overview<span class="label-sub">trunk</span></span>
+        </button>
+
+        <button class="nav-item" data-pane="tasks">
+          <span class="icon"><svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/><circle cx="19" cy="18" r="2"/></svg></span>
+          <span class="label-main">Tasks<span class="label-sub">sap</span></span>
+        </button>
+
+        <button class="nav-item" data-pane="team">
+          <span class="icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.4"/><path d="M15.3 14.2c2.3.4 4 2.4 4 5.8"/></svg></span>
+          <span class="label-main">Team<span class="label-sub">canopy</span></span>
+        </button>
+
+        <button class="nav-item" data-pane="memory">
+          <span class="icon"><svg viewBox="0 0 24 24"><path d="M12 3a5 5 0 0 1 5 5c0 1.7-.8 2.8-1.6 3.8-.7.8-1.4 1.6-1.4 2.7v1.5H10v-1.5c0-1.1-.7-1.9-1.4-2.7C7.8 10.8 7 9.7 7 8a5 5 0 0 1 5-5z"/><path d="M9.5 19h5M10.5 21.5h3"/></svg></span>
+          <span class="label-main">Memory<span class="label-sub">roots &amp; leaves</span></span>
+        </button>
+
+        <button class="nav-item" data-pane="activity">
+          <span class="icon"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg></span>
+          <span class="label-main">Activity<span class="label-sub">litter</span></span>
+        </button>
+      </nav>
+
+      <main class="content" id="content">
+        <!-- OVERVIEW -->
+        <section class="pane active" id="pane-overview">
+          <div class="content-header">
+            <h1>Overview</h1>
+            <div class="subtitle">trunk</div>
+          </div>
+
+          <div class="status-banner">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="status-banner-text">
+              <strong>Degraded</strong>
+              <span>Willow is running but needs attention — the task queue has a stuck backlog and no worker has checked in.</span>
+            </div>
+          </div>
+
+          <div class="card-grid">
+            <div class="card">
+              <div class="card-label">Tasks queued</div>
+              <div class="card-value">369</div>
+              <div class="card-note">total in queue today</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Failed</div>
+              <div class="card-value red">357</div>
+              <div class="card-note">no executable commands found</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Pending</div>
+              <div class="card-value yellow">2</div>
+              <div class="card-note">waiting on a worker</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Worker check-in</div>
+              <div class="card-value">None</div>
+              <div class="card-note">no worker has polled the queue</div>
+            </div>
+          </div>
+
+          <div class="callout">
+            <span class="icon"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 16.5h.01"/><path d="M10.3 3.9 2.5 18a1.6 1.6 0 0 0 1.4 2.4h16.2a1.6 1.6 0 0 0 1.4-2.4L13.7 3.9a1.6 1.6 0 0 0-2.8 0z"/></svg></span>
+            <div>
+              <strong>Storage isolation notice.</strong> Most memory collections are visible to any connected app with full access. Two are scoped correctly — see Memory for details.
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Confirmed data tables<span class="flavor">rings</span></div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">2 of 4 confirmed today</div>
+                <div class="progress-track"><div class="progress-fill" style="width: 50%;"></div></div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-main"><div class="row-title">Tasks</div></div>
+              <span class="pill green">Confirmed</span>
+            </div>
+            <div class="row">
+              <div class="row-main"><div class="row-title">Knowledge</div></div>
+              <span class="pill green">Confirmed</span>
+            </div>
+            <div class="row">
+              <div class="row-main"><div class="row-title">Agents</div></div>
+              <span class="pill grey">Unconfirmed</span>
+            </div>
+            <div class="row">
+              <div class="row-main"><div class="row-title">Routing</div></div>
+              <span class="pill grey">Unconfirmed</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- TASKS -->
+        <section class="pane" id="pane-tasks">
+          <div class="content-header">
+            <h1>Tasks</h1>
+            <div class="subtitle">sap</div>
+          </div>
+
+          <div class="card-grid">
+            <div class="card">
+              <div class="card-label">Total</div>
+              <div class="card-value">369</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Failed</div>
+              <div class="card-value red">357</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Pending</div>
+              <div class="card-value yellow">2</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Running</div>
+              <div class="card-value">0</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Completed</div>
+              <div class="card-value">0</div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Pending</div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">Echo smoke test</div>
+                <div class="row-sub row-id">2W1CHRFQ · queued recently</div>
+              </div>
+              <span class="pill yellow">Pending</span>
+            </div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">Embed backfill</div>
+                <div class="row-sub row-id">8ED0A500 · queued since May 19 — long-stuck</div>
+              </div>
+              <span class="pill yellow">Pending</span>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Recent failures</div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">No executable commands found</div>
+                <div class="row-sub">Task failed before dispatch</div>
+              </div>
+              <span class="pill red">Failed</span>
+            </div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">No executable commands found</div>
+                <div class="row-sub">Task failed before dispatch</div>
+              </div>
+              <span class="pill red">Failed</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- TEAM -->
+        <section class="pane" id="pane-team">
+          <div class="content-header">
+            <h1>Team</h1>
+            <div class="subtitle">canopy</div>
+          </div>
+
+          <div class="section">
+            <div class="row">
+              <div class="avatar">SK</div>
+              <div class="row-main">
+                <div class="row-title">skirnir</div>
+                <div class="row-sub">Emissary and gate-witness — closes loops</div>
+              </div>
+              <span class="pill accent">Engineer</span>
+            </div>
+            <div class="row">
+              <div class="avatar">AU</div>
+              <div class="row-main">
+                <div class="row-title">Auto</div>
+                <div class="row-sub">Cursor IDE-integrated router</div>
+              </div>
+              <span class="pill accent">Operator</span>
+            </div>
+            <div class="row">
+              <div class="avatar">G1</div>
+              <div class="row-main">
+                <div class="row-title">ganas1</div>
+                <div class="row-sub">File intake and classification pipeline</div>
+              </div>
+              <span class="pill grey">Worker</span>
+            </div>
+            <div class="row">
+              <div class="avatar">G2</div>
+              <div class="row-main">
+                <div class="row-title">ganas2</div>
+                <div class="row-sub">Lightweight local model test bed — qwen2.5:3b</div>
+              </div>
+              <span class="pill grey">Worker</span>
+            </div>
+            <div class="row">
+              <div class="avatar">G3</div>
+              <div class="row-main">
+                <div class="row-title">ganas3</div>
+                <div class="row-sub">Image generation — Imagen 4</div>
+              </div>
+              <span class="pill grey">Worker</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- MEMORY -->
+        <section class="pane" id="pane-memory">
+          <div class="content-header">
+            <h1>Memory</h1>
+            <div class="subtitle">roots &amp; leaves</div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Collections<span class="flavor">roots</span></div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">mcp_smoke_test</div>
+                <div class="row-sub">A record was written, read back, then deleted this session</div>
+              </div>
+              <span class="pill grey">Ephemeral</span>
+            </div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">ctx__willow-mcp</div>
+                <div class="row-sub">Properly scoped to this app only</div>
+              </div>
+              <span class="pill green">Scoped</span>
+            </div>
+          </div>
+
+          <div class="callout">
+            <span class="icon"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 16.5h.01"/><path d="M10.3 3.9 2.5 18a1.6 1.6 0 0 0 1.4 2.4h16.2a1.6 1.6 0 0 0 1.4-2.4L13.7 3.9a1.6 1.6 0 0 0-2.8 0z"/></svg></span>
+            <div>
+              All other collections are currently visible to any app with full access, not just Willow. Worth locking down alongside the two unconfirmed tables.
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Recent knowledge<span class="flavor">leaves</span></div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">509084FA</div>
+                <div class="row-sub">Ingested this session</div>
+              </div>
+              <span class="pill accent">New</span>
+            </div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">grove_msg_111</div>
+                <div class="row-sub">From a shared channel</div>
+              </div>
+              <span class="pill grey">Synced</span>
+            </div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">L8A5A</div>
+                <div class="row-sub">Migrated from an older version</div>
+              </div>
+              <span class="pill grey">Migrated</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ACTIVITY -->
+        <section class="pane" id="pane-activity">
+          <div class="content-header">
+            <h1>Activity</h1>
+            <div class="subtitle">litter</div>
+          </div>
+
+          <div class="section">
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">Wrote a record to memory</div>
+                <div class="row-sub">store_put</div>
+              </div>
+              <span class="pill green">OK</span>
+            </div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">Read a record from memory</div>
+                <div class="row-sub">store_get</div>
+              </div>
+              <span class="pill green">OK</span>
+            </div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">Deleted a record from memory</div>
+                <div class="row-sub">store_delete</div>
+              </div>
+              <span class="pill green">OK</span>
+            </div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">Confirmed 2 data tables</div>
+                <div class="row-sub">Tasks and Knowledge</div>
+              </div>
+              <span class="pill green">Done</span>
+            </div>
+            <div class="row">
+              <div class="row-main">
+                <div class="row-title">Submitted a new task</div>
+                <div class="row-sub">Queued, not yet reviewed</div>
+              </div>
+              <span class="pill yellow">Unread</span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var navItems = document.querySelectorAll(".nav-item");
+      navItems.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          navItems.forEach(function (b) {
+            b.classList.remove("active");
+            b.removeAttribute("aria-current");
+          });
+          btn.classList.add("active");
+          btn.setAttribute("aria-current", "page");
+
+          var target = btn.getAttribute("data-pane");
+          document.querySelectorAll(".pane").forEach(function (p) {
+            p.classList.remove("active");
+          });
+          var pane = document.getElementById("pane-" + target);
+          if (pane) {
+            pane.classList.add("active");
+          }
+          document.getElementById("content").scrollTop = 0;
+        });
+      });
+    })();
+  </script>

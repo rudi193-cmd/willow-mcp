@@ -21,6 +21,20 @@ pip install willow-mcp
 
 Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 
+```bash
+willow-mcp-init    # scaffold $WILLOW_HOME (idempotent)
+willow-mcp-compile --force   # compile manifests (use product venv — see below)
+willow-mcp-sign-seed hanuman # ratify home seed + detach-sign (operator terminal only)
+willow-mcp-compile-persona hanuman # seed → personas/hanuman.md (AS-7)
+```
+
+> **PATH note:** `~/.local/bin/willow-mcp` is often the **fleet** shim (`sap_mcp.py`), not this
+> product. Use the product venv binary:
+> `~/github/.willow/venvs/willow-mcp/bin/willow-mcp-compile --force`
+> or `.../bin/willow-mcp compile-agents --force` after `pip install -e .` in that venv.
+
+Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (LOCKED).
+
 ## Tools
 
 | Tool | Description |
@@ -39,24 +53,221 @@ Requires Python 3.11+. Postgres is optional — SOIL store works standalone.
 | `kb_journal` | Add a journal-domain knowledge atom (requires a confirmed schema mapping) |
 | `kb_startup_continuity` | Fetch atoms tagged/domained for startup continuity |
 | `schema_confirm_mapping` | Confirm (optionally correct) a table's column mapping, unlocking its write tools. `preview=True` dry-runs it and renders a **sample row** so you can see what each field actually resolves to before trusting a name match — see [docs/design/schema-adaptation.md](docs/design/schema-adaptation.md) |
+| `gap_log` | Log or bump a "we don't know this yet" entry (fleet-wide backlog, SOIL-only, no Postgres needed) — see [docs/design/gap-backlog.md](docs/design/gap-backlog.md) |
+| `gap_list` | List gaps, most-asked first — filter by `topic` and/or `status` (`open`/`resolved`/`promoted`) |
+| `gap_resolve` | Mark a gap as being worked or answered — bookkeeping only, does not write to the knowledge base |
+| `gap_promote` | Turn a resolved gap into a knowledge atom. Requires `answer`, at least one `source`, and `confirmed_by`; writes through the same schema-confirmation gate as `knowledge_ingest` and closes the gap out |
 | `task_submit` | Submit task to Kart queue |
 | `task_status` | Check task status |
 | `task_list` | List pending tasks |
 | `agent_route` | Route a task to a target agent, recording the decision |
 | `agent_dispatch_result` | Record the result of a dispatched agent task |
+| `dispatch_send` | Create dispatch packet (`meta.json` + `assignment.md`) |
+| `dispatch_read` | Read dispatch assignment and status |
+| `dispatch_list` | List dispatch packets |
+| `dispatch_accept` | Specialist accepts packet (pending → working) |
+| `handoff_write_v4` | Complete work — `handoff.json` + `closeout.md` |
+| `handoff_read` | Read handoff for a dispatch |
+| `verify_handoff` | Orchestrator verifies completion |
+| `agent_clear` | Clear specialist for next packet |
+| `session_read` | Read thin session state file |
 | `fleet_status` | List agents registered in the fleet |
-| `fleet_health` | Task queue counts by status |
+| `fleet_health` | Task queue counts by status, live worker heartbeats, and whether the queue is `stranded` |
 | `context_save` | Save ephemeral per-identity working state under a key, with an optional TTL (SOIL-backed, no Postgres) |
 | `context_get` | Read a saved context; `expired` (and purged) once its TTL passes |
 | `context_list` | List your saved context keys and expiry times (expired ones skipped) |
 | `context_expire` | Delete a saved context before its TTL |
+| `integration_list` | The integration ledger: every outbound adapter, live or **declared stub**, with credential *source* (never the value) |
+| `integration_status` | Offline readiness readout for one adapter — live/stub, credential presence, and whether the egress gate would pass. No network call |
+| `integration_call` | Call an external API through a registered adapter — behind the three-key egress gate, keyed on `integration_net` (own line, never implied by `task_net` or `full_access`) |
 | `receipts_tail` | Read your own most-recent tool-call receipts — a self-audit trail scoped to your `app_id` |
-| `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/env health, with a verdict and named fixes. Ungated — see below |
+| `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/worker/consent/egress-lease/env health, with a verdict and named fixes. Ungated — see below |
+
+### Egress needs three keys
+
+A task that reaches the network requires **all three** of these, and any one
+missing denies before anything is written:
+
+| Key | Question | Where | Turned by |
+|---|---|---|---|
+| `task_net` | May this app *ever* request egress? | `mcp_apps/<app_id>/manifest.json` | operator, granted once |
+| `consent.internet` | Is egress permitted *right now*? | `$WILLOW_HOME/settings.global.json` | operator, flipped freely |
+| egress lease | For *this app*, until *when*? | `mcp_apps/_net_leases/<app_id>.json` | operator, `willow-mcp grant-net`, expires on its own |
+
+```jsonc
+// $WILLOW_HOME/settings.global.json — the off switch
+{ "consent": { "internet": false, "cloud_llm": true, "lan": false } }
+```
+
+```console
+$ willow-mcp grant-net myapp --ttl 30m --reason "publish the release"
+$ willow-mcp net-status          # what is live, and for how much longer
+$ willow-mcp revoke-net myapp    # or just wait; the ceiling is 3h
+```
+
+Setting `consent.internet` to `false` stops network tasks **fleet-wide**,
+immediately, without editing a single manifest. `task_net` is a capability
+(rarely granted, deliberately excluded from `full_access`); `consent.internet` is
+a switch; the lease is a **time-boxed grant** that an agent may ask for and never
+issue. No MCP tool can mint one — `grant-net` is local CLI only, exactly like
+`confirm-binding`. An agent may *request* egress and may never *grant it to
+itself*.
+
+Consent and leases are both read **fail-closed**: a missing file, an unparseable
+file, a non-boolean value (`"true"`, `1`), a lease past its deadline, a deadline
+with no timezone, or a lease record naming a *different* app than the file it sits
+in — all read as denied. Absence is not consent, and a name is not an identity.
+willow-mcp only reads the consent policy — it is authored by willow-2.0's
+`global_settings.py`. That module also keeps a flat `consent.json` **mirror**,
+rewritten on every save; willow-mcp reads it only when the canonical file is
+absent. Because it is written constantly and read almost never, it can drift
+silently, and **deleting it does not keep it gone** — the next save recreates it.
+If the two disagree, `diagnostic_summary` reports an error naming both values
+rather than quietly obeying one of them (B-30).
+
+#### `gates` — every gate, on/off, egress-lease shaped
+
+Diagnosing a denial today means knowing which of a dozen-plus gates to check
+and which file or CLI command controls it. `willow-mcp gates` shows all of
+them at once, each rendered the way the egress lease already renders
+itself — on/off, plus how long the "on" is good for:
+
+```console
+$ willow-mcp gates                    # every app under mcp_apps/
+$ willow-mcp gates myapp              # scoped to one app
+$ willow-mcp gates --html             # writes ./willow-gates.html, a live-countdown snapshot
+$ willow-mcp gates --json             # raw rows, for scripting
+```
+
+Every row that has an existing operator-only local CLI to flip it (the
+egress lease, an identity binding) prints that exact command. Manifest
+permission groups — which had no CLI before, only hand-editing
+`manifest.json` or regenerating it via `compile-agents` — get a new pair for
+the same purpose:
+
+```console
+$ willow-mcp allow-permission myapp store_read
+$ willow-mcp deny-permission myapp store_read
+```
+
+Both are local-CLI-only, never MCP tools, for the same reason `grant-net`
+isn't: an agent must never be able to grant itself a permission it was just
+denied. `consent.*` rows never show a command — willow-mcp only reads that
+policy (see above) — and `strict_trust_root` / severance /
+human-orchestrator attestation are environment variables read once at
+process start, so their rows name the env var to set and restart with,
+rather than pretending a live toggle exists.
+
+`task_net` and `integration_net` both show up as their own capability rows
+(neither is folded into `full_access`), and both are authorized by the same
+per-app egress lease below them — one `grant-net`/`revoke-net` covers Kart
+sandbox egress and server-process integration calls together, since a lease
+is scoped to the app, not to which capability is asking.
+
+#### `tree` — the integration seam for a real dashboard
+
+`docs/design/*.html` sketches a client UI as a tree — trunk (overall
+health), sap (task queue), canopy (agent fleet), roots (SOIL store), rings
+(schema-mapping confirmation), leaves (knowledge atoms), litter (activity
+log), and stomata (the gates above). `willow-mcp tree` is what makes that
+real: one call that returns every part in that same shape, instead of a
+dashboard assembling `fleet_status`/`fleet_health`/`kb_startup_continuity`/
+`receipts_tail`/`gates` itself.
+
+```console
+$ willow-mcp tree myapp              # short text summary
+$ willow-mcp tree myapp --json       # full data, for a real dashboard to consume
+```
+
+It's a thin CLI wrapper over `willow_mcp.tree_view.build_tree(app_id)`,
+which a Python dashboard can also import and call directly. `sap`, `canopy`,
+and `leaves` go through the same `@_guarded` MCP tool functions a client
+would reach over the protocol — gating, rate limiting, and receipt logging
+all still apply — and degrade to `{"error": "postgres_unavailable"}` with no
+database configured, same as those tools already do. `roots`, `rings`,
+`litter`, and `stomata` read local SQLite/filesystem state directly, so they
+work with no Postgres at all.
+
+#### The residual, stated plainly
+
+On a host where the agent and the MCP server run as the same uid, the agent can
+write the very files that authorize its egress. Leases make a self-grant *expire*
+and *leave a record*, and the PreToolUse hook blocks the obvious attempts — but
+the operating system is not stopping it. `diagnostic_summary` names exactly which
+keys the running process could forge, under `checks.net_lease.self_writable`.
+
+The control is ownership. Put `mcp_apps/` and `mcp_apps/_net_leases/` under a uid
+the agent does not run as, then:
+
+```console
+$ export WILLOW_MCP_STRICT_TRUST_ROOT=1   # refuse egress when the keys are self-writable
+```
+
+Strict mode is **off by default** because turning it on before that separation
+exists would deny egress on every current install. This is tracked as B-32 in
+`docs/BUGS.md`; requesting egress and confirming it are separate authorities, and
+until the filesystem says so, only convention does.
+
+### Integrations (outbound adapters)
+
+`integration_call` lets the **server process** call external HTTP APIs through
+registered adapters — a second egress lane, beside the Kart sandbox's. It uses
+the same three-key gate, but keyed on its **own** capability, `integration_net`:
+the server egresses as its own uid with its own filesystem view, a strictly more
+privileged lane than the network-namespaced sandbox, so `task_net` never implies
+it (and vice versa). `integration_call` itself is also excluded from
+`full_access` — even the attempt surface is opt-in.
+
+Adapters are **earned, not scaffolded**. Two are live (`github`,
+`huggingface`); six are *declared stubs* (`gmail`, `slack`, `notion`,
+`google-drive`, `datadog`, `jira`) that refuse fail-closed, each naming what it
+needs and what earns its implementation. `integration_list` is the ledger — see
+[`docs/design/integrations.md`](docs/design/integrations.md) for the earn rule.
+
+Credentials resolve environment-variable-first (e.g. `WILLOW_GITHUB_TOKEN`,
+then `GITHUB_TOKEN`), then the vault under `integration/<name>/token`. No tool
+ever returns a credential — only its *source*.
+
+```console
+$ willow-mcp-integrations list                # the ledger, live + stubs
+$ willow-mcp-integrations check github --app-id myapp   # offline: creds? keys? no network call
+$ willow-mcp-integrations set-token github   # prompted + hidden, stored in the vault
+```
+
+### Running the task worker
+
+`task_submit` only *queues* a task. A worker process executes it, sandboxed with
+bubblewrap. Without one running, tasks stay `pending` forever:
+
+```bash
+willow-mcp worker --lane fast     # daemon; polls until stopped
+willow-mcp worker --once          # drain what's queued, then exit
+```
+
+The engine is [`kartikeya`](https://pypi.org/project/kartikeya/), a hard
+dependency — a base `pip install willow-mcp` ships a working drainer.
+
+A running worker publishes a heartbeat under `$WILLOW_HOME/worker_heartbeat/`,
+which `fleet_health` reads back:
+
+```json
+{"pending": 3, "running": 0, "completed": 12, "failed": 0, "total": 15,
+ "workers": {"alive": 0, "workers": [{"pid": 4242, "state": "dead", ...}]},
+ "stranded": true}
+```
+
+**`stranded: true` means there is pending work and no live worker** — the
+distinction between "queued, it'll run" and "queued, nothing is listening."
+`diagnostic_summary` raises the same condition as a named `worker` problem. A
+worker is `alive` (ticking), `stale` (process up, loop wedged), or `dead` (pid
+gone). Heartbeats are advisory telemetry: no permission decision reads them, and
+reads verify the recorded pid is a live local process, so a forged file naming a
+dead pid reads `dead`.
 
 `knowledge_search`/`kb_at`/`kb_startup_continuity` and `fleet_status` adapt to
 whatever your host database's real columns are named — see
 [docs/design/schema-adaptation.md](docs/design/schema-adaptation.md).
-`knowledge_ingest`/`kb_journal`/`kb_promote` refuse to write
+`knowledge_ingest`/`kb_ingest`/`kb_journal`/`kb_promote` refuse to write
 (`unconfirmed_schema`) until you've reviewed and confirmed that mapping via
 `schema_confirm_mapping` — the [`schema-confirm` skill](skills/schema-confirm.md)
 walks through that.
@@ -223,6 +434,8 @@ just ask to turn serve mode on or off.
 | `WILLOW_PG_DB` | `willow` | Postgres database name (serve mode won't see a shell `export` — see [serve env note](#turning-serve-mode-on-and-off)) |
 | `WILLOW_PG_USER` | `$USER` | Postgres user (Unix socket auth) |
 | `WILLOW_STORE_ROOT` | `~/.willow/store` | SQLite store directory — set to willow-2.0's store root to share data |
+| `WILLOW_MCP_FLEET_HOME` | *(unset)* | The fleet home this install claims to be **severed** from. Unset = no claim. See [Severance](#severance) |
+| `WILLOW_MCP_FLEET_PG_DB` | *(unset)* | The fleet database this install claims to be severed from |
 | `WILLOW_APP_ID` | `willow-mcp` | Default app_id if not passed per-call |
 | `WILLOW_HOME` | `~/.willow` | Root for manifests, vault, and identity bindings |
 | `WILLOW_MCP_HOST` | `127.0.0.1` | Serve-mode bind host (`--host` overrides) |
@@ -244,18 +457,106 @@ needs a manifest at `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json`:
 see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the full set
 (`store_read`, `store_write`, `knowledge_read`, `knowledge_write`,
 `schema_admin`, `task_queue`, `agent_dispatch`, `fleet_read`, `context`,
-`audit`, `full_access`). Fail-closed: no manifest, or an empty `permissions`
-list, denies every call for that `app_id`.
+`audit`, `gap_read`, `gap_write`, `gap_promote`, `full_access`). Fail-closed:
+no manifest, or an empty `permissions` list, denies every call for that
+`app_id`. `gap_promote` is kept separate from `gap_write` — landing
+something as trusted knowledge is a more consequential act than logging or
+resolving a gap, the same reasoning `schema_admin` gets its own group
+instead of folding into `knowledge_write`.
 
 There is also one **capability permission**, `task_net`, which is not a tool
-name but a privilege flag: it lets `task_submit(allow_net=True)` run a Kart
-task with network access. It is deliberately excluded from `task_queue` and
-`full_access` — network egress from the sandbox must be granted explicitly, on
-its own line, and only host-side (never authored from inside the sandbox).
+name but a privilege flag: it lets an app *ask* for `task_submit(allow_net=True)`.
+It is deliberately excluded from `task_queue` and `full_access` — network egress
+from the sandbox must be granted explicitly, on its own line, and only host-side
+(never authored from inside the sandbox). On its own it authorizes nothing: the
+call also needs the operator's `consent.internet` and a live egress lease
+(see [Egress needs three keys](#egress-needs-three-keys)).
+
+### `store_scope` — confining an app to its own collections
+
+By default, `store_*` tools are **unrestricted across collections** — and by
+default the SOIL store is the wider Willow fleet's store (see
+`WILLOW_STORE_ROOT` in [Configuration](#configuration) above), so an app with
+`store_read`/`store_write`/`full_access` can see every collection any other
+app or fleet process has written, the same way it always could. That's the
+right default for a single-operator, single-trust-domain install, but it
+means a `store_read` grant to one app is implicitly a grant to read every
+other app's data too.
+
+Sharing is a default, not a design commitment. An install that should be cut
+off from the fleet can point `WILLOW_STORE_ROOT` at its own store and name the
+fleet it is severed from — see [Severance](#severance) below, which turns the
+cut into something `diagnostic_summary` checks rather than something the docs
+assert.
+
+An operator who wants an app confined to its own data adds an optional
+`store_scope` array to that app's manifest:
+
+```json
+{"permissions": ["full_access"], "store_scope": ["myapp_*"]}
+```
+
+Patterns match by exact name, or by prefix if they end in `*`. With
+`store_scope` set, `store_put`/`get`/`list`/`update`/`search`/`delete` reject
+any collection outside it (`collection_denied`), and `store_search_all`
+only searches the matching collections instead of every collection in the
+store. Omit the field entirely for today's unrestricted behavior — an empty
+list (`"store_scope": []`) means "no collections," not "unrestricted."
+
+**A scope the gate cannot read denies everything.** If `store_scope` is present
+but malformed — most likely `"store_scope": "myapp_*"`, a string where a list
+belongs — the app is confined to *no* collections rather than granted all of
+them. The same holds for an unreadable manifest or an invalid `app_id`. This is
+deliberate: an operator who mistypes the field believes the app is confined, and
+a policy that cannot be parsed is not consent. The app fails loudly, an `ERROR`
+is logged naming the field and the type it got, and nothing leaks while the typo
+is being found. Omit the field (or set it to `null`) to declare no policy.
 
 In [HTTP serve mode](#http-serve-mode-oauth), the `app_id` is not taken from
 the call — it is resolved from the caller's confirmed OAuth identity binding,
 then checked against that same manifest ACL.
+
+## Severance
+
+A willow-mcp install can share a Willow fleet's store, database, and trust root,
+or it can be cut off from them. Both are legitimate. What is not legitimate is
+*claiming* the cut and not having it — a server that reports `ok` while wired to
+the fleet is worse than one with no check at all.
+
+Severance is **asserted, never assumed.** Name the fleet you are severed from:
+
+```bash
+export WILLOW_MCP_FLEET_HOME=/home/you/github/.willow
+export WILLOW_MCP_FLEET_PG_DB=willow_20
+```
+
+`diagnostic_summary` then reports a `severance` check over three surfaces:
+
+| Surface | Kind | Violation |
+|---|---|---|
+| `store` | data | `WILLOW_STORE_ROOT` resolves inside the fleet home → `degraded` |
+| `postgres` | data | `WILLOW_PG_DB` is the fleet database → `degraded` |
+| `trust_root` | **authority** | `mcp_apps/` is inside the fleet home, or is writable by this process → `broken` |
+
+The distinction is the whole design. Store and database hold **data**: someone
+who writes them corrupts records. `mcp_apps/` holds **authority** — the manifest
+that grants `task_net`, the lease root, the consent file. Someone who writes
+*those* grants themselves the egress the cut was supposed to deny. Only the third
+can turn a severed install into a compromised one, so only it breaks the verdict.
+
+Consequently the trust root must live somewhere neither this process nor the Kart
+sandbox can write. A repo directory is the wrong place for it, however convenient:
+repos are bound read-write into task sandboxes. Put data in the repo; put the gate
+outside it, owned by a uid the agent does not run as.
+
+Symlinks are resolved before comparison. `~/.willow` is frequently a symlink into
+a fleet tree, and two names for one directory are not two directories.
+
+Leave both variables unset and the check reports `not_asserted` and changes
+nothing — a single-trust-domain install is complete without severance, and one
+that never claimed to be cut off cannot be caught lying about it. Set one and not
+the other and the unnamed surface reports `unknown`, which degrades: an
+unverifiable claim is not a passing one.
 
 ## Hooks and skills (Claude Code)
 
@@ -265,11 +566,16 @@ the MCP server itself:
 
 - **`hooks/pre_tool_use.py`** blocks `Bash` commands that reach for raw
   `psql`/`psycopg2`/`sqlite3` against a database or store willow-mcp owns,
-  redirecting to the matching MCP tool instead.
+  redirecting to the matching MCP tool instead. It also blocks any call that
+  would write the keys authorizing the agent's *own* egress — minting a lease,
+  running `grant-net`, or editing a manifest to add `task_net` — and warns on a
+  `task_submit` that hand-embeds a `# allow_net` directive.
 - **[`skills/schema-confirm.md`](skills/schema-confirm.md)** walks through
   reviewing and confirming a table's schema mapping before writing to it.
 - **[`skills/willow-serve.md`](skills/willow-serve.md)** turns OAuth serve mode
   on/off on request (see [above](#turning-serve-mode-on-and-off)).
+- **[`skills/kart-tasks.md`](skills/kart-tasks.md)** covers submitting and polling
+  Kart tasks, the three-key egress model, and worker liveness.
 
 See [docs/design/hooks-and-skills.md](docs/design/hooks-and-skills.md) for
 the design and the reasoning behind shipping these alongside tools rather

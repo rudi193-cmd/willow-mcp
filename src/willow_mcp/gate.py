@@ -41,7 +41,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "store_get", "store_search", "store_list", "store_search_all",
     }),
     "store_write": frozenset({
-        "store_put", "store_update", "store_delete",
+        "store_put", "store_update", "store_delete", "agent_seed_mirror",
     }),
     "store_all": frozenset({
         "store_put", "store_get", "store_list", "store_update",
@@ -61,6 +61,24 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "agent_dispatch": frozenset({
         "agent_route", "agent_dispatch_result",
     }),
+    "dispatch_read": frozenset({
+        "dispatch_read", "dispatch_list", "handoff_read", "session_read", "session_enter",
+        "specialist_list", "specialist_get", "agent_seed_mirror",
+        "exposure_config_get", "exposure_slice",
+    }),
+    "dispatch_write": frozenset({
+        "dispatch_send", "dispatch_accept", "handoff_write_v4",
+        "verify_handoff", "agent_clear", "session_handoff_write",
+    }),
+    "orchestrator": frozenset({
+        "dispatch_send", "dispatch_read", "dispatch_list", "dispatch_accept",
+        "handoff_write_v4", "handoff_read", "verify_handoff", "agent_clear",
+        "session_read", "session_enter", "session_handoff_write", "agent_route", "agent_dispatch_result",
+        "fleet_status", "fleet_health", "context_save", "context_get",
+        "context_list", "knowledge_search", "kb_ingest", "store_get", "store_search",
+        "specialist_list", "specialist_get", "agent_seed_mirror",
+        "exposure_config_get", "exposure_slice",
+    }),
     "fleet_read": frozenset({
         "fleet_status", "fleet_health",
     }),
@@ -69,6 +87,29 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     }),
     "audit": frozenset({
         "receipts_tail",
+    }),
+    "gap_read": frozenset({
+        "gap_list",
+    }),
+    "gap_write": frozenset({
+        "gap_log", "gap_resolve",
+    }),
+    "integration_read": frozenset({
+        "integration_list", "integration_status",
+    }),
+    # integration_call is its own group and deliberately NOT in full_access:
+    # it is the only tool whose entire purpose is server-process egress, so it
+    # is granted on its own line — same spirit as NET_PERMISSION below. (The
+    # actual egress still needs the integration_net capability + consent +
+    # lease; this keeps even the *attempt* surface opt-in.)
+    "integration_call": frozenset({
+        "integration_call",
+    }),
+    # Landing a gap as trusted knowledge is a more consequential act than
+    # logging or resolving one, so it's gated as its own group rather than
+    # folded into gap_write — same reasoning as schema_admin below.
+    "gap_promote": frozenset({
+        "gap_promote",
     }),
     # Confirming a schema mapping unlocks write tools for a whole table — a
     # more consequential act than any single write, so it's gated as its
@@ -89,6 +130,11 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "task_submit", "task_status", "task_list",
         # Dispatch
         "agent_route", "agent_dispatch_result",
+        "dispatch_send", "dispatch_read", "dispatch_list", "dispatch_accept",
+        "handoff_write_v4", "handoff_read", "verify_handoff", "agent_clear",
+        "session_read", "session_enter", "session_handoff_write",
+        "agent_seed_mirror",
+        "exposure_config_get", "exposure_slice",
         # Fleet (read-only)
         "fleet_status", "fleet_health",
         # Schema admin
@@ -97,6 +143,10 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "context_save", "context_get", "context_list", "context_expire",
         # Self-audit
         "receipts_tail",
+        # Gap backlog
+        "gap_log", "gap_list", "gap_resolve", "gap_promote",
+        # Integrations (read-only ledger; integration_call stays own-line)
+        "integration_list", "integration_status",
     }),
 }
 
@@ -110,6 +160,14 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
 # silently carries net access with it (B-19; same spirit as B-14's trust-root
 # separation).
 NET_PERMISSION = "task_net"
+
+# Same shape, different lane: NET_PERMISSION authorizes egress from inside the
+# network-namespaced Kart sandbox; INTEGRATION_NET_PERMISSION authorizes the
+# server process itself calling out via integration adapters — a strictly more
+# privileged lane (server uid, full filesystem view), so holding one must never
+# imply the other. Checked by integrations.egress_denial alongside
+# consent.internet and a live lease (the same three-key gate task_submit uses).
+INTEGRATION_NET_PERMISSION = "integration_net"
 
 
 def _load_manifest(app_id: str) -> Optional[dict]:
@@ -131,6 +189,63 @@ def authorized(app_id: str) -> bool:
     except ValueError:
         return False
     return _load_manifest(app_id) is not None
+
+
+#: Returned when a scope cannot be established. `[]` denies every collection
+#: (see db.collection_in_scope), so an unreadable policy confines rather than
+#: releases. Distinct from None, which means "no policy declared".
+_DENY_ALL: list = []
+
+
+def store_scope(app_id: str) -> Optional[list]:
+    """Return this app's manifest `store_scope` list.
+
+    Three outcomes, and the difference between them is the whole point:
+
+    * **Field absent, or explicitly `null` → `None` → unrestricted.** An app that
+      never opted into isolation keeps seeing what it always saw — every
+      collection in whatever store WILLOW_STORE_ROOT resolved to, which may or
+      may not be the wider fleet's (see `diagnostic_summary`'s `severance` check).
+      An explicit `null` is a declaration of no policy, not a broken one.
+    * **Field present and well-formed → that list.** Exact names and/or
+      `prefix*` wildcards; `[]` denies everything.
+    * **Scope undeterminable → `[]` → deny-all.** A bad app_id, a missing or
+      unreadable manifest, or a malformed `store_scope` cannot be read as
+      consent. Returning None here would hand full store access to an operator
+      who typed `"store_scope": "myapp_*"` (a string, the obvious typo for this
+      field) and believes the app is confined. The app breaks loudly instead,
+      which is the only outcome that reaches a human.
+
+    This module fails closed on missing app_id, missing manifest, and empty
+    permissions (see header). Scope now does too. See B-24 / L-ISO-01.
+    """
+    try:
+        app_id = _validate_app_id(app_id)
+    except ValueError:
+        logger.warning("gate: invalid app_id %r for store_scope — denying all collections", app_id)
+        return list(_DENY_ALL)
+    manifest = _load_manifest(app_id)
+    if manifest is None:
+        logger.warning("gate: no readable manifest for %r — denying all collections", app_id)
+        return list(_DENY_ALL)
+    scope = manifest.get("store_scope")
+    if scope is None:
+        return None
+    if not isinstance(scope, list) or not all(isinstance(p, str) for p in scope):
+        logger.error(
+            "gate: malformed store_scope for %r (expected a list of strings, got %r) "
+            "— denying all collections",
+            app_id,
+            type(scope).__name__,
+        )
+        return list(_DENY_ALL)
+    return scope
+
+
+def collection_permitted(app_id: str, collection: str) -> bool:
+    """True if this app's (optional) store_scope allows touching `collection`."""
+    from . import db
+    return db.collection_in_scope(collection, store_scope(app_id))
 
 
 def permitted(app_id: str, tool_name: str) -> bool:
@@ -167,6 +282,14 @@ def permitted(app_id: str, tool_name: str) -> bool:
 
     if tool_name not in allowed:
         logger.info("gate: %r denied tool %r (permissions=%r)", app_id, tool_name, perms)
+        return False
+
+    deny: list = manifest.get("deny_tools") or []
+    if not isinstance(deny, list):
+        logger.error("gate: malformed deny_tools for %r — denying %r", app_id, tool_name)
+        return False
+    if tool_name in deny:
+        logger.info("gate: %r denied tool %r (deny_tools)", app_id, tool_name)
         return False
 
     return True

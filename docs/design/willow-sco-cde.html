@@ -1,0 +1,497 @@
+<title>Willow — System Status</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #5f8787;
+    font-family: "Courier New", Courier, monospace;
+    color: #000;
+    overflow-x: hidden;
+  }
+  body {
+    background-image:
+      repeating-linear-gradient(45deg, rgba(0,0,0,0.02) 0px, rgba(0,0,0,0.02) 2px, transparent 2px, transparent 4px);
+    min-height: 100vh;
+    padding: 20px;
+  }
+
+  /* ==== desktop top bar (CDE front panel, decorative) ==== */
+  .front-panel {
+    background: #a8a8a0;
+    box-shadow: inset 1px 1px 0 #e8e8e0, inset -2px -2px 0 #4a4a44;
+    border: 1px solid #2b2b28;
+    padding: 6px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 18px;
+    font-size: 12px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+  }
+  .front-panel .brand { color: #0a3d6e; }
+  .front-panel .clock { color: #2b2b28; font-weight: normal; }
+
+  /* ==== window chrome ==== */
+  .window {
+    background: #b8b5ae;
+    box-shadow: inset 1px 1px 0 #ecece4, inset -1px -1px 0 #ecece4,
+                inset 2px 2px 0 #8a8780, inset -2px -2px 0 #4a4844;
+    border: 1px solid #1c1c1a;
+    margin-bottom: 18px;
+  }
+  .titlebar {
+    background: #0a3d6e;
+    background-image: linear-gradient(180deg, #0f4d86 0%, #0a3d6e 60%, #082f56 100%);
+    color: #fff;
+    font-weight: bold;
+    font-size: 13px;
+    padding: 4px 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #05243f;
+    letter-spacing: 0.3px;
+  }
+  .titlebar .ttext {
+    text-shadow: 1px 1px 0 #041c33;
+  }
+  .win-controls { display: flex; gap: 4px; }
+  .win-btn {
+    width: 15px;
+    height: 15px;
+    background: #b8b5ae;
+    box-shadow: inset 1px 1px 0 #ecece4, inset -1px -1px 0 #4a4844;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    line-height: 1;
+    color: #1c1c1a;
+    cursor: default;
+  }
+  .win-btn:focus-visible {
+    outline: 2px solid #ffd24a;
+    outline-offset: 1px;
+  }
+  .menubar {
+    background: #b8b5ae;
+    border-bottom: 1px solid #6f6c66;
+    box-shadow: inset 0 1px 0 #ecece4;
+    padding: 3px 8px;
+    display: flex;
+    gap: 16px;
+    font-size: 12px;
+  }
+  .menubar span {
+    cursor: default;
+    padding: 1px 4px;
+  }
+  .menubar span:hover,
+  .menubar span:focus-visible {
+    background: #0a3d6e;
+    color: #fff;
+    outline: none;
+  }
+  .menubar span[tabindex] { }
+
+  .win-body {
+    padding: 12px 14px;
+    font-size: 13px;
+  }
+
+  /* ==== layout ==== */
+  .desktop-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    align-items: start;
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+  .col-span-2 { grid-column: 1 / -1; }
+
+  @media (max-width: 800px) {
+    .desktop-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ==== status LEDs ==== */
+  .led {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 1px solid #1c1c1a;
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,0.4);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .led-red { background: #b3121a; box-shadow: inset 1px 1px 0 rgba(255,255,255,0.4), 0 0 4px #b3121a; }
+  .led-amber { background: #d99a1a; box-shadow: inset 1px 1px 0 rgba(255,255,255,0.4), 0 0 4px #d99a1a; }
+  .led-green { background: #2f7d3a; box-shadow: inset 1px 1px 0 rgba(255,255,255,0.4), 0 0 3px #2f7d3a; }
+  .led-grey { background: #7a776f; }
+
+  .led-blink {
+    animation: blink 1.4s steps(1) infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .led-blink { animation: none; }
+  }
+  @keyframes blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0.35; }
+  }
+
+  /* ==== status banner ==== */
+  .status-banner {
+    background: #7a1418;
+    color: #fff;
+    border: 1px solid #3d0a0c;
+    padding: 10px 14px;
+    font-weight: bold;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,0.15);
+  }
+  .status-banner small {
+    font-weight: normal;
+    font-size: 11px;
+    opacity: 0.85;
+    margin-left: auto;
+  }
+
+  /* ==== tables ==== */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  th {
+    background: #8a8780;
+    color: #fff;
+    text-align: left;
+    padding: 4px 6px;
+    border: 1px solid #1c1c1a;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td {
+    padding: 4px 6px;
+    border: 1px solid #6f6c66;
+    background: #d4d1c8;
+    vertical-align: top;
+  }
+  tr:nth-child(even) td { background: #c6c3ba; }
+
+  .mono-id { font-weight: bold; letter-spacing: 0.5px; }
+
+  .field-row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px dotted #7a776f; }
+  .field-row:last-child { border-bottom: none; }
+  .field-label { color: #2b2b28; }
+  .field-val { font-weight: bold; }
+
+  .sunken {
+    background: #c6c3ba;
+    box-shadow: inset 1px 1px 0 #6f6c66, inset -1px -1px 0 #ecece4;
+    padding: 8px 10px;
+    margin-top: 8px;
+  }
+
+  .warn-box {
+    background: #d99a1a;
+    color: #2b1600;
+    border: 1px solid #6b4d00;
+    padding: 8px 10px;
+    margin-top: 10px;
+    font-size: 12px;
+    font-weight: bold;
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,0.3);
+  }
+  .warn-box::before { content: "⚠ ADVISORY: "; }
+
+  .trust-tag {
+    display: inline-block;
+    padding: 1px 5px;
+    font-size: 10px;
+    font-weight: bold;
+    border: 1px solid #1c1c1a;
+    letter-spacing: 0.5px;
+  }
+  .trust-ENGINEER { background: #2f7d3a; color: #fff; }
+  .trust-OPERATOR { background: #0a3d6e; color: #fff; }
+  .trust-WORKER   { background: #8a8780; color: #fff; }
+
+  .footnote {
+    text-align: center;
+    font-size: 11px;
+    color: #1c2b2b;
+    margin-top: 6px;
+    padding-bottom: 20px;
+    opacity: 0.85;
+  }
+
+  .statusline {
+    background: #0a3d6e;
+    color: #cfe3f5;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-top: 1px solid #05243f;
+  }
+
+  a { color: inherit; }
+</style>
+
+<div class="front-panel">
+  <span class="brand">WILLOW SYSTEM CONSOLE — sco-svr4 :: host wtree01</span>
+  <span class="clock" id="clock">08 JUL 2026</span>
+</div>
+
+<div class="desktop-grid">
+
+  <!-- ================= SYSTEM STATUS (trunk) ================= -->
+  <div class="window col-span-2">
+    <div class="titlebar">
+      <span class="ttext">System Status — wtree01</span>
+      <div class="win-controls">
+        <div class="win-btn" tabindex="0" role="button" aria-label="minimize">_</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="maximize">▢</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="close">X</div>
+      </div>
+    </div>
+    <div class="menubar">
+      <span tabindex="0">File</span>
+      <span tabindex="0">View</span>
+      <span tabindex="0">Options</span>
+    </div>
+    <div class="win-body">
+      <div class="status-banner">
+        <span class="led led-red led-blink"></span>
+        SYSTEM STATE: DEGRADED
+        <small>last poll: this session · subsystem: sap.queue</small>
+      </div>
+      <div class="sunken" style="margin-top:12px;">
+        <div class="field-row"><span class="field-label">Product</span><span class="field-val">Willow</span></div>
+        <div class="field-row"><span class="field-label">Overall condition</span><span class="field-val">DEGRADED — job queue backlog, no worker heartbeat</span></div>
+        <div class="field-row"><span class="field-label">Table mappings confirmed</span><span class="field-val">2 of 4 (today)</span></div>
+        <div class="field-row"><span class="field-label">Registered agents</span><span class="field-val">5</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= PROCESS QUEUE (sap/tasks) ================= -->
+  <div class="window col-span-2">
+    <div class="titlebar">
+      <span class="ttext">Process Queue Manager — /var/spool/sap</span>
+      <div class="win-controls">
+        <div class="win-btn" tabindex="0" role="button" aria-label="minimize">_</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="maximize">▢</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="close">X</div>
+      </div>
+    </div>
+    <div class="menubar">
+      <span tabindex="0">File</span>
+      <span tabindex="0">View</span>
+      <span tabindex="0">Options</span>
+    </div>
+    <div class="win-body">
+      <div class="sunken" style="display:flex; gap:24px; flex-wrap:wrap; margin-bottom:10px;">
+        <div class="field-row" style="border:none;"><span class="field-label">Total&nbsp;jobs:&nbsp;</span><span class="field-val">369</span></div>
+        <div class="field-row" style="border:none;"><span class="led led-red"></span><span class="field-label">Failed:&nbsp;</span><span class="field-val">357</span></div>
+        <div class="field-row" style="border:none;"><span class="led led-amber"></span><span class="field-label">Pending:&nbsp;</span><span class="field-val">2</span></div>
+        <div class="field-row" style="border:none;"><span class="led led-grey"></span><span class="field-label">Running:&nbsp;</span><span class="field-val">0</span></div>
+        <div class="field-row" style="border:none;"><span class="led led-green"></span><span class="field-label">Completed:&nbsp;</span><span class="field-val">0</span></div>
+      </div>
+      <div class="warn-box">No worker process has polled the queue this session. Heartbeat: NONE.</div>
+      <table style="margin-top:10px;">
+        <tr>
+          <th>Job ID</th><th>Description</th><th>State</th><th>Notes</th>
+        </tr>
+        <tr>
+          <td class="mono-id">2W1CHRFQ</td>
+          <td>echo smoke test</td>
+          <td><span class="led led-amber"></span>PENDING</td>
+          <td>queued recently</td>
+        </tr>
+        <tr>
+          <td class="mono-id">8ED0A500</td>
+          <td>embed backfill</td>
+          <td><span class="led led-amber"></span>PENDING</td>
+          <td>queued since 19 May — long-stuck</td>
+        </tr>
+        <tr>
+          <td class="mono-id">(x2 shown)</td>
+          <td>—</td>
+          <td><span class="led led-red"></span>FAILED</td>
+          <td>error: "no executable commands found"</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- ================= AGENT REGISTRY (canopy) ================= -->
+  <div class="window">
+    <div class="titlebar">
+      <span class="ttext">Agent Registry / Host Table</span>
+      <div class="win-controls">
+        <div class="win-btn" tabindex="0" role="button" aria-label="minimize">_</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="maximize">▢</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="close">X</div>
+      </div>
+    </div>
+    <div class="menubar">
+      <span tabindex="0">File</span>
+      <span tabindex="0">View</span>
+      <span tabindex="0">Options</span>
+    </div>
+    <div class="win-body">
+      <table>
+        <tr><th>Name</th><th>Role</th><th>Trust</th></tr>
+        <tr>
+          <td class="mono-id">skirnir</td>
+          <td>emissary / gate-witness, closes loops</td>
+          <td><span class="trust-tag trust-ENGINEER">ENGINEER</span></td>
+        </tr>
+        <tr>
+          <td class="mono-id">Auto</td>
+          <td>Cursor IDE-integrated router</td>
+          <td><span class="trust-tag trust-OPERATOR">OPERATOR</span></td>
+        </tr>
+        <tr>
+          <td class="mono-id">ganas1</td>
+          <td>file intake / classification pipeline</td>
+          <td><span class="trust-tag trust-WORKER">WORKER</span></td>
+        </tr>
+        <tr>
+          <td class="mono-id">ganas2</td>
+          <td>local model test bed (qwen2.5:3b)</td>
+          <td><span class="trust-tag trust-WORKER">WORKER</span></td>
+        </tr>
+        <tr>
+          <td class="mono-id">ganas3</td>
+          <td>image generation (Imagen 4)</td>
+          <td><span class="trust-tag trust-WORKER">WORKER</span></td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- ================= TABLE MAPPINGS (rings) ================= -->
+  <div class="window">
+    <div class="titlebar">
+      <span class="ttext">Table Mappings / Schema Bindings</span>
+      <div class="win-controls">
+        <div class="win-btn" tabindex="0" role="button" aria-label="minimize">_</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="maximize">▢</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="close">X</div>
+      </div>
+    </div>
+    <div class="menubar">
+      <span tabindex="0">File</span>
+      <span tabindex="0">View</span>
+      <span tabindex="0">Options</span>
+    </div>
+    <div class="win-body">
+      <div class="field-row"><span class="field-label"><span class="led led-green"></span>tasks</span><span class="field-val">CONFIRMED (today)</span></div>
+      <div class="field-row"><span class="field-label"><span class="led led-green"></span>knowledge</span><span class="field-val">CONFIRMED (today)</span></div>
+      <div class="field-row"><span class="field-label"><span class="led led-grey"></span>agents</span><span class="field-val">UNCONFIRMED</span></div>
+      <div class="field-row"><span class="field-label"><span class="led led-grey"></span>routing</span><span class="field-val">UNCONFIRMED</span></div>
+      <div class="sunken" style="margin-top:10px; font-size:11px;">
+        Bindings confirmed: 2 of 4
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= DATA STORE (roots) ================= -->
+  <div class="window">
+    <div class="titlebar">
+      <span class="ttext">Data Store — persistent volumes</span>
+      <div class="win-controls">
+        <div class="win-btn" tabindex="0" role="button" aria-label="minimize">_</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="maximize">▢</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="close">X</div>
+      </div>
+    </div>
+    <div class="menubar">
+      <span tabindex="0">File</span>
+      <span tabindex="0">View</span>
+      <span tabindex="0">Options</span>
+    </div>
+    <div class="win-body">
+      <div class="field-row"><span class="field-label">Collection: mcp_smoke_test</span><span class="field-val">write→read→delete (this session)</span></div>
+      <div class="field-row"><span class="field-label">Collection: ctx__willow-mcp</span><span class="field-val"><span class="led led-green"></span>app-scoped, OK</span></div>
+      <div class="warn-box">All other collections are visible to any app with full access — collection isolation gap; not sandboxed by app scope.</div>
+    </div>
+  </div>
+
+  <!-- ================= KNOWLEDGE BASE (leaves) ================= -->
+  <div class="window">
+    <div class="titlebar">
+      <span class="ttext">Knowledge Base — recent atoms</span>
+      <div class="win-controls">
+        <div class="win-btn" tabindex="0" role="button" aria-label="minimize">_</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="maximize">▢</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="close">X</div>
+      </div>
+    </div>
+    <div class="menubar">
+      <span tabindex="0">File</span>
+      <span tabindex="0">View</span>
+      <span tabindex="0">Options</span>
+    </div>
+    <div class="win-body">
+      <table>
+        <tr><th>ID</th><th>Origin</th></tr>
+        <tr><td class="mono-id">509084FA</td><td>ingested this session — collection mcp_smoke_test</td></tr>
+        <tr><td class="mono-id">grove_msg_111</td><td>GitHub channel</td></tr>
+        <tr><td class="mono-id">L8A5A</td><td>migrated from older version</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- ================= AUDIT LOG (litter) ================= -->
+  <div class="window col-span-2">
+    <div class="titlebar">
+      <span class="ttext">Audit Log — /var/adm/willow.log</span>
+      <div class="win-controls">
+        <div class="win-btn" tabindex="0" role="button" aria-label="minimize">_</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="maximize">▢</div>
+        <div class="win-btn" tabindex="0" role="button" aria-label="close">X</div>
+      </div>
+    </div>
+    <div class="menubar">
+      <span tabindex="0">File</span>
+      <span tabindex="0">View</span>
+      <span tabindex="0">Options</span>
+    </div>
+    <div class="win-body">
+      <table>
+        <tr><th>Event</th><th>Result</th></tr>
+        <tr><td>store_put</td><td><span class="led led-green"></span>OK</td></tr>
+        <tr><td>store_get</td><td><span class="led led-green"></span>OK</td></tr>
+        <tr><td>store_delete</td><td><span class="led led-green"></span>OK</td></tr>
+        <tr><td>schema_confirm_mapping</td><td><span class="led led-green"></span>2 tables confirmed</td></tr>
+        <tr><td>task_submit</td><td><span class="led led-amber"></span>QUEUED, unread</td></tr>
+      </table>
+    </div>
+    <div class="statusline">console ready. type 'help' for command list. — <span id="cursor">_</span></div>
+  </div>
+
+</div>
+
+<div class="footnote">willow reads as a tree, always has, always will — sap, canopy, rings, roots, leaves, litter. this console just wears a suit.</div>
+
+<script>
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var cur = document.getElementById("cursor");
+    if (cur && !reduce) {
+      setInterval(function () {
+        cur.style.visibility = cur.style.visibility === "hidden" ? "visible" : "hidden";
+      }, 600);
+    }
+  })();
+</script>

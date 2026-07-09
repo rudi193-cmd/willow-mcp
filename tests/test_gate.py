@@ -14,10 +14,13 @@ def apps_root(tmp_path, monkeypatch):
     return root
 
 
-def _write_manifest(apps_root, app_id, permissions):
+def _write_manifest(apps_root, app_id, permissions, store_scope=None):
     app_dir = apps_root / app_id
     app_dir.mkdir(parents=True, exist_ok=True)
-    (app_dir / "manifest.json").write_text(json.dumps({"permissions": permissions}))
+    manifest = {"permissions": permissions}
+    if store_scope is not None:
+        manifest["store_scope"] = store_scope
+    (app_dir / "manifest.json").write_text(json.dumps(manifest))
 
 
 def test_authorized_false_without_manifest(apps_root):
@@ -61,4 +64,154 @@ def test_permitted_denies_invalid_app_id(apps_root):
 def test_permitted_full_access_group(apps_root):
     _write_manifest(apps_root, "admin", ["full_access"])
     for tool in ("store_put", "knowledge_ingest", "task_submit", "fleet_health"):
+        assert gate.permitted("admin", tool) is True
+
+
+def test_permitted_deny_tools_overlay(apps_root):
+    app_dir = apps_root / "deny"
+    app_dir.mkdir()
+    (app_dir / "manifest.json").write_text(
+        json.dumps({
+            "permissions": ["full_access"],
+            "deny_tools": ["task_submit", "knowledge_ingest"],
+        })
+    )
+    assert gate.permitted("deny", "store_get") is True
+    assert gate.permitted("deny", "task_submit") is False
+    assert gate.permitted("deny", "knowledge_ingest") is False
+
+
+def test_permitted_malformed_deny_tools_fails_closed(apps_root):
+    app_dir = apps_root / "badden"
+    app_dir.mkdir()
+    (app_dir / "manifest.json").write_text(
+        json.dumps({"permissions": ["store_read"], "deny_tools": "not-a-list"})
+    )
+    assert gate.permitted("badden", "store_get") is False
+
+
+# ── store_scope / collection isolation (B-24 / L-ISO-01) ────────────────────
+
+def test_store_scope_none_when_unset(apps_root):
+    _write_manifest(apps_root, "unscoped", ["full_access"])
+    assert gate.store_scope("unscoped") is None
+
+
+def test_store_scope_explicit_null_is_unrestricted(apps_root):
+    # An explicit `null` declares "no policy", same as omitting the field.
+    app_dir = apps_root / "nulled"
+    app_dir.mkdir()
+    (app_dir / "manifest.json").write_text(
+        json.dumps({"permissions": ["full_access"], "store_scope": None})
+    )
+    assert gate.store_scope("nulled") is None
+
+
+def test_store_scope_returns_manifest_list(apps_root):
+    _write_manifest(apps_root, "scoped", ["full_access"], store_scope=["myapp_*", "shared_notes"])
+    assert gate.store_scope("scoped") == ["myapp_*", "shared_notes"]
+
+
+# ── fail-closed: a scope that cannot be read is not consent ──────────────────
+
+def test_store_scope_no_manifest_denies_all(apps_root):
+    # gate.py fails closed on a missing manifest everywhere else; scope too.
+    assert gate.store_scope("ghost") == []
+    assert gate.collection_permitted("ghost", "agents") is False
+
+
+def test_store_scope_invalid_app_id_denies_all(apps_root):
+    assert gate.store_scope("../../etc") == []
+    assert gate.collection_permitted("../../etc", "agents") is False
+
+
+def test_store_scope_malformed_denies_all(apps_root):
+    # `"store_scope": "myapp_*"` — a string, not a list — is the obvious typo
+    # for this field. Reading it as "unrestricted" would hand full store access
+    # to an operator who believes the app is confined. Deny, and break loudly.
+    app_dir = apps_root / "bad"
+    app_dir.mkdir()
+    (app_dir / "manifest.json").write_text(
+        json.dumps({"permissions": ["full_access"], "store_scope": "not-a-list"})
+    )
+    assert gate.store_scope("bad") == []
+    assert gate.collection_permitted("bad", "myapp_notes") is False
+    assert gate.collection_permitted("bad", "agents") is False
+
+
+def test_store_scope_non_string_entries_deny_all(apps_root):
+    app_dir = apps_root / "mixed"
+    app_dir.mkdir()
+    (app_dir / "manifest.json").write_text(
+        json.dumps({"permissions": ["full_access"], "store_scope": ["myapp_*", 7]})
+    )
+    assert gate.store_scope("mixed") == []
+    assert gate.collection_permitted("mixed", "myapp_notes") is False
+
+
+def test_store_scope_unreadable_manifest_denies_all(apps_root):
+    app_dir = apps_root / "corrupt"
+    app_dir.mkdir()
+    (app_dir / "manifest.json").write_text("{ this is not json")
+    assert gate.store_scope("corrupt") == []
+    assert gate.collection_permitted("corrupt", "agents") is False
+
+
+def test_store_scope_denied_list_is_not_shared_mutable_state(apps_root):
+    a = gate.store_scope("ghost")
+    a.append("agents")
+    assert gate.store_scope("ghost") == []
+
+
+def test_collection_permitted_unrestricted_when_no_scope(apps_root):
+    _write_manifest(apps_root, "unscoped", ["full_access"])
+    assert gate.collection_permitted("unscoped", "anything_at_all") is True
+
+
+def test_collection_permitted_exact_match(apps_root):
+    _write_manifest(apps_root, "scoped", ["full_access"], store_scope=["mcp_smoke_test"])
+    assert gate.collection_permitted("scoped", "mcp_smoke_test") is True
+    assert gate.collection_permitted("scoped", "agents") is False
+
+
+def test_collection_permitted_prefix_wildcard(apps_root):
+    _write_manifest(apps_root, "scoped", ["full_access"], store_scope=["myapp_*"])
+    assert gate.collection_permitted("scoped", "myapp_notes") is True
+    assert gate.collection_permitted("scoped", "myapp_") is True
+    assert gate.collection_permitted("scoped", "otherapp_notes") is False
+    assert gate.collection_permitted("scoped", "myap") is False
+
+
+def test_collection_permitted_empty_scope_denies_all(apps_root):
+    _write_manifest(apps_root, "locked", ["full_access"], store_scope=[])
+    assert gate.collection_permitted("locked", "anything") is False
+
+
+# ── gap backlog permission groups ────────────────────────────────────────────
+
+def test_gap_read_expands_to_gap_list_only(apps_root):
+    _write_manifest(apps_root, "gap_reader", ["gap_read"])
+    assert gate.permitted("gap_reader", "gap_list") is True
+    assert gate.permitted("gap_reader", "gap_log") is False
+    assert gate.permitted("gap_reader", "gap_promote") is False
+
+
+def test_gap_write_expands_to_log_and_resolve_not_promote(apps_root):
+    _write_manifest(apps_root, "gap_writer", ["gap_write"])
+    assert gate.permitted("gap_writer", "gap_log") is True
+    assert gate.permitted("gap_writer", "gap_resolve") is True
+    assert gate.permitted("gap_writer", "gap_promote") is False
+
+
+def test_gap_promote_is_its_own_group(apps_root):
+    # Landing a gap as trusted knowledge is gated separately from gap_write,
+    # same reasoning as schema_admin vs knowledge_write.
+    _write_manifest(apps_root, "gap_promoter", ["gap_promote"])
+    assert gate.permitted("gap_promoter", "gap_promote") is True
+    assert gate.permitted("gap_promoter", "gap_log") is False
+
+
+def test_gap_tools_included_in_full_access(apps_root):
+    _write_manifest(apps_root, "admin", ["full_access"])
+    for tool in ("gap_log", "gap_list", "gap_resolve", "gap_promote"):
         assert gate.permitted("admin", tool) is True

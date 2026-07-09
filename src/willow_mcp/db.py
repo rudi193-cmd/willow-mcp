@@ -30,6 +30,31 @@ def _validate_collection(collection: str) -> str:
     return collection
 
 
+def collection_in_scope(collection: str, scope: Optional[list]) -> bool:
+    """True if `collection` is allowed under a manifest's optional `store_scope`.
+
+    `scope=None` means unrestricted *within this install's own store* — unscoped
+    apps keep seeing everything they always could; this is opt-in isolation, not
+    a retroactive lockdown. Which store that is depends on WILLOW_STORE_ROOT: an
+    install may share the wider fleet's store or hold its own, and
+    `diagnostic_summary`'s `severance` check reports which. Sharing is a default,
+    not a design commitment — an unscoped grant's blast radius is whatever store
+    this process resolved. A pattern ending in "*" matches by prefix (e.g.
+    "myapp_*"); otherwise it's an exact match. Empty list means "no collections"
+    (deny-all), not "unrestricted" — callers that want unrestricted must omit the
+    field entirely.
+    """
+    if scope is None:
+        return True
+    for pattern in scope:
+        if pattern.endswith("*"):
+            if collection.startswith(pattern[:-1]):
+                return True
+        elif collection == pattern:
+            return True
+    return False
+
+
 def get_pg() -> Optional[psycopg2.extensions.connection]:
     """Return a Postgres connection via Unix socket, or None."""
     global _pg_conn
@@ -187,8 +212,13 @@ class Store:
             results.append(record)
         return results
 
-    def search_all(self, query: str) -> list[dict]:
-        results = []
+    def list_collections(self, scope: Optional[list] = None) -> list[str]:
+        """Every collection under this store root, or only those matching
+        `scope` if given — the same enumeration `search_all` walks, factored
+        out so a caller that only wants "what collections exist" (e.g. a
+        dashboard's roots/storage view) doesn't have to run a query to get it.
+        """
+        names = []
         for db_file in sorted(self.root.rglob("store.db")):
             col = str(db_file.parent.relative_to(self.root))
             if col.startswith("."):
@@ -198,8 +228,25 @@ class Store:
             except ValueError:
                 # An on-disk directory that predates _validate_collection or
                 # was created outside this class — skip it rather than let
-                # one bad entry crash the whole search_all call.
+                # one bad entry crash enumeration.
                 continue
+            if not collection_in_scope(col, scope):
+                continue
+            names.append(col)
+        return names
+
+    def search_all(self, query: str, scope: Optional[list] = None) -> list[dict]:
+        """Search every collection, or only those matching `scope` if given.
+
+        `scope=None` preserves today's default: search everything under this
+        store root — which is the wider fleet's store unless WILLOW_STORE_ROOT
+        says otherwise, so the reach of an unscoped search is whatever store this
+        process resolved (`diagnostic_summary`'s `severance` check). Pass a
+        manifest's `store_scope` list to confine an app's search_all to the
+        same collections its other store_* calls are restricted to.
+        """
+        results = []
+        for col in self.list_collections(scope):
             for record in self.search(col, query):
                 record["_collection"] = col
                 results.append(record)

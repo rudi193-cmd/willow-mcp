@@ -1,0 +1,431 @@
+<title>WILLOW.EXE</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --dos-blue: #0000AA;
+    --dos-white: #FFFFFF;
+    --dos-yellow: #FFFF55;
+    --dos-cyan: #55FFFF;
+    --dos-red: #FF5555;
+    --dos-grey: #AAAAAA;
+    --dos-black: #000000;
+    --bar-bg: #AAAAAA;
+  }
+
+  html, body {
+    background: var(--dos-blue);
+    color: var(--dos-white);
+    font-family: "Cascadia Mono", "Consolas", "Lucida Console", "Courier New", ui-monospace, monospace;
+    font-size: 15px;
+    line-height: 1.45;
+    min-height: 100%;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  /* ===== TOP MENU BAR ===== */
+  .menubar {
+    background: var(--bar-bg);
+    color: var(--dos-blue);
+    display: flex;
+    gap: 1.5em;
+    padding: 0.15em 1em;
+    font-weight: bold;
+    letter-spacing: 0.02em;
+    flex-wrap: wrap;
+  }
+  .menubar span.hot {
+    color: var(--dos-red);
+  }
+
+  /* ===== MAIN AREA ===== */
+  .desktop {
+    flex: 1;
+    padding: 1.25em 1.5em 0.5em 1.5em;
+    max-width: 1100px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  .titlebox {
+    white-space: pre;
+    color: var(--dos-cyan);
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 1em;
+    overflow-x: auto;
+  }
+
+  /* generic double-line window */
+  .win {
+    border: 2px solid var(--dos-white);
+    border-image: none;
+    margin-bottom: 1.25em;
+    position: relative;
+  }
+  .win-frame {
+    outline: none;
+  }
+  .win-top, .win-bot {
+    white-space: pre;
+    color: var(--dos-white);
+    overflow-x: auto;
+    font-weight: normal;
+  }
+  .win-title {
+    color: var(--dos-yellow);
+    font-weight: bold;
+    background: var(--dos-blue);
+    padding: 0 0.4em;
+  }
+  .win-body {
+    border-left: 2px solid var(--dos-white);
+    border-right: 2px solid var(--dos-white);
+    padding: 0.6em 1em;
+  }
+
+  .dline { color: var(--dos-white); }
+
+  code, .code {
+    font-family: inherit;
+  }
+
+  .kw { color: var(--dos-cyan); }
+  .fld { color: var(--dos-white); }
+  .str { color: var(--dos-yellow); }
+  .num { color: var(--dos-yellow); }
+  .err { color: var(--dos-red); font-weight: bold; }
+  .ok  { color: var(--dos-yellow); }
+  .comment { color: var(--dos-grey); }
+
+  pre.struct {
+    white-space: pre-wrap;
+    overflow-x: auto;
+  }
+
+  /* ===== STATUS LINE / CURSOR ===== */
+  .cursor {
+    display: inline-block;
+    width: 0.6em;
+    height: 1em;
+    background: var(--dos-yellow);
+    vertical-align: -0.15em;
+    animation: blink 1s steps(1) infinite;
+  }
+  @keyframes blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cursor { animation: none; opacity: 1; }
+  }
+
+  /* ===== TABLES (real CSS grid/borders, not box art) ===== */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95em;
+  }
+  th, td {
+    border: 1px solid var(--dos-grey);
+    padding: 0.25em 0.6em;
+    text-align: left;
+    white-space: nowrap;
+  }
+  th {
+    color: var(--dos-blue);
+    background: var(--dos-grey);
+    font-weight: bold;
+  }
+  td { color: var(--dos-white); }
+  td.num, th.num { text-align: right; }
+  .row-error td { color: var(--dos-red); }
+  .row-warn td.status { color: var(--dos-red); font-weight: bold; }
+  .row-pending td.status { color: var(--dos-yellow); font-weight: bold; }
+  .row-ok td.status { color: var(--dos-yellow); }
+
+  .tblwrap { overflow-x: auto; }
+
+  .grid2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.25em;
+  }
+
+  .warnbox {
+    border: 1px dashed var(--dos-red);
+    padding: 0.5em 0.8em;
+    color: var(--dos-red);
+    font-weight: bold;
+    margin-top: 0.6em;
+  }
+  .warnbox .comment { color: var(--dos-red); font-weight: normal; }
+
+  .section-label {
+    color: var(--dos-cyan);
+    font-weight: bold;
+    margin-bottom: 0.3em;
+  }
+
+  ul.log {
+    list-style: none;
+    padding: 0;
+  }
+  ul.log li {
+    padding: 0.12em 0;
+    border-bottom: 1px dotted #3333CC;
+  }
+  ul.log li:last-child { border-bottom: none; }
+  ul.log .tag {
+    color: var(--dos-cyan);
+    display: inline-block;
+    min-width: 24ch;
+  }
+
+  /* ===== BOTTOM HOTBAR ===== */
+  .hotbar {
+    background: var(--dos-blue);
+    color: var(--dos-grey);
+    border-top: 2px solid var(--dos-grey);
+    display: flex;
+    gap: 1.2em;
+    padding: 0.3em 1em;
+    flex-wrap: wrap;
+    font-size: 0.9em;
+  }
+  .hotbar .key {
+    background: var(--dos-grey);
+    color: var(--dos-blue);
+    font-weight: bold;
+    padding: 0 0.35em;
+  }
+
+  ::-webkit-scrollbar { height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--dos-blue); }
+  ::-webkit-scrollbar-thumb { background: var(--dos-grey); }
+</style>
+
+<div class="menubar" role="presentation" aria-hidden="true">
+  <span class="hot">F</span><span>ile</span>
+  <span class="hot">E</span><span>dit</span>
+  <span class="hot">S</span><span>earch</span>
+  <span class="hot">R</span><span>un</span>
+  <span class="hot">C</span><span>ompile</span>
+  <span class="hot">D</span><span>ebug</span>
+  <span class="hot">P</span><span>roject</span>
+  <span class="hot">O</span><span>ptions</span>
+  <span class="hot">W</span><span>indow</span>
+  <span class="hot">H</span><span>elp</span>
+</div>
+
+<div class="desktop">
+
+  <div class="titlebox">╔══════════════════════════════════════════════════════════════╗
+║  T u r b o   W I L L O W ++   v3.1        C:\WILLOW\WILLOW.CPP  ║
+╚══════════════════════════════════════════════════════════════╝</div>
+
+  <!-- TRUNK / OVERALL STATUS -->
+  <div class="win">
+    <div class="win-top dline">╔═[<span class="win-title">trunk.h &mdash; overall status</span>]══════════════════════════════════════════╗</div>
+    <div class="win-body">
+      <pre class="struct"><span class="kw">struct</span> TrunkStatus {
+    <span class="fld">char</span>   *name    = <span class="str">"Willow"</span>;
+    <span class="fld">enum</span>   status   = <span class="err">DEGRADED</span>;  <span class="comment">/* trunk.status */</span>
+    <span class="fld">bool</span>   worker_heartbeat = <span class="err">NONE</span>;  <span class="comment">// no worker has polled sap</span>
+} trunk<span class="cursor" aria-hidden="true"></span></pre>
+      <div class="warnbox">
+        !! WARNING: sap.heartbeat == NULL &mdash; no worker process has polled the queue.
+        <div class="comment">// 357 of 369 queued tasks have failed with no consumer attached.</div>
+      </div>
+    </div>
+    <div class="win-top dline">╚══════════════════════════════════════════════════════════════════╝</div>
+  </div>
+
+  <!-- SAP / TASK QUEUE -->
+  <div class="win">
+    <div class="win-top dline">╔═[<span class="win-title">sap.cpp &mdash; task queue</span>]══════════════════════════════════════════════╗</div>
+    <div class="win-body">
+      <pre class="struct"><span class="kw">struct</span> SapQueue {
+    <span class="fld">int</span> total     = <span class="num">369</span>;
+    <span class="fld">int</span> failed    = <span class="err num">357</span>;
+    <span class="fld">int</span> pending   = <span class="num">2</span>;
+    <span class="fld">int</span> running   = <span class="num">0</span>;
+    <span class="fld">int</span> completed = <span class="num">0</span>;
+    <span class="fld">char</span> *heartbeat = <span class="err">"none"</span>;
+} sap;</pre>
+
+      <div class="section-label">// sample rows &mdash; sap.tasks[]</div>
+      <div class="tblwrap">
+        <table>
+          <thead>
+            <tr><th>id</th><th>label</th><th class="status">status</th><th>note</th></tr>
+          </thead>
+          <tbody>
+            <tr class="row-pending">
+              <td>2W1CHRFQ</td>
+              <td>echo smoke test</td>
+              <td class="status">PENDING</td>
+              <td class="comment">queued recently</td>
+            </tr>
+            <tr class="row-pending">
+              <td>8ED0A500</td>
+              <td>embed backfill</td>
+              <td class="status">PENDING</td>
+              <td class="err">queued since May 19 &mdash; stuck</td>
+            </tr>
+            <tr class="row-error">
+              <td>--------</td>
+              <td>(x357, e.g. build/index job)</td>
+              <td class="status">FAILED</td>
+              <td class="err">error: "no executable commands found"</td>
+            </tr>
+            <tr class="row-error">
+              <td>--------</td>
+              <td>(duplicate signature)</td>
+              <td class="status">FAILED</td>
+              <td class="err">error: "no executable commands found"</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="win-top dline">╚══════════════════════════════════════════════════════════════════╝</div>
+  </div>
+
+  <div class="grid2">
+
+    <!-- CANOPY / AGENT FLEET -->
+    <div class="win">
+      <div class="win-top dline">╔═[<span class="win-title">canopy.h &mdash; agent fleet</span>]══════════════╗</div>
+      <div class="win-body">
+        <div class="tblwrap">
+          <table>
+            <thead>
+              <tr><th>agent</th><th>role</th><th>class</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>skirnir</td><td>emissary / gate-witness, closes loops</td><td class="ok">ENGINEER</td></tr>
+              <tr><td>Auto</td><td>Cursor IDE-integrated router</td><td class="ok">OPERATOR</td></tr>
+              <tr><td>ganas1</td><td>file intake / classification pipeline</td><td class="ok">WORKER</td></tr>
+              <tr><td>ganas2</td><td>local model test bed (qwen2.5:3b)</td><td class="ok">WORKER</td></tr>
+              <tr><td>ganas3</td><td>image generation (Imagen 4)</td><td class="ok">WORKER</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <pre class="struct comment">// canopy.count = 5;</pre>
+      </div>
+      <div class="win-top dline">╚══════════════════════════════════╝</div>
+    </div>
+
+    <!-- RINGS / SCHEMA CONFIRMATION -->
+    <div class="win">
+      <div class="win-top dline">╔═[<span class="win-title">rings.h &mdash; schema state</span>]══════════════╗</div>
+      <div class="win-body">
+        <pre class="struct"><span class="kw">struct</span> RingsSchema {
+    <span class="fld">int</span> confirmed_today = <span class="num">2</span>;
+    <span class="fld">int</span> total_tables    = <span class="num">4</span>;
+} rings;</pre>
+        <div class="tblwrap">
+          <table>
+            <thead>
+              <tr><th>table</th><th>state</th></tr>
+            </thead>
+            <tbody>
+              <tr class="row-ok"><td>tasks</td><td class="status">CONFIRMED</td></tr>
+              <tr class="row-ok"><td>knowledge</td><td class="status">CONFIRMED</td></tr>
+              <tr class="row-pending"><td>agents</td><td class="status">UNCONFIRMED</td></tr>
+              <tr class="row-pending"><td>routing</td><td class="status">UNCONFIRMED</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="win-top dline">╚══════════════════════════════════╝</div>
+    </div>
+
+  </div>
+
+  <!-- ROOTS / PERSISTENT STORE -->
+  <div class="win">
+    <div class="win-top dline">╔═[<span class="win-title">roots.cpp &mdash; persistent store</span>]═════════════════════════════════╗</div>
+    <div class="win-body">
+      <div class="tblwrap">
+        <table>
+          <thead>
+            <tr><th>collection</th><th>scope</th><th>note</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>mcp_smoke_test</td>
+              <td class="ok">session-local</td>
+              <td class="comment">record written, read, then deleted this session</td>
+            </tr>
+            <tr>
+              <td>ctx__willow-mcp</td>
+              <td class="ok">app-scoped</td>
+              <td class="comment">properly isolated</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="warnbox">
+        !! ISOLATION GAP: all other collections are visible to any app with full store access.
+        <div class="comment">// roots.isolation_enforced == false; recommend per-collection ACL before further writes.</div>
+      </div>
+    </div>
+    <div class="win-top dline">╚══════════════════════════════════════════════════════════════════╝</div>
+  </div>
+
+  <div class="grid2">
+
+    <!-- LEAVES / KNOWLEDGE ATOMS -->
+    <div class="win">
+      <div class="win-top dline">╔═[<span class="win-title">leaves.h &mdash; knowledge atoms</span>]══════════╗</div>
+      <div class="win-body">
+        <div class="tblwrap">
+          <table>
+            <thead>
+              <tr><th>id</th><th>origin</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>509084FA</td><td>ingested this session</td></tr>
+              <tr><td>grove_msg_111</td><td>from a GitHub channel</td></tr>
+              <tr><td>L8A5A</td><td>migrated from an older version</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="win-top dline">╚══════════════════════════════════╝</div>
+    </div>
+
+    <!-- LITTER / ACTIVITY LOG -->
+    <div class="win">
+      <div class="win-top dline">╔═[<span class="win-title">litter.log &mdash; activity</span>]═══════════════╗</div>
+      <div class="win-body">
+        <ul class="log">
+          <li><span class="tag">store_put</span><span class="ok">ok</span></li>
+          <li><span class="tag">store_get</span><span class="ok">ok</span></li>
+          <li><span class="tag">store_delete</span><span class="ok">ok</span></li>
+          <li><span class="tag">schema_confirm_mapping</span><span class="ok">2 tables confirmed</span></li>
+          <li><span class="tag">task_submit</span><span class="ok">queued, unread</span></li>
+        </ul>
+      </div>
+      <div class="win-top dline">╚══════════════════════════════════╝</div>
+    </div>
+
+  </div>
+
+</div>
+
+<div class="hotbar" role="presentation" aria-hidden="true">
+  <span><span class="key">F1</span> Help</span>
+  <span><span class="key">F2</span> Save</span>
+  <span><span class="key">F3</span> Open</span>
+  <span><span class="key">F5</span> Run</span>
+  <span><span class="key">F9</span> Compile</span>
+  <span><span class="key">Alt-X</span> Exit</span>
+</div>

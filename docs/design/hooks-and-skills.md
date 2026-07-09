@@ -35,6 +35,28 @@ neither; PR #11's `schema_confirm_mapping` needed a skill and didn't get
 one). This doc and its companion PR close that gap once, and the rule
 applies from here on.
 
+**Addendum (2026-07-08):** the rule then broke again — the task-queue surface
+(`task_submit` + the `task_net` capability, B-19; the `# allow_net` directive
+footgun, B-21/L-NET-01) shipped with neither skill nor hook, exactly the
+footgun-plus-workflow case §2 describes. Closed retroactively: `skills/kart-tasks.md`
+(submit/poll workflow, the `task_net`/`allow_net` model, the worker-liveness
+caveat) and a `task_submit` matcher on `pre_tool_use.py` that warns when a
+caller hand-embeds a stripped network directive. Logged as B-23. The lesson
+stands: the rule is only real if it's checked at PR time, not remembered.
+
+**Addendum (2026-07-09):** the rule held this time. B-32's egress leases
+(`willow-mcp grant-net`, `lease.py`) shipped in the same PR as their guardrail:
+a `Write|Edit|MultiEdit|NotebookEdit` matcher on `pre_tool_use.py`, plus a Bash
+matcher, that **blocks** any call writing a key which authorizes the agent's own
+egress — minting a lease under `mcp_apps/_net_leases/`, invoking `grant-net`, or
+editing a manifest to add `task_net`. `skills/kart-tasks.md` gained the three-key
+model in the same change. Note what the hook is and is not: it lives in the
+agent's own harness, so it is a **guardrail, not a control** — the control is
+`chown` plus `WILLOW_MCP_STRICT_TRUST_ROOT` (B-32 / L-NET-02). A hook that blocks
+the crossing makes a mistake catchable and a deliberate crossing undeniable; it
+does not make the crossing impossible, and the docs must never let it read that
+way.
+
 ## 3. Packaging shape
 
 Bundled inside `willow-mcp` itself (not a separate plugin repo) — one

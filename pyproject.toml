@@ -17,10 +17,19 @@ dependencies = [
     "cryptography>=42.0,<50.0",
     "starlette>=0.36,<1.0",
     "uvicorn>=0.29,<1.0",
+    # Kart task executor (the `willow-mcp worker` engine + task-queue backends).
+    # Hard dependency as of B-22 close-out — kartikeya is published on PyPI, so a
+    # base `pip install willow-mcp` now ships a working queue drainer.
+    "kartikeya>=0.0.1,<0.1.0",
 ]
 
 [project.scripts]
 willow-mcp = "willow_mcp.server:main"
+willow-mcp-init = "willow_mcp.home_init:main"
+willow-mcp-compile = "willow_mcp.registry:compile_cli_main"
+willow-mcp-sign-seed = "willow_mcp.seed_sign:main"
+willow-mcp-compile-persona = "willow_mcp.persona_compile:main"
+willow-mcp-integrations = "willow_mcp.integrations:main"
 
 [project.urls]
 Homepage = "https://github.com/rudi193-cmd/willow-mcp"

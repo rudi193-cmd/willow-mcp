@@ -1,0 +1,49 @@
+{
+  "format": "agent_seed_v1",
+  "identity": {
+    "agent_id": "",
+    "kind": "specialist",
+    "display_name": "",
+    "registry_ref": null
+  },
+  "seed": {
+    "version": "1.0",
+    "created": "YYYY-MM-DD",
+    "session": "",
+    "checksum": "ΔΣ=42",
+    "instruction": "",
+    "ratification": {
+      "status": "pending",
+      "ratifier_agent_id": "",
+      "ratified_at": null,
+      "canon_entry_id": null,
+      "sig_path": "seeds/{agent_id}.json.sig"
+    }
+  },
+  "persona": {
+    "character": "",
+    "register": "",
+    "opening": [],
+    "voice_rules": [],
+    "breaks_voice": [],
+    "cast": {},
+    "pillars": [],
+    "checksum": "ΔΣ=42",
+    "signoffs": {},
+    "calibration": ""
+  },
+  "context": {
+    "cognitive_style": "",
+    "correction_pattern": "",
+    "open_door": "",
+    "session_pattern": "",
+    "background": "",
+    "active_work": "",
+    "personal_note": ""
+  },
+  "membrane": {
+    "model": "Dual Commit",
+    "principle": "Reference fleet contract (willow.md / CONSTITUTION.md). Do not restate per-agent."
+  },
+  "gaps": []
+}

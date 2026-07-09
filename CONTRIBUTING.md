@@ -33,6 +33,16 @@ PGHOST=localhost PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres \
 
 The full suite must be green before a change can merge (see below).
 
+CI (`.github/workflows/tests.yml`) also runs daily on a schedule, not just on
+push/PR — this repo can go quiet for a while between changes, and a schedule
+catches drift (a Postgres/Python point release, a transitive dependency bump)
+that no code change would otherwise surface. The same job also runs a CLI
+smoke test that exercises the actual `willow-mcp` console-script end to end
+(`gates`, `tree`, `allow-permission`/`deny-permission`, `grant-net`/
+`revoke-net`/`net-status`) rather than just the underlying functions the unit
+tests already cover, so a broken packaging or argparse wiring fails there
+even if every unit test still passes.
+
 ## Branching and pull requests
 
 `master` is protected by a **no-bypass ruleset**: all changes land through a

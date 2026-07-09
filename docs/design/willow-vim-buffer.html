@@ -1,0 +1,306 @@
+<title>willow.txt (modified)</title>
+<style>
+  :root {
+    --bg:        #282828;
+    --bg1:       #3c3836;
+    --bg2:       #504945;
+    --fg:        #ebdbb2;
+    --muted:     #928374;
+    --red:       #fb4934;
+    --green:     #b8bb26;
+    --yellow:    #fabd2f;
+    --blue:      #83a598;
+    --purple:    #d3869b;
+    --aqua:      #8ec07c;
+    --orange:    #fe8019;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+  }
+
+  body {
+    font-family: "Cascadia Code", "JetBrains Mono", "Fira Code", ui-monospace,
+                 "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 14px;
+    line-height: 1.55;
+    padding-bottom: 3.6em; /* leave room for fixed statusline + cmdline */
+  }
+
+  .buffer {
+    display: flex;
+    max-width: 980px;
+    margin: 0 auto;
+  }
+
+  .gutter {
+    flex: 0 0 auto;
+    text-align: right;
+    padding: 2em 1em 2em 1.5em;
+    color: #504945;
+    user-select: none;
+    white-space: pre;
+  }
+
+  .content {
+    flex: 1 1 auto;
+    padding: 2em 1.5em 2em 0;
+    min-width: 0;
+    white-space: pre-wrap;
+  }
+
+  .head {
+    color: var(--muted);
+  }
+
+  .h1 {
+    color: var(--aqua);
+    font-weight: bold;
+  }
+
+  .rule {
+    color: #504945;
+  }
+
+  .kw   { color: var(--purple); }         /* status keywords */
+  .num  { color: var(--blue); }           /* numbers */
+  .str  { color: var(--green); }          /* names / strings */
+  .comment { color: var(--muted); }       /* labels / comments */
+
+  .ok    { color: var(--green); }
+  .warn  { color: var(--yellow); }
+  .bad   { color: var(--red); font-weight: bold; }
+  .role  { color: var(--orange); }
+
+  .indent {
+    padding-left: 2ch;
+  }
+
+  .indent2 {
+    padding-left: 4ch;
+  }
+
+  a.tag {
+    text-decoration: none;
+  }
+
+  .callout {
+    color: var(--red);
+  }
+
+  .callout::before {
+    content: "! ";
+    color: var(--red);
+  }
+
+  /* --- statusline --- */
+
+  .statusline {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 1.6em;
+    height: 2em;
+    background: var(--bg2);
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    font-size: 12.5px;
+    overflow-x: auto;
+    white-space: nowrap;
+    border-top: 1px solid #665c54;
+  }
+
+  .statusline .seg {
+    padding: 0 1ch;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5ch;
+  }
+
+  .statusline .sep {
+    color: #7c6f64;
+  }
+
+  .statusline .mode {
+    background: var(--yellow);
+    color: #282828;
+    font-weight: bold;
+    padding: 0 1.2ch;
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .statusline .trunk-bad {
+    background: var(--red);
+    color: #282828;
+    font-weight: bold;
+    padding: 0 1.2ch;
+    height: 100%;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .statusline .spacer {
+    flex: 1 1 auto;
+  }
+
+  .statusline .num { color: #076678; }
+  .statusline .bad { color: #9d0006; background: transparent; font-weight: bold; }
+  .statusline .warn { color: #7c5a00; font-weight: bold; }
+  .statusline .ok { color: #16610e; font-weight: bold; }
+
+  /* --- command line --- */
+
+  .cmdline {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1.6em;
+    background: var(--bg);
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    padding: 0 1ch;
+    font-size: 13px;
+  }
+
+  .cmdline .prompt {
+    color: var(--fg);
+  }
+
+  .cursor-block {
+    display: inline-block;
+    width: 0.6ch;
+    height: 1.1em;
+    background: var(--fg);
+    margin-left: 1px;
+    animation: blink 1.1s steps(1) infinite;
+    vertical-align: -2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cursor-block { animation: none; }
+  }
+
+  @keyframes blink {
+    0%, 49%   { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+
+  ::selection {
+    background: #504945;
+    color: var(--fg);
+  }
+</style>
+
+<div class="buffer">
+  <div class="gutter" id="gutter"></div>
+  <div class="content" id="content">" willow.txt — tool status buffer
+" last write: 2026-07-08  filetype=willow  encoding=utf-8
+" this file is generated. do not hand-edit. :e! to refresh.
+
+-- TRUNK --
+
+    trunk.status ......... <span class="bad">DEGRADED</span>
+    trunk.note ............ <span class="comment">"sap has a stuck queue and no worker heartbeat; see below"</span>
+
+-- SAP (task queue) --
+
+    sap.total ............. <span class="num">369</span>
+    sap.failed ............ <span class="bad">357</span>
+    sap.pending ............ <span class="warn">2</span>
+    sap.running ............ <span class="num">0</span>
+    sap.completed .......... <span class="num">0</span>
+    sap.heartbeat .......... <span class="bad">none</span>          <span class="comment">" no worker process has polled the queue</span>
+
+    " pending
+    <span class="str">2W1CHRFQ</span>  <span class="comment">echo smoke test</span>                    <span class="warn">queued</span>       <span class="comment">recently</span>
+    <span class="str">8ED0A500</span>  <span class="comment">embed backfill</span>                     <span class="warn">queued</span>       <span class="bad">since May 19 (stuck)</span>
+
+    " failed (sample, x2 of 357)
+    <span class="str">*</span>         <span class="bad">error: "no executable commands found"</span>
+    <span class="str">*</span>         <span class="bad">error: "no executable commands found"</span>
+
+-- CANOPY (agent fleet, 5) --
+
+    <span class="str">skirnir</span>   <span class="role">ENGINEER</span>   <span class="comment">emissary / gate-witness, closes loops</span>
+    <span class="str">Auto</span>      <span class="role">OPERATOR</span>   <span class="comment">Cursor IDE-integrated router</span>
+    <span class="str">ganas1</span>    <span class="role">WORKER</span>     <span class="comment">file intake / classification pipeline</span>
+    <span class="str">ganas2</span>    <span class="role">WORKER</span>     <span class="comment">qwen2.5:3b — lightweight local model test bed</span>
+    <span class="str">ganas3</span>    <span class="role">WORKER</span>     <span class="comment">Imagen 4 — image generation</span>
+
+-- RINGS (schema confirmation) --
+
+    <span class="ok">[x]</span> tasks     <span class="comment">confirmed today</span>
+    <span class="ok">[x]</span> knowledge <span class="comment">confirmed today</span>
+    <span class="warn">[ ]</span> agents    <span class="comment">unconfirmed</span>
+    <span class="warn">[ ]</span> routing   <span class="comment">unconfirmed</span>
+
+    rings.summary .......... <span class="num">2</span>/<span class="num">4</span> confirmed
+
+-- ROOTS (persistent store) --
+
+    mcp_smoke_test .......... <span class="comment">write -&gt; read -&gt; delete, this session</span>
+    ctx__willow-mcp .......... <span class="ok">app-scoped correctly</span>
+
+    <span class="callout">all other collections are visible to any app with full store access</span>
+
+-- LEAVES (knowledge atoms, recent) --
+
+    <span class="str">509084FA</span>       <span class="comment">ingested this session</span>
+    <span class="str">grove_msg_111</span>  <span class="comment">from a GitHub channel</span>
+    <span class="str">L8A5A</span>          <span class="comment">migrated from an older version</span>
+
+-- LITTER (activity log, recent) --
+
+    store_put               <span class="ok">ok</span>
+    store_get               <span class="ok">ok</span>
+    store_delete             <span class="ok">ok</span>
+    schema_confirm_mapping  <span class="comment">2 tables confirmed</span>
+    task_submit              <span class="warn">queued, unread</span>
+
+" eof</div>
+</div>
+
+<div class="statusline">
+  <span class="seg trunk-bad">TRUNK: DEGRADED</span>
+  <span class="sep">|</span>
+  <span class="seg">sap <span class="num">369</span> total <span class="sep">/</span> <span class="bad">357 failed</span> <span class="sep">/</span> <span class="warn">2 pend</span> <span class="sep">/</span> <span class="num">0</span> run <span class="sep">/</span> <span class="num">0</span> done <span class="sep">/</span> hb:<span class="bad">none</span></span>
+  <span class="sep">|</span>
+  <span class="seg">canopy <span class="num">5</span> agents</span>
+  <span class="sep">|</span>
+  <span class="seg">rings <span class="num">2</span>/<span class="num">4</span></span>
+  <span class="sep">|</span>
+  <span class="seg">roots: <span class="warn">1 exposed scope</span></span>
+  <span class="spacer"></span>
+  <span class="seg">willow.txt [+]</span>
+  <span class="sep">|</span>
+  <span class="seg">utf-8[unix]</span>
+  <span class="sep">|</span>
+  <span class="seg"><span class="num">64</span>,<span class="num">1</span></span>
+  <span class="sep">|</span>
+  <span class="seg"><span class="num">100%</span></span>
+</div>
+
+<div class="cmdline">
+  <span class="prompt">:</span><span class="cursor-block"></span>
+</div>
+
+<script>
+  (function () {
+    var content = document.getElementById("content");
+    var gutter = document.getElementById("gutter");
+    var lines = content.innerText.split("\n").length;
+    var out = [];
+    for (var i = 1; i <= lines; i++) out.push(i);
+    gutter.textContent = out.join("\n");
+  })();
+</script>
