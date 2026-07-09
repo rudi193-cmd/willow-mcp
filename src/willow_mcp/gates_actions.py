@@ -1,0 +1,156 @@
+"""willow_mcp/gates_actions.py — what happens when you press a gates row.
+
+Shared by the interactive TUI (`gates_tui.py`) and the live local HTML
+dashboard (`gates_serve.py`), so "what does pressing this button actually
+do" has exactly one implementation instead of two that could drift.
+
+**This adds no new authority.** Every action here calls the same functions
+the CLI subcommands already call — `manifest_admin.set_permission` (backs
+`allow-permission`/`deny-permission`), `lease.grant`/`lease.revoke` (backs
+`grant-net`/`revoke-net`), `identity_binding.confirm_binding` (backs
+`confirm-binding`), and a one-shot queue drain (backs `worker --once`). It
+is a second way to invoke the same local-CLI-only, never-an-MCP-tool
+operations `gates_panel.py`'s rows already point at, not a new one.
+
+Split into `describe()` (pure — what *would* happen, and what input it
+needs, without touching anything) and `apply()` (does it) so both UIs can
+render "this needs a TTL and a reason" before committing to anything, and
+so this module is testable without a real terminal or a real HTTP request.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional
+
+from . import lease, manifest_admin
+from .gates_panel import GateRow
+
+
+@dataclass
+class ActionSpec:
+    #: "toggle_permission" | "lease_grant" | "lease_revoke" | "confirm_binding"
+    #: | "worker_once" | "none"
+    kind: str
+    #: field names the caller must supply in `apply(..., inputs=...)`
+    needs: tuple = ()
+    #: set only for kind == "none" — why there's nothing to do here
+    reason: Optional[str] = None
+
+
+def describe(row: GateRow) -> ActionSpec:
+    """What pressing `row` would do, and what it needs from the caller.
+    Pure — reads nothing, changes nothing."""
+    rid = row.id
+    if rid.startswith("perm."):
+        return ActionSpec(kind="toggle_permission")
+    if rid.startswith("lease."):
+        if row.state == "on":
+            return ActionSpec(kind="lease_revoke")
+        return ActionSpec(kind="lease_grant", needs=("ttl", "reason"))
+    if rid.startswith("binding.") and row.state == "off":
+        return ActionSpec(kind="confirm_binding", needs=("app_id",))
+    if rid == "worker" and row.state != "on":
+        return ActionSpec(kind="worker_once")
+    return ActionSpec(kind="none",
+                       reason=row.action_note or "no live action for this gate")
+
+
+def apply(row: GateRow, inputs: Optional[dict] = None) -> dict:
+    """Perform the action `describe(row)` names, using `inputs` for
+    anything it `needs`. Returns `{"ok": bool, "message": str}` — never
+    raises, since both callers (a curses loop, an HTTP handler) need to
+    keep running past a bad TTL or a missing app_id, not crash on one."""
+    inputs = inputs or {}
+    spec = describe(row)
+    try:
+        if spec.kind == "toggle_permission":
+            return _toggle_permission(row)
+        if spec.kind == "lease_revoke":
+            return _lease_revoke(row)
+        if spec.kind == "lease_grant":
+            return _lease_grant(row, inputs)
+        if spec.kind == "confirm_binding":
+            return _confirm_binding(row, inputs)
+        if spec.kind == "worker_once":
+            return _drain_once()
+        return {"ok": False, "message": spec.reason}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
+def _toggle_permission(row: GateRow) -> dict:
+    app_id, group = row.scope, row.label
+    granted = row.state != "on"
+    manifest_admin.set_permission(app_id, group, granted)
+    verb = "granted" if granted else "revoked"
+    return {"ok": True, "message": f"{verb} {group!r} for app_id={app_id!r}"}
+
+
+def _lease_revoke(row: GateRow) -> dict:
+    app_id = row.scope
+    had = lease.revoke(app_id)
+    return {"ok": True,
+            "message": f"egress lease for {app_id!r} "
+                       f"{'revoked' if had else 'was not present'}"}
+
+
+def _lease_grant(row: GateRow, inputs: dict) -> dict:
+    app_id = row.scope
+    ttl_raw = (inputs.get("ttl") or "30m").strip()
+    reason = inputs.get("reason") or ""
+    issuer = inputs.get("issuer") or "operator"
+    ttl_seconds = lease.parse_ttl(ttl_raw)
+    record = lease.grant(app_id, ttl_seconds, issuer=issuer, reason=reason)
+    return {"ok": True,
+            "message": f"egress lease granted to {app_id!r}, "
+                       f"expires {record['expires_at']}"}
+
+
+def _confirm_binding(row: GateRow, inputs: dict) -> dict:
+    from . import identity_binding
+
+    bind_app_id = (inputs.get("app_id") or "").strip()
+    if not bind_app_id:
+        return {"ok": False, "message": "app_id is required to confirm a binding"}
+    # row.id shape: "binding.<issuer>__<subject_id>" (see gates_panel._binding_rows)
+    issuer_subject = row.id[len("binding."):]
+    issuer, _, subject_id = issuer_subject.partition("__")
+    record = identity_binding.confirm_binding(issuer, subject_id, bind_app_id)
+    return {"ok": True,
+            "message": f"bound ({issuer}, {subject_id}) -> app_id={record['app_id']!r}"}
+
+
+def _drain_once() -> dict:
+    """Backs the `worker` row's action — one pass of the queue, not a
+    persistent daemon. A live daemon (`willow-mcp worker` with no `--once`)
+    would block the TUI/HTTP handler forever; draining once is the
+    interactive-safe analogue and matches what an operator would do to
+    clear a stranded queue by hand."""
+    try:
+        import kartikeya  # noqa: F401
+    except ModuleNotFoundError:
+        return {"ok": False,
+                "message": "kartikeya is not installed — pip install willow-mcp"}
+    import os
+
+    from .heartbeat import WorkerHeartbeat, reap
+    from .task_queue import build_task_queue
+
+    # Same default `willow-mcp worker` itself falls back to (server.py's
+    # _cmd_worker / _DEFAULT_APP_ID) — no app_id is scoped to this action
+    # since the worker row is global, not per-app.
+    app_id = os.environ.get("WILLOW_APP_ID", "")
+    try:
+        queue = build_task_queue(app_id)
+    except RuntimeError as e:
+        return {"ok": False, "message": str(e)}
+
+    import kartikeya as _kartikeya
+    reap()
+    beat = WorkerHeartbeat(agent="kart", lane="fast", interval=5.0)
+    try:
+        _kartikeya.run_worker(queue, lane="fast", slots=None, interval=5.0,
+                               once=True, on_heartbeat=beat)
+    finally:
+        beat.close()
+    return {"ok": True, "message": "drained the queue once"}

@@ -41,7 +41,10 @@ smoke test that exercises the actual `willow-mcp` console-script end to end
 (`gates`, `tree`, `allow-permission`/`deny-permission`, `grant-net`/
 `revoke-net`/`net-status`) rather than just the underlying functions the unit
 tests already cover, so a broken packaging or argparse wiring fails there
-even if every unit test still passes.
+even if every unit test still passes. A second smoke-test step starts
+`willow-mcp gates --serve` and hits its real HTTP API (`GET /`, `POST
+/api/action`) the same way the live dashboard's own JS does, confirming a
+button-click-equivalent actually flips the manifest on disk.
 
 ## Branching and pull requests
 
