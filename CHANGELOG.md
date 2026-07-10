@@ -10,6 +10,22 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **The Grove** (`the_grove.py`) — a rings store for *lessons*, sibling to
+  `schema_profile`'s vocabulary rings but unbounded on purpose: vocabulary may
+  be pruned cheaply, lessons are kept precisely so the deployment cannot become
+  something that forgets them. One ring per lesson (`add_ring`/`rings`/`depth`),
+  `canopy()` (the visible architecture), `deep_roots()` (the recorded lessons),
+  and a pipe-friendly status: `python -m willow_mcp.the_grove --status` reports
+  stability, ring depth, and soil health; run with no arguments for the resting
+  display. A diseased rings file reads as empty but reports the grove
+  `unsettled` rather than silently claiming depth 0.
+- **`core.record_lessons()`** — distill any SQLite journal (any schema — the
+  table holding the writing is introspected, never assumed) into entry count,
+  date range, and theme tallies, then grow exactly one grove ring carrying the
+  lesson worth keeping. The source is opened `mode=ro` — a journal handed to
+  this function is being remembered, not edited — and every failure is
+  fail-soft (`{"error": ...}`, no ring), because a ring must never record a
+  lesson that wasn't actually learned.
 - **Integration adapters** (`integrations.py`) — outbound HTTP adapters with a
   shared base (env→vault credential resolution, bounded stdlib transport with
   Retry-After-honoring retries, credential-scrubbed errors). Two live adapters
@@ -54,6 +70,18 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   never grant itself a permission it was just denied. `consent.*` rows are
   read-only by design (willow-mcp never writes that policy) and never show a
   command.
+- **`gates` is now interactive — a real TUI and a live local HTML dashboard, not
+  just a snapshot.** Bare `willow-mcp gates` in a real terminal opens a curses
+  screen: arrow keys / j-k to move, enter/space to actually flip the highlighted
+  gate — grant/revoke a lease (prompts for TTL + reason), allow/deny a permission,
+  confirm an identity binding, drain the task queue once. `willow-mcp gates
+  --serve` does the same over a `127.0.0.1`-only local HTTP server with real
+  clickable buttons, for anyone who'd rather use a browser. Both share one action
+  layer (`gates_actions.py`) with the `allow-permission`/`grant-net`/
+  `confirm-binding` CLI subcommands — pressing a row calls the exact same
+  functions, no new authority. `--json`/`--html`/`--static` are unchanged and
+  still what runs automatically when stdout isn't a real terminal (piped, CI),
+  so nothing scripted against the old output breaks.
 - **Time-boxed egress leases** (B-32 / L-NET-02). `task_submit(allow_net=True)` now
   needs a **third** key: an unexpired lease issued by the operator with
   `willow-mcp grant-net <app_id> --ttl 30m --reason ...` (ceiling 3h, per FRANK
