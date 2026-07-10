@@ -241,6 +241,31 @@ class HuggingFaceAdapter(BaseAdapter):
     env_vars = ("WILLOW_HUGGINGFACE_TOKEN", "HF_TOKEN", "HUGGING_FACE_HUB_TOKEN")
 
 
+class JelesAdapter(BaseAdapter):
+    """Jeles the Librarian, remote lane. The stateless network-search half of
+    willow-2.0's Jeles (`core/jeles_sources.py`), hosted as `jeles-remote` on
+    Fly.io: `POST /search` fans out to ~65 institutional/academic sources
+    (arXiv, PubMed, Crossref, OpenAlex, Library of Congress, ...) and returns
+    citable results. Corroboration across independent sources is the whole
+    point — the same external-verification instinct as the lease and the
+    consent gate, pointed at facts instead of egress.
+
+    Earned by an operator request to wire ask-jeles into the MCP (the module's
+    'surface is earned' rule — this adapter exists because the fleet now calls
+    it, not on spec). Auth is a shared secret in the `X-Jeles-Secret` header
+    (not a Bearer token), resolved from JELES_REMOTE_SECRET (env) or the vault
+    under integration/jeles/token. Host is fixed per the adapter contract; set
+    WILLOW_JELES_BASE_URL to point at a self-hosted deployment instead."""
+    name = "jeles"
+    base_url = os.environ.get(
+        "WILLOW_JELES_BASE_URL", "https://jeles-remote.fly.dev").rstrip("/")
+    doc = "Jeles remote — academic/institutional source search (~65 citable sources)"
+    env_vars = ("JELES_REMOTE_SECRET",)
+    auth_header = "X-Jeles-Secret"
+    auth_prefix = ""            # raw shared secret — jeles-remote hmac-compares it, no "Bearer "
+    credential_required = True
+
+
 # ── Declared stubs — common integration points, deliberately unimplemented ────
 
 class StubAdapter(BaseAdapter):
@@ -310,7 +335,7 @@ class JiraStub(StubAdapter):
 
 
 _ADAPTERS: tuple = (
-    GitHubAdapter(), HuggingFaceAdapter(),
+    GitHubAdapter(), HuggingFaceAdapter(), JelesAdapter(),
     GmailStub(), SlackStub(), NotionStub(),
     GoogleDriveStub(), DatadogStub(), JiraStub(),
 )
