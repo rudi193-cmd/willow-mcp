@@ -1,0 +1,19 @@
+# systemd --user unit template for the willow-mcp Kart worker (kartikeya-bounded).
+# Not used directly — `scripts/willow-serve worker-install` fills in the
+# @PLACEHOLDERS@ and writes the resolved template unit to
+# ~/.config/systemd/user/willow-mcp-worker@.service.
+# The instance name (%i) is the lane: willow-mcp-worker@fast / willow-mcp-worker@batch.
+[Unit]
+Description=willow-mcp Kart worker (%i lane)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@WORKDIR@
+Environment=WILLOW_APP_ID=@APPID@
+ExecStart=@VENV@ -m willow_mcp worker --lane %i
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

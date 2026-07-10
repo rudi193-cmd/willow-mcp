@@ -11,25 +11,51 @@
 #   willow-serve status     # unit state + whether the entry is present
 #   willow-serve logs        # follow the serve process logs (journalctl)
 #
+# Kart worker (kartikeya) — `willow-mcp worker` as a lane-instanced user unit:
+#   willow-serve worker-install          # one-time: write + load willow-mcp-worker@.service
+#   willow-serve worker-on [fast|batch|all]    # start worker lane(s)   (default: all)
+#   willow-serve worker-off [fast|batch|all]   # stop worker lane(s)    (default: all)
+#   willow-serve worker-status           # per-lane unit state
+#   willow-serve worker-logs [fast|batch]      # follow a lane's logs   (default: fast)
+#
 # Port/host come from WILLOW_MCP_PORT / WILLOW_MCP_HOST (defaults 8766 / 127.0.0.1).
-# Change them, re-run `install`, then `on`.
+# The worker's app_id (whose confirmed 'tasks' mapping it drains) comes from
+# WILLOW_APP_ID (default willow). Change them, re-run the install step, then on.
 set -euo pipefail
 
 UNIT="willow-mcp-serve"
 PORT="${WILLOW_MCP_PORT:-8766}"
 HOST="${WILLOW_MCP_HOST:-127.0.0.1}"
 ENTRY_NAME="willow-mcp-serve"
+WORKER_UNIT="willow-mcp-worker"
+APP_ID="${WILLOW_APP_ID:-willow}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MCP_JSON="$REPO_ROOT/.mcp.json"
 VENV_PY="$REPO_ROOT/.venv/bin/python3"
 TEMPLATE="$REPO_ROOT/deploy/willow-mcp-serve.service.template"
+WORKER_TEMPLATE="$REPO_ROOT/deploy/willow-mcp-worker@.service.template"
 URL="http://$HOST:$PORT/mcp"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT_FILE="$UNIT_DIR/$UNIT.service"
+WORKER_UNIT_FILE="$UNIT_DIR/$WORKER_UNIT@.service"
 
-usage() { echo "usage: willow-serve {install|on|off|status|logs}" >&2; exit 2; }
+usage() {
+  echo "usage: willow-serve {install|on|off|status|logs}" >&2
+  echo "       willow-serve {worker-install|worker-on|worker-off|worker-status|worker-logs} [fast|batch|all]" >&2
+  exit 2
+}
 have_unit() { [ -f "$UNIT_FILE" ]; }
+have_worker_unit() { [ -f "$WORKER_UNIT_FILE" ]; }
+
+# Expand a lane argument to instance unit names. all -> both lanes.
+worker_lanes() {  # $1 = fast|batch|all (default all)
+  case "${1:-all}" in
+    fast|batch) echo "$1" ;;
+    all) echo "fast batch" ;;
+    *) echo "invalid lane: $1 (want fast|batch|all)" >&2; exit 2 ;;
+  esac
+}
 
 # Add or remove the http entry in .mcp.json. Idempotent; preserves other servers.
 TOGGLE_PY="$REPO_ROOT/scripts/mcp_entry_toggle.py"
@@ -85,6 +111,50 @@ case "${1:-}" in
     ;;
   logs)
     journalctl --user -u "$UNIT" -f
+    ;;
+  worker-install)
+    [ -f "$WORKER_TEMPLATE" ] || { echo "missing template: $WORKER_TEMPLATE" >&2; exit 1; }
+    [ -x "$VENV_PY" ] || echo "warning: $VENV_PY not found — create the venv first (see README)" >&2
+    "$VENV_PY" -c "import kartikeya" 2>/dev/null \
+      || echo "warning: kartikeya not importable from the venv — worker will exit at start (pip install -e . or pip install willow-mcp)" >&2
+    mkdir -p "$UNIT_DIR"
+    sed -e "s#@VENV@#$VENV_PY#g" \
+        -e "s#@WORKDIR@#$REPO_ROOT#g" \
+        -e "s#@APPID@#$APP_ID#g" \
+        "$WORKER_TEMPLATE" > "$WORKER_UNIT_FILE"
+    systemctl --user daemon-reload
+    echo "installed $WORKER_UNIT_FILE  (app_id $APP_ID; lanes are unit instances)"
+    echo "next: willow-serve worker-on   # starts fast + batch"
+    ;;
+  worker-on)
+    have_worker_unit || { echo "unit not installed — run: willow-serve worker-install" >&2; exit 1; }
+    for lane in $(worker_lanes "${2:-all}"); do
+      systemctl --user start "$WORKER_UNIT@$lane"
+      if systemctl --user is-active --quiet "$WORKER_UNIT@$lane"; then
+        echo "worker ON   $lane lane"
+      else
+        echo "worker $lane did not stay active — check: willow-serve worker-logs $lane" >&2
+        exit 1
+      fi
+    done
+    ;;
+  worker-off)
+    for lane in $(worker_lanes "${2:-all}"); do
+      have_worker_unit && systemctl --user stop "$WORKER_UNIT@$lane" || true
+      echo "worker OFF  $lane lane"
+    done
+    ;;
+  worker-status)
+    for lane in fast batch; do
+      if have_worker_unit && systemctl --user is-active --quiet "$WORKER_UNIT@$lane"; then
+        echo "worker $lane:  active"
+      else
+        echo "worker $lane:  inactive"
+      fi
+    done
+    ;;
+  worker-logs)
+    journalctl --user -u "$WORKER_UNIT@$(worker_lanes "${2:-fast}" | cut -d' ' -f1)" -f
     ;;
   *)
     usage
