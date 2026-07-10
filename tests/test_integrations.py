@@ -59,8 +59,25 @@ def test_registry_lists_live_and_stub_adapters():
         by_status.setdefault(r["status"], []).append(r["name"])
     assert "github" in by_status["live"]
     assert "huggingface" in by_status["live"]
-    assert len(by_status["live"]) == 2
+    assert "jeles" in by_status["live"]
+    assert len(by_status["live"]) == 3
     assert len(by_status["stub"]) == 6
+
+
+def test_jeles_adapter_wired_live_with_secret_header():
+    """ask-jeles is a live adapter using shared-secret auth in the
+    X-Jeles-Secret header (not Bearer), credential required, fixed HTTPS host."""
+    a = integrations.get("jeles")
+    assert a is not None and a.status == "live"
+    assert a.credential_required is True
+    assert a.auth_header == "X-Jeles-Secret"
+    assert a.auth_prefix == ""
+    assert a.base_url.startswith("https://")
+    # the secret rides raw in its own header — no "Bearer " prefix, and never the
+    # Authorization header (jeles-remote hmac-compares X-Jeles-Secret directly).
+    headers = a._headers("s3cr3t")
+    assert headers["X-Jeles-Secret"] == "s3cr3t"
+    assert "Authorization" not in headers
 
 
 def test_every_stub_declares_needs_and_earned_by():
@@ -249,7 +266,7 @@ def test_integration_list_tool_is_gated(home):
 def test_full_access_grants_ledger_but_not_call(home):
     app = _manifest(home, permissions=["full_access"])
     out = server.integration_list(app_id=app)
-    assert len(out["integrations"]) == 8
+    assert len(out["integrations"]) == 9
     out = server.integration_call(app_id=app, name="github", method="GET", path="/user")
     assert "gate denied" in out["error"]
 
