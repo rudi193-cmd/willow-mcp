@@ -195,6 +195,15 @@ per-app egress lease below them — one `grant-net`/`revoke-net` covers Kart
 sandbox egress and server-process integration calls together, since a lease
 is scoped to the app, not to which capability is asking.
 
+Every row also carries a `state_label` in context instead of a bare ON/OFF —
+GRANTED, ALLOWED, ACTIVE, CONFIRMED, RUNNING, ENABLED (and their opposites) —
+and a `category` (egress & network / system / identity / permissions) that
+the TUI and both HTML pages group by. The HTML pages open on the egress
+tab — the smallest group, and the one with a clock — with a summary strip
+above the tabs for at-a-glance state, and render the ~20-row permissions
+group (routine, rarely touched) as a compact list rather than large cards,
+instead of one flat scroll of everything at once.
+
 #### `tree` — the integration seam for a real dashboard
 
 `docs/design/*.html` sketches a client UI as a tree — trunk (overall

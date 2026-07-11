@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from html import escape as _esc
 from typing import Optional
 
-from . import consent, lease, paths
+from . import consent, gates_html, lease, paths
 from .gate import (
     INTEGRATION_NET_PERMISSION,
     NET_PERMISSION,
@@ -80,10 +80,27 @@ class GateRow:
     #: exact. Falls back to a humanized version of `label` for anything
     #: `FRIENDLY_LABELS` doesn't yet cover (see `_friendly()`).
     friendly: str = ""
+    #: What this row is FOR, not what it's called — "egress" (consent, the
+    #: lease, task_net/integration_net), "permissions" (the ~20 routine
+    #: manifest groups), "identity" (bindings), or "system" (worker,
+    #: strict_trust_root, severance, human_orchestrator). Display-only, used
+    #: to group/tab the UI instead of one undifferentiated list — see
+    #: `_category()`.
+    category: str = ""
+    #: What "on"/"off" actually MEANS for this row, in words — a bare ON/OFF
+    #: reads the same whether "on" is good news or bad, and a viewer who
+    #: doesn't already know this codebase has no way to tell GRANTED from
+    #: RUNNING from ALLOWED without reading the detail text. Display-only;
+    #: `state` itself (the thing gates_actions.py branches on) never changes.
+    state_label: str = ""
 
     def __post_init__(self) -> None:
         if not self.friendly:
             self.friendly = _friendly(self.label)
+        if not self.category:
+            self.category = _category(self.id, self.label)
+        if not self.state_label:
+            self.state_label = _state_label(self.id, self.state)
 
 
 #: Plain-language translation for every permission group / capability name a
@@ -134,6 +151,47 @@ def _humanize(name: str) -> str:
 
 def _friendly(label: str) -> str:
     return FRIENDLY_LABELS.get(label, _humanize(label))
+
+
+def _category(row_id: str, label: str) -> str:
+    """Which UI group this row belongs to. `task_net`/`integration_net` are
+    `perm.*` rows by id shape but belong with the lease and consent — they're
+    the capability half of the same egress decision, not routine access
+    control — so they're pulled into "egress" by label rather than by id
+    prefix alone."""
+    if row_id.startswith("binding."):
+        return "identity"
+    if row_id.startswith("consent.") or row_id.startswith("lease."):
+        return "egress"
+    if row_id.startswith("perm."):
+        if label in (NET_PERMISSION, INTEGRATION_NET_PERMISSION):
+            return "egress"
+        return "permissions"
+    return "system"  # worker, strict_trust_root, severance, human_orchestrator
+
+
+#: state_label lookup, keyed by row-id prefix (checked in order) and then
+#: by `state`. "warn" isn't universal — only the worker row uses it — so
+#: each table only needs the states that row type can actually be in.
+_STATE_LABELS: dict[str, dict[str, str]] = {
+    "perm.": {"on": "GRANTED", "off": "NOT GRANTED"},
+    "consent.": {"on": "ALLOWED", "off": "BLOCKED"},
+    "lease.": {"on": "ACTIVE", "off": "NONE"},
+    "binding.": {"on": "CONFIRMED", "off": "PENDING"},
+    "worker": {"on": "RUNNING", "warn": "STALLED", "off": "STOPPED"},
+    "strict_trust_root": {"on": "ENABLED", "off": "DISABLED"},
+    "severance": {"on": "ENABLED", "off": "DISABLED"},
+    "human_orchestrator": {"on": "ENABLED", "off": "DISABLED"},
+}
+
+
+def _state_label(row_id: str, state: str) -> str:
+    for prefix, table in _STATE_LABELS.items():
+        if row_id == prefix or row_id.startswith(prefix):
+            if state in table:
+                return table[state]
+            break
+    return state.upper()
 
 
 def list_app_ids() -> list[str]:
@@ -292,8 +350,24 @@ def collect(app_id: str = "") -> list[GateRow]:
 _ANSI = {"on": "\033[97;42m", "off": "\033[97;41m", "warn": "\033[30;43m", "reset": "\033[0m"}
 
 
-def _button_text(state: str) -> str:
-    return {"on": " ON  ", "off": " OFF ", "warn": "WARN "}.get(state, state.upper())
+#: Display order and heading for each category — egress first (the one
+#: with a clock and the most consequence), permissions last (the long,
+#: mostly-boring routine-access list nobody needs to see before anything
+#: else). Both renderers (TUI, HTML) iterate this instead of a flat list.
+CATEGORY_ORDER: list[tuple[str, str]] = [
+    ("egress", "Egress & network"),
+    ("system", "System"),
+    ("identity", "Identity"),
+    ("permissions", "Permissions"),
+]
+
+
+def group_by_category(rows: list[GateRow]) -> list[tuple[str, str, list[GateRow]]]:
+    """Rows bucketed into CATEGORY_ORDER, skipping empty categories."""
+    buckets: dict[str, list[GateRow]] = {key: [] for key, _ in CATEGORY_ORDER}
+    for r in rows:
+        buckets.setdefault(r.category, []).append(r)
+    return [(key, title, buckets[key]) for key, title in CATEGORY_ORDER if buckets[key]]
 
 
 def _timer_text(row: GateRow) -> str:
@@ -312,208 +386,51 @@ def _timer_text(row: GateRow) -> str:
 
 def render_tui(rows: list[GateRow], color: bool = True) -> str:
     lines = ["willow-mcp gates — every authorization gate, egress-lease shaped\n"]
-    scope_w = max((len(r.scope) for r in rows), default=6)
-    label_w = max((len(r.friendly) for r in rows), default=6)
-    timer_w = max((len(_timer_text(r)) for r in rows), default=6)
-    for r in rows:
-        button = _button_text(r.state)
-        if color:
-            button = f"{_ANSI.get(r.state, '')}{button}{_ANSI['reset']}"
-        lines.append(
-            f"[{button}] {r.scope:<{scope_w}}  {r.friendly:<{label_w}}  "
-            f"{_timer_text(r):<{timer_w}}  {r.label} — {r.detail}"
-        )
-        if r.action_cli:
-            lines.append(f"{'':>{9}}-> {r.action_cli}")
-        elif r.action_note:
-            lines.append(f"{'':>{9}}-> {r.action_note}")
+    if not rows:
+        return "\n".join(lines) + "(nothing to show)"
+
+    scope_w = max(len(r.scope) for r in rows)
+    label_w = max(len(r.friendly) for r in rows)
+    timer_w = max(len(_timer_text(r)) for r in rows)
+    button_w = max(len(r.state_label) for r in rows)
+    indent = button_w + 3  # matches the "[BUTTON] " prefix width, for action lines
+
+    for key, title, group in group_by_category(rows):
+        lines.append(f"\n== {title} " + "=" * max(1, 60 - len(title)))
+        for r in group:
+            button = r.state_label.center(button_w)
+            if color:
+                button = f"{_ANSI.get(r.state, '')}{button}{_ANSI['reset']}"
+            lines.append(
+                f"[{button}] {r.scope:<{scope_w}}  {r.friendly:<{label_w}}  "
+                f"{_timer_text(r):<{timer_w}}  {r.label} — {r.detail}"
+            )
+            if r.action_cli:
+                lines.append(f"{'':>{indent}}-> {r.action_cli}")
+            elif r.action_note:
+                lines.append(f"{'':>{indent}}-> {r.action_note}")
     return "\n".join(lines)
 
 
-_HTML_TEMPLATE = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>willow-mcp gates</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  :root {{
-    --bg: #0b0d12; --card: #161a22; --border: #262c38; --text: #e6e9ef; --muted: #8b93a3;
-    --on: #1f9d55; --on-glow: #22c55e; --off: #c0392b; --off-glow: #ef4444; --warn: #b8860b;
-  }}
-  @media (prefers-color-scheme: light) {{
-    :root {{ --bg: #f3f4f6; --card: #ffffff; --border: #dde1e8; --text: #14171f; --muted: #5b6472; }}
-  }}
-  * {{ box-sizing: border-box; }}
-  body {{
-    margin: 0; padding: 2rem 1.25rem 4rem; background: var(--bg); color: var(--text);
-    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  }}
-  h1 {{ font-size: 1.3rem; margin: 0 0 .25rem; }}
-  .sub {{ color: var(--muted); margin: 0 0 1.75rem; font-size: .9rem; }}
-  .scope-heading {{
-    margin: 2rem 0 .75rem; font-size: .78rem; letter-spacing: .06em; text-transform: uppercase;
-    color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: .4rem;
-  }}
-  .grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: .9rem; }}
-  .card {{
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 1rem; display: flex; flex-direction: column; gap: .55rem; min-width: 0;
-  }}
-  .card-head {{ display: flex; align-items: center; gap: .6rem; min-width: 0; }}
-  .card-head-text {{ min-width: 0; }}
-  .label {{ font-weight: 600; overflow-wrap: anywhere; }}
-  .tech {{ font-size: .72rem; color: var(--muted); font-family: ui-monospace, monospace; overflow-wrap: anywhere; }}
-  .btn {{
-    appearance: none; border: none; border-radius: 999px; padding: .3rem .85rem;
-    font-weight: 700; font-size: .72rem; letter-spacing: .05em; color: #fff; cursor: default;
-    flex-shrink: 0;
-  }}
-  .btn.on  {{ background: var(--on);  box-shadow: 0 0 0 3px color-mix(in srgb, var(--on-glow) 30%, transparent); }}
-  .btn.off {{ background: var(--off); box-shadow: 0 0 0 3px color-mix(in srgb, var(--off-glow) 30%, transparent); }}
-  .btn.warn{{ background: var(--warn); }}
-  .btn.actionable {{ cursor: pointer; }}
-  .btn.actionable:hover {{ filter: brightness(1.12); }}
-  .timer {{ font-variant-numeric: tabular-nums; font-size: .85rem; color: var(--muted); }}
-  .detail {{ font-size: .82rem; color: var(--muted); overflow-wrap: anywhere; }}
-  .action {{ display: flex; gap: .4rem; align-items: center; margin-top: auto; }}
-  .action code {{
-    flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 6px; padding: .35rem .5rem; font-size: .74rem; overflow-x: auto;
-    white-space: pre; color: var(--text);
-  }}
-  .copy {{
-    border: 1px solid var(--border); background: transparent; color: var(--text);
-    border-radius: 6px; padding: .35rem .55rem; font-size: .74rem; cursor: pointer;
-  }}
-  .copy:hover {{ background: var(--border); }}
-  .note {{ font-size: .78rem; color: var(--muted); font-style: italic; }}
-</style>
-</head>
-<body>
-<h1>willow-mcp gates</h1>
-<p class="sub">Every authorization gate, shown the way the egress lease already shows itself —
-on/off, plus how long the "on" is good for. Generated once; re-run <code>willow-mcp gates --html</code>
-for fresh state. Countdown timers below tick client-side from the moment this file was generated.</p>
-<div id="root"></div>
-<script>
-const ROWS = {rows_json};
-const GENERATED_AT = {generated_at_json};
+_BODY_SCRIPTS_TEMPLATE = """
+const ROWS = __ROWS_JSON__;
+const GENERATED_AT = __GENERATED_AT_JSON__;
 
-function fmtRemaining(s) {{
-  if (s === null || s <= 0) return "no active grant";
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  const mm = String(m).padStart(2, "0"), ss = String(sec).padStart(2, "0");
-  return h > 0 ? `expires in ${{h}}h${{mm}}m${{ss}}s` : `expires in ${{m}}m${{ss}}s`;
-}}
+function elapsedSeconds() {
+  return Math.floor((Date.now() - Date.parse(GENERATED_AT)) / 1000);
+}
 
-function timerText(row) {{
-  if (row.timer_shape === "lease") {{
-    if (row.remaining_seconds === null) return "no active grant";
-    const elapsed = Math.floor((Date.now() - Date.parse(GENERATED_AT)) / 1000);
-    return fmtRemaining(row.remaining_seconds - elapsed);
-  }}
-  if (row.timer_shape === "standing") return "standing — no expiry";
-  if (row.timer_shape === "process") return "process-lifetime — restart to change";
-  return "—";
-}}
-
-function copy(text, btn) {{
-  const done = () => {{ const old = btn.textContent; btn.textContent = "copied"; setTimeout(() => btn.textContent = old, 1200); }};
-  if (navigator.clipboard && navigator.clipboard.writeText) {{
-    navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
-  }} else {{
-    fallbackCopy(text, done);
-  }}
-}}
-function fallbackCopy(text, done) {{
-  const ta = document.createElement("textarea");
-  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
-  document.body.appendChild(ta); ta.select();
-  try {{ document.execCommand("copy"); done(); }} catch (e) {{}}
-  document.body.removeChild(ta);
-}}
-
-function render() {{
-  const root = document.getElementById("root");
-  root.innerHTML = "";
-  const scopes = [...new Set(ROWS.map(r => r.scope))];
-  for (const scope of scopes) {{
-    const heading = document.createElement("div");
-    heading.className = "scope-heading";
-    heading.textContent = scope;
-    root.appendChild(heading);
-    const grid = document.createElement("div");
-    grid.className = "grid";
-    for (const row of ROWS.filter(r => r.scope === scope)) {{
-      const card = document.createElement("div");
-      card.className = "card";
-      const head = document.createElement("div");
-      head.className = "card-head";
-      const btn = document.createElement("span");
-      btn.className = "btn " + row.state;
-      btn.textContent = row.state.toUpperCase();
-      const textWrap = document.createElement("div");
-      textWrap.className = "card-head-text";
-      const label = document.createElement("div");
-      label.className = "label";
-      label.textContent = row.friendly;
-      const tech = document.createElement("div");
-      tech.className = "tech";
-      tech.textContent = row.label;
-      textWrap.appendChild(label); textWrap.appendChild(tech);
-      head.appendChild(btn); head.appendChild(textWrap);
-      card.appendChild(head);
-      const timer = document.createElement("div");
-      timer.className = "timer";
-      timer.dataset.row = row.id;
-      timer.textContent = timerText(row);
-      card.appendChild(timer);
-      const detail = document.createElement("div");
-      detail.className = "detail";
-      detail.textContent = row.detail;
-      card.appendChild(detail);
-      if (row.action_cli) {{
-        const action = document.createElement("div");
-        action.className = "action";
-        const code = document.createElement("code");
-        code.textContent = row.action_cli;
-        const copyBtn = document.createElement("button");
-        copyBtn.className = "copy";
-        copyBtn.textContent = "copy";
-        copyBtn.onclick = () => copy(row.action_cli, copyBtn);
-        action.appendChild(code); action.appendChild(copyBtn);
-        card.appendChild(action);
-      }} else if (row.action_note) {{
-        const note = document.createElement("div");
-        note.className = "note";
-        note.textContent = row.action_note;
-        card.appendChild(note);
-      }}
-      grid.appendChild(card);
-    }}
-    root.appendChild(grid);
-  }}
-}}
-
-render();
-setInterval(() => {{
-  document.querySelectorAll(".timer").forEach(el => {{
-    const row = ROWS.find(r => r.id === el.dataset.row);
-    if (row) el.textContent = timerText(row);
-  }});
-}}, 1000);
-</script>
-</body>
-</html>
+renderDashboard(ROWS, elapsedSeconds);
+setInterval(() => renderDashboard(ROWS, elapsedSeconds), 1000);
 """
 
 
 def render_html(rows: list[GateRow], generated_at: str) -> str:
     rows_payload = [
         {
-            "id": r.id, "label": r.label, "friendly": r.friendly, "scope": r.scope,
-            "state": r.state, "detail": r.detail, "remaining_seconds": r.remaining_seconds,
+            "id": r.id, "label": r.label, "friendly": r.friendly, "category": r.category,
+            "state": r.state, "state_label": r.state_label, "scope": r.scope,
+            "detail": r.detail, "remaining_seconds": r.remaining_seconds,
             "timer_shape": r.timer_shape, "action_cli": r.action_cli,
             "action_note": r.action_note,
         }
@@ -522,7 +439,17 @@ def render_html(rows: list[GateRow], generated_at: str) -> str:
     # json.dumps output is safe to inline in a <script> block except for the
     # literal substring "</script>", which would close the tag early.
     rows_json = json.dumps(rows_payload).replace("</script>", "<\\/script>")
-    return _HTML_TEMPLATE.format(
-        rows_json=rows_json,
-        generated_at_json=json.dumps(generated_at),
+    body_scripts = (
+        _BODY_SCRIPTS_TEMPLATE
+        .replace("__ROWS_JSON__", rows_json)
+        .replace("__GENERATED_AT_JSON__", json.dumps(generated_at))
+    )
+    return gates_html.page(
+        title="willow-mcp gates",
+        subtitle='Every authorization gate, shown the way the egress lease already shows '
+                 'itself — on/off, plus how long the "on" is good for. Generated once; '
+                 're-run <code>willow-mcp gates --html</code> for fresh state. Countdown '
+                 'timers tick client-side from the moment this file was generated.',
+        top_extra="",
+        body_scripts=body_scripts,
     )
