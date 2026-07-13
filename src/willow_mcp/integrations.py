@@ -266,6 +266,35 @@ class JelesAdapter(BaseAdapter):
     credential_required = True
 
 
+class UtetyAdapter(BaseAdapter):
+    """UTETY — the classroom-grade learning product — speaking through its OWN
+    mouth, never jeles's.
+
+    Founding rule (build-plan §0.5): UTETY's product identity and egress ride a
+    `UtetyAdapter` with its own `app_id` (`utety`), backend URL, and secret — so a
+    student-facing call is attributable to `utety`, gated by `utety`'s manifest +
+    consent + lease, and never borrows the librarian's credentials. This is the
+    seam from build-plan §5.2 made concrete: *UTETY owns the pedagogy, Jeles owns
+    the knowledge.* When a claim needs backing, UTETY asks Jeles a de-identified
+    question through the jeles lane; but UTETY's own transport is this adapter.
+
+    Earned by the founding decision, not spec — this is the fleet building UTETY.
+    The backend (UTETY's pedagogy/knowledge service) is deployed in Phase 1;
+    until then `credential_required` stays False so the identity + transport exist
+    without a live endpoint to hard-fail against. Point it at the real service by
+    setting WILLOW_UTETY_BASE_URL; flip `credential_required` True when the backend
+    enforces auth. Host is fixed per the adapter contract (a path cannot re-point
+    it), exactly like every other live adapter here."""
+    name = "utety"
+    base_url = os.environ.get(
+        "WILLOW_UTETY_BASE_URL", "https://utety.pages.dev").rstrip("/")
+    doc = "UTETY — classroom learning product; its own egress identity (backend wired in Phase 1)"
+    env_vars = ("WILLOW_UTETY_SECRET",)
+    auth_header = "X-Utety-Secret"
+    auth_prefix = ""            # raw shared secret, mirroring the jeles lane
+    credential_required = False
+
+
 # ── Declared stubs — common integration points, deliberately unimplemented ────
 
 class StubAdapter(BaseAdapter):
@@ -335,7 +364,7 @@ class JiraStub(StubAdapter):
 
 
 _ADAPTERS: tuple = (
-    GitHubAdapter(), HuggingFaceAdapter(), JelesAdapter(),
+    GitHubAdapter(), HuggingFaceAdapter(), JelesAdapter(), UtetyAdapter(),
     GmailStub(), SlackStub(), NotionStub(),
     GoogleDriveStub(), DatadogStub(), JiraStub(),
 )
