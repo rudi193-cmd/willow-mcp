@@ -82,6 +82,22 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   functions, no new authority. `--json`/`--html`/`--static` are unchanged and
   still what runs automatically when stdout isn't a real terminal (piped, CI),
   so nothing scripted against the old output breaks.
+- **Gates dashboard: readable state labels and a real layout, not one long
+  scroll of identical cards.** Feedback on the live HTML dashboard: bare
+  ON/OFF buttons don't say what "on" means (granted? allowed? running?), and
+  ~30 same-sized cards in one flat grid reads as noise, not a dashboard. Every
+  row now carries a `state_label` in context — GRANTED/NOT GRANTED,
+  ALLOWED/BLOCKED, ACTIVE/NONE, CONFIRMED/PENDING, RUNNING/STALLED/STOPPED,
+  ENABLED/DISABLED — and a `category` (egress & network / system / identity /
+  permissions) that both the TUI and the two HTML pages now group by instead
+  of showing everything at once. The HTML pages default to the egress tab
+  (smallest group, the one with a clock and real consequence) with a summary
+  strip above the tabs for at-a-glance state, and render the ~20-row,
+  rarely-touched permissions group as a compact single-column list instead of
+  large cards. New shared module `gates_html.py` holds the CSS/JS both the
+  static snapshot (`gates_panel.render_html`) and the live dashboard
+  (`gates_serve.py`) now render through, so the two pages can't drift apart
+  the way two independent ~200-line templates eventually would.
 - **Time-boxed egress leases** (B-32 / L-NET-02). `task_submit(allow_net=True)` now
   needs a **third** key: an unexpired lease issued by the operator with
   `willow-mcp grant-net <app_id> --ttl 30m --reason ...` (ceiling 3h, per FRANK
