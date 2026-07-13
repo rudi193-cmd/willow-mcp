@@ -198,3 +198,109 @@ def test_render_html_payload_includes_friendly_field(apps_root):
     row = next(r for r in payload if r["id"] == "perm.testapp.store_read")
     assert row["friendly"] == "View saved notes"
     assert row["label"] == "store_read"
+
+
+# ── category grouping ────────────────────────────────────────────────────────
+
+def test_category_permission_group():
+    row = gates_panel.GateRow(id="perm.app.store_read", label="store_read",
+                               scope="app", state="off", detail="")
+    assert row.category == "permissions"
+
+
+def test_category_task_net_and_integration_net_are_egress_not_permissions():
+    """task_net/integration_net are perm.* by id shape but belong with the
+    lease and consent — they're the capability half of the egress decision."""
+    for label in (NET_PERMISSION, INTEGRATION_NET_PERMISSION):
+        row = gates_panel.GateRow(id=f"perm.app.{label}", label=label,
+                                   scope="app", state="off", detail="")
+        assert row.category == "egress"
+
+
+def test_category_consent_and_lease_are_egress():
+    consent_row = gates_panel.GateRow(id="consent.internet", label="consent.internet",
+                                       scope="global", state="off", detail="")
+    lease_row = gates_panel.GateRow(id="lease.app", label="egress lease",
+                                     scope="app", state="off", detail="")
+    assert consent_row.category == "egress"
+    assert lease_row.category == "egress"
+
+
+def test_category_binding_is_identity():
+    row = gates_panel.GateRow(id="binding.google__sub1", label="identity binding (google)",
+                               scope="app", state="off", detail="")
+    assert row.category == "identity"
+
+
+def test_category_worker_and_env_flags_are_system():
+    for row_id in ("worker", "strict_trust_root", "severance", "human_orchestrator"):
+        row = gates_panel.GateRow(id=row_id, label=row_id, scope="global",
+                                   state="off", detail="")
+        assert row.category == "system"
+
+
+def test_group_by_category_skips_empty_categories_and_follows_order(apps_root):
+    manifest_admin.set_permission("testapp", "store_read", True)
+    rows = gates_panel.collect("testapp")
+    grouped = gates_panel.group_by_category(rows)
+    keys = [key for key, _, _ in grouped]
+    assert keys == sorted(keys, key=lambda k: [c for c, _ in gates_panel.CATEGORY_ORDER].index(k))
+    assert set(keys) <= {"egress", "system", "identity", "permissions"}
+    assert all(group for _, _, group in grouped)  # no empty buckets
+
+
+# ── state_label — what "on"/"off" means, in words ───────────────────────────
+
+@pytest.mark.parametrize("row_id,state,expected", [
+    ("perm.app.store_read", "on", "GRANTED"),
+    ("perm.app.store_read", "off", "NOT GRANTED"),
+    ("consent.internet", "on", "ALLOWED"),
+    ("consent.internet", "off", "BLOCKED"),
+    ("lease.app", "on", "ACTIVE"),
+    ("lease.app", "off", "NONE"),
+    ("binding.google__sub1", "on", "CONFIRMED"),
+    ("binding.google__sub1", "off", "PENDING"),
+    ("worker", "on", "RUNNING"),
+    ("worker", "warn", "STALLED"),
+    ("worker", "off", "STOPPED"),
+    ("strict_trust_root", "on", "ENABLED"),
+    ("strict_trust_root", "off", "DISABLED"),
+])
+def test_state_label_says_what_on_off_means(row_id, state, expected):
+    row = gates_panel.GateRow(id=row_id, label=row_id, scope="x", state=state, detail="")
+    assert row.state_label == expected
+
+
+def test_state_label_explicit_override_wins():
+    row = gates_panel.GateRow(id="perm.app.x", label="x", scope="app", state="on",
+                               detail="", state_label="CUSTOM")
+    assert row.state_label == "CUSTOM"
+
+
+def test_render_tui_groups_by_category_with_headings(apps_root):
+    manifest_admin.set_permission("testapp", "store_read", True)
+    rows = gates_panel.collect("testapp")
+    out = gates_panel.render_tui(rows, color=False)
+    assert "Egress & network" in out
+    assert "Permissions" in out
+    assert "GRANTED" in out or "NOT GRANTED" in out
+
+
+def test_render_html_payload_includes_category_and_state_label(apps_root):
+    manifest_admin.set_permission("testapp", "store_read", True)
+    rows = gates_panel.collect("testapp")
+    html = gates_panel.render_html(rows, "2026-01-01T00:00:00+00:00")
+    start = html.index("const ROWS = ") + len("const ROWS = ")
+    end = html.index(";\n", start)
+    payload = json.loads(html[start:end])
+    row = next(r for r in payload if r["id"] == "perm.testapp.store_read")
+    assert row["category"] == "permissions"
+    assert row["state_label"] == "GRANTED"
+
+
+def test_render_html_uses_shared_dashboard_renderer(apps_root):
+    manifest_admin.set_permission("testapp", "store_read", True)
+    rows = gates_panel.collect("testapp")
+    html = gates_panel.render_html(rows, "2026-01-01T00:00:00+00:00")
+    assert "renderDashboard(" in html
+    assert 'id="toast"' in html
