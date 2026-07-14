@@ -60,7 +60,8 @@ def test_registry_lists_live_and_stub_adapters():
     assert "github" in by_status["live"]
     assert "huggingface" in by_status["live"]
     assert "jeles" in by_status["live"]
-    assert len(by_status["live"]) == 3
+    assert "utety" in by_status["live"]
+    assert len(by_status["live"]) == 4
     assert len(by_status["stub"]) == 6
 
 
@@ -266,7 +267,7 @@ def test_integration_list_tool_is_gated(home):
 def test_full_access_grants_ledger_but_not_call(home):
     app = _manifest(home, permissions=["full_access"])
     out = server.integration_list(app_id=app)
-    assert len(out["integrations"]) == 9
+    assert len(out["integrations"]) == 10
     out = server.integration_call(app_id=app, name="github", method="GET", path="/user")
     assert "gate denied" in out["error"]
 
