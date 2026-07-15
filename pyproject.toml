@@ -23,6 +23,11 @@ dependencies = [
     "kartikeya>=0.0.1,<0.1.0",
 ]
 
+[project.optional-dependencies]
+# Sentry telemetry for the Bug Smash observability experiment. Opt-in only:
+# inert unless WILLOW_SENTRY_DSN is set at runtime (see observability.py).
+observability = ["sentry-sdk>=2.0,<3.0"]
+
 [project.scripts]
 willow-mcp = "willow_mcp.server:main"
 willow-mcp-init = "willow_mcp.home_init:main"

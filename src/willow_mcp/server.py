@@ -2536,6 +2536,10 @@ def main():
     unhandled `BrokenPipeError` traceback — several of these subcommands
     (`gates`, `net-status`, `tree`) print multiple lines and are exactly the
     shape someone pipes into `head`/`grep`."""
+    # Observability (opt-in, egress-gated): inert unless WILLOW_SENTRY_DSN is
+    # set. Treats Sentry as a hostile egress destination — see observability.py.
+    from .observability import init_observability
+    init_observability()
     try:
         _main()
     except BrokenPipeError:
