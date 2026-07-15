@@ -91,10 +91,20 @@ _BASE_URL = _BASE_URL_ENV if _BASE_URL_ENV else f"http://{_HOST}:{_PORT}"
 
 _common_kwargs: dict[str, Any] = dict(
     instructions=(
-        "Willow sovereign agent platform. "
-        "Store, retrieve, and search records; ingest and query the knowledge base; "
-        "submit and monitor sandboxed Kart tasks. "
-        "Pass app_id on every call — matches your manifest in $WILLOW_HOME/mcp_apps/<app_id>/manifest.json."
+        "Willow sovereign agent platform (willow-mcp). "
+        "FIRST CALL of every session: session_enter(app_id, session_id) — it returns your "
+        "entry_mode and, for a dispatched specialist, your assignment. Read the bundled "
+        "'session-start' skill for the full lifecycle. "
+        "app_id=willow is the human-orchestrator seat (WILLOW_HUMAN_ORCHESTRATOR=1); agents "
+        "must use their OWN app_id, never willow, and never pass dispatch_id as willow. "
+        "Close a session with session_handoff_write (human path) or handoff_write_v4 (dispatch path). "
+        "Core verbs: store/get/search records; kb_ingest / kb_search the knowledge base; "
+        "task_submit + task_status for sandboxed Kart execution. "
+        "Kart tasks are network-isolated by default: egress needs THREE keys held at once — "
+        "the task_net capability in your manifest, the operator's consent.internet, and an "
+        "unexpired operator-issued lease (willow-mcp grant-net). No MCP tool can mint a lease; "
+        "ask the operator. "
+        "Pass app_id on every call — it matches your manifest in $WILLOW_HOME/mcp_apps/<app_id>/manifest.json."
     ),
     host=_HOST,
     port=_PORT,
