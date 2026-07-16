@@ -15,7 +15,7 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  test:
+  test-matrix:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -124,3 +124,13 @@ jobs:
           PGPORT: 5432
           PGUSER: postgres
           PGPASSWORD: postgres
+
+  # Aggregate gate: branch protection requires a check named exactly "test".
+  # The matrix legs report as "test-matrix (3.11)" / "test-matrix (3.12)";
+  # this job carries the required name and only runs when every leg passed
+  # (a failed or skipped leg leaves it un-run, keeping the merge blocked).
+  test:
+    needs: test-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "all matrix legs green"
