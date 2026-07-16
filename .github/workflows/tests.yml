@@ -2,6 +2,9 @@ name: Tests
 
 on:
   push:
+    # Master only — an unfiltered push trigger plus pull_request ran CI
+    # twice on every PR commit.
+    branches: [master]
   pull_request:
   schedule:
     # Daily, off the :00/:30 marks to avoid GitHub's peak-load minutes.
@@ -14,6 +17,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor and current for requires-python >= 3.11.
+        python-version: ["3.11", "3.12"]
 
     services:
       postgres:
@@ -35,7 +43,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: pip install -e "." pytest
