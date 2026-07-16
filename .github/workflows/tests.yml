@@ -2,6 +2,9 @@ name: Tests
 
 on:
   push:
+    # Master only — an unfiltered push trigger plus pull_request ran CI
+    # twice on every PR commit.
+    branches: [master]
   pull_request:
   schedule:
     # Daily, off the :00/:30 marks to avoid GitHub's peak-load minutes.
@@ -12,8 +15,13 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  test:
+  test-matrix:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Floor and current for requires-python >= 3.11.
+        python-version: ["3.11", "3.12"]
 
     services:
       postgres:
@@ -35,7 +43,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: pip install -e "." pytest
@@ -116,3 +124,13 @@ jobs:
           PGPORT: 5432
           PGUSER: postgres
           PGPASSWORD: postgres
+
+  # Aggregate gate: branch protection requires a check named exactly "test".
+  # The matrix legs report as "test-matrix (3.11)" / "test-matrix (3.12)";
+  # this job carries the required name and only runs when every leg passed
+  # (a failed or skipped leg leaves it un-run, keeping the merge blocked).
+  test:
+    needs: test-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "all matrix legs green"
