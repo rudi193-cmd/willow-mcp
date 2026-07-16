@@ -15,7 +15,7 @@ dependencies = [
     "mcp>=1.28.1,<2.0.0",
     "psycopg2-binary>=2.9,<3.0",
     "cryptography>=42.0,<50.0",
-    "starlette>=0.36,<1.0",
+    "starlette>=1.3.1,<2.0",
     "uvicorn>=0.29,<1.0",
     # Kart task executor (the `willow-mcp worker` engine + task-queue backends).
     # Hard dependency as of B-22 close-out — kartikeya is published on PyPI, so a
