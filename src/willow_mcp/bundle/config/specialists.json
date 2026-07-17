@@ -2,6 +2,15 @@
   "format": "specialist_registry_v1",
   "updated_at": "2026-07-09T09:15:00Z",
   "note": "Ratified permissions per docs/design/permissions-matrix.md. Compile with willow-mcp compile-agents.",
+  "collection_aliases": {
+    "stack": "projects_willow_stack",
+    "pm/portfolio": "projects_willow_pm_portfolio",
+    "pm/milestones": "projects_willow_pm_milestones",
+    "pa/commitments": "projects_willow_pa_commitments",
+    "governance/flags": "projects_willow_governance_flags",
+    "governance/decisions": "projects_willow_governance_decisions",
+    "orient": "projects_willow_orient"
+  },
   "specialists": [
     {
       "agent_id": "hanuman",

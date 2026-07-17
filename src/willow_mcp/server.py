@@ -52,7 +52,7 @@ from mcp.server.fastmcp import FastMCP
 from psycopg2.extras import Json
 
 from .db import Store, get_pg
-from .gate import permitted
+from .gate import permitted, resolve_collection_alias
 from .identity_binding import resolve_app_id
 from .receipts import ReceiptLog
 from . import paths
@@ -423,6 +423,25 @@ def _guarded(tool_name: str, *, list_error: bool = False):
                 return _shape(gate_err)
             if "app_id" in call_kwargs:
                 call_kwargs["app_id"] = effective_app_id
+
+            collection = call_kwargs.get("collection")
+            if (
+                isinstance(collection, str)
+                and ".." not in collection
+                and "\\" not in collection
+            ):
+                resolved, alias_error = resolve_collection_alias(
+                    effective_app_id, collection
+                )
+                if alias_error:
+                    _receipt_log.record(
+                        effective_app_id,
+                        tool_name,
+                        "error",
+                        alias_error,
+                    )
+                    return _shape({"error": alias_error})
+                call_kwargs["collection"] = resolved
 
             cleaned, problem = _sanitize(call_kwargs)
             if problem:
@@ -1520,9 +1539,63 @@ def session_enter(
     app_id: str,
     session_id: str,
     dispatch_id: str = "",
+    project: str = "",
+    workspace: str = "",
 ) -> dict:
-    """Resolve entry mode: human prompt (no id) vs dispatch id path (assignment + v4 closeout)."""
-    return dispatch_stack.session_enter(app_id, session_id, dispatch_id)
+    """Enter a human/dispatch session and return native project orientation."""
+    result = dispatch_stack.session_enter(
+        app_id,
+        session_id,
+        dispatch_id,
+        project=project,
+        workspace=workspace,
+    )
+    if result.get("error"):
+        return result
+    from . import gate
+
+    project_info = result.get("project") or {}
+    root = Path(project_info["root"]) if project_info.get("root") else None
+    aliases = gate.collection_aliases(app_id)
+    reads: dict[str, Any] = {}
+    for logical in (
+        "stack",
+        "pm/portfolio",
+        "pm/milestones",
+        "pa/commitments",
+        "governance/flags",
+    ):
+        physical = aliases.get(logical)
+        if not physical:
+            reads[logical] = {"error": "alias_not_configured"}
+        elif not gate.collection_permitted(app_id, physical):
+            reads[logical] = _collection_denied(app_id, physical)
+        else:
+            reads[logical] = _store.all(physical)
+    orient_path = root / "ORIENT.md" if root else None
+    project_name = project_info.get("name")
+    result["orientation"] = {
+        "orient": {
+            "path": str(orient_path) if orient_path else None,
+            "exists": bool(orient_path and orient_path.is_file()),
+        },
+        "records": reads,
+        "latest_handoff": (
+            dispatch_stack.latest_project_handoff(app_id, project_name)
+            if project_name
+            else None
+        ),
+        "collection_aliases": aliases,
+        "frank": {
+            "status": (
+                "present"
+                if root and (root / "FRANK").exists()
+                else "not_present"
+            ),
+            "path": str(root / "FRANK") if root else None,
+        },
+    }
+    return result
 
 
 @mcp.tool()
@@ -1534,8 +1607,10 @@ def session_handoff_write(
     summary: str = "",
     findings: Optional[list] = None,
     next_bite: str = "",
+    project: str = "",
+    workspace: str = "",
 ) -> dict:
-    """Human-entry session closeout — markdown handoff, no dispatch_id."""
+    """Human-entry project-scoped v3 closeout — markdown, no dispatch_id."""
     return dispatch_stack.session_handoff_write(
         app_id,
         session_id,
@@ -1543,6 +1618,8 @@ def session_handoff_write(
         summary=summary,
         findings=findings,
         next_bite=next_bite,
+        project=project,
+        workspace=workspace,
     )
 
 

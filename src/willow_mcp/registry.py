@@ -47,7 +47,11 @@ def iter_registry_rows(registry: dict[str, Any]) -> Iterator[dict[str, Any]]:
         yield orch
 
 
-def manifest_from_row(row: dict[str, Any]) -> dict[str, Any]:
+def manifest_from_row(
+    row: dict[str, Any],
+    *,
+    collection_aliases: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Build an mcp_apps manifest dict from a registry row."""
     agent_id = row.get("agent_id")
     if not agent_id:
@@ -63,6 +67,10 @@ def manifest_from_row(row: dict[str, Any]) -> dict[str, Any]:
     store_scope = row.get("store_scope")
     if store_scope is not None:
         manifest["store_scope"] = list(store_scope)
+    aliases = dict(collection_aliases or {})
+    aliases.update(row.get("collection_aliases") or {})
+    if aliases:
+        manifest["collection_aliases"] = aliases
     return manifest
 
 
@@ -88,7 +96,10 @@ def compile_manifests(
             skipped.append(rel)
             continue
 
-        manifest = manifest_from_row(row)
+        manifest = manifest_from_row(
+            row,
+            collection_aliases=reg.get("collection_aliases") or {},
+        )
         if dry_run:
             written.append(rel)
             continue
