@@ -10,6 +10,21 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Egress secret redaction** (`secret_scan.py`, wired at the `_guarded`
+  funnel) — defense-in-depth for the standing guarantee "no tool ever returns a
+  credential." The credential *accessor* already withheld values
+  (`credential_source()` returns a source, never the secret); the *data* path
+  did not — a stored record, a KB atom, task output, or an integration response
+  body carrying an `sk-…`, an `AKIA…`, or a private-key block was returned
+  verbatim. Now the one funnel every tool response passes through redacts
+  high-confidence credential formats (AWS access key id, provider `sk-` keys,
+  GitHub/Slack/Google/Stripe tokens, JWTs, PEM private-key blocks) to
+  `[REDACTED:<kind>]` before egress. Redacts rather than blocks, so legitimate
+  retrieval survives minus the credential; precision-first patterns so ordinary
+  ids/hashes are not false-positived; fail-closed if the scanner itself errors
+  (the payload is denied, never returned unscanned); and payload-free receipts
+  (a `redacted` row records only WHICH kinds, never the value). Unit contract in
+  `test_secret_scan.py`, end-to-end store round-trip in `test_server.py`.
 - **The Grove** (`the_grove.py`) — a rings store for *lessons*, sibling to
   `schema_profile`'s vocabulary rings but unbounded on purpose: vocabulary may
   be pruned cheaply, lessons are kept precisely so the deployment cannot become

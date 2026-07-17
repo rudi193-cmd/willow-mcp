@@ -60,6 +60,7 @@ from . import schema_profile as sp
 from . import dispatch as dispatch_stack
 from . import handoff as handoff_stack
 from . import gaps as gap_backlog
+from . import secret_scan
 
 _store = Store()
 _receipt_log = ReceiptLog()
@@ -446,6 +447,24 @@ def _guarded(tool_name: str, *, list_error: bool = False):
                 _receipt_log.record(effective_app_id, tool_name, "error", str(probe["error"]))
             else:
                 _receipt_log.record(effective_app_id, tool_name, "ok", None)
+
+            # Egress secret redaction (defense-in-depth for the README
+            # guarantee "No tool ever returns a credential"). Enforced at this
+            # single funnel so a credential smuggled through the DATA path — a
+            # stored record, a KB atom, task output, an integration response
+            # body — is redacted before it leaves, not just the accessor.
+            # Fail-closed: if the scanner itself breaks, deny the payload rather
+            # than risk returning it unscanned (ARCHITECT.md: never fail open).
+            try:
+                result, redacted_kinds = secret_scan.redact_egress(result)
+            except Exception as e:
+                _receipt_log.record(effective_app_id, tool_name, "error",
+                                    f"egress_scan_failed: {type(e).__name__}")
+                return _shape({"error": "egress_scan_failed"})
+            if redacted_kinds:
+                # Payload-free: record WHICH kinds were redacted, never the value.
+                _receipt_log.record(effective_app_id, tool_name, "redacted",
+                                    "kinds=" + ",".join(redacted_kinds))
 
             return result
 
