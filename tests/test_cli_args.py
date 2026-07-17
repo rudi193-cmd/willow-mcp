@@ -82,3 +82,13 @@ def test_default_port_when_no_flag_or_env():
     port, host, *_ = _import_with([], env=env)
     assert port == "8765"
     assert host == "127.0.0.1"
+
+
+def test_worker_service_subcommand_parses_in_fresh_process():
+    result = subprocess.run(
+        [sys.executable, "-m", "willow_mcp", "worker-service", "--help"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "{install,status,uninstall}" in result.stdout

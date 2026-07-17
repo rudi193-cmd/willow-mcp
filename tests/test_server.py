@@ -639,8 +639,11 @@ def test_kb_promote_schema_unusable_when_domain_unmapped_even_if_confirmed(app_i
 
 _TASKS_COLUMNS = [
     ("id", "text"), ("task", "text"), ("submitted_by", "text"),
-    ("network_authorization", "text"), ("agent", "text"),
+    ("network_authorization", "text"), ("agent", "text"), ("lane", "text"),
     ("status", "text"), ("result", "jsonb"), ("created_at", "timestamp with time zone"),
+    ("completed_at", "timestamp with time zone"), ("claim_owner", "text"),
+    ("claimed_at", "timestamp with time zone"), ("attempts", "integer"),
+    ("max_attempts", "integer"), ("retry_at", "timestamp with time zone"),
 ]
 
 
@@ -657,7 +660,9 @@ def test_task_submit_writes_mapped_columns_after_confirm(app_id, monkeypatch):
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app_id, table="tasks")
 
-    result = server.task_submit(app_id=app_id, task="do a thing", agent="kart")
+    result = server.task_submit(
+        app_id=app_id, task="do a thing", agent="kart", lane="batch"
+    )
 
     assert result["status"] == "pending"
     assert "task_id" in result
@@ -666,7 +671,19 @@ def test_task_submit_writes_mapped_columns_after_confirm(app_id, monkeypatch):
     assert '"id"' in insert_sql          # task_id -> id, alias-mapped
     assert '"submitted_by"' in insert_sql
     assert '"agent"' in insert_sql
+    assert '"lane"' in insert_sql
+    assert params[-1] == "batch"
     assert params[0] == result["task_id"]
+
+
+def test_task_submit_rejects_unknown_lane_before_database_work(
+    app_id, monkeypatch
+):
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.task_submit(app_id=app_id, task="echo hi", lane="priority")
+    assert "invalid_lane" in result["error"]
+    assert fake.executed == []
 
 
 # Patterns the *currently published* kartikeya scanner blocks — this test
@@ -1118,7 +1135,24 @@ def test_task_status_not_found(app_id, monkeypatch):
 def test_task_status_maps_id_to_task_id_and_surfaces_unmapped(app_id, monkeypatch):
     fake = _FakePg(
         columns=_TASKS_COLUMNS,
-        canned_rows=[("T1", "do a thing", "willow", "kart", "pending", None, "2026-07-08")],
+        canned_rows=[
+            (
+                "T1",
+                "do a thing",
+                "willow",
+                "kart",
+                "fast",
+                "pending",
+                None,
+                "2026-07-08",
+                None,
+                None,
+                None,
+                0,
+                3,
+                None,
+            )
+        ],
     )
     monkeypatch.setattr(server, "get_pg", lambda: fake)
 
@@ -1127,7 +1161,7 @@ def test_task_status_maps_id_to_task_id_and_surfaces_unmapped(app_id, monkeypatc
     assert result["task_id"] == "T1"
     assert result["status"] == "pending"
     assert "network_authorization" not in result
-    assert set(result["_unmapped"]) == {"steps", "completed_at"}
+    assert set(result["_unmapped"]) == {"steps"}
     select_sql, params = fake.executed[-1]
     assert '"id" AS "task_id"' in select_sql
     assert 'WHERE "id" = %s' in select_sql

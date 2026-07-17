@@ -41,7 +41,10 @@ _MIN_WRITE_INTERVAL_S = 1.0
 
 
 def heartbeat_root() -> Path:
-    """Where workers publish liveness. Follows WILLOW_HOME, like gate._apps_root."""
+    """Where workers publish liveness. Explicit service env wins."""
+    configured = os.environ.get("WILLOW_WORKER_HEARTBEAT_ROOT", "").strip()
+    if configured:
+        return Path(configured).expanduser()
     home = Path(os.environ.get("WILLOW_HOME", Path.home() / ".willow"))
     return home / "worker_heartbeat"
 
@@ -135,7 +138,12 @@ def read_workers(root: Path | None = None) -> dict:
     stopped), `dead` (its pid is gone from this host). Only `alive` counts.
     """
     root = Path(root) if root is not None else heartbeat_root()
-    check: dict = {"root": str(root), "workers": [], "alive": 0}
+    check: dict = {
+        "root": str(root),
+        "workers": [],
+        "alive": 0,
+        "readiness": "absent",
+    }
     try:
         if not root.exists():
             check["status"] = "ok"
@@ -157,6 +165,13 @@ def read_workers(root: Path | None = None) -> dict:
                 "last_tick_ok": record.get("tick_ok"),
             })
         check["alive"] = sum(1 for w in check["workers"] if w["state"] == "alive")
+        states = {worker["state"] for worker in check["workers"]}
+        if check["alive"]:
+            check["readiness"] = "alive"
+        elif "stale" in states:
+            check["readiness"] = "stale"
+        elif "dead" in states:
+            check["readiness"] = "dead"
         check["status"] = "ok"
     except Exception as e:
         check["status"] = "fail"

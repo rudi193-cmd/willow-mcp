@@ -520,6 +520,25 @@ just ask to turn serve mode on or off.
 > tool over the serve endpoint: a `table_not_found` / `relation … does not
 > exist` on data that stdio can see is the signature of this env gap.
 
+### Installing standalone workers
+
+`willow-mcp worker-service` manages separate fast and batch systemd user units.
+It writes every required environment value into the units, so workers do not
+inherit hidden willow-2.0 paths or depend on shell exports:
+
+```bash
+willow-mcp worker-service install
+willow-mcp worker-service status
+willow-mcp worker-service uninstall
+```
+
+Install and uninstall never start or stop services. Uninstall refuses while a
+worker is active; live state changes remain an explicit operator action. Before
+starting either unit, apply `docs/schema/tasks-worker-production.sql` and
+reconfirm the `tasks` mapping. The queue then isolates `fast`/`batch` claims,
+records claim owner/time, recovers stale claims, applies bounded retries, and
+timestamps terminal rows.
+
 ## Configuration
 
 | Env var | Default | Description |
@@ -531,6 +550,9 @@ just ask to turn serve mode on or off.
 | `WILLOW_MCP_FLEET_PG_DB` | *(unset)* | The fleet database this install claims to be severed from |
 | `WILLOW_APP_ID` | `willow-mcp` | Default app_id if not passed per-call |
 | `WILLOW_HOME` | `~/.willow` | Root for manifests, vault, and identity bindings |
+| `WILLOW_WORKER_LANE` | set by worker unit | Worker lane (`fast` or `batch`) |
+| `WILLOW_WORKER_HEARTBEAT_ROOT` | `$WILLOW_HOME/worker_heartbeat` | Explicit worker heartbeat directory |
+| `WILLOW_WORKER_STALE_SECONDS` | `1800` | Age after which an uncompleted claim is recovered |
 | `WILLOW_MCP_HOST` | `127.0.0.1` | Serve-mode bind host (`--host` overrides) |
 | `WILLOW_MCP_PORT` | `8765` | Serve-mode bind port (`--port` overrides) |
 | `WILLOW_MCP_URL` | *(derived)* | Public base URL for OAuth issuer/callbacks in serve mode |

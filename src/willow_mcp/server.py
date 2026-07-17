@@ -238,11 +238,17 @@ _TASK_FIELDS = [
     "submitted_by",
     "network_authorization",
     "agent",
+    "lane",
     "status",
     "result",
     "steps",
     "created_at",
     "completed_at",
+    "claim_owner",
+    "claimed_at",
+    "attempts",
+    "max_attempts",
+    "retry_at",
 ]
 _TASK_READ_FIELDS = [
     field for field in _TASK_FIELDS if field != "network_authorization"
@@ -913,6 +919,7 @@ def task_submit(
     app_id: str,
     task: str,
     agent: str = "kart",
+    lane: str = "fast",
     allow_net: bool = False,
     allow_localhost: bool = False,
     network_authorization: str = "",
@@ -950,6 +957,9 @@ def task_submit(
         blocked = None
     if blocked:
         return blocked
+    lane = (lane or "").strip().lower()
+    if lane not in ("fast", "batch"):
+        return {"error": f"invalid_lane: expected fast|batch, got {lane!r}"}
 
     pg = get_pg()
     if not pg:
@@ -1070,6 +1080,14 @@ def task_submit(
         values["network_authorization"] = network_authorization
     if fields["agent"]["column"]:
         values["agent"] = agent
+    if not fields["lane"]["column"]:
+        return {
+            "error": (
+                "schema_unusable: the confirmed tasks mapping has no 'lane' "
+                "column; apply the worker-production migration before queueing work"
+            )
+        }
+    values["lane"] = lane
 
     cols = ", ".join(f'"{fields[f]["column"]}"' for f in values)
     placeholders = ", ".join(["%s"] * len(values))
@@ -2405,7 +2423,8 @@ def _diag_env() -> dict:
     # systemd --user unit does not inherit a shell `export`.
     keys = ["WILLOW_HOME", "WILLOW_PG_DB", "WILLOW_PG_USER", "WILLOW_STORE_ROOT",
             "WILLOW_APP_ID", "WILLOW_MCP_APPS_ROOT", "WILLOW_MCP_HOST", "WILLOW_MCP_PORT",
-            "WILLOW_SETTINGS_GLOBAL", "WILLOW_MCP_FLEET_HOME", "WILLOW_MCP_FLEET_PG_DB"]
+            "WILLOW_SETTINGS_GLOBAL", "WILLOW_MCP_FLEET_HOME", "WILLOW_MCP_FLEET_PG_DB",
+            "WILLOW_WORKER_LANE", "WILLOW_WORKER_HEARTBEAT_ROOT"]
     return {k: os.environ.get(k) for k in keys}
 
 
@@ -2456,14 +2475,27 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
         # would make `degraded` the resting state for most installs.
         if alive == 0 and isinstance(pending, int) and pending > 0:
             died = [w for w in worker.get("workers", []) if w.get("state") in ("stale", "dead")]
-            detail = (f"{pending} task(s) pending and no live worker — nothing will drain the "
-                      f"queue; task_submit will return task_ids that never execute")
+            readiness = worker.get("readiness") or (
+                "stale" if any(w.get("state") == "stale" for w in died)
+                else "dead" if died
+                else "absent"
+            )
+            reason = {
+                "absent": "no worker heartbeat has ever been published",
+                "dead": "the worker process exited",
+                "stale": "the worker process exists but its heartbeat stalled",
+            }.get(readiness, "no live worker is ready")
+            detail = (
+                f"{pending} task(s) stranded: {reason}; nothing will drain the queue"
+            )
             if died:
                 detail += (f" (found {len(died)} heartbeat(s) from stopped worker(s): "
                            f"{', '.join(str(w.get('pid')) for w in died)})")
             problems.append({"severity": "warn", "check": "worker", "detail": detail,
-                             "fix": "start a worker: `willow-mcp worker --lane fast` "
-                                    "(or `--once` to drain and exit)"})
+                             "worker_readiness": readiness,
+                             "fix": "inspect `willow-mcp worker-service status`, then start "
+                                    "the installed worker unit (or use `willow-mcp worker "
+                                    "--lane fast --once` for a one-shot drain)"})
     if consent:
         if consent.get("status") == "fail":
             problems.append({
@@ -2797,7 +2829,10 @@ def _cmd_worker(args) -> None:
     from .task_queue import build_task_queue
 
     try:
-        queue = build_task_queue(args.app_id or _DEFAULT_APP_ID)
+        queue = build_task_queue(
+            args.app_id or _DEFAULT_APP_ID,
+            require_postgres=args.require_postgres or args.lane == "batch",
+        )
     except RuntimeError as e:
         print(f"willow-mcp worker: {e}", file=sys.stderr)
         raise SystemExit(1)
@@ -2844,6 +2879,36 @@ def _cmd_consent(args) -> None:
     print(json.dumps(result, indent=2))
 
 
+def _cmd_worker_service(args) -> None:
+    """Install, inspect, or uninstall worker units without changing live state."""
+    from dataclasses import replace
+
+    from . import worker_service
+
+    config = worker_service.default_config()
+    config = replace(
+        config,
+        python=Path(args.python).expanduser().resolve(),
+        workdir=Path(args.workdir).expanduser().resolve(),
+        willow_home=Path(args.willow_home).expanduser().resolve(),
+        store_root=Path(args.store_root).expanduser().resolve(),
+        pg_db=args.pg_db,
+        app_id=args.app_id,
+        heartbeat_root=Path(args.heartbeat_root).expanduser().resolve(),
+    )
+    try:
+        if args.action == "install":
+            result = worker_service.install_services(config)
+        elif args.action == "status":
+            result = worker_service.service_status()
+        else:
+            result = worker_service.uninstall_services()
+    except (OSError, RuntimeError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps(result, indent=2))
+
+
 def _cmd_roster(args) -> None:
     from . import fleet_roster
 
@@ -2866,8 +2931,6 @@ def _cmd_roster(args) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1)
     print(json.dumps(result, indent=2, default=str))
-
-
 def _cmd_sign_net_task(args) -> None:
     """Create a one-use task envelope from an operator's interactive terminal."""
     import secrets
@@ -3116,6 +3179,11 @@ def _main():
     worker_p.add_argument("--slots", type=int, default=None)
     worker_p.add_argument("--interval", type=float, default=5.0)
     worker_p.add_argument("--once", action="store_true", help="drain the queue and exit")
+    worker_p.add_argument(
+        "--require-postgres",
+        action="store_true",
+        help="refuse the lane-agnostic SQLite fallback (set by managed units)",
+    )
     worker_p.add_argument("--app-id", dest="app_id", default=os.environ.get("WILLOW_APP_ID", ""),
                           help="app_id whose confirmed 'tasks' mapping to use (default $WILLOW_APP_ID)")
 
@@ -3131,6 +3199,32 @@ def _main():
         "roster", help="Inspect or operator-sync fleet.json into existing agents rows"
     )
     roster_p.add_argument("action", choices=["status", "sync"])
+    worker_service_p = subparsers.add_parser(
+        "worker-service",
+        help="Install/status/uninstall standalone fast+batch user units without starting or stopping them",
+    )
+    worker_service_p.add_argument("action", choices=["install", "status", "uninstall"])
+    _service_home = os.environ.get("WILLOW_HOME", str(Path.home() / ".willow"))
+    worker_service_p.add_argument("--python", default=sys.executable)
+    worker_service_p.add_argument("--workdir", default=str(Path.cwd()))
+    worker_service_p.add_argument("--willow-home", default=_service_home)
+    worker_service_p.add_argument(
+        "--store-root", default=os.environ.get("WILLOW_STORE_ROOT", _service_home)
+    )
+    worker_service_p.add_argument(
+        "--pg-db", default=os.environ.get("WILLOW_PG_DB", "willow")
+    )
+    worker_service_p.add_argument(
+        "--app-id", default=os.environ.get("WILLOW_APP_ID", "willow-mcp")
+    )
+    worker_service_p.add_argument(
+        "--heartbeat-root",
+        default=os.environ.get(
+            "WILLOW_WORKER_HEARTBEAT_ROOT",
+            str(Path(_service_home) / "worker_heartbeat"),
+        ),
+    )
+
     sign_net_p = subparsers.add_parser(
         "sign-net-task",
         help="Sign one exact network task (interactive operator terminal only; never an MCP tool)",
@@ -3259,6 +3353,9 @@ def _main():
         return
     if args.command == "roster":
         _cmd_roster(args)
+    if args.command == "worker-service":
+        _cmd_worker_service(args)
+        return
     if args.command == "sign-net-task":
         _cmd_sign_net_task(args)
         return
@@ -3284,8 +3381,6 @@ def _main():
         _cmd_tree(args)
         return
     if args.command == "compile-agents":
-        from pathlib import Path
-
         from .registry import compile_agents_main
 
         reg = Path(args.registry).expanduser() if args.registry else None
@@ -3297,8 +3392,6 @@ def _main():
         print(json.dumps(result, indent=2))
         return
     if args.command == "compile-persona":
-        from pathlib import Path
-
         from .persona_compile import compile_persona
 
         out = Path(args.out).expanduser() if args.out else None

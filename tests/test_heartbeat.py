@@ -16,6 +16,7 @@ from willow_mcp import heartbeat as hb
 @pytest.fixture
 def hb_root(tmp_path, monkeypatch):
     monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
+    monkeypatch.delenv("WILLOW_WORKER_HEARTBEAT_ROOT", raising=False)
     return tmp_path / "worker_heartbeat"
 
 
@@ -39,6 +40,14 @@ def test_heartbeat_writes_a_readable_record(hb_root):
     assert record["pid"] == os.getpid()
     assert record["lane"] == "fast"
     assert record["tick_ok"] is True
+
+
+def test_heartbeat_root_honors_explicit_service_environment(
+    tmp_path, monkeypatch
+):
+    configured = tmp_path / "service-heartbeats"
+    monkeypatch.setenv("WILLOW_WORKER_HEARTBEAT_ROOT", str(configured))
+    assert hb.heartbeat_root() == configured
 
 
 def test_heartbeat_throttles_writes(hb_root):
@@ -75,13 +84,20 @@ def test_heartbeat_never_raises_when_root_is_unwritable(hb_root, monkeypatch):
 
 def test_read_workers_empty_when_no_root(hb_root):
     out = hb.read_workers()
-    assert out == {"root": str(hb_root), "workers": [], "alive": 0, "status": "ok"}
+    assert out == {
+        "root": str(hb_root),
+        "workers": [],
+        "alive": 0,
+        "readiness": "absent",
+        "status": "ok",
+    }
 
 
 def test_live_pid_with_fresh_tick_is_alive(hb_root):
     _write(hb_root, "kart-fast-1.json")
     out = hb.read_workers()
     assert out["alive"] == 1
+    assert out["readiness"] == "alive"
     assert out["workers"][0]["state"] == "alive"
 
 
@@ -91,6 +107,7 @@ def test_dead_pid_is_dead_even_when_fresh(hb_root):
     out = hb.read_workers()
     assert out["alive"] == 0
     assert out["workers"][0]["state"] == "dead"
+    assert out["readiness"] == "dead"
 
 
 def test_live_pid_with_old_tick_is_stale(hb_root):
@@ -99,6 +116,7 @@ def test_live_pid_with_old_tick_is_stale(hb_root):
     out = hb.read_workers()
     assert out["alive"] == 0
     assert out["workers"][0]["state"] == "stale"
+    assert out["readiness"] == "stale"
 
 
 def test_foreign_host_record_is_judged_on_age_alone(hb_root):
@@ -139,7 +157,8 @@ def test_pending_with_no_worker_is_a_warn():
     problems = server._derive_problems({}, {}, {}, "stdio", worker)
     assert [p["check"] for p in problems] == ["worker"]
     assert problems[0]["severity"] == "warn"
-    assert "willow-mcp worker" in problems[0]["fix"]
+    assert problems[0]["worker_readiness"] == "absent"
+    assert "worker-service status" in problems[0]["fix"]
 
 
 def test_pending_with_no_worker_names_the_stopped_workers():
@@ -148,6 +167,21 @@ def test_pending_with_no_worker_names_the_stopped_workers():
               "workers": [{"state": "dead", "pid": 4242}, {"state": "stale", "pid": 4243}]}
     detail = server._derive_problems({}, {}, {}, "stdio", worker)[0]["detail"]
     assert "4242" in detail and "4243" in detail
+
+
+def test_diagnostics_distinguish_dead_and_stale_workers():
+    from willow_mcp import server
+
+    dead = server._derive_problems(
+        {}, {}, {}, "stdio",
+        {"alive": 0, "pending": 1, "readiness": "dead", "workers": []},
+    )[0]
+    stale = server._derive_problems(
+        {}, {}, {}, "stdio",
+        {"alive": 0, "pending": 1, "readiness": "stale", "workers": []},
+    )[0]
+    assert "exited" in dead["detail"]
+    assert "heartbeat stalled" in stale["detail"]
 
 
 def test_no_worker_and_no_pending_is_not_a_problem():
