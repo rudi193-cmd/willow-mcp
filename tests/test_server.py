@@ -1237,3 +1237,46 @@ def test_egress_leaves_clean_records_untouched(app_id):
         assert got.get(k) == v                          # no false-positive redaction
     assert "[REDACTED" not in str(got)
     assert _redacted_count() == before                  # this round-trip added none
+
+
+# ── Egress redaction exemption (operator-declared, per-tool) ─────────────────
+#
+# The canonical case: an integration_call performing an OAuth token exchange
+# must return the token it just obtained. An app's manifest may name specific
+# tools as exempt; the exempted return is still receipted (credential_returned),
+# never silent, and the exemption is per-tool, not a blanket unlock.
+
+@pytest.fixture
+def exempt_app_id(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / "oauthapp"
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(json.dumps({
+        "permissions": ["full_access"],
+        "egress_secret_exempt": ["store_get"],   # stands in for integration_call
+    }))
+    return "oauthapp"
+
+
+def test_egress_exemption_returns_credential_raw_and_audits(exempt_app_id):
+    secret = "sk-ant-" + "Z" * 40
+    put = server.store_put(app_id=exempt_app_id, collection="tokens", record={"tok": secret})
+    got = server.store_get(app_id=exempt_app_id, collection="tokens", record_id=put["id"])
+    assert secret in str(got)                    # exempt tool: raw, not redacted
+    assert "[REDACTED" not in str(got)
+    receipts = server._receipt_log.tail(exempt_app_id, limit=20)
+    cr = [r for r in receipts if r["outcome"] == "credential_returned"]
+    assert cr, "an exempt credential return must still be receipted"
+    assert "provider_api_key" in (cr[0]["detail"] or "")
+    assert all(secret not in (r["detail"] or "") for r in receipts)   # audit payload-free
+
+
+def test_egress_exemption_is_per_tool_not_blanket(exempt_app_id):
+    # store_get is exempt for this app; store_list is NOT — the same record's
+    # secret is still redacted when it comes back through the non-exempt tool.
+    secret = "AKIA" + "Q" * 16
+    server.store_put(app_id=exempt_app_id, collection="per_tool", record={"k": secret})
+    listed = server.store_list(app_id=exempt_app_id, collection="per_tool")
+    assert secret not in str(listed)
+    assert "[REDACTED:aws_access_key_id]" in str(listed)

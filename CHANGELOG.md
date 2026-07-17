@@ -25,6 +25,16 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   (the payload is denied, never returned unscanned); and payload-free receipts
   (a `redacted` row records only WHICH kinds, never the value). Unit contract in
   `test_secret_scan.py`, end-to-end store round-trip in `test_server.py`.
+  - **Per-manifest exemption** (`gate.egress_secret_exempt`): a tool that
+    legitimately must return a raw token — the canonical case is an
+    `integration_call` performing an OAuth token exchange — can be named in its
+    app's manifest `egress_secret_exempt` list. The scan still runs (the audit
+    trail stays complete); an exempted return is kept raw but receipted as
+    `credential_returned` with the kinds, so the exception is loud, never
+    silent. Fail-closed toward redaction: a bad app_id, a missing/unreadable
+    manifest, or a malformed field exempts nothing, and — since manifests are
+    operator-side (the PreToolUse hook blocks an app from writing its own) — an
+    app can never exempt itself. Per-tool, not a blanket unlock.
 - **The Grove** (`the_grove.py`) — a rings store for *lessons*, sibling to
   `schema_profile`'s vocabulary rings but unbounded on purpose: vocabulary may
   be pruned cheaply, lessons are kept precisely so the deployment cannot become

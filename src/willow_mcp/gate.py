@@ -248,6 +248,43 @@ def collection_permitted(app_id: str, collection: str) -> bool:
     return db.collection_in_scope(collection, store_scope(app_id))
 
 
+def egress_secret_exempt(app_id: str, tool_name: str) -> bool:
+    """True if this app's manifest explicitly exempts `tool_name` from egress
+    secret redaction (server._guarded).
+
+    The redaction backstop enforces "no tool ever returns a credential" on the
+    data path. A few tools legitimately need to hand a raw token back — the
+    canonical case is an `integration_call` that performs an OAuth token
+    exchange and must return the token it just obtained. This is the
+    operator-controlled, per-tool carve-out for exactly that.
+
+    Fail-closed, and the closed direction here is REDACT: any ambiguity — bad
+    app_id, missing/unreadable manifest, a malformed `egress_secret_exempt`
+    field (not a list of strings) — yields False, so the value is redacted. An
+    exemption only ever comes from a well-formed manifest naming the tool, and a
+    manifest is operator-side (the PreToolUse hook blocks an app from writing its
+    own) — so an app can never exempt itself. Even an exempted return is still
+    audited: server records a `credential_returned` receipt naming the kinds, so
+    the exception is loud, never silent.
+    """
+    try:
+        app_id = _validate_app_id(app_id)
+    except ValueError:
+        return False
+    manifest = _load_manifest(app_id)
+    if manifest is None:
+        return False
+    exempt = manifest.get("egress_secret_exempt")
+    if not isinstance(exempt, list) or not all(isinstance(t, str) for t in exempt):
+        if exempt is not None:
+            logger.error(
+                "gate: malformed egress_secret_exempt for %r (expected a list of "
+                "tool-name strings, got %r) — redacting all egress",
+                app_id, type(exempt).__name__)
+        return False
+    return tool_name in exempt
+
+
 def permitted(app_id: str, tool_name: str) -> bool:
     """
     Return True if app_id is authorized and its manifest permits tool_name.

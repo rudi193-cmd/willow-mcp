@@ -215,3 +215,47 @@ def test_gap_tools_included_in_full_access(apps_root):
     _write_manifest(apps_root, "admin", ["full_access"])
     for tool in ("gap_log", "gap_list", "gap_resolve", "gap_promote"):
         assert gate.permitted("admin", tool) is True
+
+
+# ── egress_secret_exempt (per-manifest, per-tool redaction carve-out) ────────
+
+def _write_raw_manifest(apps_root, app_id, manifest):
+    app_dir = apps_root / app_id
+    app_dir.mkdir(parents=True, exist_ok=True)
+    (app_dir / "manifest.json").write_text(json.dumps(manifest))
+
+
+def test_egress_exempt_true_when_tool_listed(apps_root):
+    _write_raw_manifest(apps_root, "oauthapp",
+                        {"permissions": ["full_access"],
+                         "egress_secret_exempt": ["integration_call", "store_get"]})
+    assert gate.egress_secret_exempt("oauthapp", "integration_call") is True
+    assert gate.egress_secret_exempt("oauthapp", "store_get") is True
+
+
+def test_egress_exempt_false_for_unlisted_tool(apps_root):
+    _write_raw_manifest(apps_root, "oauthapp",
+                        {"permissions": ["full_access"],
+                         "egress_secret_exempt": ["integration_call"]})
+    assert gate.egress_secret_exempt("oauthapp", "store_get") is False
+
+
+def test_egress_exempt_false_without_field(apps_root):
+    _write_manifest(apps_root, "plainapp", ["full_access"])
+    assert gate.egress_secret_exempt("plainapp", "integration_call") is False
+
+
+def test_egress_exempt_fails_closed_without_manifest(apps_root):
+    assert gate.egress_secret_exempt("nobody", "integration_call") is False
+
+
+def test_egress_exempt_fails_closed_on_malformed_field(apps_root):
+    # a bare string where a list belongs (the obvious typo) must exempt NOTHING
+    _write_raw_manifest(apps_root, "typoapp",
+                        {"permissions": ["full_access"],
+                         "egress_secret_exempt": "integration_call"})
+    assert gate.egress_secret_exempt("typoapp", "integration_call") is False
+
+
+def test_egress_exempt_fails_closed_on_invalid_app_id(apps_root):
+    assert gate.egress_secret_exempt("../etc", "integration_call") is False

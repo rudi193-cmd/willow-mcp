@@ -455,16 +455,30 @@ def _guarded(tool_name: str, *, list_error: bool = False):
             # body — is redacted before it leaves, not just the accessor.
             # Fail-closed: if the scanner itself breaks, deny the payload rather
             # than risk returning it unscanned (ARCHITECT.md: never fail open).
+            #
+            # The scan runs regardless so the audit trail is complete; an
+            # operator-declared per-manifest exemption (gate.egress_secret_exempt
+            # — e.g. an integration_call doing an OAuth token exchange that must
+            # return the token) suppresses the redaction but is itself receipted
+            # as `credential_returned`, so the exception is loud, never silent.
             try:
-                result, redacted_kinds = secret_scan.redact_egress(result)
+                scanned, redacted_kinds = secret_scan.redact_egress(result)
             except Exception as e:
                 _receipt_log.record(effective_app_id, tool_name, "error",
                                     f"egress_scan_failed: {type(e).__name__}")
                 return _shape({"error": "egress_scan_failed"})
             if redacted_kinds:
-                # Payload-free: record WHICH kinds were redacted, never the value.
-                _receipt_log.record(effective_app_id, tool_name, "redacted",
-                                    "kinds=" + ",".join(redacted_kinds))
+                from . import gate
+                if gate.egress_secret_exempt(effective_app_id, tool_name):
+                    # Operator-sanctioned raw return — keep `result` unredacted,
+                    # but record that a credential left under the exemption.
+                    _receipt_log.record(effective_app_id, tool_name, "credential_returned",
+                                        "exempt kinds=" + ",".join(redacted_kinds))
+                else:
+                    result = scanned
+                    # Payload-free: record WHICH kinds were redacted, never the value.
+                    _receipt_log.record(effective_app_id, tool_name, "redacted",
+                                        "kinds=" + ",".join(redacted_kinds))
 
             return result
 
