@@ -1196,3 +1196,44 @@ def test_gap_promote_denied_without_gap_promote_permission(tmp_path, monkeypatch
         app_id="writer_only", gap_id="whatever", answer="a", sources=["x"], confirmed_by="designer",
     )
     assert "denied" in result["error"]
+
+
+# ── Egress secret redaction (README "no tool ever returns a credential") ─────
+#
+# The credential ACCESSOR already withholds values (credential_source returns a
+# source, never the secret). These exercise the DATA path: a credential smuggled
+# into a stored record is redacted when it comes back out through the _guarded
+# funnel, and the redaction is receipted without the value.
+
+def test_egress_redacts_secret_stored_then_retrieved(app_id):
+    secret = "sk-ant-" + "Z" * 40
+    put = server.store_put(app_id=app_id, collection="notes",
+                           record={"api_key": secret})
+    got = server.store_get(app_id=app_id, collection="notes", record_id=put["id"])
+    assert secret not in str(got)                       # not returned verbatim
+    assert "[REDACTED:provider_api_key]" in str(got)    # redacted in place
+
+
+def test_egress_redaction_is_receipted_without_the_value(app_id):
+    secret = "AKIA" + "Q" * 16
+    put = server.store_put(app_id=app_id, collection="notes", record={"k": secret})
+    server.store_get(app_id=app_id, collection="notes", record_id=put["id"])
+    receipts = server._receipt_log.tail(app_id, limit=20)
+    redacted = [r for r in receipts if r["outcome"] == "redacted"]
+    assert redacted, "expected a redacted receipt for the store_get egress"
+    assert "aws_access_key_id" in (redacted[0]["detail"] or "")
+    assert all(secret not in (r["detail"] or "") for r in receipts)  # payload-free
+
+
+def test_egress_leaves_clean_records_untouched(app_id):
+    def _redacted_count():
+        return len([r for r in server._receipt_log.tail(app_id, limit=200)
+                    if r["outcome"] == "redacted"])
+    before = _redacted_count()
+    record = {"title": "meeting notes", "count": 3, "id": "notes:1"}
+    put = server.store_put(app_id=app_id, collection="notes", record=record)
+    got = server.store_get(app_id=app_id, collection="notes", record_id=put["id"])
+    for k, v in record.items():
+        assert got.get(k) == v                          # no false-positive redaction
+    assert "[REDACTED" not in str(got)
+    assert _redacted_count() == before                  # this round-trip added none
