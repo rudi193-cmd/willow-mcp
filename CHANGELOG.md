@@ -57,6 +57,13 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   handoff, and persona voice context; project-scoped v3 handoffs cannot bleed
   across projects. A supported Cursor SessionStart template invokes this path
   directly without fylgja or a persona picker.
+- **Governance continuity** — interactive operator-only atomic consent
+  administration; an adapter over the existing Postgres FRANK chain; strict
+  citation-before-act constitutional envelope metering; and idempotent
+  `fleet.json` roster reconciliation that preserves contested rows.
+- **Local governance CLI** — `willow-mcp consent status|set|reconcile` and
+  `willow-mcp roster status|sync`. Mutation commands reject non-interactive and
+  Kart execution and are blocked by the bundled self-grant hook.
 - **The Grove** (`the_grove.py`) — a rings store for *lessons*, sibling to
   `schema_profile`'s vocabulary rings but unbounded on purpose: vocabulary may
   be pruned cheaply, lessons are kept precisely so the deployment cannot become

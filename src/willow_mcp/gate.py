@@ -77,13 +77,21 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "dispatch_send", "dispatch_read", "dispatch_list", "dispatch_accept",
         "handoff_write_v4", "handoff_read", "verify_handoff", "agent_clear",
         "session_read", "session_enter", "session_handoff_write", "agent_route", "agent_dispatch_result",
-        "fleet_status", "fleet_health", "context_save", "context_get",
+        "fleet_status", "fleet_health", "frank_read", "frank_verify",
+        "frank_append", "envelope_apply",
+        "context_save", "context_get",
         "context_list", "knowledge_search", "kb_ingest", "store_get", "store_search",
         "specialist_list", "specialist_get", "agent_seed_mirror",
         "exposure_config_get", "exposure_slice",
     }),
     "fleet_read": frozenset({
-        "fleet_status", "fleet_health",
+        "fleet_status", "fleet_health", "frank_read", "frank_verify",
+    }),
+    "frank_write": frozenset({
+        "frank_append",
+    }),
+    "envelope_apply": frozenset({
+        "envelope_apply",
     }),
     "context": frozenset({
         "context_save", "context_get", "context_list", "context_expire",
@@ -150,6 +158,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "specialist_list", "specialist_get",
         # Fleet (read-only)
         "fleet_status", "fleet_health",
+        "frank_read", "frank_verify",
         # Schema admin
         "schema_confirm_mapping",
         # Session context

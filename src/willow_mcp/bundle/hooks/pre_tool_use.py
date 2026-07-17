@@ -119,8 +119,12 @@ def check_task_submit(tool_input: dict) -> Optional[str]:
 # sudo invariant forbids: request and confirm are separate authorities, and the
 # agent holds only the first.
 _LEASE_DIR_RE = re.compile(r"mcp_apps/_net_leases\b")
-_GRANT_CMD_RE = re.compile(r"\bwillow-mcp\s+grant-net\b|willow_mcp\s+grant-net\b"
-                           r"|\blease\.grant\s*\(")
+_GRANT_CMD_RE = re.compile(
+    r"\bwillow-mcp\s+(?:grant-net|consent\s+(?:set|reconcile)|roster\s+sync)\b"
+    r"|\bwillow_mcp\s+grant-net\b|\blease\.grant\s*\("
+    r"|\bconsent_admin\.(?:write_consent|set_key|reconcile)\s*\("
+    r"|\bfleet_roster\.sync\s*\("
+)
 _MANIFEST_RE = re.compile(r"mcp_apps/[^/\s\"']+/manifest\.json")
 _TASK_NET_RE = re.compile(r"\btask_net\b")
 # Reading a lease or a manifest is not escalation — `net-status` and
@@ -129,9 +133,10 @@ _TASK_NET_RE = re.compile(r"\btask_net\b")
 _WRITE_VERB_RE = re.compile(r">>?|\b(tee|cp|mv|install|touch|dd|truncate)\b|\bsed\s+-i\b")
 
 _SELF_GRANT_REASON = (
-    "willow-mcp: this writes a key that authorizes your own egress. An agent may "
-    "REQUEST egress; it may never CONFIRM it (sudo invariant, FRANK 90e52ab7). "
-    "Leases are issued by the operator, at their own terminal, with "
+    "willow-mcp: this invokes an operator-only policy mutation. An agent may "
+    "REQUEST egress, another grant, or a roster change; it may never CONFIRM it itself "
+    "(sudo invariant, FRANK 90e52ab7). Leases and consent changes are made "
+    "by the operator, at their own terminal, with "
     "`willow-mcp grant-net <app_id> --ttl 30m --reason ...`, and `task_net` is "
     "added to a manifest by the operator, not by the app that wants it. "
     "Ask for the grant; do not write the file. (B-32)"

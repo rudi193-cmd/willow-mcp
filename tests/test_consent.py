@@ -139,7 +139,8 @@ def test_disagreement_fix_does_not_advise_deleting_the_mirror(home):
     assert p["severity"] == "error"
     assert "mirror" in p["detail"]
     assert "delete" not in p["fix"].lower()
-    assert "_write_legacy_consent" in p["fix"]     # the remedy that actually holds
+    assert "willow-mcp consent reconcile" in p["fix"]
+    assert "willow.fylgja" not in p["fix"]
 
 
 def test_agreement_reports_no_disagreement(home):

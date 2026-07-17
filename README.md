@@ -99,8 +99,11 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `verify_handoff` | Orchestrator verifies completion |
 | `agent_clear` | Clear specialist for next packet |
 | `session_read` | Read thin session state file |
-| `fleet_status` | List agents registered in the fleet |
+| `fleet_status` | Return the canonical charter `fleet.json` roster plus Postgres drift diagnostics |
 | `fleet_health` | Task queue counts by status, live worker heartbeats, and whether the queue is `stranded` |
+| `frank_read` / `frank_verify` | Read and verify the existing Postgres FRANK hash chain |
+| `frank_append` | Append an established-shape FRANK event (separately gated) |
+| `envelope_apply` | Match an active constitutional grant and write its FRANK citation before returning authority |
 | `context_save` | Save ephemeral per-identity working state under a key, with an optional TTL (SOIL-backed, no Postgres) |
 | `context_get` | Read a saved context; `expired` (and purged) once its TTL passes |
 | `context_list` | List your saved context keys and expiry times (expired ones skipped) |
@@ -156,13 +159,25 @@ Consent and leases are both read **fail-closed**: a missing file, an unparseable
 file, a non-boolean value (`"true"`, `1`), a lease past its deadline, a deadline
 with no timezone, or a lease record naming a *different* app than the file it sits
 in — all read as denied. Absence is not consent, and a name is not an identity.
-willow-mcp only reads the consent policy — it is authored by willow-2.0's
-`global_settings.py`. That module also keeps a flat `consent.json` **mirror**,
-rewritten on every save; willow-mcp reads it only when the canonical file is
-absent. Because it is written constantly and read almost never, it can drift
-silently, and **deleting it does not keep it gone** — the next save recreates it.
-If the two disagree, `diagnostic_summary` reports an error naming both values
-rather than quietly obeying one of them (B-30).
+Runtime tools only read consent. An operator can mutate it through the local,
+interactive-only `willow-mcp consent set <key> <true|false>` command; the command
+atomically writes canonical policy and mirror and appends a metadata-only audit
+record. `willow-mcp consent reconcile` keeps the canonical value and repairs its
+mirror. If the two disagree, `diagnostic_summary` reports both rather than
+guessing intent (B-30).
+
+### Governance continuity
+
+`willow-mcp roster status` compares the constitution repo's canonical
+`fleet.json` with Postgres. `willow-mcp roster sync` is interactive-only and
+idempotently inserts or updates charter rows; unknown database rows are reported
+as contested and preserved, never silently deleted.
+
+Constitutional envelopes are loaded read-only from
+`envelopes/pre-approved.json` and checked against `syscall-table.json`.
+`envelope_apply` validates issuer, grantee, verb, exact bounds shape, revocation,
+expiry, and FRANK-derived quota. Both grants and faults append an
+`envelope_citation` to the existing `frank_ledger` before authority is returned.
 
 #### `gates` — every gate, on/off, egress-lease shaped
 
