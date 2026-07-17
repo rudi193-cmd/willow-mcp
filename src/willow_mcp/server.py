@@ -232,8 +232,21 @@ _KNOWLEDGE_FIELDS = ["id", "content", "domain", "source", "tags"]
 # `completed_at` column; those stay unmapped (null on read) rather than
 # guessing at a substitute like `updated_at`, which fires on any update, not
 # just completion.
-_TASK_FIELDS = ["task_id", "task", "submitted_by", "agent", "status", "result",
-                 "steps", "created_at", "completed_at"]
+_TASK_FIELDS = [
+    "task_id",
+    "task",
+    "submitted_by",
+    "network_authorization",
+    "agent",
+    "status",
+    "result",
+    "steps",
+    "created_at",
+    "completed_at",
+]
+_TASK_READ_FIELDS = [
+    field for field in _TASK_FIELDS if field != "network_authorization"
+]
 
 # Registry of tables schema_confirm_mapping knows how to confirm, and the
 # canonical fields each one speaks in. Extend this when a new table gets a
@@ -896,25 +909,26 @@ def knowledge_search(
 
 @mcp.tool()
 @_guarded("task_submit")
-def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = False) -> dict:
+def task_submit(
+    app_id: str,
+    task: str,
+    agent: str = "kart",
+    allow_net: bool = False,
+    network_authorization: str = "",
+) -> dict:
     """Submit a task to the Kart sandboxed execution queue. Returns task_id for polling.
 
-    Tasks run network-isolated by default. Egress through THIS tool needs THREE
-    keys, all held at once: the 'task_net' capability in the app's manifest (it is
-    NOT included in task_queue or full_access; grant it explicitly), the operator's
-    standing `consent.internet` in $WILLOW_HOME/settings.global.json, and an
-    unexpired egress **lease** issued by the operator via `willow-mcp grant-net`.
-    The capability says *this app may ever request egress*; consent says *egress is
-    permitted right now*; the lease says *this app, until this time*. Only when all
-    three hold is the Kart worker's `# allow_net` directive appended so the sandbox
-    gets egress. No MCP tool can issue a lease.
+    Tasks run network-isolated by default. Egress needs the `task_net` capability,
+    standing `consent.internet`, a live operator lease, and an operator-signed
+    per-task envelope passed as `network_authorization`. The envelope binds the
+    submitter, normalized task hash, network scope, expiry, and one-use nonce.
+    `# allow_net` remains a request, never authority.
 
-    These three keys gate the **submitter**, not the network. The executor
-    (`kartikeya`) reads `# allow_net` out of the stored task text and honors it
-    without consulting consent, the lease, or any capability, and the `tasks` table
-    is shared Postgres — so a row written by any other submitter carrying that
-    directive reaches the network regardless (**B-37**, P0). `consent.internet:
-    false` closes this door; it does not close the building.
+    The Kartikeya executor verifies all host gates and the signed envelope again
+    immediately before shell launch. Missing attribution or envelope, an invalid
+    signature, expiry, replay, task mutation, unavailable verifier, or a strict
+    trust-root failure denies network. Signing is available only through the local
+    interactive `willow-mcp sign-net-task` CLI; no MCP tool can mint authority.
 
     Task text is security-scanned at SUBMIT time (defense-in-depth): a task the
     Kart scanner would refuse — destructive, exfiltration, secret access, obfusc-
@@ -990,27 +1004,55 @@ def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = F
     if fields["task_id"]["column"] is None or fields["task"]["column"] is None:
         return {"error": "schema_unusable: 'tasks' table has no mappable 'task_id' or 'task' column"}
 
-    # The Kart worker (willow-2.0) reads network policy from directive lines
-    # (`# allow_net` / `# allow_localhost`) in the stored task text
-    # (core/kart_sandbox.py task_allows_network / task_allows_localhost, which
-    # match on `line.strip() == <directive>`). Strip any such caller-supplied
-    # line UNCONDITIONALLY first, then re-append `# allow_net` only when the
-    # permission check above passed. Otherwise a caller holding only task_queue
-    # could grant itself egress by embedding the directive in `task` text with
-    # allow_net=False — the gate is keyed off the argument, not the text (B-21;
-    # B-19 closed only the allow_net=True path).
-    _NET_DIRECTIVES = {"# allow_net", "# allow_localhost"}
+    from . import egress_authorization
+
     task = "\n".join(
-        line for line in task.splitlines() if line.strip() not in _NET_DIRECTIVES
+        line
+        for line in egress_authorization.normalize_task(task).splitlines()
+        if line.strip() not in {"# allow_net", "# allow_localhost"}
     )
     if allow_net:
-        task = task.rstrip("\n") + "\n# allow_net"
+        task = egress_authorization.canonical_network_task(task)
+        if not network_authorization:
+            return {
+                "error": (
+                    "net_authorization_denied: allow_net requires an "
+                    "operator-signed per-task envelope from "
+                    "`willow-mcp sign-net-task`"
+                )
+            }
+        public_key = egress_authorization.public_key_path()
+        if public_key is None:
+            return {
+                "error": (
+                    "net_authorization_denied: "
+                    "WILLOW_MCP_EGRESS_PUBLIC_KEY is not configured"
+                )
+            }
+        verified, reason, _ = egress_authorization.verify_envelope(
+            public_key_path=public_key,
+            submitted_by=app_id,
+            task=task,
+            envelope=network_authorization,
+        )
+        if not verified:
+            return {"error": f"net_authorization_denied: {reason}"}
+        if not fields["network_authorization"]["column"]:
+            return {
+                "error": (
+                    "schema_unusable: the confirmed tasks mapping has no "
+                    "'network_authorization' column; apply the reviewed migration "
+                    "and reconfirm the mapping before submitting network work"
+                )
+            }
 
     import random
     task_id = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789", k=8))
     values = {"task_id": task_id, "task": task}
     if fields["submitted_by"]["column"]:
         values["submitted_by"] = app_id or "willow-mcp"
+    if allow_net:
+        values["network_authorization"] = network_authorization
     if fields["agent"]["column"]:
         values["agent"] = agent
 
@@ -1039,7 +1081,7 @@ def task_status(app_id: str, task_id: str) -> dict:
     if id_col is None:
         return {"error": "schema_unusable: 'tasks' table has no mappable 'task_id' column"}
 
-    select_clause, present, unmapped = _build_select(_TASK_FIELDS, fields)
+    select_clause, present, unmapped = _build_select(_TASK_READ_FIELDS, fields)
     cur = pg.cursor()
     cur.execute(f'SELECT {select_clause} FROM tasks WHERE "{id_col}" = %s', (task_id,))
     row = cur.fetchone()
@@ -2746,12 +2788,16 @@ def _cmd_worker(args) -> None:
         raise SystemExit(1)
 
     from .heartbeat import WorkerHeartbeat, reap
+    from .egress_authorization import ExecutorNetworkAuthorizer
+
     reap()  # clear files left by workers that were killed rather than stopped
     beat = WorkerHeartbeat(agent="kart", lane=args.lane, interval=args.interval)
+    network_authorizer = ExecutorNetworkAuthorizer()
     try:
         kartikeya.run_worker(
             queue, lane=args.lane, slots=args.slots, interval=args.interval,
             once=args.once, on_heartbeat=beat,
+            network_authorizer=network_authorizer,
         )
     finally:
         beat.close()
@@ -2805,6 +2851,71 @@ def _cmd_roster(args) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1)
     print(json.dumps(result, indent=2, default=str))
+
+
+def _cmd_sign_net_task(args) -> None:
+    """Create a one-use task envelope from an operator's interactive terminal."""
+    import secrets
+    import stat
+
+    from . import egress_authorization, lease
+
+    if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
+        print(
+            "Error: sign-net-task requires an interactive operator terminal "
+            "outside Kart; it cannot run from an MCP tool or queued task.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    key_path = Path(args.key).expanduser() if args.key else None
+    if key_path is None:
+        print(
+            "Error: pass --key or set WILLOW_MCP_EGRESS_SIGNING_KEY. "
+            "The private key is never read by the MCP server or worker.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    try:
+        mode = stat.S_IMODE(key_path.stat().st_mode)
+    except OSError as e:
+        print(f"Error: cannot read signing key metadata: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    if mode & 0o077:
+        print("Error: signing key must not be group/world accessible", file=sys.stderr)
+        raise SystemExit(1)
+    protected_roots = {
+        Path(os.environ.get("WILLOW_HOME", Path.home() / ".willow")).expanduser(),
+        Path(os.environ.get("WILLOW_STORE_ROOT", Path.home() / ".willow")).expanduser(),
+    }
+    resolved_key = key_path.resolve()
+    if any(
+        resolved_key == root.resolve() or root.resolve() in resolved_key.parents
+        for root in protected_roots
+    ):
+        print(
+            "Error: signing key must live outside WILLOW_HOME/WILLOW_STORE_ROOT, "
+            "which are mounted into worker sandboxes.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    try:
+        raw_task = (
+            Path(args.task_file).read_text(encoding="utf-8")
+            if args.task_file
+            else args.task
+        )
+        canonical_task = egress_authorization.canonical_network_task(raw_task)
+        envelope = egress_authorization.sign_envelope(
+            private_key_path=key_path,
+            submitted_by=args.app_id,
+            task=canonical_task,
+            ttl_seconds=lease.parse_ttl(args.ttl),
+            nonce=secrets.token_urlsafe(24),
+        )
+    except (OSError, ValueError, PermissionError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(envelope)
 
 
 def _cmd_grant_net(args) -> None:
@@ -2998,6 +3109,22 @@ def _main():
         "roster", help="Inspect or operator-sync fleet.json into existing agents rows"
     )
     roster_p.add_argument("action", choices=["status", "sync"])
+    sign_net_p = subparsers.add_parser(
+        "sign-net-task",
+        help="Sign one exact network task (interactive operator terminal only; never an MCP tool)",
+    )
+    sign_net_p.add_argument("app_id", help="submitted_by identity bound into the envelope")
+    sign_net_input = sign_net_p.add_mutually_exclusive_group(required=True)
+    sign_net_input.add_argument("--task", default="", help="exact task text to authorize")
+    sign_net_input.add_argument(
+        "--task-file", default="", help="UTF-8 file containing the exact task text"
+    )
+    sign_net_p.add_argument("--ttl", default="30m", help="envelope lifetime (ceiling 3h)")
+    sign_net_p.add_argument(
+        "--key",
+        default=os.environ.get("WILLOW_MCP_EGRESS_SIGNING_KEY", ""),
+        help="operator Ed25519 private PEM (or $WILLOW_MCP_EGRESS_SIGNING_KEY)",
+    )
 
     grant_p = subparsers.add_parser(
         "grant-net",
@@ -3102,6 +3229,8 @@ def _main():
         return
     if args.command == "roster":
         _cmd_roster(args)
+    if args.command == "sign-net-task":
+        _cmd_sign_net_task(args)
         return
     if args.command == "grant-net":
         _cmd_grant_net(args)

@@ -79,7 +79,10 @@ def test_construct_raises_on_resolve_error(pg, monkeypatch):
 # ── claim_pending ──────────────────────────────────────────────────────────
 
 def test_claim_pending_atomic_sql_and_rows(queue, pg):
-    pg.next_rows = [("T1", "echo hi", "kart", "willow"), ("T2", "ls", "kart", "willow")]
+    pg.next_rows = [
+        ("T1", "echo hi", "kart", "willow", ""),
+        ("T2", "curl x\n# allow_net", "kart", "willow", '{"signed":true}'),
+    ]
     rows = queue.claim_pending("kart", 5, lane="fast")
     sql, params = pg.executed[-1]
     assert "FOR UPDATE SKIP LOCKED" in sql
@@ -90,6 +93,24 @@ def test_claim_pending_atomic_sql_and_rows(queue, pg):
     assert [r.task_id for r in rows] == ["T1", "T2"]
     assert all(isinstance(r, TaskRow) for r in rows)
     assert rows[0].submitted_by == "willow"
+    assert rows[1].network_authorization == '{"signed":true}'
+
+
+def test_legacy_postgres_mapping_does_not_invent_network_authority(
+    pg, monkeypatch
+):
+    monkeypatch.setattr(
+        tq.sp,
+        "resolve",
+        lambda *a, **k: _mapping(
+            network_authorization={"column": None, "data_type": None}
+        ),
+    )
+    queue = tq.WillowMcpTaskQueue(pg, "app")
+    pg.next_rows = [("OLD", "curl x\n# allow_net", "kart", "legacy")]
+    row = queue.claim_pending("kart", 1)[0]
+    assert row.submitted_by == "legacy"
+    assert row.network_authorization == ""
 
 
 # ── mark_done ──────────────────────────────────────────────────────────────

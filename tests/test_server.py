@@ -638,7 +638,8 @@ def test_kb_promote_schema_unusable_when_domain_unmapped_even_if_confirmed(app_i
 # as the knowledge_* tools.
 
 _TASKS_COLUMNS = [
-    ("id", "text"), ("task", "text"), ("submitted_by", "text"), ("agent", "text"),
+    ("id", "text"), ("task", "text"), ("submitted_by", "text"),
+    ("network_authorization", "text"), ("agent", "text"),
     ("status", "text"), ("result", "jsonb"), ("created_at", "timestamp with time zone"),
 ]
 
@@ -722,6 +723,22 @@ def _operator_leases(app, *, ttl_seconds=1800):
     return lease.grant(app, ttl_seconds, issuer="test-operator", reason="unit test")
 
 
+def _accepted_network_envelope(tmp_path, monkeypatch):
+    from willow_mcp import egress_authorization
+
+    public_key = tmp_path / "verify.pem"
+    public_key.write_text("test key")
+    monkeypatch.setattr(
+        egress_authorization, "public_key_path", lambda: public_key
+    )
+    monkeypatch.setattr(
+        egress_authorization,
+        "verify_envelope",
+        lambda **_kwargs: (True, "verified", {"nonce": "test"}),
+    )
+    return '{"signed":true}'
+
+
 def test_task_submit_allow_net_denied_without_task_net_permission(tmp_path, monkeypatch):
     # B-19: full_access grants task_submit but NOT the escalated net capability.
     app = _app_with_perms(tmp_path, monkeypatch, "netless", ["full_access"])
@@ -745,14 +762,67 @@ def test_task_submit_allow_net_appends_directive_with_permission(tmp_path, monke
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
 
-    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+    result = server.task_submit(
+        app_id=app,
+        task="curl https://example.com",
+        allow_net=True,
+        network_authorization=envelope,
+    )
 
     assert result["status"] == "pending"
     insert_sql, params = fake.executed[-1]
     assert insert_sql.startswith("INSERT INTO tasks")
     # values dict order is task_id, task, ... so the task column value is params[1]
     assert params[1] == "curl https://example.com\n# allow_net"
+    assert '"network_authorization"' in insert_sql
+    assert params[3] == envelope
+
+
+def test_task_submit_allow_net_requires_signed_envelope(tmp_path, monkeypatch):
+    app = _app_with_perms(
+        tmp_path, monkeypatch, "unsigned", ["full_access", "task_net"]
+    )
+    _operator_consents(tmp_path)
+    _operator_leases(app)
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+
+    result = server.task_submit(
+        app_id=app, task="curl https://example.com", allow_net=True
+    )
+
+    assert "operator-signed per-task envelope" in result["error"]
+    assert not any("INSERT" in sql for sql, _ in fake.executed)
+
+
+def test_task_submit_network_denied_when_envelope_column_unmapped(
+    tmp_path, monkeypatch
+):
+    app = _app_with_perms(
+        tmp_path, monkeypatch, "oldschema", ["full_access", "task_net"]
+    )
+    _operator_consents(tmp_path)
+    _operator_leases(app)
+    old_columns = [
+        column for column in _TASKS_COLUMNS if column[0] != "network_authorization"
+    ]
+    fake = _FakePg(columns=old_columns)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
+
+    result = server.task_submit(
+        app_id=app,
+        task="curl https://example.com",
+        allow_net=True,
+        network_authorization=envelope,
+    )
+
+    assert "network_authorization" in result["error"]
+    assert not any("INSERT" in sql for sql, _ in fake.executed)
 
 
 def test_task_submit_allow_net_denied_when_operator_consent_is_off(tmp_path, monkeypatch):
@@ -849,9 +919,13 @@ def test_task_submit_permitted_net_survives_caller_directive_dedup(tmp_path, mon
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
 
     result = server.task_submit(
-        app_id=app, task="curl https://example.com\n# allow_net", allow_net=True
+        app_id=app,
+        task="curl https://example.com\n# allow_net",
+        allow_net=True,
+        network_authorization=envelope,
     )
 
     assert result["status"] == "pending"
@@ -969,8 +1043,14 @@ def test_task_submit_strict_trust_root_denies_when_keys_are_self_writable(tmp_pa
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
 
-    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+    result = server.task_submit(
+        app_id=app,
+        task="curl https://example.com",
+        allow_net=True,
+        network_authorization=envelope,
+    )
 
     assert "trust_root_denied" in result["error"]
     assert not any("INSERT" in sql for sql, _ in fake.executed)
@@ -986,8 +1066,14 @@ def test_task_submit_strict_trust_root_off_by_default(tmp_path, monkeypatch):
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
 
-    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+    result = server.task_submit(
+        app_id=app,
+        task="curl https://example.com",
+        allow_net=True,
+        network_authorization=envelope,
+    )
 
     assert result["status"] == "pending"
 
@@ -1009,6 +1095,7 @@ def test_task_status_maps_id_to_task_id_and_surfaces_unmapped(app_id, monkeypatc
 
     assert result["task_id"] == "T1"
     assert result["status"] == "pending"
+    assert "network_authorization" not in result
     assert set(result["_unmapped"]) == {"steps", "completed_at"}
     select_sql, params = fake.executed[-1]
     assert '"id" AS "task_id"' in select_sql

@@ -3,7 +3,8 @@
 -- willow-mcp ADAPTS to an existing `tasks` table when one is present (see
 -- docs/design/schema-adaptation.md); this DDL is for a fresh install that has
 -- no such table yet. Columns match the canonical _TASK_FIELDS the server maps
--- (server.py: task_id, task, submitted_by, agent, status, result, steps,
+-- (server.py: task_id, task, submitted_by, network_authorization, agent,
+-- status, result, steps,
 -- created_at, completed_at). After creating it, confirm the mapping once:
 --   schema_confirm_mapping(app_id=..., table="tasks")
 --
@@ -14,6 +15,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     task_id       text PRIMARY KEY,
     task          text NOT NULL,
     submitted_by  text NOT NULL DEFAULT '',
+    network_authorization text NOT NULL DEFAULT '',
     agent         text NOT NULL DEFAULT 'kart',
     status        text NOT NULL DEFAULT 'pending',   -- pending | running | completed | failed
     result        jsonb,

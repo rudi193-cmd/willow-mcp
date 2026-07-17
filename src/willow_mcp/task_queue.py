@@ -23,8 +23,18 @@ from psycopg2.extras import Json
 from . import schema_profile as sp
 from .db import get_pg
 
-_TASK_FIELDS = ["task_id", "task", "submitted_by", "agent", "status", "result",
-                "steps", "created_at", "completed_at"]
+_TASK_FIELDS = [
+    "task_id",
+    "task",
+    "submitted_by",
+    "network_authorization",
+    "agent",
+    "status",
+    "result",
+    "steps",
+    "created_at",
+    "completed_at",
+]
 
 
 def _require_kartikeya():
@@ -71,9 +81,11 @@ class WillowMcpTaskQueue:
         from kartikeya import TaskRow  # lazy — this backend is only used with kartikeya present
         c = self._col
         order = c["created_at"] or c["task_id"]
-        ret = [c["task_id"], c["task"], c["agent"]]
-        if c["submitted_by"]:
-            ret.append(c["submitted_by"])
+        ret_fields = ["task_id", "task", "agent"]
+        for optional in ("submitted_by", "network_authorization"):
+            if c[optional]:
+                ret_fields.append(optional)
+        ret = [c[field] for field in ret_fields]
         ret_cols = ", ".join(f'"{x}"' for x in ret)
         sql = (
             f'UPDATE tasks SET {self._q("status")} = \'running\' '
@@ -90,9 +102,17 @@ class WillowMcpTaskQueue:
         self._pg.commit()
         out = []
         for r in rows:
-            submitted_by = r[3] if c["submitted_by"] and len(r) > 3 else ""
-            out.append(TaskRow(task_id=r[0], task=r[1] or "", agent=r[2] or agent,
-                               submitted_by=submitted_by or "", status="running"))
+            values = dict(zip(ret_fields, r))
+            out.append(
+                TaskRow(
+                    task_id=values["task_id"],
+                    task=values["task"] or "",
+                    agent=values["agent"] or agent,
+                    submitted_by=values.get("submitted_by") or "",
+                    network_authorization=values.get("network_authorization") or "",
+                    status="running",
+                )
+            )
         return out
 
     def mark_running(self, task_id: str) -> None:

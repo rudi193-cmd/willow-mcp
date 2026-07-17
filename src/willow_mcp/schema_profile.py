@@ -59,6 +59,12 @@ CANONICAL_ALIASES: dict[str, tuple[str, ...]] = {
     "task": ("cmd_line", "cmdline", "command", "cmd", "cmd_text", "script", "action", "payload"),
     "submitted_by": ("submitter", "requestor", "requester", "created_by", "owner",
                      "username", "usr", "user", "author"),
+    "network_authorization": (
+        "net_authorization",
+        "egress_authorization",
+        "network_envelope",
+        "egress_envelope",
+    ),
     "agent": ("worker", "executor", "runner", "processor", "handler"),
     "status": ("stat", "state", "job_state", "proc_state", "status_code", "st"),
     "result": ("output", "outblob", "result_text", "response", "stdout", "res", "log"),
@@ -325,6 +331,7 @@ _EXPECTED_SHAPES: dict[str, frozenset] = {
     "completed_at": frozenset({"timestamp"}),
     "agent": frozenset({"enum", "identifier"}),
     "submitted_by": frozenset({"identifier", "enum", "freetext", "prose"}),
+    "network_authorization": frozenset({"freetext", "prose"}),
     "result": frozenset({"freetext", "command", "prose", "reference"}),
     # knowledge side. `content` is the one field that expects prose but NOT
     # reference — a content column full of citations is the trap, so it flags.
