@@ -28,6 +28,29 @@ willow-mcp-sign-seed hanuman # ratify home seed + detach-sign (operator terminal
 willow-mcp-compile-persona hanuman # seed → personas/hanuman.md (AS-7)
 ```
 
+### Local sandbox (one command)
+
+To take a fresh clone to a working stdio server — venv, editable install,
+scaffolded `$WILLOW_HOME`, compiled manifests, and (best-effort) a local
+Postgres with every table created — run:
+
+```bash
+scripts/sandbox-bootstrap.sh   # idempotent; ends with a live diagnostic_summary
+```
+
+It scaffolds a repo-local, gitignored `.willow/` so the sandbox never touches
+your real fleet state. Postgres is optional and handled best-effort (the SOIL
+store stands alone); pass `WILLOW_SKIP_PG=1` for a SOIL-only stand-up, or
+`WILLOW_PG_BOOTSTRAP_ROLE=1` on a bare cluster where your OS user has no
+Postgres role yet.
+
+A fresh Postgres database needs willow-mcp's tables. On a shared fleet DB they
+already exist; on a standalone install, apply the DDL in
+[`docs/schema/`](docs/schema/) (`knowledge`, `agents`, `routing_decisions`,
+`tasks` — the four `diagnostic_summary` checks for). The bootstrap script
+applies all four for you. Each `knowledge`/`tasks` write path stays locked
+behind `schema_confirm_mapping` until you confirm the mapping once.
+
 > **PATH note:** `~/.local/bin/willow-mcp` is often the **fleet** shim (`sap_mcp.py`), not this
 > product. Use the product venv binary:
 > `~/github/.willow/venvs/willow-mcp/bin/willow-mcp-compile --force`
