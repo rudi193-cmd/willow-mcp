@@ -556,6 +556,29 @@ In [HTTP serve mode](#http-serve-mode-oauth), the `app_id` is not taken from
 the call — it is resolved from the caller's confirmed OAuth identity binding,
 then checked against that same manifest ACL.
 
+### `egress_secret_exempt` — letting a tool return a raw credential
+
+Tool responses are scanned at a single funnel and any credential-shaped value
+(a provider `sk-` key, an `AKIA…` id, a PEM private-key block, a GitHub/Slack/
+Google/Stripe token, a JWT) is redacted to `[REDACTED:<kind>]` before it
+leaves — the data-path half of "no tool ever returns a credential." A few tools
+legitimately must return a raw token, the canonical case being an
+`integration_call` that performs an OAuth token exchange. Name those tools in
+the app's manifest:
+
+```json
+{"permissions": ["full_access"], "egress_secret_exempt": ["integration_call"]}
+```
+
+The scan still runs, so the audit trail stays complete: an exempted return is
+kept raw but receipted as `credential_returned` (naming the kinds, never the
+value), so the exception is loud rather than silent. Like `store_scope`, the
+field **fails closed toward redaction** — a bad `app_id`, a missing/unreadable
+manifest, or a malformed field (a string where a list belongs) exempts *nothing*
+and an `ERROR` is logged. Because manifests are operator-side (the PreToolUse
+hook blocks an app from writing its own), an app can never exempt itself. The
+exemption is per named tool, never a blanket unlock.
+
 ## Severance
 
 A willow-mcp install can share a Willow fleet's store, database, and trust root,
