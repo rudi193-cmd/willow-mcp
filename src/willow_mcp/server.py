@@ -914,6 +914,7 @@ def task_submit(
     task: str,
     agent: str = "kart",
     allow_net: bool = False,
+    allow_localhost: bool = False,
     network_authorization: str = "",
 ) -> dict:
     """Submit a task to the Kart sandboxed execution queue. Returns task_id for polling.
@@ -921,8 +922,10 @@ def task_submit(
     Tasks run network-isolated by default. Egress needs the `task_net` capability,
     standing `consent.internet`, a live operator lease, and an operator-signed
     per-task envelope passed as `network_authorization`. The envelope binds the
-    submitter, normalized task hash, network scope, expiry, and one-use nonce.
-    `# allow_net` remains a request, never authority.
+    submitter, task id, agent, normalized task hash, network scope, expiry, and
+    nonce. The signed task id is the queue primary key, preventing the envelope
+    from authorizing a second row. `# allow_net` and `# allow_localhost` remain
+    requests, never authority.
 
     The Kartikeya executor verifies all host gates and the signed envelope again
     immediately before shell launch. Missing attribution or envelope, an invalid
@@ -952,19 +955,22 @@ def task_submit(
     if not pg:
         return {"error": "postgres_unavailable"}
 
-    if allow_net:
+    if allow_net and allow_localhost:
+        return {"error": "network_mode_invalid: choose allow_net or allow_localhost"}
+    network_requested = allow_net or allow_localhost
+    if network_requested:
         from . import consent, gate, lease
         # Key 1: is this app allowed to ask at all? (capability, granted once)
         if not gate.permitted(app_id, gate.NET_PERMISSION):
             return {"error": (
-                f"net_denied: allow_net requires the '{gate.NET_PERMISSION}' permission in "
+                f"net_denied: shared network access requires the '{gate.NET_PERMISSION}' permission in "
                 f"this app's manifest ($WILLOW_HOME/mcp_apps/{app_id or '<app_id>'}/manifest.json). "
                 "It is not granted by task_queue or full_access — add it explicitly.")}
         # Key 2: does the operator permit egress right now? (standing consent)
         # Read fail-closed — an absent or unparseable policy is not consent.
         if not consent.internet_permitted():
             return {"error": (
-                "consent_denied: allow_net also requires the operator's standing "
+                "consent_denied: shared network access also requires the operator's standing "
                 f"'consent.internet' in {consent.settings_path()}. This app holds "
                 f"'{gate.NET_PERMISSION}', but egress is switched off (or the consent "
                 "policy could not be read, which denies). Only the operator may turn it "
@@ -975,7 +981,7 @@ def task_submit(
         lease_state = lease.read_lease(app_id)
         if lease_state["status"] != "active":
             return {"error": (
-                f"lease_denied: allow_net requires an unexpired egress lease for '{app_id}' "
+                f"lease_denied: shared network access requires an unexpired egress lease for '{app_id}' "
                 f"(status: {lease_state['status']}"
                 + (f" — {lease_state['error']}" if lease_state.get("error") else "")
                 + "). Leases are issued only by the operator, on the host, via "
@@ -1011,12 +1017,15 @@ def task_submit(
         for line in egress_authorization.normalize_task(task).splitlines()
         if line.strip() not in {"# allow_net", "# allow_localhost"}
     )
-    if allow_net:
-        task = egress_authorization.canonical_network_task(task)
+    task_id = ""
+    if network_requested:
+        task = egress_authorization.canonical_network_task(
+            task, localhost=allow_localhost
+        )
         if not network_authorization:
             return {
                 "error": (
-                    "net_authorization_denied: allow_net requires an "
+                    "net_authorization_denied: shared network access requires an "
                     "operator-signed per-task envelope from "
                     "`willow-mcp sign-net-task`"
                 )
@@ -1029,9 +1038,14 @@ def task_submit(
                     "WILLOW_MCP_EGRESS_PUBLIC_KEY is not configured"
                 )
             }
+        task_id = egress_authorization.claimed_task_id(network_authorization)
+        if not task_id:
+            return {"error": "net_authorization_denied: malformed task_id claim"}
         verified, reason, _ = egress_authorization.verify_envelope(
             public_key_path=public_key,
             submitted_by=app_id,
+            task_id=task_id,
+            agent=agent,
             task=task,
             envelope=network_authorization,
         )
@@ -1046,12 +1060,13 @@ def task_submit(
                 )
             }
 
-    import random
-    task_id = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789", k=8))
+    if not task_id:
+        import random
+        task_id = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789", k=8))
     values = {"task_id": task_id, "task": task}
     if fields["submitted_by"]["column"]:
         values["submitted_by"] = app_id or "willow-mcp"
-    if allow_net:
+    if network_requested:
         values["network_authorization"] = network_authorization
     if fields["agent"]["column"]:
         values["agent"] = agent
@@ -2904,10 +2919,17 @@ def _cmd_sign_net_task(args) -> None:
             if args.task_file
             else args.task
         )
-        canonical_task = egress_authorization.canonical_network_task(raw_task)
+        canonical_task = egress_authorization.canonical_network_task(
+            raw_task, localhost=args.localhost
+        )
+        task_id = "".join(
+            secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789") for _ in range(8)
+        )
         envelope = egress_authorization.sign_envelope(
             private_key_path=key_path,
             submitted_by=args.app_id,
+            task_id=task_id,
+            agent=args.agent,
             task=canonical_task,
             ttl_seconds=lease.parse_ttl(args.ttl),
             nonce=secrets.token_urlsafe(24),
@@ -3114,6 +3136,14 @@ def _main():
         help="Sign one exact network task (interactive operator terminal only; never an MCP tool)",
     )
     sign_net_p.add_argument("app_id", help="submitted_by identity bound into the envelope")
+    sign_net_p.add_argument(
+        "--agent", default="kart", help="queue agent identity bound into the envelope"
+    )
+    sign_net_p.add_argument(
+        "--localhost",
+        action="store_true",
+        help="authorize # allow_localhost instead of full # allow_net",
+    )
     sign_net_input = sign_net_p.add_mutually_exclusive_group(required=True)
     sign_net_input.add_argument("--task", default="", help="exact task text to authorize")
     sign_net_input.add_argument(

@@ -11,6 +11,11 @@ from kartikeya import TaskRow
 from willow_mcp import egress_authorization as auth
 
 
+@pytest.fixture(autouse=True)
+def _outside_kart_for_signing_tests(monkeypatch):
+    monkeypatch.delenv("WILLOW_IN_KART", raising=False)
+
+
 @pytest.fixture
 def keys(tmp_path):
     private = Ed25519PrivateKey.generate()
@@ -33,10 +38,19 @@ def keys(tmp_path):
     return private_path, public_path
 
 
-def _signed(keys, *, task="curl https://example.com\n# allow_net", now=None):
+def _signed(
+    keys,
+    *,
+    task="curl https://example.com\n# allow_net",
+    task_id="NETTASK1",
+    agent="kart",
+    now=None,
+):
     return auth.sign_envelope(
         private_key_path=keys[0],
         submitted_by="caller",
+        task_id=task_id,
+        agent=agent,
         task=task,
         ttl_seconds=300,
         nonce="abcdefghijklmnopqrstuvwxyz012345",
@@ -50,11 +64,15 @@ def test_valid_envelope_binds_submitter_task_scope_expiry_and_nonce(keys):
     ok, reason, payload = auth.verify_envelope(
         public_key_path=keys[1],
         submitted_by="caller",
+        task_id="NETTASK1",
+        agent="kart",
         task=task,
         envelope=envelope,
     )
     assert (ok, reason) == (True, "verified")
     assert payload["submitted_by"] == "caller"
+    assert payload["task_id"] == "NETTASK1"
+    assert payload["agent"] == "kart"
     assert payload["task_hash"] == auth.normalized_task_hash(task)
     assert payload["scope"] == auth.NETWORK_SCOPE
     assert payload["nonce"] == "abcdefghijklmnopqrstuvwxyz012345"
@@ -72,6 +90,8 @@ def test_malformed_envelope_denied(keys, mutator, reason):
     ok, detail, _ = auth.verify_envelope(
         public_key_path=keys[1],
         submitted_by="caller",
+        task_id="NETTASK1",
+        agent="kart",
         task="curl https://example.com\n# allow_net",
         envelope=envelope,
     )
@@ -84,17 +104,43 @@ def test_task_mutation_and_identity_forgery_are_denied(keys):
     mutated = auth.verify_envelope(
         public_key_path=keys[1],
         submitted_by="caller",
+        task_id="NETTASK1",
+        agent="kart",
         task="curl https://attacker.example\n# allow_net",
         envelope=envelope,
     )
     forged = auth.verify_envelope(
         public_key_path=keys[1],
         submitted_by="someone-else",
+        task_id="NETTASK1",
+        agent="kart",
         task="curl https://example.com\n# allow_net",
         envelope=envelope,
     )
     assert mutated[:2] == (False, "task hash mismatch")
     assert forged[:2] == (False, "submitted_by mismatch")
+
+
+def test_task_id_and_agent_rebinding_are_denied(keys):
+    envelope = _signed(keys)
+    wrong_task = auth.verify_envelope(
+        public_key_path=keys[1],
+        submitted_by="caller",
+        task_id="OTHERTSK",
+        agent="kart",
+        task="curl https://example.com\n# allow_net",
+        envelope=envelope,
+    )
+    wrong_agent = auth.verify_envelope(
+        public_key_path=keys[1],
+        submitted_by="caller",
+        task_id="NETTASK1",
+        agent="other",
+        task="curl https://example.com\n# allow_net",
+        envelope=envelope,
+    )
+    assert wrong_task[:2] == (False, "task_id mismatch")
+    assert wrong_agent[:2] == (False, "agent mismatch")
 
 
 def test_malformed_base64_signature_denied_without_raising(keys):
@@ -103,6 +149,8 @@ def test_malformed_base64_signature_denied_without_raising(keys):
     ok, reason, _ = auth.verify_envelope(
         public_key_path=keys[1],
         submitted_by="caller",
+        task_id="NETTASK1",
+        agent="kart",
         task="curl https://example.com\n# allow_net",
         envelope=json.dumps(envelope),
     )
@@ -115,6 +163,8 @@ def test_expired_envelope_denied(keys):
     ok, reason, _ = auth.verify_envelope(
         public_key_path=keys[1],
         submitted_by="caller",
+        task_id="NETTASK1",
+        agent="kart",
         task="curl https://example.com\n# allow_net",
         envelope=envelope,
     )
@@ -127,8 +177,10 @@ def _permit_execution_policy(monkeypatch, keys, tmp_path):
     monkeypatch.setattr(auth.lease, "active", lambda *_: True)
     monkeypatch.setattr(auth.lease, "strict_trust_root", lambda: True)
     monkeypatch.setattr(auth.lease, "self_writable_trust_paths", lambda *_: [])
+    monkeypatch.setattr(
+        auth.lease, "path_is_self_writable_or_replaceable", lambda *_: False
+    )
     monkeypatch.setenv("WILLOW_MCP_EGRESS_PUBLIC_KEY", str(keys[1]))
-    monkeypatch.setenv("WILLOW_MCP_EGRESS_REPLAY_ROOT", str(tmp_path / "replay"))
     real_access = os.access
     monkeypatch.setattr(
         auth.os,
@@ -137,20 +189,18 @@ def _permit_execution_policy(monkeypatch, keys, tmp_path):
     )
 
 
-def test_execution_authorizer_allows_once_then_denies_replay(
+def test_execution_authorizer_allows_envelope_for_its_bound_row(
     keys, tmp_path, monkeypatch
 ):
     _permit_execution_policy(monkeypatch, keys, tmp_path)
     row = TaskRow(
-        task_id="NET",
+        task_id="NETTASK1",
         task="curl https://example.com\n# allow_net",
         submitted_by="caller",
         network_authorization=_signed(keys),
     )
     authorizer = auth.ExecutorNetworkAuthorizer()
     assert authorizer(row, row.network_authorization) is True
-    assert authorizer(row, row.network_authorization) is False
-    assert authorizer.last_error == "authorization replayed"
 
 
 @pytest.mark.parametrize(
@@ -180,7 +230,33 @@ def test_execution_rechecks_every_host_gate(
             auth.lease, "self_writable_trust_paths", lambda *_: [{"key": "manifest"}]
         )
     row = TaskRow(
-        task_id="NET",
+        task_id="NETTASK1",
+        task="curl https://example.com\n# allow_net",
+        submitted_by="caller",
+        network_authorization=_signed(keys),
+    )
+    authorizer = auth.ExecutorNetworkAuthorizer()
+    assert authorizer(row, row.network_authorization) is False
+    assert authorizer.last_error == expected
+
+
+@pytest.mark.parametrize(
+    ("replaceable_name", "expected"),
+    [
+        ("operator-public.pem", "verification key is absent, self-writable, or replaceable"),
+    ],
+)
+def test_execution_denies_replaceable_authorization_roots(
+    keys, tmp_path, monkeypatch, replaceable_name, expected
+):
+    _permit_execution_policy(monkeypatch, keys, tmp_path)
+    monkeypatch.setattr(
+        auth.lease,
+        "path_is_self_writable_or_replaceable",
+        lambda path: replaceable_name in str(path),
+    )
+    row = TaskRow(
+        task_id="NETTASK1",
         task="curl https://example.com\n# allow_net",
         submitted_by="caller",
         network_authorization=_signed(keys),
@@ -209,6 +285,8 @@ def test_sign_net_cli_requires_interactive_operator_terminal(
         task="echo hi",
         task_file="",
         app_id="caller",
+        agent="kart",
+        localhost=False,
         ttl="5m",
     )
     with pytest.raises(SystemExit):
@@ -231,6 +309,8 @@ def test_sign_net_cli_emits_verifiable_envelope(
         task="curl https://example.com",
         task_file="",
         app_id="caller",
+        agent="kart",
+        localhost=False,
         ttl="5m",
     )
     server._cmd_sign_net_task(args)
@@ -238,13 +318,16 @@ def test_sign_net_cli_emits_verifiable_envelope(
     ok, reason, _ = auth.verify_envelope(
         public_key_path=keys[1],
         submitted_by="caller",
+        task_id=auth.claimed_task_id(envelope),
+        agent="kart",
         task=auth.canonical_network_task(args.task),
         envelope=envelope,
     )
     assert (ok, reason) == (True, "verified")
 
 
-def test_forged_direct_row_is_denied_before_shell_launch(monkeypatch):
+@pytest.mark.parametrize("directive", ["# allow_net", "# allow_localhost"])
+def test_forged_direct_row_is_denied_before_shell_launch(monkeypatch, directive):
     from kartikeya import execute as kexec
 
     launched = []
@@ -256,7 +339,7 @@ def test_forged_direct_row_is_denied_before_shell_launch(monkeypatch):
     )
     row = TaskRow(
         task_id="FORGED",
-        task="curl https://example.com\n# allow_net",
+        task=f"curl https://example.com\n{directive}",
         submitted_by="forged-app",
         network_authorization='{"forged":true}',
     )

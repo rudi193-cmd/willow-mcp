@@ -734,9 +734,13 @@ def _accepted_network_envelope(tmp_path, monkeypatch):
     monkeypatch.setattr(
         egress_authorization,
         "verify_envelope",
-        lambda **_kwargs: (True, "verified", {"nonce": "test"}),
+        lambda **_kwargs: (
+            True,
+            "verified",
+            {"nonce": "test", "task_id": "NETTASK1", "agent": "kart"},
+        ),
     )
-    return '{"signed":true}'
+    return json.dumps({"payload": {"task_id": "NETTASK1"}, "signature": "test"})
 
 
 def test_task_submit_allow_net_denied_without_task_net_permission(tmp_path, monkeypatch):
@@ -778,6 +782,33 @@ def test_task_submit_allow_net_appends_directive_with_permission(tmp_path, monke
     assert params[1] == "curl https://example.com\n# allow_net"
     assert '"network_authorization"' in insert_sql
     assert params[3] == envelope
+
+
+def test_task_submit_allow_localhost_requires_and_binds_signed_authority(
+    tmp_path, monkeypatch
+):
+    app = _app_with_perms(
+        tmp_path, monkeypatch, "localapp", ["full_access", "task_net"]
+    )
+    _operator_consents(tmp_path)
+    _operator_leases(app)
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
+
+    result = server.task_submit(
+        app_id=app,
+        task="curl http://127.0.0.1:11434",
+        agent="kart",
+        allow_localhost=True,
+        network_authorization=envelope,
+    )
+
+    assert result == {"task_id": "NETTASK1", "status": "pending"}
+    insert_sql, params = fake.executed[-1]
+    assert params[1] == "curl http://127.0.0.1:11434\n# allow_localhost"
+    assert '"network_authorization"' in insert_sql
 
 
 def test_task_submit_allow_net_requires_signed_envelope(tmp_path, monkeypatch):

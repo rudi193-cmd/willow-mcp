@@ -2,8 +2,10 @@
 
 The ``# allow_net`` directive is only a request.  Kartikeya calls
 ``ExecutorNetworkAuthorizer`` immediately before shell execution; this module
-then re-checks the host policy and verifies a one-use signed envelope bound to
-the submitter and exact normalized task text.
+then re-checks the host policy and verifies a signed envelope bound to the
+submitter, unique queue task id, agent, and exact normalized task text. Replay
+markers are deliberately unnecessary: the signed task id is the queue primary
+key, so the authority cannot be attached to a second row.
 
 Signing is intentionally not an MCP surface.  ``sign_envelope`` is used only by
 the local ``willow-mcp sign-net-task`` command and reads a private key path that
@@ -29,9 +31,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 
 from . import consent, gate, lease
 
-ENVELOPE_FORMAT = "willow-net-auth-v1"
+ENVELOPE_FORMAT = "willow-net-auth-v2"
 NETWORK_SCOPE = "network"
 _NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{22,128}$")
+_TASK_ID_RE = re.compile(r"^[A-Z0-9]{8}$")
+_AGENT_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 _NET_DIRECTIVES = {"# allow_net", "# allow_localhost"}
 
 
@@ -44,14 +48,15 @@ def normalize_task(task: str) -> str:
     return (task or "").replace("\r\n", "\n").replace("\r", "\n")
 
 
-def canonical_network_task(task: str) -> str:
+def canonical_network_task(task: str, *, localhost: bool = False) -> str:
     """Produce the exact task representation stored by ``task_submit``."""
     clean = "\n".join(
         line
         for line in normalize_task(task).splitlines()
         if line.strip() not in _NET_DIRECTIVES
     )
-    return clean.rstrip("\n") + "\n# allow_net"
+    directive = "# allow_localhost" if localhost else "# allow_net"
+    return clean.rstrip("\n") + f"\n{directive}"
 
 
 def normalized_task_hash(task: str) -> str:
@@ -62,6 +67,15 @@ def _canonical_payload(payload: dict) -> bytes:
     return json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
+
+
+def claimed_task_id(envelope: str) -> str:
+    """Return the syntactically valid claimed task id; verification is separate."""
+    try:
+        value = json.loads(envelope).get("payload", {}).get("task_id", "")
+    except (AttributeError, TypeError, json.JSONDecodeError):
+        return ""
+    return value if isinstance(value, str) and _TASK_ID_RE.fullmatch(value) else ""
 
 
 def _parse_deadline(value: object) -> datetime | None:
@@ -96,6 +110,8 @@ def sign_envelope(
     *,
     private_key_path: str | Path,
     submitted_by: str,
+    task_id: str,
+    agent: str,
     task: str,
     ttl_seconds: int,
     nonce: str,
@@ -107,6 +123,10 @@ def sign_envelope(
         raise PermissionError("network authorization cannot be signed inside Kart")
     if not submitted_by.strip():
         raise ValueError("submitted_by is required")
+    if not _TASK_ID_RE.fullmatch(task_id or ""):
+        raise ValueError("task_id must be exactly 8 uppercase letters or digits")
+    if not _AGENT_RE.fullmatch(agent or ""):
+        raise ValueError("agent must be 1..64 identifier characters")
     if scope != NETWORK_SCOPE:
         raise ValueError(f"unsupported network authorization scope {scope!r}")
     if (
@@ -124,6 +144,8 @@ def sign_envelope(
     payload = {
         "format": ENVELOPE_FORMAT,
         "submitted_by": submitted_by,
+        "task_id": task_id,
+        "agent": agent,
         "task_hash": normalized_task_hash(task),
         "scope": scope,
         "issued_at": issued.isoformat(),
@@ -147,6 +169,8 @@ def verify_envelope(
     *,
     public_key_path: str | Path,
     submitted_by: str,
+    task_id: str,
+    agent: str,
     task: str,
     envelope: str,
     now: datetime | None = None,
@@ -165,6 +189,10 @@ def verify_envelope(
         return False, "unsupported envelope format", payload
     if payload.get("submitted_by") != submitted_by:
         return False, "submitted_by mismatch", payload
+    if payload.get("task_id") != task_id:
+        return False, "task_id mismatch", payload
+    if payload.get("agent") != agent:
+        return False, "agent mismatch", payload
     if payload.get("scope") != NETWORK_SCOPE:
         return False, "scope mismatch", payload
     if payload.get("task_hash") != normalized_task_hash(task):
@@ -198,30 +226,6 @@ def public_key_path() -> Path | None:
     return Path(value).expanduser() if value else None
 
 
-def _replay_root() -> Path:
-    configured = os.environ.get("WILLOW_MCP_EGRESS_REPLAY_ROOT", "").strip()
-    if configured:
-        return Path(configured).expanduser()
-    store = os.environ.get("WILLOW_STORE_ROOT", "").strip()
-    base = Path(store).expanduser() if store else Path.home() / ".willow"
-    return base / "egress-replay"
-
-
-def _consume_nonce(nonce: str) -> bool:
-    """Atomically consume one nonce. False means it was already used."""
-    root = _replay_root()
-    root.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256(nonce.encode("ascii")).hexdigest()
-    path = root / digest
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        return False
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(_now().isoformat())
-    return True
-
-
 class ExecutorNetworkAuthorizer:
     """Concrete execution-time policy passed into Kartikeya's host seam."""
 
@@ -250,22 +254,24 @@ class ExecutorNetworkAuthorizer:
         if public_key is None:
             return self._deny("verification key is not configured")
         try:
-            if not public_key.is_file() or os.access(public_key, os.W_OK):
-                return self._deny("verification key is absent or self-writable")
+            if (
+                not public_key.is_file()
+                or lease.path_is_self_writable_or_replaceable(public_key)
+            ):
+                return self._deny(
+                    "verification key is absent, self-writable, or replaceable"
+                )
         except OSError:
             return self._deny("verification key is unreadable")
         ok, reason, payload = verify_envelope(
             public_key_path=public_key,
             submitted_by=submitted_by,
+            task_id=row.task_id,
+            agent=row.agent,
             task=row.task,
             envelope=envelope,
         )
         if not ok or payload is None:
             return self._deny(reason)
-        try:
-            if not _consume_nonce(payload["nonce"]):
-                return self._deny("authorization replayed")
-        except OSError:
-            return self._deny("replay ledger unavailable")
         self.last_error = ""
         return True

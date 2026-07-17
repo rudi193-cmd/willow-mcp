@@ -12,6 +12,7 @@ it. That report is the whole difference between a control and a costume.
 import json
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -219,18 +220,25 @@ def test_self_writable_skips_a_manifest_that_does_not_exist(home):
     assert keys == {"lease_root"}
 
 
-def test_self_writable_is_empty_when_the_root_is_read_only(home):
-    """The deployment B-32 actually asks for: the confirm authority is out of the
-    actor's write reach. Skipped as root, for whom nothing is read-only."""
-    if os.geteuid() == 0:
-        pytest.skip("root bypasses mode bits; there is no separation to test")
+def test_self_writable_is_empty_when_full_path_is_protected(home, monkeypatch):
+    """Every pathname component must be outside the actor's write reach."""
     lease.grant("app", 600, issuer="op")  # creates the root
     root = lease._leases_root()
-    root.chmod(0o500)
-    try:
-        assert lease.self_writable_trust_paths() == []
-    finally:
-        root.chmod(0o700)
+    monkeypatch.setattr(lease.os, "access", lambda *_: False)
+    assert lease.self_writable_trust_paths() == []
+
+
+def test_read_only_leaf_beneath_writable_parent_is_replaceable(home, monkeypatch):
+    lease.grant("app", 600, issuer="op")
+    root = lease._leases_root()
+    parent = root.parent
+    monkeypatch.setattr(
+        lease.os,
+        "access",
+        lambda path, _mode: Path(path) == parent,
+    )
+    assert lease.path_is_self_writable_or_replaceable(root) is True
+    assert [f["key"] for f in lease.self_writable_trust_paths()] == ["lease_root"]
 
 
 def test_a_read_only_lease_root_is_still_readable(home):
