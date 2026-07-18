@@ -46,6 +46,16 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   `register-agent`/`rotate-agent`/`revoke-agent` verbs; a `rotate-agent` CLI is added.
 
 ### Added
+- **Lineage seed pack** (`seed/lineage_willow.py`) — real, cited provenance atoms
+  for willow-mcp's own build story (the willow-gate seam: the three holes H1/H2/H3,
+  the settled decisions D1–D5, the five phases, the adversarial-review hardening,
+  the `whoami` fix, the signing harness, and the upstream `entry_allowed` fix),
+  each an atom that answers a question an agent will actually ask and cites a real
+  PR / commit / file / design-doc section. Kept OUT of the agent-neutral base (a
+  separate lore pack, per `lineage.py`); idempotent by slug + composite edge id, so
+  an operator runs it against their live store (`python seed/lineage_willow.py`) and
+  can re-run or extend it freely. Guarded by `tests/test_seed_lineage.py` so an atom
+  that can't cite is caught before it ships.
 - **Signing harness + end-to-end proof** (`signing.SigningClientSession`,
   `examples/signing_client.py`, `tests/test_signing_e2e.py`) — the reusable client
   wrapper over an MCP `ClientSession` that holds the agent's secret, checks in once
