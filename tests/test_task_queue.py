@@ -6,11 +6,14 @@ the same style as tests/test_server.py — with the schema mapping stubbed, so n
 live DB is touched.
 """
 import json
+import os
+import socket
 
 import pytest
 
 from kartikeya import QueueStats, TaskRow
 
+from willow_mcp import heartbeat as hb
 from willow_mcp import task_queue as tq
 
 
@@ -183,16 +186,60 @@ def test_mark_done_rejects_unknown_terminal_state(queue):
         queue.mark_done("T1", status="running", result="")
 
 
-def test_reap_stale_recovers_each_expired_claim_once(queue, pg):
+def test_reap_stale_recovers_a_dead_owner(queue, pg, monkeypatch):
+    # A candidate held by a worker with no live heartbeat and no live pid is
+    # reclaimed. The recovery UPDATE targets it by id and re-applies the stale
+    # guard so a claim renewed mid-probe cannot be stolen.
+    monkeypatch.setattr(hb, "live_worker_keys", lambda *a, **k: set())
+    monkeypatch.setattr(hb, "_pid_alive", lambda pid: False)
+    pg.next_rows = [("T1", "deadhost:99999:abc")]
     pg.next_rowcount = 1
     assert queue.reap_stale() == 1
-    sql, params = pg.executed[-1]
-    assert '"status" = \'running\'' in sql
-    assert '"claimed_at" <' in sql
-    assert "THEN 'failed' ELSE 'pending'" in sql
-    assert params == (queue.stale_after_seconds,)
-    pg.next_rowcount = 0
+    select_sql, select_params = pg.executed[-2]
+    assert '"status" = \'running\'' in select_sql
+    assert '"claimed_at" <' in select_sql
+    assert select_params == (queue.stale_after_seconds,)
+    update_sql, update_params = pg.executed[-1]
+    assert '"task_id" = ANY(%s)' in update_sql
+    assert '"claimed_at" <' in update_sql  # race guard re-applied on the write
+    assert "THEN 'failed' ELSE 'pending'" in update_sql
+    assert update_params == (["T1"], queue.stale_after_seconds)
+
+
+def test_reap_stale_spares_a_live_owner_by_heartbeat(queue, pg, monkeypatch):
+    # THE anti-double-execution invariant (Loki §2.1): a slow worker still
+    # publishing a fresh heartbeat keeps its claim, so its long task is never
+    # re-dispatched. No recovery UPDATE is issued at all.
+    monkeypatch.setattr(hb, "live_worker_keys", lambda *a, **k: {("livehost", 1234)})
+    monkeypatch.setattr(hb, "_pid_alive", lambda pid: False)
+    pg.next_rows = [("T1", "livehost:1234:abc")]
+    pg.next_rowcount = 1
     assert queue.reap_stale() == 0
+    assert not any("ANY(%s)" in sql for sql, _ in pg.executed)
+
+
+def test_reap_stale_spares_a_live_local_pid(queue, pg, monkeypatch):
+    # Even with no heartbeat file, a live process on this host holding the claim
+    # is not reaped — a missing telemetry file is not proof of death.
+    monkeypatch.setattr(hb, "live_worker_keys", lambda *a, **k: set())
+    owner = f"{socket.gethostname()}:{os.getpid()}:abc"
+    pg.next_rows = [("T1", owner)]
+    pg.next_rowcount = 1
+    assert queue.reap_stale() == 0
+    assert not any("ANY(%s)" in sql for sql, _ in pg.executed)
+
+
+def test_reap_stale_with_no_candidates_issues_no_update(queue, pg):
+    pg.next_rows = []
+    assert queue.reap_stale() == 0
+    assert all("ANY(%s)" not in sql for sql, _ in pg.executed)
+
+
+def test_parse_claim_owner_recovers_host_and_pid_or_none():
+    assert tq._parse_claim_owner("host-a:4242:deadbeef") == ("host-a", 4242)
+    assert tq._parse_claim_owner("") is None
+    assert tq._parse_claim_owner("garbage") is None
+    assert tq._parse_claim_owner("host:notapid:nonce") is None
 
 
 # ── stats ──────────────────────────────────────────────────────────────────

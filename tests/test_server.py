@@ -1204,8 +1204,8 @@ def test_fleet_health_counts_by_mapped_status_column(app_id, monkeypatch, tmp_pa
     # 3 pending with nothing draining them: queued is not the same as progressing.
     assert result["stranded"] is True
     assert result["workers"]["alive"] == 0
-    select_sql, params = fake.executed[-1]
-    assert select_sql == 'SELECT "status", COUNT(*) FROM tasks GROUP BY "status"'
+    issued = [s for s, _ in fake.executed]
+    assert 'SELECT "status", COUNT(*) FROM tasks GROUP BY "status"' in issued
 
 
 def test_fleet_health_not_stranded_when_a_worker_is_alive(app_id, monkeypatch, tmp_path):
@@ -1230,6 +1230,37 @@ def test_fleet_health_not_stranded_when_queue_is_empty(app_id, monkeypatch, tmp_
     result = server.fleet_health(app_id=app_id)
 
     assert result["stranded"] is False
+
+
+def test_fleet_health_reports_per_lane_stranding(app_id, monkeypatch, tmp_path):
+    # With a mapped lane column and pending work, fleet_health issues the per-lane
+    # pending query and reports stranded_lanes for any lane with no alive worker
+    # (Loki DD0114E5 §2.2). (_FakePg returns the same rows for every query, so the
+    # lane label is a test-double artifact; the clean per-lane semantics live in
+    # test_heartbeat's read_workers/_derive_problems tests.)
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))  # no live workers → nothing ready
+    fake = _FakePg(columns=_TASKS_COLUMNS, canned_rows=[("pending", 2)])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.fleet_health(app_id=app_id)
+
+    issued = [s for s, _ in fake.executed]
+    assert any("GROUP BY 1" in s and "= 'pending'" in s for s in issued), \
+        "the per-lane pending query must be issued"
+    assert result["pending_by_lane"]  # populated
+    assert result["stranded_lanes"], "a lane with pending work and no alive worker is stranded"
+
+
+def test_fleet_health_no_per_lane_query_when_queue_empty(app_id, monkeypatch, tmp_path):
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
+    fake = _FakePg(columns=_TASKS_COLUMNS, canned_rows=[("completed", 7)])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.fleet_health(app_id=app_id)
+
+    issued = [s for s, _ in fake.executed]
+    assert not any("GROUP BY 1" in s for s in issued)
+    assert result["stranded_lanes"] == []
 
 
 def test_fleet_health_table_not_found(app_id, monkeypatch):

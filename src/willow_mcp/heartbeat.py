@@ -131,11 +131,28 @@ def _classify(record: dict, now: float) -> tuple[str, float]:
     return "alive", age
 
 
+def _readiness_from_states(states: set) -> str:
+    """Collapse a set of worker states into a single readiness verdict.
+
+    Only a fresh, live tick (`alive`) is ready; `stale`/`dead`/absent are not.
+    """
+    if "alive" in states:
+        return "alive"
+    if "stale" in states:
+        return "stale"
+    if "dead" in states:
+        return "dead"
+    return "absent"
+
+
 def read_workers(root: Path | None = None) -> dict:
     """Report every worker that has published a heartbeat.
 
     States: `alive` (ticking), `stale` (file fresh enough to exist but its ticks
     stopped), `dead` (its pid is gone from this host). Only `alive` counts.
+
+    `by_lane` rolls the same verdict up per lane so an alive worker in one lane
+    never masks a stranded peer lane (Loki DD0114E5 §2.2).
     """
     root = Path(root) if root is not None else heartbeat_root()
     check: dict = {
@@ -166,17 +183,49 @@ def read_workers(root: Path | None = None) -> dict:
             })
         check["alive"] = sum(1 for w in check["workers"] if w["state"] == "alive")
         states = {worker["state"] for worker in check["workers"]}
-        if check["alive"]:
-            check["readiness"] = "alive"
-        elif "stale" in states:
-            check["readiness"] = "stale"
-        elif "dead" in states:
-            check["readiness"] = "dead"
+        check["readiness"] = _readiness_from_states(states)
+        by_lane: dict = {}
+        for worker in check["workers"]:
+            lane = worker.get("lane") or "unknown"
+            bucket = by_lane.setdefault(
+                lane, {"alive": 0, "stale": 0, "dead": 0, "readiness": "absent"}
+            )
+            if worker["state"] in bucket:
+                bucket[worker["state"]] += 1
+        for bucket in by_lane.values():
+            lane_states = {s for s in ("alive", "stale", "dead") if bucket[s]}
+            bucket["readiness"] = _readiness_from_states(lane_states)
+        check["by_lane"] = by_lane
         check["status"] = "ok"
     except Exception as e:
         check["status"] = "fail"
         check["error"] = str(e)[:160]
     return check
+
+
+def live_worker_keys(root: Path | None = None) -> set:
+    """`(host, pid)` of every worker whose heartbeat currently classifies `alive`.
+
+    The task queue's liveness-aware reap uses this to distinguish a slow-but-living
+    worker from a dead one. Best-effort: any read error yields an empty set, and
+    callers must keep their own same-host pid-liveness fallback for that case.
+    """
+    root = Path(root) if root is not None else heartbeat_root()
+    keys: set = set()
+    if not root.exists():
+        return keys
+    now = time.time()
+    for f in sorted(root.glob("*.json")):
+        try:
+            record = json.loads(f.read_text())
+        except Exception:
+            continue
+        if _classify(record, now)[0] != "alive":
+            continue
+        host, pid = record.get("host"), record.get("pid")
+        if isinstance(host, str) and isinstance(pid, int):
+            keys.add((host, pid))
+    return keys
 
 
 def reap(root: Path | None = None) -> int:

@@ -14,6 +14,7 @@ def config(tmp_path):
         willow_home=tmp_path / "home",
         store_root=tmp_path / "store",
         pg_db="willow_mcp_prod",
+        pg_user="willow_role",
         app_id="worker-host",
         heartbeat_root=tmp_path / "heartbeats",
     )
@@ -28,6 +29,7 @@ def test_clean_install_renders_standalone_worker_units(config, lane):
     assert "WILLOW_HOME=" in unit
     assert "WILLOW_STORE_ROOT=" in unit
     assert "WILLOW_PG_DB=willow_mcp_prod" in unit
+    assert "WILLOW_PG_USER=willow_role" in unit
     assert "WILLOW_APP_ID=worker-host" in unit
     assert "WILLOW_WORKER_LANE=" in unit
     assert "WILLOW_WORKER_HEARTBEAT_ROOT=" in unit
@@ -44,6 +46,25 @@ def test_install_writes_both_lanes_without_starting_services(
     assert result["enabled"] == []
     assert (tmp_path / ws.unit_name("fast")).is_file()
     assert (tmp_path / ws.unit_name("batch")).is_file()
+
+
+def test_default_config_carries_pg_user_from_env(monkeypatch):
+    monkeypatch.setenv("WILLOW_PG_USER", "willow_role")
+    assert ws.default_config().pg_user == "willow_role"
+
+
+def test_default_config_pg_user_falls_back_to_os_user(monkeypatch):
+    monkeypatch.delenv("WILLOW_PG_USER", raising=False)
+    monkeypatch.setenv("USER", "deploybot")
+    assert ws.default_config().pg_user == "deploybot"
+
+
+def test_default_config_pg_user_never_empty(monkeypatch):
+    # An empty Environment value would fail _safe at render; the unit must always
+    # name a concrete role.
+    monkeypatch.delenv("WILLOW_PG_USER", raising=False)
+    monkeypatch.delenv("USER", raising=False)
+    assert ws.default_config().pg_user == "willow"
 
 
 def test_repository_and_packaged_worker_templates_match():

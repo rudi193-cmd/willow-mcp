@@ -149,6 +149,38 @@ def test_reap_removes_only_dead_records(hb_root):
     assert not (hb_root / "dead.json").exists()
 
 
+# ── per-lane readiness (Loki DD0114E5 §2.2) ─────────────────────────────────
+
+def test_read_workers_reports_readiness_per_lane(hb_root):
+    _write(hb_root, "kart-fast.json", lane="fast")                       # live
+    _write(hb_root, "kart-batch.json", lane="batch", pid=999_999_998)    # dead
+    out = hb.read_workers()
+    assert out["by_lane"]["fast"]["readiness"] == "alive"
+    assert out["by_lane"]["batch"]["readiness"] == "dead"
+
+
+def test_alive_lane_does_not_mask_a_stranded_peer_lane(hb_root):
+    # The whole point of §2.2: a healthy batch worker must not make the fast
+    # lane read ready when the fast lane's own worker has stopped ticking.
+    _write(hb_root, "kart-batch.json", lane="batch")                       # live
+    _write(hb_root, "kart-fast.json", lane="fast", ts=time.time() - 120.0) # stale ticks
+    out = hb.read_workers()
+    assert out["by_lane"]["batch"]["readiness"] == "alive"
+    assert out["by_lane"]["fast"]["readiness"] == "stale"
+
+
+def test_live_worker_keys_returns_only_alive_host_pids(hb_root):
+    _write(hb_root, "kart-fast.json", lane="fast")                       # live
+    _write(hb_root, "kart-batch.json", lane="batch", pid=999_999_998)    # dead
+    keys = hb.live_worker_keys()
+    assert (hb.socket.gethostname(), os.getpid()) in keys
+    assert (hb.socket.gethostname(), 999_999_998) not in keys
+
+
+def test_live_worker_keys_empty_when_no_root(hb_root):
+    assert hb.live_worker_keys() == set()
+
+
 # ── diagnostic_summary rollup ────────────────────────────────────────────────
 
 def test_pending_with_no_worker_is_a_warn():
@@ -203,6 +235,20 @@ def test_live_worker_with_pending_is_not_a_problem():
     from willow_mcp import server
     worker = {"alive": 1, "pending": 9, "workers": [{"state": "alive", "pid": 1}]}
     assert server._derive_problems({}, {}, {}, "stdio", worker) == []
+
+
+def test_alive_worker_does_not_hide_a_stranded_lane():
+    from willow_mcp import server
+    # A live batch worker (alive=1) must not suppress the warning that the fast
+    # lane is stranded with pending work and no fast worker (Loki DD0114E5 §2.2).
+    worker = {"alive": 1, "pending": 2,
+              "workers": [{"state": "alive", "pid": 1, "lane": "batch"}],
+              "stranded_lanes": ["fast"], "pending_by_lane": {"fast": 2}}
+    problems = server._derive_problems({}, {}, {}, "stdio", worker)
+    worker_problems = [p for p in problems if p.get("check") == "worker"]
+    assert worker_problems, "a stranded fast lane must warn even with a live batch worker"
+    assert "fast" in worker_problems[0]["detail"]
+    assert worker_problems[0]["stranded_lanes"] == ["fast"]
 
 
 def test_stranded_queue_degrades_the_verdict():

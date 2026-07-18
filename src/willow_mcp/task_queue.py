@@ -45,6 +45,27 @@ _TASK_FIELDS = [
 ]
 
 
+def _parse_claim_owner(owner: str) -> tuple[str, int] | None:
+    """Recover ``(host, pid)`` from a ``host:pid:nonce`` claim owner.
+
+    Claim owners are minted as ``f"{hostname}:{pid}:{uuid4().hex[:12]}"``; the
+    nonce and pid are the last two ``:``-delimited fields, so hostnames that
+    themselves contain ``:`` still parse. Anything that does not match (a legacy
+    or externally-set owner) returns ``None`` and is treated as not-live, so it
+    is still recoverable once past the stale window.
+    """
+    if not owner:
+        return None
+    parts = owner.rsplit(":", 2)
+    if len(parts) != 3:
+        return None
+    host, pid_str, _nonce = parts
+    try:
+        return host, int(pid_str)
+    except ValueError:
+        return None
+
+
 def _require_kartikeya():
     try:
         import kartikeya  # noqa: F401
@@ -230,7 +251,52 @@ class WillowMcpTaskQueue:
         self._pg.commit()
 
     def reap_stale(self) -> int:
-        """Recover expired claims once, exhausting rows at max_attempts."""
+        """Recover claims held by *dead* workers, exhausting rows at max_attempts.
+
+        Liveness-aware (Loki DD0114E5 §2.1). A fixed age is not evidence a worker
+        died: kartikeya runs each task in a thread pool while the main loop keeps
+        ticking `on_heartbeat` every ~5s, so a worker draining a task for longer
+        than `stale_after_seconds` is still alive and still publishing liveness.
+        Reclaiming its row on age alone would re-dispatch live work and execute it
+        twice. So a candidate (running past the stale window) is reclaimed only
+        when its owning worker is gone — absent from the heartbeat's live set and,
+        for a same-host owner, holding no live pid. The `claimed_at` guard is
+        re-applied in the UPDATE so a claim renewed between the probe and the
+        write is never stolen.
+        """
+        from . import heartbeat
+
+        cur = self._pg.cursor()
+        cur.execute(
+            f'SELECT {self._q("task_id")}, {self._q("claim_owner")} FROM tasks '
+            f'WHERE {self._q("status")} = \'running\' '
+            f'AND {self._q("claimed_at")} < '
+            f"now() - (%s * INTERVAL '1 second')",
+            (self.stale_after_seconds,),
+        )
+        candidates = cur.fetchall()
+        cur.close()
+        if not candidates:
+            self._pg.commit()
+            return 0
+
+        alive_keys = heartbeat.live_worker_keys()
+        this_host = socket.gethostname()
+        dead_ids = []
+        for task_id, owner in candidates:
+            parsed = _parse_claim_owner(owner or "")
+            if parsed is not None:
+                host, pid = parsed
+                if (host, pid) in alive_keys:
+                    continue  # a fresh heartbeat proves this owner is alive
+                if host == this_host and heartbeat._pid_alive(pid):
+                    continue  # live local pid, even if its heartbeat file is gone
+            dead_ids.append(task_id)
+
+        if not dead_ids:
+            self._pg.commit()
+            return 0
+
         cur = self._pg.cursor()
         cur.execute(
             f'UPDATE tasks SET {self._q("status")} = CASE '
@@ -244,10 +310,11 @@ class WillowMcpTaskQueue:
             f'{self._q("retry_at")} = NULL, '
             f'{self._q("claim_owner")} = NULL, '
             f'{self._q("claimed_at")} = NULL '
-            f'WHERE {self._q("status")} = \'running\' '
+            f'WHERE {self._q("task_id")} = ANY(%s) '
+            f'AND {self._q("status")} = \'running\' '
             f'AND {self._q("claimed_at")} < '
             f"now() - (%s * INTERVAL '1 second')",
-            (self.stale_after_seconds,),
+            (dead_ids, self.stale_after_seconds),
         )
         changed = max(int(cur.rowcount), 0)
         cur.close()

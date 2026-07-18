@@ -23,6 +23,7 @@ class WorkerServiceConfig:
     willow_home: Path
     store_root: Path
     pg_db: str
+    pg_user: str
     app_id: str
     heartbeat_root: Path
 
@@ -36,6 +37,15 @@ def default_config() -> WorkerServiceConfig:
         willow_home=home.resolve(),
         store_root=store.resolve(),
         pg_db=os.environ.get("WILLOW_PG_DB", "willow"),
+        # Mirror db.py's connection user (WILLOW_PG_USER → $USER) so the managed
+        # unit connects as the same role the live server does. Fall back to a
+        # non-empty literal — an empty Environment value would fail _safe and
+        # leave the unit connecting as an unintended default role.
+        pg_user=(
+            os.environ.get("WILLOW_PG_USER")
+            or os.environ.get("USER")
+            or "willow"
+        ),
         app_id=os.environ.get("WILLOW_APP_ID", "willow-mcp"),
         heartbeat_root=Path(
             os.environ.get("WILLOW_WORKER_HEARTBEAT_ROOT", home / "worker_heartbeat")
@@ -85,6 +95,7 @@ def render_unit(
         "WILLOW_HOME": config.willow_home,
         "WILLOW_STORE_ROOT": config.store_root,
         "WILLOW_PG_DB": config.pg_db,
+        "WILLOW_PG_USER": config.pg_user,
         "APP_ID": config.app_id,
         "HEARTBEAT_ROOT": config.heartbeat_root,
     }

@@ -1931,6 +1931,32 @@ def fleet_health(app_id: str) -> dict:
     from .heartbeat import read_workers
     workers = read_workers()
     pending = counts.get("pending", 0)
+
+    # Per-lane strand detection (Loki DD0114E5 §2.2): pending work on a lane with
+    # no *alive* worker for that lane is stranded, even when another lane is
+    # healthy — a live batch worker must not hide a dead fast lane. Falls back to
+    # the aggregate signal if the tasks table exposes no mappable lane column.
+    lane_col = mapping["fields"].get("lane", {}).get("column")
+    stranded_lanes: list[str] = []
+    pending_by_lane: dict = {}
+    if lane_col and pending > 0:
+        try:
+            cur = pg.cursor()
+            cur.execute(
+                f'SELECT COALESCE("{lane_col}", \'fast\'), COUNT(*) FROM tasks '
+                f'WHERE "{status_col}" = \'pending\' GROUP BY 1'
+            )
+            pending_by_lane = {r[0]: r[1] for r in cur.fetchall()}
+            cur.close()
+        except Exception:
+            pending_by_lane = {}
+        by_lane = workers.get("by_lane", {})
+        stranded_lanes = [
+            lane
+            for lane, n in pending_by_lane.items()
+            if n > 0 and by_lane.get(lane, {}).get("readiness") != "alive"
+        ]
+
     return {
         "pending":   pending,
         "running":   counts.get("running", 0),
@@ -1939,6 +1965,8 @@ def fleet_health(app_id: str) -> dict:
         "total":     sum(counts.values()),
         "workers":   workers,
         "stranded":  pending > 0 and workers.get("alive", 0) == 0,
+        "pending_by_lane": pending_by_lane,
+        "stranded_lanes":  stranded_lanes,
     }
 
 
@@ -2284,6 +2312,8 @@ def _diag_worker(app_id: str) -> dict:
     from .heartbeat import read_workers
     check = read_workers()
     check["pending"] = None
+    check["pending_by_lane"] = {}
+    check["stranded_lanes"] = []
     try:
         pg = get_pg()
         if pg is not None:
@@ -2294,6 +2324,20 @@ def _diag_worker(app_id: str) -> dict:
                 cur.execute(f'SELECT COUNT(*) FROM tasks WHERE "{status_col}" = %s', ("pending",))
                 check["pending"] = cur.fetchone()[0]
                 cur.close()
+                lane_col = mapping.get("fields", {}).get("lane", {}).get("column")
+                if lane_col and check["pending"]:
+                    cur = pg.cursor()
+                    cur.execute(
+                        f'SELECT COALESCE("{lane_col}", \'fast\'), COUNT(*) FROM tasks '
+                        f'WHERE "{status_col}" = %s GROUP BY 1', ("pending",)
+                    )
+                    check["pending_by_lane"] = {r[0]: r[1] for r in cur.fetchall()}
+                    cur.close()
+                    by_lane = check.get("by_lane", {})
+                    check["stranded_lanes"] = [
+                        lane for lane, n in check["pending_by_lane"].items()
+                        if n > 0 and by_lane.get(lane, {}).get("readiness") != "alive"
+                    ]
     except Exception:
         pass  # unknown, not broken
     return check
@@ -2470,10 +2514,14 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
     if worker:
         pending = worker.get("pending")
         alive = worker.get("alive", 0)
+        stranded_lanes = worker.get("stranded_lanes") or []
         # No worker is only a defect when something is waiting on one. An install
         # that never submits tasks is complete without a worker; saying otherwise
-        # would make `degraded` the resting state for most installs.
-        if alive == 0 and isinstance(pending, int) and pending > 0:
+        # would make `degraded` the resting state for most installs. A per-lane
+        # strand still warns even when a *different* lane is alive (Loki §2.2): a
+        # live batch worker must not mask a dead fast lane.
+        aggregate_stranded = alive == 0 and isinstance(pending, int) and pending > 0
+        if aggregate_stranded or stranded_lanes:
             died = [w for w in worker.get("workers", []) if w.get("state") in ("stale", "dead")]
             readiness = worker.get("readiness") or (
                 "stale" if any(w.get("state") == "stale" for w in died)
@@ -2485,17 +2533,28 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                 "dead": "the worker process exited",
                 "stale": "the worker process exists but its heartbeat stalled",
             }.get(readiness, "no live worker is ready")
-            detail = (
-                f"{pending} task(s) stranded: {reason}; nothing will drain the queue"
-            )
+            if stranded_lanes:
+                pbl = worker.get("pending_by_lane", {})
+                lanes_desc = ", ".join(
+                    f"{lane} ({pbl.get(lane, '?')} pending)" for lane in sorted(stranded_lanes)
+                )
+                detail = (
+                    f"lane(s) stranded: {lanes_desc}; no alive worker on that lane to "
+                    f"drain it (other lanes may be healthy)"
+                )
+            else:
+                detail = (
+                    f"{pending} task(s) stranded: {reason}; nothing will drain the queue"
+                )
             if died:
                 detail += (f" (found {len(died)} heartbeat(s) from stopped worker(s): "
                            f"{', '.join(str(w.get('pid')) for w in died)})")
             problems.append({"severity": "warn", "check": "worker", "detail": detail,
                              "worker_readiness": readiness,
+                             "stranded_lanes": stranded_lanes,
                              "fix": "inspect `willow-mcp worker-service status`, then start "
-                                    "the installed worker unit (or use `willow-mcp worker "
-                                    "--lane fast --once` for a one-shot drain)"})
+                                    "the installed worker unit for the stranded lane (or use "
+                                    "`willow-mcp worker --lane <lane> --once` for a one-shot drain)"})
     if consent:
         if consent.get("status") == "fail":
             problems.append({
@@ -2893,6 +2952,7 @@ def _cmd_worker_service(args) -> None:
         willow_home=Path(args.willow_home).expanduser().resolve(),
         store_root=Path(args.store_root).expanduser().resolve(),
         pg_db=args.pg_db,
+        pg_user=args.pg_user,
         app_id=args.app_id,
         heartbeat_root=Path(args.heartbeat_root).expanduser().resolve(),
     )
@@ -3213,6 +3273,15 @@ def _main():
     )
     worker_service_p.add_argument(
         "--pg-db", default=os.environ.get("WILLOW_PG_DB", "willow")
+    )
+    worker_service_p.add_argument(
+        "--pg-user",
+        default=(
+            os.environ.get("WILLOW_PG_USER")
+            or os.environ.get("USER")
+            or "willow"
+        ),
+        help="Postgres role the worker connects as (mirrors the server's WILLOW_PG_USER)",
     )
     worker_service_p.add_argument(
         "--app-id", default=os.environ.get("WILLOW_APP_ID", "willow-mcp")
