@@ -1,154 +1,201 @@
 # Migration Gap Inventory — willow-2.0 → willow-mcp
 
-Status: **INVENTORY** (2026-07-18). This is a stock-take, not an implementation.
-It reconciles the forward-looking language in `docs/design/*` against the
-*current* state recorded in `docs/BUGS.md`, `CHANGELOG.md`, and the live tool
-surface, so the "what's left" list reflects reality rather than the intent
-captured when each design doc was written.
+Status: **INVENTORY** (2026-07-18, Draft 0.2 — verified against willow-2.0 source).
+A stock-take, not an implementation. Draft 0.2 replaces the earlier estimate-based
+version: willow-2.0 was cloned and its MCP surface diffed tool-by-tool against
+willow-mcp, then scored on **production-fitness** using willow-2.0's own
+`sap/mcp_profiles.py` tiers and its test coverage.
 
-> **Method & caveat.** willow-2.0 (`~/github/willow`, the fleet service) is **not
-> present in this sandbox** — this inventory could not diff against its source
-> tree. The delta below is derived from willow-mcp's own docs, bug ledger,
-> changelog, and the 69 registered MCP tools. Items that require reading
-> willow-2.0 to size accurately are marked **[needs 2.0 source]**.
+> **Two axes, not one.** "Get everything over" is the wrong frame. Most of
+> willow-2.0's surface was never load-bearing — willow-2.0 itself hides it behind
+> a `full`-only profile and ships it untested. So every gap is scored twice:
+> **(1) capability** — is it already here (renamed), a genuine gap, or a
+> deliberate non-goal? and **(2) production-fitness** — did it earn its place, or
+> is it spec-ware to leave behind? The migration target is the *intersection*:
+> genuine gaps that were actually used.
 
 ---
 
 ## 0. TL;DR
 
-The migration is **much further along than the design docs read.** The largest
-item several docs still describe as "not yet started" — the Kart task executor —
-**shipped** (B-22 closed): Kart was extracted as the published
-[`kartikeya`](https://pypi.org/project/kartikeya/) package, made a hard
-dependency (`kartikeya>=0.0.3,<0.1.0`), and `willow-mcp worker` now drains the
-queue. Several Kart design docs (`kart-productionization.md`,
-`kart-lift-spec.md`) are **stale** and should be marked superseded.
-
-What genuinely remains splits three ways:
-1. **Unbuilt willow-mcp features** — DAG/orchestration tools, role-envelope
-   enforcement, consent leases, canonical-identity modelling.
-2. **Deliberate non-goals** — fylgja hooks, persona picker, Grove daemons.
-   willow-mcp replaced these with "packet is boot" *by design*; they are **not**
-   migration targets.
-3. **Cross-repo blockers** — bugs whose fix lives in willow-2.0's writer code
-   (consent, envelope metering). willow-mcp already reads defensively around
-   them; full severance waits on the 2.0 side.
+- willow-mcp is **not** a renamed superset of willow-2.0. The README's claim that
+  "the tool API is identical" is **FALSE** and should be corrected — of
+  willow-2.0's **169** `@mcp.tool` surfaces (`sap/sap_mcp.py`), only **15 names
+  match exactly**. willow-mcp is a **re-scoped re-implementation** of the
+  SOIL/KB/dispatch core.
+- Counting renames, **~42 of 169** willow-2.0 capabilities already exist in
+  willow-mcp (`soil_*`→`store_*`, `ledger_*`→`frank_*`, `agent_task_*`→`task_*`,
+  `kb_get`→`kb_at`, `kb_search`/`kb_query`→`knowledge_search`, …).
+- That leaves **~108 genuine capability gaps** and **~19 deliberately-dropped**
+  fleet/fylgja tools. willow-mcp also adds **~58 product-only tools** willow-2.0
+  never had (gap backlog, lineage, friction watcher, HMAC gate-seam sessions,
+  integration adapters).
+- **The 108 gaps are mostly not worth porting as-is.** Only **61 of 169**
+  willow-2.0 tools have any test; **108 are untested**. willow-2.0's own profile
+  system marks whole families (`workflow_*`, `routine_*`, `dream_*`, `mem_jeles_*`,
+  `cmb_*`, `outcome_*`, `hook_*`, `tension_scan`, …) as `full`-only — i.e. never
+  in the standard surface. The realistic port shortlist is **single digits**
+  (see §6), not 108.
+- The prior draft's largest "deferred" item — the Kart executor — already
+  shipped as the `kartikeya` package (B-22 closed). Several Kart design docs are
+  stale (§8).
 
 ---
 
-## 1. Already ported (done — do not re-migrate)
+## 1. Verified numbers
 
-| Capability | willow-mcp home | Evidence |
+| Metric | Value | Source |
 |---|---|---|
-| **SOIL store** (SQLite k/v + FTS + soft-delete) | `db.py`, `store_*` (11 tools) | live |
-| **Postgres KB** (multi-keyword search graph) | `knowledge_*`, `kb_*` (7 tools) | live |
-| **Kart executor** (sandbox, worker, lanes) | `kartikeya` PyPI dep + `willow-mcp worker` | **B-22 Fixed** |
-| **Task queue** (Pg + SQLite) | `task_submit/status/list`, `WillowMcpTaskQueue` | live |
-| **Dispatch / handoff / session stack** | `dispatch_*`, `handoff_*`, `session_*` | S1–S5 **done** |
-| **Gap backlog** (propose→resolve→promote) | `gap_*` (6 tools), `gaps.py` | PR #54 shipped |
-| **FRANK ledger** (append/read/verify) | `frank_*` (3 tools) | live |
-| **Lineage / provenance** | `lineage_*` (4 tools) | live |
-| **Identity + Ed25519 signing** | `signing.py`, `identity_binding.py` | end-to-end proven |
-| **PGP verification** | `pgp.py` (ported from `willow-2.0/sap/core/gate.py`) | done |
-| **Egress lease machinery** | `willow-mcp grant-net`, `egress_authorization.py` | B-37 Fixed |
-| **Fail-closed consent reader** | `consent.py` | reads independently of 2.0 writer |
+| willow-2.0 `sap_mcp.py` tools | **169** | `@mcp.tool` count |
+| willow-mcp `server.py` tools | **73** | `@mcp.tool()` count (incl. Nest pipeline, PR #104) |
+| Exact-name overlap | **15** | `comm` of both name lists |
+| Already ported incl. renames (bucket A) | **~42** | §3, code-verified |
+| Genuine capability gaps (bucket B) | **~108** | §4 |
+| Deliberately dropped (bucket C) | **~19** | §5, cross-checked vs `session-lifecycle.md` §9 |
+| willow-mcp product-only tools | **~58** | §7 |
+| willow-2.0 tools with **any** test | **61 / 169** | grep of `tests/` per tool name |
+| willow-2.0 tools that are `full`-profile-only | large | `mcp_profiles.py` `_FULL_ONLY_*` |
 
-Tool surface: **69 registered MCP tools** vs. the "100+" attributed to
-willow-2.0 in `session-lifecycle.md` §9. The residual ~30 are mostly the
-deliberate non-goals in §3 plus the unbuilt features in §2 — not a flat backlog
-of missing plumbing.
+**willow-2.0's own tiers** (`sap/mcp_profiles.py`), used below as the
+production-fitness signal:
+
+- **minimal (~20)** — boot: `willow_*` facade, `fleet_status/health`, `kb_search`, `kart_task_run`.
+- **core (~55)** — daily: `soil_*`, `ledger_*`, `kb_*`, `grove_*`, `handoff_*`, `agent_task_*`, `infer_chat`, `skill_list/load`.
+- **standard (default)** — extended prefixes: `fork_*`, `code_graph_*`, `intake_*`, `mem_binder_*`, `policy_*`, `agent_dispatch/route/create`, `index_search/feedback`, `pg_edge_*`, `voice_*`.
+- **full-only (never standard)** — `workflow_*`, `routine_*`, `cmb_*`, `context_*`, `outcome_*`, `hook_*`, `routing_*`, `session_query`, `tension_scan`, `dream_*`, `kb_backup/promote/extract/intelligence`, `mem_jeles_*`, `fleet_blast/restart/reload/governance/base17/persona`.
 
 ---
 
-## 2. Remaining willow-mcp features to build
+## 2. Bucket A — already ported under a new name (do NOT re-migrate)
 
-These are willow-mcp's own roadmap — capabilities willow-2.0 has that the product
-still intends to own standalone.
+Code-verified equivalences (docstrings/tables match):
 
-| # | Gap | Status today | Source | Blocked on |
+| willow-2.0 | willow-mcp | Evidence |
+|---|---|---|
+| `soil_{get,search,search_all,list,stats,put,update,delete}` (8) | `store_{…}` | store runs on the SOIL store, `server.py:763,880`; identical docstrings |
+| `ledger_{write,read,verify}` (3) | `frank_{append,read,verify}` | shared `frank_ledger` table, `server.py:2438` |
+| `kb_search`, `kb_query` (2) | `knowledge_search` | same "AND search the Postgres KB" |
+| `kb_get` (1) | `kb_at` | "fetch a single atom by id" |
+| `journal_read`, `mem_check` (2) | `knowledge_search`(journal) / `kb_journal`; `knowledge_ingest` dedup gate | docstrings |
+| `agent_task_{submit,status,list}` (3) | `task_{submit,status,list}` | Kart `tasks` table, `server.py:443` |
+| `agent_dispatch` (1) | `dispatch_send` | dispatch packet files |
+| `handoff_write_v3`, `handoff_latest`, `boot_digest` (3) | `session_handoff_write` / `handoff_read` / `session_enter` | v3 claims record ≡ closeout |
+| `nest_file`, `nest_queue` (2) | `nest_promote` / `nest_status` (+ `nest_scan/digest`) | redesigned Nest family |
+| `fleet_agents`, `fleet_system_status` (2) | `fleet_status` / `specialist_list` / `diagnostic_summary` | roster + health |
+
+---
+
+## 3. Bucket B — genuine capability gaps, scored for production-fitness
+
+**Recommendation legend** (capability gap × production-fitness):
+- 🟢 **PORT** — genuine gap, was core/standard tier, self-contained.
+- 🟡 **EARN-FIRST** — real capability but `full`-only and/or untested in 2.0; port
+  only when a concrete willow-mcp consumer needs it (the "surface is earned" rule).
+- 🔴 **LEAVE** — heavy external deps or vestigial; don't bring into a clean product
+  without a strong reason.
+
+| Family (count) | 2.0 tier | Tested? | Rec | What it does |
 |---|---|---|---|---|
-| G-1 | **DAG orchestration** — `dag_next`, `dag_status`, `status_report`; SOIL-backed DAG | **not built** (0 tools) | `session-lifecycle.md` S6 / §11 | — (design exists) |
-| G-2 | **Role-envelope enforcement** — enforce persona allow/deny in `gate.py`/hook | metadata in `roles.py`; **no enforcement** | `session-lifecycle.md` S3 | operator ratifying the **permissions matrix** (`permissions-matrix.md`) |
-| G-3 | **Consent leases** — issue/check time-boxed consent leases | **not built** | `schema-adaptation.md` §6.3 | schema §§1–5 not yet ratified |
-| G-4 | **Canonical identity model** (§6.2) | **not built** | `schema-adaptation.md` §6.2/§9 | schema ratification |
-| G-5 | **Jeles corpus (local half)** | only the **remote** search adapter is wired; the stateful corpus stays in `willow-2.0/core/jeles_sources.py` | `integrations.py` `JelesAdapter` | product decision: keep remote, or lift corpus **[needs 2.0 source]** |
-| G-6 | **Grove / dreams subsystems** | **not present**; `Grove` MCP server requires separate auth | `product-layout.md` §5, `session-lifecycle.md` §9 | scope decision — see §3 |
-
-**Recommended order:** G-2 → G-1 first (both are pure willow-mcp work with
-designs in hand; G-2 unblocks the whole envelope story and only needs an
-operator decision). G-3/G-4 move together once the schema is ratified. G-5/G-6
-are scope calls, not plumbing.
-
----
-
-## 3. Deliberate non-goals (NOT migration targets)
-
-`session-lifecycle.md` §9 and §12 record these as intentional divergences.
-willow-mcp replaced the mechanism, it did not fail to port it. Listing them so
-"get everything over" does not accidentally sweep them back in:
-
-- **fylgja hooks** — `session_start.py`, persona picker, boot-done flags, Grove
-  daemons. willow-mcp uses **"packet is boot"** instead. Fleet-internal.
-- **Session-scoped named-agent daemons** — replaced by "any MCP client +
-  manifest `app_id`".
-- **Charter `ORIENT.md`** — stays in the charter repo; product must **not**
-  overwrite it (`product-layout.md` §6).
-- **`envelopes/pre-approved.json` as an authority grant** — willow-mcp uses
-  `persona_envelopes`/manifest with different semantics; do not import blindly.
-
-If the operator *does* want any of these lifted, that is a new scope decision,
-not a gap to close silently.
+| `willow_web_search`, `willow_web_fetch` (2) | core | partial | 🟢 **PORT** | **Only** open-web / guarded-fetch path; willow-mcp has none. Highest-value gap. |
+| `code_graph_*` (6) | standard | ✗ | 🟢 **PORT** | Python symbol graph — callers/callees, blast radius. Self-contained (repo path + SQLite). |
+| `fork_*` + `env_check` (8) | standard | ✗ | 🟢 **PORT** | Bounded work-units over existing store/KB; merge promotes atoms. Mostly bookkeeping. |
+| `human_attestation_*`, `human_required_queue_*` (5) | standard | ✗ | 🟢 **PORT** | Human-in-loop pause/attest queue. Pure DB state — pairs with the trust story. |
+| `skill_{put,load,list,mastery}` (4) | core/std | partial | 🟡 EARN-FIRST | Skill registry + Bayesian mastery. `list/load` are core; `mastery/put` full-ish. |
+| `cbm_*` (7) | full | ✗ | 🟡 EARN-FIRST | Codebase-memory CLI wrappers; pairs with `code_graph_*`, needs external CLI. |
+| `index_*`, `cmb_*` (8) | std/full | ✗ | 🟡 EARN-FIRST | Extra KB sub-stores (`opus.atoms`, `cmb_atoms`) mirroring store patterns. |
+| `intake_*` (4) | standard | partial | 🟡 EARN-FIRST | KB-tier routing layer — depends on jeles/binder/opus targets existing first. |
+| `workflow_*` (5) | **full** | partial | 🟡 EARN-FIRST | Multi-phase engine; rides the present Kart `task_*` queue, so tractable. |
+| `mem_binder_*`, `mem_ratify_*` (7) | std/full | ✗ | 🟡 EARN-FIRST | Ratification memory pipeline — new tables + lifecycle. |
+| `soil_add_edge/edges_for/audit`, `pg_edge_*` (5) | core/std | partial | 🟡 EARN-FIRST | SOIL graph edges + KB edge graph + audit reader — extends store willow-mcp already owns. |
+| `ledger_repair`, `handoff_search/rebuild`, `routing_log_read`, `session_query/review` (6) | std/full | ✗ | 🟡 EARN-FIRST | Maintenance/analytics readers over tables willow-mcp already writes. Cheap, low priority. |
+| `mem_jeles_*`, `source_trail_verify`, `tension_scan` (10) | **full** | ✗ | 🔴 LEAVE | Institutional-source librarian: 64 connectors + embeddings + `mistral:7b`. Heavy. (Jeles *remote* search already wired via `integration_call`.) |
+| `infer_{7b,chat,imagine,speak}` (4) | core/full | ✗ | 🔴 LEAVE | Local inference/TTS/image gen — Ollama/Groq/Novita wiring. Largest external surface. |
+| `outcome_*` (3), `routine_*` (3) | **full** | ✗ | 🔴 LEAVE | Anthropic Outcomes API + Claude Code Routines — external-credential-bound. |
+| `app_*` (4), `agent_create` (1), `voice_keyterms`, `fleet_blast`, `kb_backup/extract/intelligence` | std/full | ✗ | 🔴 LEAVE | SAFE-app lifecycle, agent provisioning, STT keyterms, blast-radius scan, KB ops — fleet-operational, not product-core. |
 
 ---
 
-## 4. Cross-repo blockers (fix lives in willow-2.0)
+## 4. Bucket C — deliberately dropped (NOT migration targets)
 
-These are open in `docs/BUGS.md` because the defective writer is willow-2.0 code.
-willow-mcp already reads fail-closed around each; full state/network **severance**
-is what waits on the 2.0 side.
+Documented as intentional divergences in `session-lifecycle.md` §9 and
+`product-layout.md` §9. willow-mcp replaced the mechanism by design.
 
-| Bug | What | Why it blocks "everything over" |
-|---|---|---|
-| **B-31** (P1) | `global_settings.py` consent writer **fails open** (`DEFAULT_CONSENT` all-`True`) | willow-mcp reads fail-closed independently, but a shared consent file is still written permissively by 2.0 |
-| **B-35** (P1) | Metered envelopes are **unmetered** — `envelope_citation` is never written anywhere in willow-2.0, so `max_count`/`EDQUOT` enforce nothing | verb 13 `envelope.apply` (licenses the orchestrator seat) is `enforced_by: null` |
-| **B-28** (P3) | `completed_at` stays null on **failed** tasks — shared fleet Postgres trigger only fires on `completed` | operator-gated `ALTER` on shared DB; willow-mcp's own `mark_done` is already correct |
-| **B-32/33/37/38** | egress / severance surface | mostly **mitigated** in willow-mcp (leases, closed sandbox lane); residual fixes are deployment-gated (`chown` + `WILLOW_MCP_STRICT_TRUST_ROOT=1`) or blocked on B-37 |
-| **B-36** (P2) | `gap_*` / `kb_startup_continuity` gate-denied to `app_id=willow`; the `gaps` collection nonetheless lives in the **fleet** store under `$WILLOW_HOME` | store/DB **severance** must land before this dissolves |
-
-**Severance is the real finish line.** B-36/B-38 both point at the same root:
-willow-mcp and willow-2.0 still share `$WILLOW_HOME` (store, consent, KB). "Get
-everything over" ultimately means willow-mcp owning its own state root so the
-fleet is a genuine *optional overlay*, not a shared substrate.
+- `dream_*`, `wce_*` — AutoDream synthesis + weekly witness rituals (§9 lists "dreams" as 2.0-only).
+- `hook_list`, `hook_log_read`, `loop_list` — fylgja hook registry + declarative loops ("packet is boot").
+- `fleet_reload/restart/identity_status/persona/base17/governance` — fleet-daemon ops (replaced by "any client + manifest `app_id`").
+- `policy_{list,put,delete}` — replaced by manifest envelopes (`envelope_apply` + `exposure_config_get`).
+- `kart_task_run`, `intake_schedule_fleet` — fleet-scoped Kart fallback + fleet-wide intake.
 
 ---
 
-## 5. Stale docs to reconcile (housekeeping)
+## 5. willow-mcp product-only innovations (no willow-2.0 equivalent)
 
-Not migration work, but these mislead anyone reading the gap:
-
-- `docs/design/kart-productionization.md` — "not yet started" → **superseded**; Kart shipped as `kartikeya` (B-22).
-- `docs/design/kart-lift-spec.md` — "stage 5 deferred" language predates the `kartikeya` extraction; mark stages 1–4 done.
-- Any `pip install willow-mcp[worker]` reference — the `[worker]` extra never existed (B-27); `kartikeya` is a hard dep.
+~58 tools, notably: `gap_*` (6, self-observed backlog), `lineage_*` (4, provenance
+graph), `friction_scan`/`friction_flags_list` (model-free failure watcher),
+`session_bind`/`session_reconcile` (HMAC gate-seam check-in/out), `integration_*`
+(3, external adapters behind the three-key egress gate), `exposure_*`/`envelope_apply`/
+`schema_confirm_mapping`, `receipts_tail`/`whoami` (self-audit), `verify_handoff`,
+`agent_clear`, `store_collections`/`store_stats`/`store_purge_collection`. These are
+the security/identity/provenance work that motivates willow-mcp as the successor.
 
 ---
 
-## 6. Suggested migration checklist
+## 6. Recommended port shortlist (the actual migration)
+
+Not "get everything over" — get the **used** gaps over:
 
 ```
-[ ] G-2  Ratify permissions matrix → enforce role envelopes in gate.py    (unblocks the envelope story)
-[ ] G-1  Build SOIL DAG + dag_next / dag_status / status_report           (S6; design exists)
-[ ] --   Ratify schema-adaptation §§1–5
-[ ]  └ G-3  Consent leases (issue/check)
-[ ]  └ G-4  Canonical identity (§6.2)
-[ ] SEV  Give willow-mcp its own $WILLOW_HOME state root                   (dissolves B-36, advances B-38)
-[ ] G-5  Decide: keep Jeles remote-only, or lift the corpus half          [needs 2.0 source]
-[ ] G-6  Decide: Grove/dreams in scope, or permanent non-goal
-[ ] DOC  Mark kart-productionization.md / kart-lift-spec.md superseded
-[ ] 2.0  Cross-repo: fix B-31 consent writer, B-35 envelope metering       (willow-2.0 side)
+🟢 PORT (genuine gap + was core/standard + self-contained)
+  [ ] willow_web_search / willow_web_fetch   the only open-web path; product has none
+  [ ] code_graph_*                            self-contained symbol graph
+  [ ] fork_* + env_check                      bounded work-units over existing store
+  [ ] human_attestation_* / human_required_*  human-in-loop trust queue
+
+🟡 EARN-FIRST (wire only when a willow-mcp consumer needs it)
+  [ ] workflow_*        rides existing Kart queue
+  [ ] intake_*          once jeles/binder/opus targets exist
+  [ ] skill_*, index_*, cbm_*, mem_binder_*, soil edges, maintenance readers
+
+🔴 LEAVE (don't port into a clean product without a strong reason)
+      mem_jeles_* / infer_* / outcome_* / routine_* / app_* / dreams / fleet ops
+
+── also, still willow-mcp's own roadmap (from Draft 0.1, unrelated to 2.0 tools) ──
+  [ ] G-2  role-envelope enforcement in gate.py   (blocked on permissions matrix)
+  [ ] G-1  SOIL DAG + dag_next/dag_status          (S6 design exists)
+  [ ] SEV  own $WILLOW_HOME state root             (dissolves B-36, advances B-38)
 ```
+
+Cross-repo blockers unchanged from Draft 0.1 (fixes live in willow-2.0): **B-31**
+(consent writer fails open), **B-35** (envelope metering never written), **B-28**
+(`completed_at` on failed tasks). See `docs/BUGS.md`.
 
 ---
 
-*Draft 0.1 — 2026-07-18. Reconciled against BUGS.md, CHANGELOG.md, and the live
-69-tool surface. Tool-count and Jeles/Grove items marked **[needs 2.0 source]**
-could not be diffed against willow-2.0 in this sandbox.*
+## 7. Housekeeping (not migration work, but misleading)
+
+- `README.md` — "run the full willow-2.0 server directly — the tool API is
+  identical" is **false**; only 15/169 names match. Reword to "willow-mcp
+  re-implements the SOIL/KB/dispatch core with a redesigned, smaller surface."
+- `docs/design/kart-productionization.md` — "not yet started" → **superseded** (Kart shipped as `kartikeya`, B-22).
+- `docs/design/kart-lift-spec.md` — "stage 5 deferred" predates the `kartikeya` extraction; mark stages 1–4 done.
+
+---
+
+## 8. Method & caveats
+
+- willow-2.0 cloned to `/workspace/willow-2.0` (shallow); diff is against
+  `sap/sap_mcp.py` (the canonical server). willow-2.0's **other** facades —
+  `grove_tools.py` (17), `grove/mcp_local.py` (17), `mai/tools.py` (10),
+  `openclaw_mcp.py` (5) — were **not** folded in; they are Grove/SAFE-app
+  subsystems, out of scope for the core diff.
+- Production-fitness = willow-2.0's own `mcp_profiles.py` tier + presence of a
+  test naming the tool. Test-naming is a proxy: a few willow-mcp-ported tools are
+  untested in 2.0 yet tested in the product, so "untested in 2.0" is directional,
+  not absolute.
+- Bucket A equivalences are code-verified (shared tables/docstrings), not
+  name-guessed.
+
+---
+
+*Draft 0.2 — 2026-07-18. Verified against willow-2.0 @ `06519c3`. Supersedes the
+estimate-based Draft 0.1.*
