@@ -34,6 +34,13 @@ def _validate_app_id(app_id: str) -> str:
     return app_id
 
 
+def valid_app_id(app_id: str) -> bool:
+    """True if `app_id` is well-formed (matches the id charset). Lets a caller
+    distinguish a malformed id from a merely-unmanifested one before building a
+    manifest path from it — an invalid id names no file."""
+    return bool(app_id) and bool(_APP_ID_RE.match(app_id))
+
+
 # Permission groups — named bundles that expand to sets of tool names.
 # An app manifest lists group names and/or literal tool names in "permissions".
 PERMISSION_GROUPS: dict[str, frozenset] = {

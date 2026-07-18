@@ -394,6 +394,18 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
     else:
         effective = app_id or _DEFAULT_APP_ID
 
+    # A malformed app_id names no manifest — say so, rather than building a
+    # (possibly traversal-looking) path string out of it and reporting a generic
+    # "not permitted". An invalid id is rejected on its shape, not on ACL.
+    from . import gate
+    if not gate.valid_app_id(effective):
+        return None, {
+            "error": (
+                f"invalid app_id: {effective!r} — an app_id must match "
+                r"[a-zA-Z0-9_-]{1,64} (no path separators or dots)."
+            )
+        }
+
     if not permitted(effective, tool_name):
         return None, {
             "error": (
@@ -520,6 +532,22 @@ _MAX_TAG_LEN = 128
 _PATH_TRAVERSAL_RE = re.compile(r"\.\.|[/\\]")
 
 
+def _strip_nulls(obj):
+    """Recursively remove NUL bytes from every string in a JSON-ish structure.
+
+    NUL has no legitimate place in stored text and truncates C-string consumers
+    downstream (and glitches some renderers), so strip it wherever it hides — not
+    only in the reserved top-level string keys below. Values only; a NUL in a key
+    is pathological and left alone rather than risk a key collision on removal."""
+    if isinstance(obj, str):
+        return obj.replace("\x00", "")
+    if isinstance(obj, dict):
+        return {k: _strip_nulls(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_strip_nulls(v) for v in obj]
+    return obj
+
+
 def _sanitize(kwargs: dict) -> tuple[dict, Optional[str]]:
     """Clean known-risky fields by name, regardless of which tool they belong to.
 
@@ -532,6 +560,8 @@ def _sanitize(kwargs: dict) -> tuple[dict, Optional[str]]:
             size = len(json.dumps(val))
             if size > _MAX_BLOB_BYTES:
                 return kwargs, f"'{key}' exceeds 512KB limit ({size} bytes)"
+            # Strip NULs from every nested string, not just the reserved keys.
+            kwargs[key] = _strip_nulls(val)
 
     for key in ("content", "task", "query", "question", "answer", "topic"):
         val = kwargs.get(key)

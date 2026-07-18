@@ -43,6 +43,26 @@ def test_sanitize_strips_null_bytes():
     assert cleaned["content"] == "helloworld"
 
 
+def test_sanitize_strips_null_bytes_in_arbitrary_record_fields():
+    # NUL must be stripped from ANY stored string, not just the reserved keys —
+    # a value nested in a record dict, a list item, or a deeper field.
+    cleaned, problem = server._sanitize({"record": {
+        "field": "before\x00after",
+        "nested": {"deep": "a\x00b"},
+        "list": ["x\x00y", {"k": "m\x00n"}],
+    }})
+    assert problem is None
+    assert cleaned["record"]["field"] == "beforeafter"
+    assert cleaned["record"]["nested"]["deep"] == "ab"
+    assert cleaned["record"]["list"] == ["xy", {"k": "mn"}]
+
+
+def test_sanitize_strips_nulls_in_context_and_value_and_body():
+    for key in ("context", "value", "body"):
+        cleaned, problem = server._sanitize({key: {"s": "p\x00q"}})
+        assert problem is None and cleaned[key]["s"] == "pq"
+
+
 def test_sanitize_rejects_oversized_record():
     big = {"blob": "x" * (600 * 1024)}
     cleaned, problem = server._sanitize({"record": big})
@@ -90,6 +110,20 @@ def test_check_rate_allows_burst_then_limits():
             ok_count += 1
     # burst capacity is 10 tokens; the 11th+ immediate call should be limited
     assert ok_count == 10
+
+
+# ── _gate: invalid app_id ──────────────────────────────────────────────────
+
+def test_gate_reports_invalid_app_id_not_a_fake_path():
+    # A malformed app_id is rejected on its shape, with a clear message — not a
+    # generic "not permitted" that splices the bad id into a manifest path.
+    eff, err = server._gate("bad/../app", "store_get")
+    assert eff is None
+    assert "invalid app_id" in err["error"]
+    assert "manifest exists at" not in err["error"]      # no fabricated path
+    # a well-formed but unmanifested id still gets the ordinary gate-denied path
+    eff2, err2 = server._gate("nosuchapp", "store_get")
+    assert eff2 is None and "not permitted" in err2["error"]
 
 
 # ── _guarded / tool pipeline (stdio mode) ──────────────────────────────────

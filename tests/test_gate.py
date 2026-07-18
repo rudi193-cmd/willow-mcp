@@ -61,6 +61,15 @@ def test_permitted_denies_invalid_app_id(apps_root):
     assert gate.permitted("", "store_get") is False
 
 
+def test_valid_app_id():
+    assert gate.valid_app_id("sandbox") is True
+    assert gate.valid_app_id("a_b-c123") is True
+    assert gate.valid_app_id("bad/../app") is False      # path separators
+    assert gate.valid_app_id("has.dots") is False
+    assert gate.valid_app_id("") is False
+    assert gate.valid_app_id("x" * 65) is False          # over 64 chars
+
+
 def test_permitted_full_access_group(apps_root):
     _write_manifest(apps_root, "admin", ["full_access"])
     for tool in ("store_put", "knowledge_ingest", "task_submit", "fleet_health"):
