@@ -199,15 +199,18 @@ real gain over today) but a captured token replays for any call for the session'
 lifetime, so it is acceptable *only* where the transport itself is the trust
 boundary.
 
-Practical shape:
+Practical shape (**SHIPPED** — client: `willow_mcp/signing.py`; server:
+`_read_call_credential` / `_current_call_credential` in `server.py`):
 - **The MCP client signs, not the LLM.** The harness wrapping the agent holds the
   per-agent secret and signs each call; the model never sees the secret and
   cannot fabricate or omit a signature. This is client-side signing middleware —
   a real integration cost, and the point: an un-instrumented client cannot call
-  gated tools.
-- **The credential rides out-of-band** (a transport/metadata field on the MCP
-  request), *not* as a tool parameter — tool schemas stay clean and the model
-  can't touch it. `_gate` reads it from the request context.
+  gated tools. `ClientSigner(agent_id, secret, session_id).meta_for(tool)` is that
+  middleware; `signed_call_tool(session, signer, name, args)` is the one-liner.
+- **The credential rides out-of-band** in the MCP request's `_meta` (key
+  `willow_call_credential`), *not* as a tool parameter — tool schemas stay clean and
+  the model can't touch it. `_gate` reads it from the request context
+  (`mcp...request_ctx` → `.meta.model_extra`), never from `arguments`.
 - `_gate` becomes: read `(session_id, call_nonce, sig)` → resolve to `(agent_id,
   trust)` → **require `agent_id == app_id`** → then today's `permitted()` + tier.
 - **Mode by deployment:** SIGNED is required for serve-mode / multi-agent. For a
@@ -373,17 +376,23 @@ that owns `$WILLOW_HOME`):
    (H1/H2/H3 + policy) and D1–D5 are all closed.**
 
 ### Residuals after the build (known, tracked)
-The mechanism is complete and fail-closed; two things remain before enforcement is
-*useful* rather than merely *safe*, plus one pre-existing gap the review surfaced:
-- **The per-call credential is not yet populated in production.** `_CALL_CREDENTIAL`
-  is a contextvar the enforcement gate reads, but nothing yet reads the MCP request's
-  out-of-band transport field to fill it — the client-side signing middleware (H1
-  "practical shape") is the remaining integration cost. Consequence: turning
-  `WILLOW_MCP_ENFORCE_BINDING` on today denies *every* call from a registered agent
-  (fail-closed — an un-instrumented client cannot reach a gated tool, exactly as
-  designed), so the allow-path is exercised only by tests until the signer ships.
-  Enforcement should stay off in production until then; observe-only (Phase 2) is the
-  usable mode now. This is the one integration seam to build next.
+The mechanism is complete and fail-closed. The client signer is now shipped, so
+enforcement runs end to end; what remains is one operator step and one pre-existing
+gap the review surfaced:
+- **The per-call credential is now wired (H1 "practical shape" — SHIPPED).** The
+  client rides `{session_id, call_nonce, sig}` in the MCP request's out-of-band
+  `_meta` (key `willow_call_credential`); the server reads it via
+  `server._read_call_credential()` from the request context and the gate consults it.
+  The client half is `willow_mcp/signing.py` — `build_checkin_header` / `ClientSigner`
+  / `signed_call_tool` — which a HARNESS embeds; the model never sees the secret.
+  Flow under enforcement: `session_bind` is the ONE bootstrap call (exempt from the
+  per-call credential — there is no session yet, and it authenticates via its own
+  header HMAC), it returns the `session_id`, and every subsequent call carries a
+  fresh per-call signature in `_meta`. The remaining operator step is real
+  provisioning: `register-agent`, install the printed secret into the harness's
+  signer config, then flip `WILLOW_MCP_ENFORCE_BINDING=1`. An un-instrumented client
+  still cannot reach a gated tool (that is the design), so keep enforcement off until
+  every registered agent's harness is signing; observe-only stays the safe default.
 - **A registered agent with an unreadable/short secret fails closed** (not open):
   `_enforce_binding_gate` pairs `agent_registry.load()` with `is_registered()` so a
   broken keystore denies rather than silently downgrading to manifest-only. An

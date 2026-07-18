@@ -74,12 +74,53 @@ _friction = FrictionWatcher(_store)
 import contextvars
 from . import agent_registry, tier_policy
 from .session_binder import SessionBinder, BindError
+from .signing import CREDENTIAL_META_KEY
 _binder = SessionBinder()
-# Per-call SIGNED credential (H1), if a signing client supplies one out-of-band.
-# A contextvar so it never rides a tool's argument list. Phase 2 OBSERVES it;
-# Phase 3 (when WILLOW_MCP_ENFORCE_BINDING is on) ENFORCES it for registered apps.
+# Per-call SIGNED credential (H1). It rides the MCP request's out-of-band `_meta`
+# (never a tool argument); _read_call_credential pulls it from the request context.
+# This contextvar is an explicit OVERRIDE seam — tests set it directly, and it wins
+# when set — but in production nothing sets it, so _current_call_credential falls
+# through to reading `_meta`. Phase 2 OBSERVES the credential; Phase 3 (when
+# WILLOW_MCP_ENFORCE_BINDING is on) ENFORCES it for registered apps.
 _CALL_CREDENTIAL: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar(
     "willow_call_credential", default=None)
+
+# Tools exempt from the per-call credential requirement. `session_bind` is the
+# check-in itself — there is no session to sign against yet, and it authenticates
+# via its own header HMAC — so requiring a per-call signature would be a
+# bootstrap deadlock. It is the ONLY exemption; everything after check-in signs.
+_BINDING_BOOTSTRAP_TOOLS = frozenset({"session_bind"})
+
+
+def _read_call_credential() -> Optional[dict]:
+    """Pull the per-call credential the signing client attached to the MCP
+    request's out-of-band `_meta` (key CREDENTIAL_META_KEY). Returns a normalized
+    {session_id, call_nonce, sig} dict, or None if absent/malformed. Never raises —
+    a missing request context or meta is simply "no credential"."""
+    try:
+        from mcp.server.lowlevel.server import request_ctx
+        rc = request_ctx.get(None)
+        if rc is None:
+            return None
+        meta = getattr(rc, "meta", None)
+        extra = getattr(meta, "model_extra", None) or {}
+        cred = extra.get(CREDENTIAL_META_KEY)
+        if isinstance(cred, dict) and all(k in cred for k in ("session_id", "call_nonce", "sig")):
+            return {"session_id": str(cred["session_id"]),
+                    "call_nonce": str(cred["call_nonce"]),
+                    "sig": str(cred["sig"])}
+    except Exception:
+        return None
+    return None
+
+
+def _current_call_credential() -> Optional[dict]:
+    """The per-call credential for this call: an explicitly-set contextvar (the
+    test override) if present, else whatever the request `_meta` carried."""
+    cred = _CALL_CREDENTIAL.get()
+    if cred is not None:
+        return cred
+    return _read_call_credential()
 
 
 def _enforce_binding() -> bool:
@@ -105,6 +146,11 @@ def _enforce_binding_gate(app_id: str, tool_name: str) -> Optional[dict]:
     this is a no-op — a plain local clone keeps working with manifest-only auth and
     no HMAC ceremony. If it *is* registered, the call must carry a valid signed
     credential whose bound tier is high enough for this tool, or it is denied."""
+    # The check-in call itself carries no per-call credential (there is no session
+    # yet) and authenticates via its own header HMAC — exempt it, or enforcement is
+    # a bootstrap deadlock. The only exemption.
+    if tool_name in _BINDING_BOOTSTRAP_TOOLS:
+        return None
     # Distinguish "not registered" (→ manifest-only, unchanged) from "registered
     # but its secret is unreadable/short" (→ load() is None but is_registered() is
     # True). The latter must FAIL CLOSED: waving it through would silently downgrade
@@ -117,7 +163,7 @@ def _enforce_binding_gate(app_id: str, tool_name: str) -> Optional[dict]:
                 f"unreadable or invalid — refusing (fail-closed). An operator must "
                 f"repair the keystore ($WILLOW_HOME/gate/secrets/).")}
         return None  # genuinely unregistered ⇒ manifest-only, unchanged
-    cred = _CALL_CREDENTIAL.get()
+    cred = _current_call_credential()
     if not cred:
         return {"error": (
             f"binding required: '{app_id}' is a registered agent, so this call must "
@@ -180,7 +226,7 @@ def _observe_binding(app_id: str, tool_name: str) -> None:
     if _enforce_binding():
         return
     try:
-        cred = _CALL_CREDENTIAL.get()
+        cred = _current_call_credential()
         if cred:
             r = _binder.verify_call(cred.get("session_id", ""), app_id, tool_name,
                                     cred.get("call_nonce", ""), cred.get("sig", ""))

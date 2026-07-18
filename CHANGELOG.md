@@ -38,6 +38,23 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   `register-agent`/`rotate-agent`/`revoke-agent` verbs; a `rotate-agent` CLI is added.
 
 ### Added
+- **Client-side signing shim** (`signing.py`, `_read_call_credential` /
+  `_current_call_credential` in `server.py`) — the H1 "practical shape" that makes
+  tier enforcement run END TO END. The agent's HARNESS (not the model) holds the
+  per-agent secret and signs each call; the signature rides the MCP request's
+  out-of-band `_meta` (key `willow_call_credential`), never a tool argument, so the
+  model can neither see the secret nor fabricate/omit a signature. `signing.py`
+  provides `build_checkin_header`, `build_call_credential`, `ClientSigner`, and the
+  `signed_call_tool(session, signer, name, args)` one-liner. Server-side,
+  `_read_call_credential` pulls `{session_id, call_nonce, sig}` from the request
+  context and `_current_call_credential` resolves it (an explicit contextvar wins
+  for tests; production reads `_meta`), feeding both the observe hook and the
+  enforcement gate. `session_bind` is the ONE bootstrap exemption — the check-in
+  carries no per-call credential (no session yet) and authenticates via its own
+  header HMAC, so requiring one would deadlock; everything after check-in signs.
+  With this, flipping `WILLOW_MCP_ENFORCE_BINDING=1` against a registered agent
+  whose harness signs now PASSES a live call (previously only tests could), while an
+  un-instrumented client still cannot reach a gated tool — the intended property.
 - **Graduated announcement volume** (`announce.py`, the `ReceiptLog.on_record`
   hook) — Phase 5 of the willow-gate integration
   (`docs/design/willow-gate-seam.md` §5): a policy *over* the receipt log, not a
