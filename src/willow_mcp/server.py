@@ -909,28 +909,70 @@ def friction_flags_list(app_id: str, limit: int = 20) -> list:
     return _friction.list_flags(limit=limit)
 
 
-# ── Identity binding (willow-gate seam, Phase 2 — observe-only) ──────────────────
+# ── Identity binding (willow-gate seam — check-in / check-out) ───────────────────
 
 @mcp.tool()
 @_guarded("session_bind")
 def session_bind(app_id: str, header: dict) -> dict:
-    """Open a cryptographically-bound session. Provide a 13-field HMAC-signed
-    `header` whose `agent_id` equals your app_id; the server verifies it against
-    your operator-registered secret and caps the claimed `trust_level` at your
-    registered ceiling ("Elder is not a text field anyone can type"). Returns
-    {session_id, agent_id, trust_level, tier}, or {error} on refusal.
+    """Open a cryptographically-bound session (check-in). Provide a 13-field
+    HMAC-signed `header` whose `agent_id` equals your app_id; the server verifies
+    it against your operator-registered secret and caps the claimed `trust_level`
+    at your registered ceiling ("Elder is not a text field anyone can type").
+    Returns {session_id, agent_id, trust_level, tier}, or {error} on refusal.
 
-    OBSERVE-ONLY today: once bound, the tier is LOGGED on your subsequent calls
-    (receipt outcome `bind_observed`) but does NOT yet change authorization — the
-    manifest ACL still governs (enforcement is Phase 3). Registration/rotation of
-    the secret is operator/CLI-only (`willow-mcp register-agent`); no MCP tool can
-    mint one — the sudo invariant."""
+    Once bound, the tier is LOGGED on your subsequent calls (receipt
+    `bind_observed`). With `WILLOW_MCP_ENFORCE_BINDING` on it is also ENFORCED —
+    each call must carry a valid per-call signature and clear the tier ceiling
+    (Phase 3). Registration/rotation of the secret is operator/CLI-only
+    (`willow-mcp register-agent`); no MCP tool can mint one — the sudo invariant."""
     if isinstance(header, dict) and header.get("agent_id") not in (None, app_id):
         return {"error": "agent_id_mismatch", "detail": "header agent_id must equal app_id"}
     try:
         return _binder.check_in(header)
     except BindError as e:
         return {"error": "bind_refused", "detail": str(e)}
+
+
+@mcp.tool()
+@_guarded("session_reconcile")
+def session_reconcile(app_id: str, session_id: str, exit_declaration: dict) -> dict:
+    """Close a bound session and reconcile what you DECLARE you did against what the
+    receipt log shows you actually did (check-out; willow-gate seam Phase 4 / H3).
+
+    `exit_declaration` is the reconciled subset of the entry header — `tools` (the
+    willow-gate CLASSES you exercised: read/write/execute/admin), plus your
+    self-scored `pass_count`/`fail_count`/`drift`/`state_hash`. The server sources
+    the ground truth from ReceiptLog (every gated call that actually ran since your
+    check-in — you cannot feed it), classifies those tools, and diffs:
+      * `claimed_not_done` — a class you claim you used that NO receipt backs;
+      * `beyond_entry` / `done_not_claimed` — a privileged class the receipts show
+        you used that you did not pre-declare / did not report.
+    `clean` is false if any privileged discrepancy is found; read-level over/under-
+    reporting is surfaced but never fails the session. The session is DROPPED after
+    this call (its per-call nonce set is freed), so verify_call for it then fails.
+
+    Requires a live session bound to your app_id (call session_bind first); returns
+    {error} if there is none. This RECONCILES and records — it never blocks a
+    handoff, so run session_handoff_write / handoff_write_v4 as usual alongside it."""
+    started = _binder.session_started_ts(session_id)
+    if started is None:
+        return {"error": "no_live_session",
+                "detail": "no live bound session for session_id — call session_bind first"}
+    # Ground truth: only calls that actually ran (outcome 'ok'), scoped to this
+    # app_id and this session's window. The agent cannot supply this list.
+    rows = _receipt_log.since(app_id, started, outcome="ok")
+    actual_tools = [r["tool"] for r in rows]
+    try:
+        report = _binder.check_out(session_id, exit_declaration, actual_tools)
+    except BindError as e:
+        return {"error": "reconcile_refused", "detail": str(e)}
+    _receipt_log.record(
+        app_id, "session_reconcile",
+        "reconciled" if report["clean"] else "reconcile_discrepancy",
+        None if report["clean"] else
+        f"claimed_not_done={report['claimed_not_done']} "
+        f"beyond_entry={report['beyond_entry']} done_not_claimed={report['done_not_claimed']}")
+    return report
 
 
 # ── Knowledge tools ────────────────────────────────────────────────────────────

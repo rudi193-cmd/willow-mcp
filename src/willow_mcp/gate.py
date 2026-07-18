@@ -134,7 +134,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     # the HMAC signature, not this ACL; the group just lets a manifest opt an app
     # into calling check-in. Registration stays operator/CLI-only.
     "binding": frozenset({
-        "session_bind",
+        "session_bind", "session_reconcile",
     }),
     "integration_read": frozenset({
         "integration_list", "integration_status",
@@ -196,8 +196,8 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "lineage_why", "lineage_list", "lineage_record", "lineage_link",
         # Friction floor (relationship smoke detector)
         "friction_scan", "friction_flags_list",
-        # Identity binding (observe-only check-in; registration is CLI-only)
-        "session_bind",
+        # Identity binding (check-in / check-out; registration is CLI-only)
+        "session_bind", "session_reconcile",
         # Integrations (read-only ledger; integration_call stays own-line)
         "integration_list", "integration_status",
     }),

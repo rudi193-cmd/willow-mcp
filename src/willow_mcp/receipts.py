@@ -55,6 +55,30 @@ class ReceiptLog:
             )
             self._conn.commit()
 
+    def since(self, app_id: str, ts_iso: str, outcome: Optional[str] = None,
+              limit: int = 2000) -> list[dict]:
+        """This app_id's receipts at or after `ts_iso`, oldest first.
+
+        The session-reconciliation feed (willow-gate seam H3): `tools_used` must
+        come from the receipt log, or a declare-vs-did diff silently passes on
+        out-of-band use. ISO-8601 UTC timestamps sort lexicographically in
+        chronological order, so a string `ts >= ?` bound is a correct time window.
+        Optionally narrow to a single `outcome` (e.g. only calls that actually
+        ran). Scoped to one app_id, like tail() — never another identity's calls.
+        """
+        limit = max(1, min(int(limit), 10000))
+        q = ("SELECT ts, tool, outcome, detail FROM receipts "
+             "WHERE app_id = ? AND ts >= ?")
+        params: list = [app_id, ts_iso]
+        if outcome is not None:
+            q += " AND outcome = ?"
+            params.append(outcome)
+        q += " ORDER BY id ASC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(q, tuple(params)).fetchall()
+        return [{"ts": r[0], "tool": r[1], "outcome": r[2], "detail": r[3]} for r in rows]
+
     def tail(self, app_id: str, limit: int = 20) -> list[dict]:
         """Return this app_id's own most-recent receipts, newest first.
 

@@ -56,7 +56,7 @@ TOOL_CLASS: dict[str, str] = {
     "receipts_tail": READ,
     "lineage_why": READ, "lineage_list": READ,
     "friction_flags_list": READ,
-    "session_bind": READ,
+    "session_bind": READ, "session_reconcile": READ,
     "context_get": READ, "context_list": READ,
     # ── write ───────────────────────────────────────────────────────────────
     "store_put": WRITE, "store_update": WRITE, "store_delete": WRITE,

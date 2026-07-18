@@ -10,6 +10,24 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Session reconciliation** (`session_binder.reconcile` / `check_out`,
+  `ReceiptLog.since`, the `session_reconcile` tool) — Phase 4 of the willow-gate
+  integration (`docs/design/willow-gate-seam.md`, hole H3): a check-out
+  declare-vs-did diff. At check-out an agent declares the tool CLASSES it
+  exercised (`{tools, pass_count, fail_count, drift, state_hash}` — the reconciled
+  subset of the 13-field entry header, D4); the server diffs that against the
+  ground truth it **cannot feed** — `ReceiptLog.since(app_id, started_ts,
+  outcome="ok")`, every gated call that actually ran since check-in, scoped to the
+  session window by a SERVER-stamped start time (never the agent-supplied one) and
+  classified via `tier_policy`. The verdict flags a false write/execute/admin
+  claim (`claimed_not_done` — the H3 catch: a claim no receipt backs, i.e. a lie
+  or out-of-band use) and privileged activity not declared at entry/exit
+  (`beyond_entry` / `done_not_claimed`); read is ambient, so read-level over/under-
+  reporting is surfaced but never fails a session. Reconciling **records but never
+  blocks** (`reconciled` / `reconcile_discrepancy` receipt) — it runs alongside
+  `session_handoff_write`, not in front of it — and drops the session, freeing its
+  per-call nonce set (the H1 residual bound). `pass_count`/`fail_count`/`drift`/
+  `state_hash` are echoed, never judged (no independent ground truth).
 - **Tier-ceiling enforcement** (`tier_policy.py`, `_enforce_binding_gate` in
   `server.py`) — Phase 3 of the willow-gate integration
   (`docs/design/willow-gate-seam.md`, hole H2): the observed identity binding

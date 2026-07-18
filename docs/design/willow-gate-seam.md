@@ -323,8 +323,9 @@ that owns `$WILLOW_HOME`):
 - **D3 — stdio default:** **settled — see "D3" above.** Both: an explicit env
   switch (`WILLOW_MCP_ENFORCE_BINDING`) *and* per-agent registration, so an
   operator can register + observe before the switch can deny anything.
-- **D4 — 13-field declaration schema:** what willow-mcp agents declare at
-  `session_enter` so `check_out` reconciliation has something to diff.
+- **D4 — declaration schema:** **settled — see "D4" above.** Entry = the 13-field
+  check-in header; the reconciled subset is `{tools, pass_count, fail_count, drift,
+  state_hash}`, of which only `tools` has receipt-log ground truth.
 - **D5 — vendoring:** willow-gate as a pip dependency (`python-gnupg` pulls in)
   vs. vendored subset; whether the base takes on the PGP dep at all or gates it
   behind `require_pgp=False`-style dev mode.
@@ -345,11 +346,32 @@ that owns `$WILLOW_HOME`):
    ceiling is applied *after* `permitted()` — manifest ∩ tier, fail-closed — and
    the single-use nonce is consumed exactly once (enforcement verifies; the
    observe hook steps aside when enforcing).
-4. **Session reconciliation** — `check_out` declare-vs-did on top of
-   `session_handoff_write`, with `tools_used` fed from `ReceiptLog` (**H3**);
-   needs D4. *(next)*
+4. **Session reconciliation** — `check_out` declare-vs-did, with `tools_used` fed
+   from `ReceiptLog` (**H3**). **SHIPPED** (`session_binder.reconcile` /
+   `check_out`, `ReceiptLog.since`, the `session_reconcile` tool). Runs alongside
+   `session_handoff_write`, never blocking it: it RECONCILES and records (receipt
+   `reconciled` / `reconcile_discrepancy`), it does not gate the handoff. See D4.
 5. **Announcement/ledger policy** — graduated loudness + optional encrypted
-   channel over `ReceiptLog`.
+   channel over `ReceiptLog`. *(next)*
+
+### D4 — the declaration schema (settled by Phase 4)
+The 13-field check-in header is the ENTRY declaration (already implemented, H1).
+Only a subset is reconciled — the *did-diff* has no independent ground truth for
+identity/crypto fields, so the reconciled set is `session_binder.RECONCILED_FIELDS`
+= `{tools, pass_count, fail_count, drift, state_hash}`:
+- **`tools`** is the willow-gate CLASS list (read/write/execute/admin), diffed
+  against the receipt log. Ground truth is `ReceiptLog.since(app_id, started_ts,
+  outcome="ok")` — only calls that actually ran, scoped to the session window by a
+  SERVER-stamped start time (never the agent-supplied `timestamp`), classified via
+  `tier_policy`. The agent cannot feed this list (H3).
+- **`pass_count` / `fail_count` / `drift` / `state_hash`** are the agent's
+  self-scored task metrics — willow-mcp has no independent ground truth, so they
+  are *echoed* in the report, never judged.
+Verdict `clean` is false only on a **privileged** discrepancy (a false
+write/execute/admin claim, or privileged use not declared at entry/exit); read is
+ambient (session_enter, self-reads), so read-level over/under-reporting is
+surfaced but never fails a session. The session is dropped at check-out, freeing
+its per-call used-nonce set (the H1 residual bound).
 
 ### D3 — the opt-in trigger (settled by Phase 3)
 Two locks, not one, because turning enforcement on before a registered agent's

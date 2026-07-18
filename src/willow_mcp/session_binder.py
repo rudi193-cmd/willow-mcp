@@ -23,9 +23,10 @@ import hashlib
 import hmac
 import json
 import os
+from datetime import datetime, timezone
 from typing import Optional
 
-from . import agent_registry, paths
+from . import agent_registry, paths, tier_policy
 
 # (name, read_only) — the ladder for logging; D1 maps tiers→groups at enforcement.
 TRUST_LEVELS = {
@@ -38,6 +39,61 @@ REQUIRED_FIELDS = {
     "reserved",
 }
 _SIGNED_FIELDS = sorted(REQUIRED_FIELDS - {"signature"})
+
+# D4 — the reconciled subset of the 13-field declaration. The entry header
+# already carries all 13 (identity + crypto + these); at check-out the agent
+# re-declares just this subset — "what I did" — to diff against the receipt log.
+# The other entry fields (agent_name, nonce, signature, timestamp, trust_level,
+# reserved, last_gate) are identity/crypto, not part of the declare-vs-did diff.
+RECONCILED_FIELDS = ("tools", "pass_count", "fail_count", "drift", "state_hash")
+_PRIVILEGED_CLASSES = frozenset({tier_policy.WRITE, tier_policy.EXECUTE, tier_policy.ADMIN})
+
+
+def reconcile(entry_declared: dict, exit_declared: dict, actual_tools: list) -> dict:
+    """Pure declare-vs-did diff (willow-gate seam H3). No session, no I/O — just
+    the three inputs and the verdict, so it is trivially testable.
+
+    * `entry_declared` — the tool CLASSES the agent named at check-in (its plan).
+    * `exit_declared`  — what the agent claims it did at check-out (RECONCILED_FIELDS).
+    * `actual_tools`   — the tool NAMES the receipt log shows actually ran; the
+                         ground truth. Classified to willow-gate classes here.
+
+    Verdict `clean` is driven by the two integrity signals, at privileged classes
+    only (read is universal enough that a coarse over/under-report of it is noise):
+      * claimed_not_done — a class the agent SAYS it exercised that NO receipt
+        backs (the H3 catch: a false claim, or use through a path that bypassed
+        the gate and left no receipt);
+      * beyond_entry / done_not_claimed — a privileged class the receipts show it
+        used that it did NOT pre-declare at entry / did NOT report at exit (scope
+        creep, or hidden activity).
+    Read-class over/under-reporting is surfaced but never makes a session unclean.
+    """
+    exit_classes = {c for c in (exit_declared.get("tools") or []) if isinstance(c, str)}
+    entry_classes = {c for c in (entry_declared.get("tools") or []) if isinstance(c, str)}
+    actual_classes = {c for t in actual_tools if (c := tier_policy.classify(t)) is not None}
+
+    claimed_not_done = exit_classes - actual_classes
+    done_not_claimed = actual_classes - exit_classes
+    beyond_entry = actual_classes - entry_classes
+
+    # Only a PRIVILEGED discrepancy (in any direction) makes a session unclean:
+    # a false execute claim / an unreported write is an integrity signal; over- or
+    # under-reporting read is noise (session_enter, whoami-style reads are ambient).
+    clean = not ((claimed_not_done | done_not_claimed | beyond_entry) & _PRIVILEGED_CLASSES)
+    return {
+        "clean": clean,
+        "entry_declared_classes": sorted(entry_classes),
+        "exit_declared_classes": sorted(exit_classes),
+        "actual_classes": sorted(actual_classes),
+        "actual_tools": sorted(set(actual_tools)),
+        "claimed_not_done": sorted(claimed_not_done),
+        "done_not_claimed": sorted(done_not_claimed),
+        "beyond_entry": sorted(beyond_entry),
+        # Echoed, never reconciled: willow-mcp has no independent ground truth for
+        # the agent's self-scored task metrics, so they are recorded, not judged.
+        "self_report": {k: exit_declared.get(k) for k in
+                        ("pass_count", "fail_count", "drift", "state_hash")},
+    }
 
 
 class BindError(Exception):
@@ -112,7 +168,12 @@ class SessionBinder:
 
         name, read_only = TRUST_LEVELS[int(trust)]
         session = {"session_id": nonce, "agent_id": agent_id, "trust_level": int(trust),
-                   "tier": name, "read_only": read_only, "used_call_nonces": set()}
+                   "tier": name, "read_only": read_only, "used_call_nonces": set(),
+                   # Retained for check-out reconciliation (Phase 4): the entry
+                   # declaration (the plan) and a trustworthy SERVER start time to
+                   # window the receipt-log feed — never the agent-supplied timestamp.
+                   "started_ts": datetime.now(timezone.utc).isoformat(),
+                   "entry_declared": {k: header.get(k) for k in RECONCILED_FIELDS}}
         self._sessions[nonce] = session
         return {k: session[k] for k in ("session_id", "agent_id", "trust_level", "tier", "read_only")}
 
@@ -146,3 +207,33 @@ class SessionBinder:
             if s["agent_id"] == app_id:
                 return s
         return None
+
+    # ── check-out reconciliation (declare-vs-did; H3) ──────────────────────────
+    def session_started_ts(self, session_id: str) -> Optional[str]:
+        """The server-stamped start time of a live session, to window the receipt
+        feed. None if there is no live session for this id."""
+        sess = self._sessions.get(session_id or "")
+        return sess["started_ts"] if sess else None
+
+    def check_out(self, session_id: str, exit_declaration: dict,
+                  actual_tools: list) -> dict:
+        """Close a bound session and reconcile the agent's exit declaration against
+        the tools the receipt log shows actually ran (`actual_tools`, supplied by
+        the server from ReceiptLog.since — H3). Raises BindError on a bad
+        session/declaration (fail-closed); otherwise returns the reconcile() report
+        and DROPS the session (freeing its used-nonce set — the H1 residual note).
+        """
+        sess = self._sessions.get(session_id or "")
+        if sess is None:
+            raise BindError("no live session for session_id")
+        if not isinstance(exit_declaration, dict):
+            raise BindError("exit_declaration must be an object")
+        tools = exit_declaration.get("tools")
+        if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
+            raise BindError("exit_declaration.tools must be a list of class strings")
+        report = reconcile(sess["entry_declared"], exit_declaration, list(actual_tools or []))
+        report["session_id"] = session_id
+        report["agent_id"] = sess["agent_id"]
+        report["tier"] = sess["tier"]
+        del self._sessions[session_id]
+        return report
