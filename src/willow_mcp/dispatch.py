@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -21,6 +24,7 @@ from .seed_loader import seed_context
 from .roles import VALID_STATUSES
 
 _AGENT_DOC = "docs/AGENTS.md"
+_PROJECT_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 
 def _utc_now() -> str:
@@ -39,6 +43,34 @@ def _read_json(path: Path) -> dict | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
+
+
+def project_context(project: str = "", workspace: str = "") -> dict:
+    root_value = (
+        workspace
+        or os.environ.get("WILLOW_PROJECT_ROOT", "")
+    ).strip()
+    root = Path(root_value).expanduser().resolve() if root_value else None
+    name = (project or os.environ.get("WILLOW_HANDOFF_PROJECT", "")).strip()
+    derived = False
+    if not name and root:
+        # Collision-safe derivation (Loki C303AA2F §3.5): the bare basename
+        # collides — /a/charter and /b/charter would share one project state.
+        # Disambiguate a human-readable prefix with a short digest of the
+        # *canonical* (resolved) path so distinct workspaces never merge. An
+        # explicit project id always wins over this and is used verbatim.
+        digest = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:8]
+        prefix = re.sub(r"[^A-Za-z0-9_.-]", "-", root.name).strip("-") or "project"
+        name = f"{prefix}-{digest}"
+        derived = True
+    if name and not _PROJECT_RE.fullmatch(name):
+        return {"error": "invalid_project", "project": name}
+    return {
+        "name": name or None,
+        "root": str(root) if root else None,
+        "workspace": str(root) if root else (workspace or None),
+        "derived_from_workspace": derived,
+    }
 
 
 def dispatch_send(
@@ -239,11 +271,17 @@ def session_enter(
     app_id: str,
     session_id: str,
     dispatch_id: str = "",
+    project: str = "",
+    workspace: str = "",
 ) -> dict:
     """Resolve session entry mode: human prompt vs dispatch id path.
 
     Orchestrator (willow) is human-only — never dispatch entry. See human-orchestrator.md.
     """
+    project_info = project_context(project, workspace)
+    if project_info.get("error"):
+        return project_info
+
     # ── Orchestrator seat: human operator only; no agent, no packet boot ──
     if is_orchestrator_app(app_id):
         did = (dispatch_id or "").strip().upper()
@@ -267,6 +305,7 @@ def session_enter(
             "agent_doc": _AGENT_DOC,
             "agent_doc_section": "orchestrator",
             "closeout_tools": ["session_handoff_write"],
+            "project": project_info,
             "message": (
                 "Human orchestrator entry. Desk: dispatch_list. "
                 "Assign with dispatch_send (human host only). "
@@ -298,6 +337,7 @@ def session_enter(
             "agent_doc": _AGENT_DOC,
             "agent_doc_section": "specialist",
             "closeout_tools": ["context_save", "session_handoff_write"],
+            "project": project_info,
             "message": "Human entry — no dispatch_id. Use human-facing agent and output.",
             **persona_context(app_id),
             **seed_context(app_id),
@@ -332,6 +372,7 @@ def session_enter(
         "assignment": pkt.get("assignment", ""),
         "summary": pkt.get("meta", {}).get("summary", ""),
         "closeout_tools": ["handoff_write_v4"],
+        "project": project_info,
         "status": pkt.get("status", {}).get("status"),
         **persona_context(app_id),
         **seed_context(app_id),
@@ -346,10 +387,18 @@ def session_handoff_write(
     summary: str = "",
     findings: Optional[list[dict]] = None,
     next_bite: str = "",
+    project: str = "",
+    workspace: str = "",
 ) -> dict:
-    """Human-entry closeout — no dispatch_id required."""
+    """Project-scoped v3 human-entry closeout — no dispatch_id required."""
+    project_info = project_context(project, workspace)
+    if project_info.get("error"):
+        return project_info
     sessions_dir().mkdir(parents=True, exist_ok=True)
     handoffs = handoffs_dir(app_id)
+    project_name = project_info.get("name")
+    if project_name:
+        handoffs = handoffs / project_name
     handoffs.mkdir(parents=True, exist_ok=True)
     stamp = _utc_now()[:10]
     hid = new_dispatch_id()[:8].lower()
@@ -357,8 +406,11 @@ def session_handoff_write(
     lines = [
         f"# Session handoff — {app_id}",
         "",
+        "**Format:** session_handoff_v3",
         f"**Entry mode:** human",
         f"**Session:** {session_id}",
+        f"**Project:** {project_name or ''}",
+        f"**Workspace:** {project_info.get('workspace') or ''}",
         f"**Written:** {_utc_now()}",
         "",
         "## Summary",
@@ -382,9 +434,28 @@ def session_handoff_write(
     session_bind(app_id, session_id, "", "idle")
     return {
         "entry_mode": "human",
+        "format": "session_handoff_v3",
+        "project": project_info,
         "handoff_path": str(path),
         "continuity_key": f"handoff/{stamp}-{hid}",
     }
+
+
+def latest_project_handoff(app_id: str, project: str) -> dict | None:
+    if not project or not _PROJECT_RE.fullmatch(project):
+        return None
+    root = handoffs_dir(app_id) / project
+    if not root.is_dir():
+        return None
+    paths = sorted(
+        root.glob("session_handoff-*.md"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not paths:
+        return None
+    path = paths[0]
+    return {"path": str(path), "content": path.read_text(encoding="utf-8")}
 
 
 def agent_clear(target_app: str, dispatch_id: str, session_id: str = "") -> dict:

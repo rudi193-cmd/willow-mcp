@@ -299,6 +299,64 @@ def egress_secret_exempt(app_id: str, tool_name: str) -> bool:
     return tool_name in exempt
 
 
+_PHYSICAL_COLLECTION_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_LOGICAL_COLLECTION_RE = re.compile(
+    r"^[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)+$"
+)
+
+
+def collection_aliases(app_id: str) -> dict[str, str]:
+    """Return validated explicit logical→physical aliases from the manifest."""
+    try:
+        manifest = _load_manifest(_validate_app_id(app_id))
+    except ValueError:
+        return {}
+    raw = (manifest or {}).get("collection_aliases") or {}
+    if not isinstance(raw, dict):
+        return {}
+    raw_targets = {
+        value for value in raw.values() if isinstance(value, str)
+    }
+    aliases: dict[str, str] = {}
+    for logical, physical in raw.items():
+        if (
+            not isinstance(logical, str)
+            or not isinstance(physical, str)
+            or (
+                "/" in logical
+                and not _LOGICAL_COLLECTION_RE.fullmatch(logical)
+            )
+            or (
+                "/" not in logical
+                and not _PHYSICAL_COLLECTION_RE.fullmatch(logical)
+            )
+            or not _PHYSICAL_COLLECTION_RE.fullmatch(physical)
+        ):
+            continue
+        if logical in raw_targets and logical != physical:
+            logger.error(
+                "gate: collection alias %r collides with a canonical target",
+                logical,
+            )
+            return {}
+        aliases[logical] = physical
+    return aliases
+
+
+def resolve_collection_alias(
+    app_id: str, collection: str
+) -> tuple[str | None, str | None]:
+    """Resolve only declared aliases; never turn arbitrary slashes into names."""
+    aliases = collection_aliases(app_id)
+    if collection in aliases:
+        return aliases[collection], None
+    if collection in aliases.values():
+        return collection, None
+    if "/" in collection:
+        return None, f"unknown collection alias: {collection!r}"
+    return collection, None
+
+
 def permitted(app_id: str, tool_name: str) -> bool:
     """
     Return True if app_id is authorized and its manifest permits tool_name.

@@ -2,6 +2,15 @@
   "format": "specialist_registry_v1",
   "updated_at": "2026-07-09T09:15:00Z",
   "note": "Ratified permissions per docs/design/permissions-matrix.md. Compile with willow-mcp compile-agents.",
+  "collection_aliases": {
+    "stack": "projects_willow_stack",
+    "pm/portfolio": "projects_willow_pm_portfolio",
+    "pm/milestones": "projects_willow_pm_milestones",
+    "pa/commitments": "projects_willow_pa_commitments",
+    "governance/flags": "projects_willow_governance_flags",
+    "governance/decisions": "projects_willow_governance_decisions",
+    "orient": "projects_willow_orient"
+  },
   "specialists": [
     {
       "agent_id": "hanuman",
@@ -9,7 +18,7 @@
       "display_name": "Hanuman",
       "role": "builder",
       "roles": ["builder", "coordinator"],
-      "permissions": ["dispatch_write", "task_queue", "store_read", "knowledge_read"],
+      "permissions": ["dispatch_read", "dispatch_write", "task_queue", "store_read", "knowledge_read"],
       "deny_tools": ["kb_promote", "knowledge_ingest"],
       "persona_path": "personas/hanuman.md",
       "persona_bundle": true,
@@ -141,7 +150,7 @@
     "persona_path": "personas/willow.md",
     "persona_bundle": false,
     "entry_mode": "human_orchestrator",
-    "store_scope": ["willow_*", "projects_*"],
+    "store_scope": ["willow_*", "projects_willow_stack", "projects_willow_pm_portfolio", "projects_willow_pm_milestones", "projects_willow_pa_commitments", "projects_willow_governance_flags", "projects_willow_governance_decisions", "projects_willow_orient"],
     "namespace": "willow/",
     "job": "DAG, dispatch, verify, report to operator",
     "not_job": "Implementation without envelope grant",

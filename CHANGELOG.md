@@ -51,6 +51,12 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
     manifest, or a malformed field exempts nothing, and — since manifests are
     operator-side (the PreToolUse hook blocks an app from writing its own) — an
     app can never exempt itself. Per-tool, not a blanket unlock.
+- **Native project orientation.** Explicit manifest collection aliases map
+  charter names to flat SOIL names without generic slash rewriting.
+  `session_enter` returns project records, ORIENT/FRANK status, latest project
+  handoff, and persona voice context; project-scoped v3 handoffs cannot bleed
+  across projects. A supported Cursor SessionStart template invokes this path
+  directly without fylgja or a persona picker.
 - **The Grove** (`the_grove.py`) — a rings store for *lessons*, sibling to
   `schema_profile`'s vocabulary rings but unbounded on purpose: vocabulary may
   be pruned cheaply, lessons are kept precisely so the deployment cannot become
