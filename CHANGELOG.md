@@ -10,6 +10,25 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Friction-floor watcher** (`friction.py` + vendored `friction_floor.py`) —
+  Phase 1 of the willow-gate integration (`docs/design/willow-gate-seam.md`): a
+  model-free, deterministic relationship smoke detector. It watches one thing —
+  whether the agent has stopped being *other* and is mirroring the user back,
+  smoothed, WHILE the user is escalating — and when a window of agent turns sits
+  below a friction floor during escalation it raises a loud, human-facing flag
+  ("the agent has stopped being 'other' — no pushback, no grounding, mostly
+  echo; look at turns …"). It NEVER blocks and NEVER egresses; it is a SIGNAL,
+  not a verdict (false-positives happen, a clever mirror can duck it) — its value
+  is observability: it makes an invisible thing leave a trace. Two tools:
+  `friction_scan` (scan a `[{role, text, ts?}]` window; persists any flag,
+  deduped by content, to the `friction_flags` collection) and
+  `friction_flags_list`. New `friction_read`/`friction_write` groups (both in
+  `full_access`). Orthogonal to the auth path — it wires to transcripts, not the
+  gate. The scanner is **vendored** from willow-gate (Apache-2.0) rather than
+  taken as a dependency, because it is pure stdlib while the willow-gate package
+  pulls `python-gnupg`; keeping the base dependency-free wins (seam-doc D5, for
+  this pure piece). Must be driven from OUTSIDE the watched model — a mirror
+  cannot audit itself.
 - **Lineage / provenance atoms** (`lineage.py`, prototype) — a queryable "story
   of this willow" for the user-facing base store. Agents dropped into a running
   willow keep asking where something came from, what was here before, and why it

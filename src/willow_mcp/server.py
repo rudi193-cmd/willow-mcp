@@ -68,6 +68,9 @@ _receipt_log = ReceiptLog()
 from .lineage import Lineage
 _lineage = Lineage(_store)
 
+from .friction import FrictionWatcher
+_friction = FrictionWatcher(_store)
+
 def _argv_opt(flag: str) -> Optional[str]:
     """Read `--flag value` or `--flag=value` from sys.argv at import time.
 
@@ -775,6 +778,40 @@ def lineage_list(app_id: str, current_only: bool = False) -> list:
     if denied:
         return [denied]
     return _lineage.list_atoms(current_only=current_only)
+
+
+# ── Friction floor (relationship smoke detector) ────────────────────────────────
+
+@mcp.tool()
+@_guarded("friction_scan")
+def friction_scan(app_id: str, turns: list, window: int = 4, floor: float = 0.35) -> dict:
+    """Scan a transcript window for the mirror failure mode: the agent has stopped
+    being *other* and is reflecting the user back, smoothed, WHILE the user is
+    escalating. Model-free and deterministic — no LLM, no egress; it NEVER blocks,
+    it only flags. When a window of agent turns sits below the friction `floor`
+    during escalation it raises (and persists, deduped) a loud human-facing flag
+    naming where the agent stopped disagreeing.
+
+    `turns`: [{"role": "user"|"agent", "text": str, "ts"?: number}, …] — the recent
+    window, in order. It is a SIGNAL, not a verdict (false-positives happen; a
+    clever mirror can duck it); its value is observability. It MUST be driven from
+    OUTSIDE the watched model (a harness/monitor) — a mirror cannot audit itself;
+    an agent scanning its own turns is theater."""
+    from . import gate
+    if not gate.collection_permitted(app_id, _friction.collection):
+        return _collection_denied(app_id, _friction.collection)
+    return _friction.scan(turns, window=window, floor=floor)
+
+
+@mcp.tool()
+@_guarded("friction_flags_list", list_error=True)
+def friction_flags_list(app_id: str, limit: int = 20) -> list:
+    """List recent friction flags recorded by `friction_scan` — the durable trace
+    of when the relationship watcher tripped (most recent first)."""
+    from . import gate
+    if not gate.collection_permitted(app_id, _friction.collection):
+        return [_collection_denied(app_id, _friction.collection)]
+    return _friction.list_flags(limit=limit)
 
 
 # ── Knowledge tools ────────────────────────────────────────────────────────────

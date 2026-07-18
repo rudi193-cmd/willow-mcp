@@ -122,6 +122,14 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "lineage_write": frozenset({
         "lineage_record", "lineage_link",
     }),
+    # Relationship smoke detector (model-free; never blocks, never egresses).
+    # scan persists a flag when it trips, so it is a write; listing is a read.
+    "friction_read": frozenset({
+        "friction_flags_list",
+    }),
+    "friction_write": frozenset({
+        "friction_scan",
+    }),
     "integration_read": frozenset({
         "integration_list", "integration_status",
     }),
@@ -180,6 +188,8 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "gap_promote",
         # Lineage / provenance ("story of this willow")
         "lineage_why", "lineage_list", "lineage_record", "lineage_link",
+        # Friction floor (relationship smoke detector)
+        "friction_scan", "friction_flags_list",
         # Integrations (read-only ledger; integration_call stays own-line)
         "integration_list", "integration_status",
     }),
