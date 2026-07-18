@@ -10,6 +10,22 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Store/gap introspection & cleanup tools** — `whoami` (your own manifest and
+  effective permissions; ungated like `diagnostic_summary`), `store_collections`
+  and `store_stats` (list / count the SOIL collections in your `store_scope`
+  without a search), and `store_purge_collection` / `gap_delete` /
+  `gap_purge_topic` (reversible soft-delete cleanup — a whole collection, one
+  gap, or every gap under a topic; each confirm-guarded and archive-don't-delete,
+  with `gap_purge_topic` skipping promoted gaps). Shaped by dogfooding the server
+  from inside — each tool surfaced the need for the next.
+- **One-command local sandbox + native session load.**
+  `scripts/sandbox-bootstrap.sh` and fresh-install Postgres DDL
+  (`docs/schema/{knowledge,agents,routing_decisions}.postgres.sql`) take a clone
+  to a working stdio server; a synchronous `SessionStart` hook
+  (`.claude/hooks/session-start.sh`) plus `.claude/settings.json` provision the
+  box (venv, `$WILLOW_HOME`, Postgres, bubblewrap) and load willow-mcp natively
+  at session start on Claude Code on the web, and activate the `PreToolUse`
+  sudo-invariant guard.
 - **Egress secret redaction** (`secret_scan.py`, wired at the `_guarded`
   funnel) — defense-in-depth for the standing guarantee "no tool ever returns a
   credential." The credential *accessor* already withheld values
@@ -205,6 +221,25 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 - Dockerfile and GitHub Actions test workflow (runs against a Postgres service).
 
 ### Fixed
+- **`kb_startup_continuity` crashed on a jsonb `tags` column**
+  (`operator does not exist: jsonb ~~`) and silently returned empty on a native
+  `text[]` column. Now branches on the column type: `::text LIKE` for text /
+  jsonb, `= ANY(col)` element match for arrays.
+- **Receipts escaped the sovereign box.** The tool-call audit trail defaulted to
+  `~/.willow/mcp_receipt.db` — outside any box `$WILLOW_HOME` points at. Now
+  defaults under `$WILLOW_HOME` (explicit `db_path` / `WILLOW_MCP_RECEIPT_DB`
+  still win), keeping the audit trail inside the data-vault boundary.
+- **Test isolation could be defeated by the ambient environment.** conftest used
+  `os.environ.setdefault`, so an exported `WILLOW_HOME`/`WILLOW_STORE_ROOT` (e.g.
+  from the new SessionStart hook) ran the suite against a real store, polluting
+  it. It now force-sets the isolation vars.
+- **Purge confirm-guard degeneration.** An explicit empty `collection`/`topic`
+  made the `confirm != target` check pass (`"" == ""`); the purge tools now
+  reject an empty target before the confirm check.
+- **PreToolUse guard coverage.** The owned-store tripwire now catches
+  psycopg3/asyncpg/pg8000 and `vault.db`/`kart.db`/`store.db` (a SOIL collection
+  reached by absolute path); its known limits (a `python -c` one-liner, unlisted
+  clients) are documented rather than overclaimed.
 - **`willow-mcp gates`/`net-status`/`tree` crashed with an unhandled
   `BrokenPipeError` traceback when piped into something that closes early**
   (`willow-mcp gates | head`, `willow-mcp net-status app | grep -q active`) —
@@ -238,6 +273,12 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 - Security-audit hardening (Level 2 WLWR1) across the tool surface.
 
 ### Changed
+- **`full_access` completeness.** Now includes `specialist_list` /
+  `specialist_get` and the new store/gap read tools, matching the documented
+  contract ("all gated tools except the egress lines `task_net` and
+  `integration_call`"); `permissions-matrix.md` corrected to match. Bulk
+  `gap_purge_topic` is its own opt-in `gap_purge` group (it soft-deletes across
+  the fleet-shared gaps backlog), not folded into everyday `gap_write`.
 - Repository is agent-neutral: removed personal/fleet-specific references from
   the public surface.
 
