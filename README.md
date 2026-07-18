@@ -70,6 +70,7 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `store_delete` | Soft-delete a record by `record_id` |
 | `store_search_all` | Search across all collections |
 | `store_collections` | List the SOIL collections you can see (narrowed to your `store_scope`) — learn the collection names without running a search |
+| `store_purge_collection` | Bulk soft-delete every record in a collection (e.g. leftover test/scratch data). Reversible (archive-don't-delete — the store.db is kept); requires `confirm=<collection name>` and stays within your `store_scope` |
 | `knowledge_ingest` | Add a knowledge atom (requires a confirmed schema mapping — see `schema_confirm_mapping`) |
 | `knowledge_search` | Multi-keyword search in the Postgres knowledge base |
 | `kb_at` | Fetch a single knowledge atom by ID |

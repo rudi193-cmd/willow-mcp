@@ -262,3 +262,20 @@ class Store:
             )
             conn.commit()
         return result.rowcount > 0
+
+    def purge_collection(self, collection: str) -> int:
+        """Soft-delete every live record in a collection at once — a bulk
+        `delete`. Archive, not drop: rows stay in the db (deleted=1) and remain
+        recoverable, they just fall out of get/list/search. Returns how many
+        records were purged. Never touches the collection's on-disk store.db
+        (hard removal stays an operator/filesystem act, out of the tool surface).
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            conn = self._conn(collection)
+            result = conn.execute(
+                "UPDATE records SET deleted = 1, updated_at = ? WHERE deleted = 0",
+                (now,),
+            )
+            conn.commit()
+        return result.rowcount
