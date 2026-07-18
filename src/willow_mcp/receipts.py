@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from . import paths
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS receipts (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,10 +32,14 @@ class ReceiptLog:
     """Append-only SQLite log of every tool call."""
 
     def __init__(self, db_path: Optional[str] = None):
-        self.path = Path(db_path or os.environ.get(
-            "WILLOW_MCP_RECEIPT_DB",
-            Path.home() / ".willow" / "mcp_receipt.db"
-        ))
+        # Default under $WILLOW_HOME so the audit trail stays inside the
+        # sovereign box (the data-vault boundary). Explicit db_path wins, then
+        # the WILLOW_MCP_RECEIPT_DB override, then $WILLOW_HOME/mcp_receipt.db.
+        self.path = Path(
+            db_path
+            or os.environ.get("WILLOW_MCP_RECEIPT_DB")
+            or (paths.willow_home() / "mcp_receipt.db")
+        )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
