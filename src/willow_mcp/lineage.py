@@ -146,6 +146,30 @@ class Lineage:
         edges = edges if edges is not None else self._all_edges()
         return {e["to"] for e in edges if e.get("relation") == SUPERSEDES and e.get("to")}
 
+    def _tag_siblings(self, atom: dict, superseded: set,
+                      all_nodes: Optional[list] = None) -> list:
+        """Other atoms sharing at least one tag — "what else in this area has a
+        story". Answers the sideways provenance question `supersedes`/
+        `derived_from` can't: neighbours by subject, not by descent. Sorted by
+        overlap (most shared tags first), each marked current-or-superseded so an
+        agent can tell live neighbours from archived ones."""
+        tags = set(atom.get("tags") or [])
+        if not tags:
+            return []
+        aid = atom.get("id")
+        out = []
+        for n in (all_nodes if all_nodes is not None else self.store.all(self.collection)):
+            nid = n.get("id")
+            if nid == aid:
+                continue
+            shared = tags & set(n.get("tags") or [])
+            if shared:
+                out.append({"id": nid, "title": n.get("title"),
+                            "shared_tags": sorted(shared),
+                            "is_current": nid not in superseded})
+        out.sort(key=lambda r: (-len(r["shared_tags"]), r["id"]))
+        return out
+
     def _node_summary(self, node_id: str) -> dict:
         n = self.store.get(self.collection, node_id)
         if n is None:
@@ -189,6 +213,7 @@ class Lineage:
         derived_from = [self._node_summary(e["to"]) for e in out_edges
                         if e.get("relation") == DERIVED_FROM]
         motivated_by = [e["to"] for e in out_edges if e.get("relation") == MOTIVATED_BY]
+        related_by_tag = self._tag_siblings(atom, superseded)
         is_current = not superseded_by
         return {
             "query": q,
@@ -204,12 +229,15 @@ class Lineage:
             "superseded_by": superseded_by,
             "derived_from": derived_from,
             "motivated_by": motivated_by,
-            "answer": self._synthesize(atom, chain, superseded_by, derived_from, motivated_by),
+            "related_by_tag": related_by_tag,
+            "answer": self._synthesize(atom, chain, superseded_by, derived_from,
+                                       motivated_by, related_by_tag),
         }
 
     @staticmethod
     def _synthesize(atom: dict, chain: list, superseded_by: list,
-                    derived_from: list, motivated_by: list) -> str:
+                    derived_from: list, motivated_by: list,
+                    related_by_tag: Optional[list] = None) -> str:
         title = atom.get("title") or atom.get("id")
         parts = [f"{title} exists because {atom.get('rationale')}"]
         if atom.get("origin"):
@@ -227,6 +255,11 @@ class Lineage:
         ev = atom.get("evidence") or []
         if ev:
             parts.append("Evidence: " + ", ".join(str(e) for e in ev))
+        sibs = related_by_tag or []
+        if sibs:
+            shown = ", ".join(s["id"] for s in sibs[:5])
+            more = f" (+{len(sibs) - 5} more)" if len(sibs) > 5 else ""
+            parts.append(f"Related in this area: {shown}{more}")
         return ". ".join(parts) + "."
 
     # ── list ───────────────────────────────────────────────────────────────────

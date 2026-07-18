@@ -164,6 +164,36 @@ def test_why_empty_query(lin):
     assert lin.why("  ")["error"] == "query_required"
 
 
+# ── tag siblings (sideways provenance) ────────────────────────────────────────
+
+def test_why_surfaces_tag_siblings_sorted_by_overlap(lin):
+    lin.record(id="a", title="A", rationale="r", evidence=["c"], tags=["adapters", "sqlite"])
+    lin.record(id="b", title="B", rationale="r", evidence=["c"], tags=["adapters", "sqlite"])
+    lin.record(id="c", title="C", rationale="r", evidence=["c"], tags=["adapters"])
+    lin.record(id="z", title="Z", rationale="r", evidence=["c"], tags=["unrelated"])
+    sibs = lin.why("a")["related_by_tag"]
+    ids = [s["id"] for s in sibs]
+    assert "z" not in ids and "a" not in ids            # unrelated + self excluded
+    assert ids == ["b", "c"]                            # b shares 2 tags, c shares 1
+    assert sibs[0]["shared_tags"] == ["adapters", "sqlite"]
+
+
+def test_tag_siblings_mark_current_status(lin):
+    lin.record(id="old", title="old", rationale="r", evidence=["c"], tags=["area"])
+    lin.record(id="new", title="new", rationale="r", evidence=["c"], tags=["area"],
+               supersedes=["old"])
+    # querying a third atom in the area sees old as archived, new as live
+    lin.record(id="probe", title="p", rationale="r", evidence=["c"], tags=["area"])
+    by_id = {s["id"]: s for s in lin.why("probe")["related_by_tag"]}
+    assert by_id["old"]["is_current"] is False
+    assert by_id["new"]["is_current"] is True
+
+
+def test_no_tags_no_siblings(lin):
+    lin.record(id="a", title="A", rationale="r", evidence=["c"])
+    assert lin.why("a")["related_by_tag"] == []
+
+
 # ── list ──────────────────────────────────────────────────────────────────────
 
 def test_list_current_only_hides_superseded(lin):
