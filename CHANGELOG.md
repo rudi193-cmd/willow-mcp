@@ -10,6 +10,14 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Security (willow-gate seam — hardening from adversarial review)
+- **`whoami` / `diagnostic_summary` can no longer enumerate another identity's
+  config.** These tools are ungated (they must answer with a missing manifest), so in
+  stdio a caller could pass any `app_id` and read that identity's permissions / role /
+  `store_scope`. They now route through `_own_identity_denial`: under binding
+  enforcement the caller must present a valid per-call credential proving it owns the
+  `app_id` (identity proof, not a tier gate — whoami is unclassified). Unchanged when
+  enforcement is off (trusted-host model) or for an unregistered app_id; serve mode
+  was already OAuth-bound.
 - **Enforcement no longer fails OPEN on a broken keystore.** `_enforce_binding_gate`
   now pairs `agent_registry.load()` with a new `is_registered()`: a registered agent
   whose secret is momentarily unreadable/short is DENIED (fail-closed), not silently

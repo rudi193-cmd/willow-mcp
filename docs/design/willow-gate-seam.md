@@ -397,11 +397,15 @@ gap the review surfaced:
   `_enforce_binding_gate` pairs `agent_registry.load()` with `is_registered()` so a
   broken keystore denies rather than silently downgrading to manifest-only. An
   operator must repair `$WILLOW_HOME/gate/secrets/` to restore that agent.
-- **Pre-existing, out of scope for the seam:** `whoami(app_id)` in stdio mode returns
-  *any* app's manifest (permissions/role/`store_scope`) with no proof the caller owns
-  that identity — a cross-identity config-disclosure primitive independent of the
-  binding work, mitigated today only by the single-operator stdio trust model. Worth
-  closing separately (bind `whoami` to the caller's own resolved identity).
+- **`whoami` / `diagnostic_summary` cross-identity disclosure — CLOSED.** These
+  tools are ungated (they must answer with an empty/missing manifest), so in stdio a
+  caller could pass any `app_id` and read that identity's config (permissions/role/
+  `store_scope`). They now route through `_own_identity_denial` → the same per-call
+  credential check the gate uses: under enforcement you may only read the identity
+  you can prove you own (whoami is unclassified, so identity proof, not a tier gate).
+  No-op when enforcement is off (trusted-host single-operator model) or the app_id is
+  unregistered — consistent with how `_gate` treats every other tool. Serve mode was
+  already bound via OAuth.
 
 ### D4 — the declaration schema (settled by Phase 4)
 The 13-field check-in header is the ENTRY declaration (already implemented, H1).

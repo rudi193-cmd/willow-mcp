@@ -183,6 +183,23 @@ def _enforce_binding_gate(app_id: str, tool_name: str) -> Optional[dict]:
     return None
 
 
+def _own_identity_denial(app_id: str, tool_name: str) -> Optional[dict]:
+    """Identity proof for the UNGATED self-report tools (whoami / diagnostic_summary).
+
+    Those tools are deliberately not @_guarded — they must answer even when the
+    manifest is empty or missing — but that also means they never went through the
+    binding gate, so in stdio a caller could pass ANY app_id and read that
+    identity's config (permissions/role/store_scope). When binding is ENFORCED,
+    route them through the same per-call credential check the gate uses, so a caller
+    may only read the identity it can prove it owns; whoami is unclassified, so this
+    is identity proof, not a tier gate. No-op when enforcement is off (trusted-host
+    single-operator model) or the app_id is unregistered (no bound identity to
+    protect) — consistent with how _gate treats every other tool."""
+    if not _enforce_binding():
+        return None
+    return _enforce_binding_gate(app_id, tool_name)
+
+
 from . import announce as _announce
 
 
@@ -3091,14 +3108,23 @@ def whoami(app_id: str = "") -> dict:
     groups your manifest grants, the resolved set of tools you can actually call
     (group expansion minus any deny_tools), your store_scope, and whether you're
     a human-only seat. Read-only and self-scoped — your own manifest, never
-    another identity's. Ungated, like diagnostic_summary, so it still answers
-    when your manifest is empty or missing (it says exactly that)."""
+    another identity's: in serve mode the app_id comes from your OAuth binding, and
+    in stdio under enforcement you must prove you own the app_id you pass (a valid
+    per-call credential), so whoami can't enumerate another bound agent's config.
+    Ungated otherwise, like diagnostic_summary, so it still answers when your
+    manifest is empty or missing (it says exactly that)."""
     from . import gate
     if _SERVE_MODE:
         bound, err = _resolve_serve_identity()
         if err:
             return err
         app_id = bound or ""
+    else:
+        # stdio: under enforcement, prove you own this app_id before reading its
+        # config — whoami must not enumerate another bound agent's manifest.
+        denial = _own_identity_denial(app_id, "whoami")
+        if denial:
+            return denial
     if not app_id:
         return {"error": "no_app_id",
                 "detail": "no app_id supplied — pass the app_id you call willow-mcp with"}
@@ -3154,6 +3180,12 @@ def diagnostic_summary(app_id: str = "") -> dict:
         allowed, retry_after = _check_rate(app_id)
         if not allowed:
             return {"error": "rate_limited", "retry_after": retry_after}
+    else:
+        # stdio: same identity proof as whoami — under enforcement you may only
+        # diagnose the identity you can prove you own, not enumerate another's.
+        denial = _own_identity_denial(app_id, "diagnostic_summary")
+        if denial:
+            return {"verdict": "unauthorized", "mode": mode, "detail": denial["error"]}
 
     eff = app_id or _DEFAULT_APP_ID
     store = _diag_store()
