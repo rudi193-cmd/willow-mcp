@@ -79,16 +79,21 @@ JSON
 fi
 
 # Optional data-vault restore. If WILLOW_VAULT_RESTORE names an executable, run
-# it and adopt any WILLOW_STORE_ROOT / WILLOW_PG_DB it prints on stdout. This is
-# how a persistent data-vault (e.g. a cloned snapshot repo) supplies the real
-# store + knowledge base at session start, without hardcoding any personal vault
-# in this agent-neutral hook — the restore logic lives with the vault. Runs
-# after Postgres is up (the vault may load a dump); best-effort and non-fatal.
+# it and adopt any core WILLOW_* env it prints on stdout (KEY=VALUE per line) —
+# WILLOW_HOME, WILLOW_STORE_ROOT, WILLOW_PG_DB, WILLOW_PG_USER, WILLOW_APP_ID.
+# This is how a persistent data-vault (e.g. a cloned snapshot repo) supplies the
+# real store, knowledge base, AND the identity to operate them as (e.g. an
+# unscoped `operator` app that can see the restored collections) at session
+# start — without hardcoding any personal vault in this agent-neutral hook. A
+# pre-set WILLOW_APP_ID still wins if the vault doesn't declare one (the
+# ${WILLOW_APP_ID:-willow} default above), so a purely-local identity works too.
+# Runs after Postgres is up (the vault may load a dump); best-effort, non-fatal.
 if [ -n "${WILLOW_VAULT_RESTORE:-}" ] && [ -x "${WILLOW_VAULT_RESTORE}" ]; then
   if _vault_env="$("${WILLOW_VAULT_RESTORE}" 2>>"$WILLOW_HOME/logs/vault-restore.log" || true)"; then
     while IFS='=' read -r _k _v; do
       case "$_k" in
-        WILLOW_STORE_ROOT|WILLOW_PG_DB) [ -n "$_v" ] && export "$_k=$_v" ;;
+        WILLOW_HOME|WILLOW_STORE_ROOT|WILLOW_PG_DB|WILLOW_PG_USER|WILLOW_APP_ID)
+          [ -n "$_v" ] && export "$_k=$_v" ;;
       esac
     done <<< "$_vault_env"
   fi
