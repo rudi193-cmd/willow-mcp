@@ -1,7 +1,15 @@
 # Design: Productionize Kart into willow-mcp
 
-Status: DIRECTION SET (2026-07-08) — staged migration, not yet started. This
-doc captures the decision and the plan; the lift lands over subsequent PRs.
+Status: **SHIPPED** (superseded 2026-07-18) — the lift landed. Kart was extracted
+as the published **`kartikeya`** package (PyPI) and made a hard willow-mcp
+dependency; `willow-mcp worker` drains the queue and publishes liveness. Tracked
+as **B-22 Fixed** (`docs/BUGS.md`); engineering detail in `kart-lift-spec.md`
+(stages 1–4 shipped via PRs #35/#36, worker heartbeat as B-26). This doc is
+retained as the direction/decision record. **Still open:** stage 5 — willow-2.0
+migrating off its own `core/kart_*` copy to depend on `kartikeya` (the drift
+window), which lives on the willow-2.0 side, not here.
+
+Original status (2026-07-08): DIRECTION SET — staged migration, not yet started.
 
 ## 1. Why
 

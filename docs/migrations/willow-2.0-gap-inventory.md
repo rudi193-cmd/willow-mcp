@@ -173,11 +173,15 @@ Cross-repo blockers unchanged from Draft 0.1 (fixes live in willow-2.0): **B-31*
 
 ## 7. Housekeeping (not migration work, but misleading)
 
-- `README.md` — "run the full willow-2.0 server directly — the tool API is
-  identical" is **false**; only 15/169 names match. Reword to "willow-mcp
-  re-implements the SOIL/KB/dispatch core with a redesigned, smaller surface."
-- `docs/design/kart-productionization.md` — "not yet started" → **superseded** (Kart shipped as `kartikeya`, B-22).
-- `docs/design/kart-lift-spec.md` — "stage 5 deferred" predates the `kartikeya` extraction; mark stages 1–4 done.
+- `README.md` — the old "run the full willow-2.0 server directly — the tool API
+  is identical" line was **false** (only 15/169 names match). **Fixed 2026-07-18**:
+  reworded to "re-implements the SOIL/KB/dispatch core with a redesigned, smaller
+  surface" and linked here.
+- `docs/design/kart-productionization.md` — old status said "not yet started".
+  **Fixed 2026-07-18**: marked SHIPPED/superseded (Kart shipped as `kartikeya`,
+  B-22); stage 5 (willow-2.0 side) correctly noted still open.
+- `docs/design/kart-lift-spec.md` — **already accurate** (marked IMPLEMENTED,
+  stages 1–4 shipped, stage 5 open by design). No change needed.
 
 ---
 
