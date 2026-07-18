@@ -156,11 +156,17 @@ build, plus one policy call and one upstream bug:
 - **H2 — willow-gate must BE `_gate`, not sit beside it.** `_gate` today
   authorizes via `permitted()` alone. Unless `authorize_tool` runs *inside*
   `_gate` as the sole funnel, willow-gate is a ledger, not a gate: a call that
-  reaches a tool any other way is neither prevented nor recorded.
+  reaches a tool any other way is neither prevented nor recorded. *Prototyped —
+  the funnel already exists (see "H2/H3 prototype"): `@_guarded` is the sole
+  wrapper on every tool, `_gate` already returns an `effective_app_id` distinct
+  from the raw arg, so H2 is inserting willow-gate's authorize at that existing
+  point, not building a funnel.*
 - **H3 — reconciliation needs a real `tools_used` feed.** `check_out`'s
   declare-vs-did diff only sees tools that passed through `authorize_tool`. It
-  must be fed from `ReceiptLog` (which already records every `_gate` decision),
-  or reconciliation silently passes on out-of-band use.
+  must be fed from `ReceiptLog`, or reconciliation silently passes on out-of-band
+  use. *Prototyped — `ReceiptLog` already records every `ok`/`denied` decision at
+  the funnel; sourcing `tools_used` from `ReceiptLog.tail` reconciles correctly
+  AND flags an exit that claims a tool no receipt ever authorized.*
 - **Policy — read-universal does NOT survive the seam.** willow-gate grants read
   to everyone (even Exiled); willow-mcp fail-closes an unmanifested/unscoped
   `app_id`, and in the bridge that WINS. Bringing in willow-gate does **not** make
@@ -206,6 +212,28 @@ Residual limits to carry into the build: per-agent secret provisioning (D2); a
 per-session used-nonce set that is dropped at check-out (bounded growth); and the
 hard truth that any client not instrumented to sign simply cannot reach a gated
 tool.
+
+## H2/H3 prototype — the funnel already exists (resolved)
+
+Reading `_guarded`/`_gate` changed H2/H3 from "build" to "insert":
+
+- `@_guarded` wraps **every** `@mcp.tool` — the sole funnel is already structural;
+  the raw tool body has no un-gated handle.
+- `_gate` already returns an `effective_app_id` distinct from the caller-supplied
+  `app_id` (built for serve-mode OAuth binding) — the exact point the H1 SIGNED
+  binder + `authorize_tool` slot into.
+- `_guarded` already receipts every decision (`ok` / `denied` / `rate_limited` /
+  `error`) via `ReceiptLog`.
+
+A prototype composed `_gate_v2 = SIGNED binder → authorize_tool → permitted()`
+behind a `@guarded` wrapper over the **real** `ReceiptLog`, and showed:
+- an authorized call runs its body; a denied call's body **never** runs;
+- `check_out` reconciliation sourced from `ReceiptLog.tail` matches what actually
+  ran, and **flags** an exit that declares a tool no receipt authorized
+  (out-of-band claim caught).
+
+So H2 = swap the `app_id`-verbatim step in `_gate` for `_gate_v2`; H3 = compute
+`tools_used` from `ReceiptLog` at `check_out`. Neither needs new plumbing.
 
 ## Open decisions (the forks to settle before wiring)
 - **D1 — tier↔group map:** ratify the class→group table in §2, especially where
