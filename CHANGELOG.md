@@ -10,6 +10,27 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Tier-ceiling enforcement** (`tier_policy.py`, `_enforce_binding_gate` in
+  `server.py`) — Phase 3 of the willow-gate integration
+  (`docs/design/willow-gate-seam.md`, hole H2): the observed identity binding
+  becomes a CONTROL. `tier_policy.py` is the D1 tier→group map as a pure,
+  fully-tested table — every `@_guarded` tool is classified into a cumulative
+  privilege class (read ⊆ +write ⊆ +execute ⊆ +admin), with a completeness test
+  that fails if a tool is added to a group without a class, so the ceiling can't
+  silently lag. Inside `_gate`, after `permitted()` allows a tool by the manifest,
+  `_enforce_binding_gate` applies the *bound* trust tier: effective authorization
+  is `expand(manifest.permissions) ∩ unlocked_tools(trust_level)`. Egress stays
+  **double-gated** — `integration_call` / `task_net` need `execute` on a
+  non-read-only tier AND the manifest's own-line grant; the tier never softens the
+  own-line rule, and `admin` still ≠ sudo. Fail-closed on every ambiguous path
+  (missing/forged/replayed credential, tier-below-tool). **Opt-in via two locks**
+  (seam-doc D3): the `WILLOW_MCP_ENFORCE_BINDING` env switch (OFF by default —
+  registering an agent while off is exactly Phase 2, observe-only) AND per-agent
+  registration (a registered app must sign and clear the ceiling; an unregistered
+  app stays manifest-only, so a plain local clone is unchanged). The single-use
+  call nonce is consumed exactly once — enforcement verifies it inside `_gate`;
+  the observe hook steps aside when enforcing. New `enforce_binding` global row in
+  the gates panel surfaces the switch's live state beside `strict_trust_root`.
 - **Identity binding, observe-only** (`agent_registry.py`, `session_binder.py`) —
   Phase 2 of the willow-gate integration (`docs/design/willow-gate-seam.md`,
   hole H1): the mechanism that lets the gate know *which* agent is calling,

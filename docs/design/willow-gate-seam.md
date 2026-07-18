@@ -320,8 +320,9 @@ that owns `$WILLOW_HOME`):
 ## Open decisions (the forks to settle before wiring)
 - **D1 — tier↔group map:** **settled — see "D1" above.**
 - **D2 — secret store, rotation, CLI:** **settled — see "D2" above.**
-- **D3 — stdio default:** confirm "unregistered ⇒ manifest-only, registered ⇒
-  must-sign" is the right opt-in trigger (vs. an explicit env flag).
+- **D3 — stdio default:** **settled — see "D3" above.** Both: an explicit env
+  switch (`WILLOW_MCP_ENFORCE_BINDING`) *and* per-agent registration, so an
+  operator can register + observe before the switch can deny anything.
 - **D4 — 13-field declaration schema:** what willow-mcp agents declare at
   `session_enter` so `check_out` reconciliation has something to diff.
 - **D5 — vendoring:** willow-gate as a pip dependency (`python-gnupg` pulls in)
@@ -330,18 +331,40 @@ that owns `$WILLOW_HOME`):
 
 ## A phased path (each phase is independently shippable)
 1. **friction_floor watcher** — orthogonal, no auth-path risk; net-new signal.
-   Unblocked by every hole below — the safe first slice.
+   Unblocked by every hole below — the safe first slice. **SHIPPED**
+   (`friction.py` + vendored `friction_floor.py`).
 2. **Session credential + identity binding (read-only)** — add the per-call
    session token (**H1**), `register_agent` + `check_in` HMAC-verify feeding
    `_gate`, *observed only* (log the bound tier, don't enforce). Nothing after
-   this works without H1, so it leads.
+   this works without H1, so it leads. **SHIPPED** (`agent_registry.py`,
+   `session_binder.py`, `_observe_binding` in `server.py`).
 3. **Tier ceiling enforced** — `authorize_tool` *inside* `_gate` as the sole
-   funnel (**H2**), applying §2 once D1 is ratified.
+   funnel (**H2**), applying §2 once D1 is ratified. **SHIPPED**
+   (`tier_policy.py` = the D1 map as a pure tested table; `_enforce_binding_gate`
+   inside `_gate`; gated by `WILLOW_MCP_ENFORCE_BINDING`, see D3 below). The
+   ceiling is applied *after* `permitted()` — manifest ∩ tier, fail-closed — and
+   the single-use nonce is consumed exactly once (enforcement verifies; the
+   observe hook steps aside when enforcing).
 4. **Session reconciliation** — `check_out` declare-vs-did on top of
    `session_handoff_write`, with `tools_used` fed from `ReceiptLog` (**H3**);
-   needs D4.
+   needs D4. *(next)*
 5. **Announcement/ledger policy** — graduated loudness + optional encrypted
    channel over `ReceiptLog`.
+
+### D3 — the opt-in trigger (settled by Phase 3)
+Two locks, not one, because turning enforcement on before a registered agent's
+client can sign would brick it (an un-instrumented client cannot produce the
+per-call signature, and that is by design — H1's whole point):
+- **`WILLOW_MCP_ENFORCE_BINDING`** (env, read live) is the master switch. OFF by
+  default ⇒ registering an agent is *exactly Phase 2* (observe-only): the operator
+  can watch the binding land in receipts before it can deny anything.
+- **Registration** is the per-agent trigger. With the switch ON, a *registered*
+  app must present a valid signed per-call credential and clear the tier ceiling;
+  an *unregistered* app stays manifest-only (a plain local clone keeps working
+  with no HMAC ceremony). So the cutover is deliberate and reversible: register in
+  observe mode, wire the client's signer, then flip the switch.
+The `enforce_binding` global row in the gates panel makes the switch's live state
+visible next to `strict_trust_root`.
 
 Before any of this, upstream a fix (or a tracked issue) for willow-gate's
 unenforced `entry_allowed`, and write the read-universal policy call into the

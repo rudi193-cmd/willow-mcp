@@ -137,7 +137,7 @@ class SessionBinder:
             return {"bound": False, "reason": "signed session is not this app_id"}
         sess["used_call_nonces"].add(call_nonce)
         return {"bound": True, "agent_id": sess["agent_id"], "trust_level": sess["trust_level"],
-                "tier": sess["tier"], "reason": "verified"}
+                "tier": sess["tier"], "read_only": sess["read_only"], "reason": "verified"}
 
     def session_for(self, app_id: str) -> Optional[dict]:
         """The most recent live session bound to this app_id, if any (used by the

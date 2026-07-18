@@ -72,19 +72,73 @@ from .friction import FrictionWatcher
 _friction = FrictionWatcher(_store)
 
 import contextvars
+from . import agent_registry, tier_policy
 from .session_binder import SessionBinder, BindError
 _binder = SessionBinder()
 # Per-call SIGNED credential (H1), if a signing client supplies one out-of-band.
-# A contextvar so it never rides a tool's argument list. Phase 2 only OBSERVES it.
+# A contextvar so it never rides a tool's argument list. Phase 2 OBSERVES it;
+# Phase 3 (when WILLOW_MCP_ENFORCE_BINDING is on) ENFORCES it for registered apps.
 _CALL_CREDENTIAL: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar(
     "willow_call_credential", default=None)
+
+
+def _enforce_binding() -> bool:
+    """Phase 3 master switch, read live (not cached) so it can be toggled per
+    process / per test. OFF by default: registering an agent while this is off is
+    exactly Phase 2 (observe-only), so an operator can watch the binding in
+    receipts before the day it can lock anyone out. ON: a *registered* app must
+    present a valid per-call signature and clear the tier ceiling; an
+    *unregistered* app stays manifest-only (seam-doc D3)."""
+    return os.environ.get("WILLOW_MCP_ENFORCE_BINDING", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _enforce_binding_gate(app_id: str, tool_name: str) -> Optional[dict]:
+    """Apply the willow-gate binding as a CONTROL (Phase 3, H2), inside _gate and
+    only after permitted() has already allowed the tool per the manifest.
+
+    Returns None to allow, or an error dict to deny. Fail-closed on every ambiguous
+    path. Records the successful bind receipt itself so the audit line survives;
+    denials are receipted by the _guarded wrapper.
+
+    Rule (seam-doc §1 opt-in, D3): if the app is *not registered* in the keystore,
+    this is a no-op — a plain local clone keeps working with manifest-only auth and
+    no HMAC ceremony. If it *is* registered, the call must carry a valid signed
+    credential whose bound tier is high enough for this tool, or it is denied."""
+    if agent_registry.load(app_id) is None:
+        return None  # unregistered ⇒ manifest-only, unchanged
+    cred = _CALL_CREDENTIAL.get()
+    if not cred:
+        return {"error": (
+            f"binding required: '{app_id}' is a registered agent, so this call must "
+            f"carry a signed per-call credential (session_id, call_nonce, sig) supplied "
+            f"out-of-band by the client's signing middleware. app_id alone cannot bind.")}
+    v = _binder.verify_call(cred.get("session_id", ""), app_id, tool_name,
+                            cred.get("call_nonce", ""), cred.get("sig", ""))
+    if not v.get("bound"):
+        return {"error": f"binding rejected for '{app_id}': {v.get('reason')}"}
+    if not tier_policy.tier_permits(v["trust_level"], tool_name,
+                                    read_only=v.get("read_only")):
+        return {"error": (
+            f"tier too low: '{app_id}' is bound at {v['tier']} "
+            f"(level {v['trust_level']}), which may not call '{tool_name}'.")}
+    _receipt_log.record(app_id, tool_name, "bind_enforced",
+                        f"tier={v['tier']} sig=ok")
+    return None
 
 
 def _observe_binding(app_id: str, tool_name: str) -> None:
     """Phase 2, OBSERVE-ONLY: log the identity binding for this call — a per-call
     signature if the client supplied one, else the app_id's live check-in tier —
     WITHOUT changing the authorization decision (manifest ACL still governs).
-    Enforcement is Phase 3. Must never affect the call: all failures swallowed."""
+    Must never affect the call: all failures swallowed.
+
+    When enforcement is on, _enforce_binding_gate has already verified the
+    per-call credential inside _gate (consuming its single-use nonce and writing
+    a bind_enforced receipt), so re-verifying here would only spuriously fail on
+    the now-spent nonce. Step aside in that case."""
+    if _enforce_binding():
+        return
     try:
         cred = _CALL_CREDENTIAL.get()
         if cred:
@@ -245,6 +299,14 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
                 f"and lists this tool or a group that includes it."
             )
         }
+
+    # willow-gate binding ceiling (Phase 3, H2): the manifest allowed the tool;
+    # now apply the *bound trust tier* on top of it. No-op unless enforcement is on
+    # AND the app is registered (seam-doc D3) — see _enforce_binding_gate.
+    if _enforce_binding():
+        bind_err = _enforce_binding_gate(effective, tool_name)
+        if bind_err:
+            return None, bind_err
 
     from .human_session import orchestrator_write_denial
 
