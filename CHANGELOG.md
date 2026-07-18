@@ -46,6 +46,18 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   `register-agent`/`rotate-agent`/`revoke-agent` verbs; a `rotate-agent` CLI is added.
 
 ### Added
+- **Signing harness + end-to-end proof** (`signing.SigningClientSession`,
+  `examples/signing_client.py`, `tests/test_signing_e2e.py`) — the reusable client
+  wrapper over an MCP `ClientSession` that holds the agent's secret, checks in once
+  (`.bind`), signs every subsequent call (`.call`), and checks out (`.reconcile`) —
+  the model it drives never sees the secret. Proven against the REAL willow-mcp
+  server: `test_signing_e2e.py` drives the actual FastMCP dispatch over an in-memory
+  transport (a signed call passes, an unsigned one is denied, the tier ceiling denies
+  an over-tier tool, unregistered stays manifest-only, check-out reconciles clean),
+  and `examples/signing_client.py` is a runnable operator demo that launches
+  `python -m willow_mcp` as a stdio server with `WILLOW_MCP_ENFORCE_BINDING=1`,
+  registers an agent, and shows the whole flow pass. This closes the review's
+  "enforcement has never run end to end without the test harness" gap.
 - **Client-side signing shim** (`signing.py`, `_read_call_credential` /
   `_current_call_credential` in `server.py`) — the H1 "practical shape" that makes
   tier enforcement run END TO END. The agent's HARNESS (not the model) holds the

@@ -383,16 +383,24 @@ gap the review surfaced:
   client rides `{session_id, call_nonce, sig}` in the MCP request's out-of-band
   `_meta` (key `willow_call_credential`); the server reads it via
   `server._read_call_credential()` from the request context and the gate consults it.
-  The client half is `willow_mcp/signing.py` — `build_checkin_header` / `ClientSigner`
-  / `signed_call_tool` — which a HARNESS embeds; the model never sees the secret.
+  The client half is `willow_mcp/signing.py`: the low-level `build_checkin_header`
+  / `ClientSigner` / `signed_call_tool`, plus **`SigningClientSession`** — the real
+  harness wrapper over an MCP `ClientSession` that holds the secret, checks in once
+  (`.bind`), signs every subsequent call (`.call`), and checks out (`.reconcile`).
+  The model driving the session never sees the secret or a signature.
   Flow under enforcement: `session_bind` is the ONE bootstrap call (exempt from the
   per-call credential — there is no session yet, and it authenticates via its own
   header HMAC), it returns the `session_id`, and every subsequent call carries a
-  fresh per-call signature in `_meta`. The remaining operator step is real
-  provisioning: `register-agent`, install the printed secret into the harness's
-  signer config, then flip `WILLOW_MCP_ENFORCE_BINDING=1`. An un-instrumented client
-  still cannot reach a gated tool (that is the design), so keep enforcement off until
-  every registered agent's harness is signing; observe-only stays the safe default.
+  fresh per-call signature in `_meta`. Proven end to end against a REAL stdio server
+  by `examples/signing_client.py` (a runnable operator demo) and
+  `tests/test_signing_e2e.py` (in-memory transport, real dispatch): a signed call
+  passes, an unsigned one is denied, the tier ceiling denies an over-tier tool, and
+  check-out reconciles clean.
+  The remaining operator step is real provisioning: `register-agent`, install the
+  printed secret into the harness's signer config, then flip
+  `WILLOW_MCP_ENFORCE_BINDING=1`. An un-instrumented client still cannot reach a
+  gated tool (that is the design), so keep enforcement off until every registered
+  agent's harness is signing; observe-only stays the safe default.
 - **A registered agent with an unreadable/short secret fails closed** (not open):
   `_enforce_binding_gate` pairs `agent_registry.load()` with `is_registered()` so a
   broken keystore denies rather than silently downgrading to manifest-only. An
