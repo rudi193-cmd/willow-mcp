@@ -167,8 +167,12 @@ def test_main_silent_on_clean_task_submit():
     "willow-mcp consent set internet true",
     "willow-mcp consent reconcile",
     "willow-mcp roster sync",
+    "willow-mcp register-agent evil --max-trust 4",
+    "willow-mcp revoke-agent op",
+    "willow-mcp rotate-agent op",
     'python -c "from willow_mcp import consent_admin; consent_admin.set_key(\'internet\', True)"',
     'python -c "from willow_mcp.egress_authorization import sign_envelope; sign_envelope()"',
+    'python -c "from willow_mcp import agent_registry; agent_registry.register_agent(\'evil\', 4)"',
     "echo '{}' > ~/.willow/mcp_apps/_net_leases/willow.json",
     "tee $WILLOW_HOME/mcp_apps/_net_leases/willow.json <<< '{}'",
     "sed -i 's/store_read/task_net/' ~/.willow/mcp_apps/willow/manifest.json",
@@ -192,6 +196,34 @@ def test_check_bash_self_grant_blocks_minting_egress_keys(command):
 ])
 def test_check_bash_self_grant_allows_everything_else(command):
     assert pre_tool_use.check_bash_self_grant(command) is None
+
+
+# ── keystore guard: an app may request standing, never write its own secret ──────
+
+@pytest.mark.parametrize("command", [
+    "echo deadbeef > $WILLOW_HOME/gate/secrets/evil.key",
+    "tee ~/.willow/gate/secrets/op.key <<< 'x'",
+    'jq \'.evil = {"max_trust": 4}\' r.json > ~/.willow/gate/registry.json',
+])
+def test_check_bash_self_grant_blocks_keystore_writes(command):
+    reason = pre_tool_use.check_bash_self_grant(command)
+    assert reason is not None
+    assert "keystore" in reason and "REQUEST standing" in reason
+
+
+@pytest.mark.parametrize("command", [
+    "cat $WILLOW_HOME/gate/registry.json",              # reading the registry is fine
+    "cat ~/.willow/gate/secrets/op.key",                # reading a secret is not minting
+    "ls ~/.willow/gate/secrets/",
+])
+def test_check_bash_self_grant_allows_keystore_reads(command):
+    assert pre_tool_use.check_bash_self_grant(command) is None
+
+
+def test_check_trust_root_write_blocks_a_secret_file():
+    reason = pre_tool_use.check_trust_root_write(
+        {"file_path": "/home/x/.willow/gate/secrets/evil.key", "content": "deadbeef"})
+    assert reason is not None and "keystore" in reason
 
 
 def test_check_trust_root_write_blocks_a_lease_file():

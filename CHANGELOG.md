@@ -9,7 +9,181 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
+### Security (willow-gate seam — hardening from adversarial review)
+- **`whoami` / `diagnostic_summary` can no longer enumerate another identity's
+  config.** These tools are ungated (they must answer with a missing manifest), so in
+  stdio a caller could pass any `app_id` and read that identity's permissions / role /
+  `store_scope`. They now route through `_own_identity_denial`: under binding
+  enforcement the caller must present a valid per-call credential proving it owns the
+  `app_id` (identity proof, not a tier gate — whoami is unclassified). Unchanged when
+  enforcement is off (trusted-host model) or for an unregistered app_id; serve mode
+  was already OAuth-bound.
+- **Enforcement no longer fails OPEN on a broken keystore.** `_enforce_binding_gate`
+  now pairs `agent_registry.load()` with a new `is_registered()`: a registered agent
+  whose secret is momentarily unreadable/short is DENIED (fail-closed), not silently
+  downgraded to app_id-only manifest auth. `load()` also rejects a `<32`-byte secret
+  on read, not only on register.
+- **Check-out is ownership-scoped.** `session_reconcile` / `SessionBinder.check_out`
+  now require the session's bound `agent_id == app_id` (the rule `verify_call` already
+  enforced), and `session_started_ts` is owner-scoped — closing a cross-agent
+  session-destroy (DoS) and audit-forgery path where any caller who learned another
+  agent's `session_id` could close and mis-attribute its session.
+- **Reconciliation can't be truncated past the diff.** The ground-truth feed uses a
+  new unbounded `ReceiptLog.distinct_tools()` (DISTINCT tool set) instead of a
+  row-limited `since()`, so a late privileged call in a high-volume session can no
+  longer fall outside the window and read as `clean`.
+- **Check-in replay protection fails closed.** An unreadable (vs absent) check-in
+  nonce file now raises instead of being treated as "nothing used".
+- **Announcement redacts before the sink.** Receipt `detail` (which can carry raw
+  error text embedding a token) is run through `secret_scan` before it reaches the
+  announcement sink, which may be an external ledger; `credential_returned` gets an
+  ALERT floor so an exemption-bypassed secret egress is never silent.
+- **Thread-safety + hardening.** `SessionBinder` state is guarded by a lock (FastMCP
+  threadpool); Exiled (trust 0) is denied at check-in; `call_sig` uses an unambiguous
+  structured encoding; keystore temp files are pid+thread+random-unique; keystore
+  `chmod` failures are logged, not swallowed. The PreToolUse guard now blocks writes
+  to the `gate/` keystore (both hook copies, kept byte-identical) and the
+  `register-agent`/`rotate-agent`/`revoke-agent` verbs; a `rotate-agent` CLI is added.
+
 ### Added
+- **Client-side signing shim** (`signing.py`, `_read_call_credential` /
+  `_current_call_credential` in `server.py`) — the H1 "practical shape" that makes
+  tier enforcement run END TO END. The agent's HARNESS (not the model) holds the
+  per-agent secret and signs each call; the signature rides the MCP request's
+  out-of-band `_meta` (key `willow_call_credential`), never a tool argument, so the
+  model can neither see the secret nor fabricate/omit a signature. `signing.py`
+  provides `build_checkin_header`, `build_call_credential`, `ClientSigner`, and the
+  `signed_call_tool(session, signer, name, args)` one-liner. Server-side,
+  `_read_call_credential` pulls `{session_id, call_nonce, sig}` from the request
+  context and `_current_call_credential` resolves it (an explicit contextvar wins
+  for tests; production reads `_meta`), feeding both the observe hook and the
+  enforcement gate. `session_bind` is the ONE bootstrap exemption — the check-in
+  carries no per-call credential (no session yet) and authenticates via its own
+  header HMAC, so requiring one would deadlock; everything after check-in signs.
+  With this, flipping `WILLOW_MCP_ENFORCE_BINDING=1` against a registered agent
+  whose harness signs now PASSES a live call (previously only tests could), while an
+  un-instrumented client still cannot reach a gated tool — the intended property.
+- **Graduated announcement volume** (`announce.py`, the `ReceiptLog.on_record`
+  hook) — Phase 5 of the willow-gate integration
+  (`docs/design/willow-gate-seam.md` §5): a policy *over* the receipt log, not a
+  second log. It decides how loudly each recorded decision is surfaced on the
+  operator's log channel, graduated by the caller's BOUND trust tier (louder for
+  the less trusted — an unbound caller is loud, Elder's routine calls are silent),
+  with every denial and reconciliation discrepancy escalated to ALERT regardless
+  of who did it. `WILLOW_MCP_ANNOUNCE` gates it (off by default ⇒ a plain local box
+  is unchanged and the record path pays nothing beyond the switch check);
+  `WILLOW_MCP_AUDIT_LEVEL` = `full` (per-volume) or `minimal` (only the loud stuff —
+  untrusted callers and every denial). Wired through a single `ReceiptLog.on_record`
+  observer so it sees every record site from one point and can NEVER break the
+  audit write it rides on (sink errors swallowed; the log stays the sole record).
+  Binding-mechanism receipts (`bind_observed`/`bind_enforced`) are never announced
+  (they ride every call — announcing them would just double each line). Pure
+  stdlib; willow-gate's PGP-encrypted announcement ledger is a pluggable
+  `announce.set_sink()`, so the base never imports `python-gnupg` (seam-doc D5).
+  New `announce` global row in the gates panel surfaces the switch + audit level.
+- **Session reconciliation** (`session_binder.reconcile` / `check_out`,
+  `ReceiptLog.since`, the `session_reconcile` tool) — Phase 4 of the willow-gate
+  integration (`docs/design/willow-gate-seam.md`, hole H3): a check-out
+  declare-vs-did diff. At check-out an agent declares the tool CLASSES it
+  exercised (`{tools, pass_count, fail_count, drift, state_hash}` — the reconciled
+  subset of the 13-field entry header, D4); the server diffs that against the
+  ground truth it **cannot feed** — `ReceiptLog.since(app_id, started_ts,
+  outcome="ok")`, every gated call that actually ran since check-in, scoped to the
+  session window by a SERVER-stamped start time (never the agent-supplied one) and
+  classified via `tier_policy`. The verdict flags a false write/execute/admin
+  claim (`claimed_not_done` — the H3 catch: a claim no receipt backs, i.e. a lie
+  or out-of-band use) and privileged activity not declared at entry/exit
+  (`beyond_entry` / `done_not_claimed`); read is ambient, so read-level over/under-
+  reporting is surfaced but never fails a session. Reconciling **records but never
+  blocks** (`reconciled` / `reconcile_discrepancy` receipt) — it runs alongside
+  `session_handoff_write`, not in front of it — and drops the session, freeing its
+  per-call nonce set (the H1 residual bound). `pass_count`/`fail_count`/`drift`/
+  `state_hash` are echoed, never judged (no independent ground truth).
+- **Tier-ceiling enforcement** (`tier_policy.py`, `_enforce_binding_gate` in
+  `server.py`) — Phase 3 of the willow-gate integration
+  (`docs/design/willow-gate-seam.md`, hole H2): the observed identity binding
+  becomes a CONTROL. `tier_policy.py` is the D1 tier→group map as a pure,
+  fully-tested table — every `@_guarded` tool is classified into a cumulative
+  privilege class (read ⊆ +write ⊆ +execute ⊆ +admin), with a completeness test
+  that fails if a tool is added to a group without a class, so the ceiling can't
+  silently lag. Inside `_gate`, after `permitted()` allows a tool by the manifest,
+  `_enforce_binding_gate` applies the *bound* trust tier: effective authorization
+  is `expand(manifest.permissions) ∩ unlocked_tools(trust_level)`. Egress stays
+  **double-gated** — `integration_call` / `task_net` need `execute` on a
+  non-read-only tier AND the manifest's own-line grant; the tier never softens the
+  own-line rule, and `admin` still ≠ sudo. Fail-closed on every ambiguous path
+  (missing/forged/replayed credential, tier-below-tool). **Opt-in via two locks**
+  (seam-doc D3): the `WILLOW_MCP_ENFORCE_BINDING` env switch (OFF by default —
+  registering an agent while off is exactly Phase 2, observe-only) AND per-agent
+  registration (a registered app must sign and clear the ceiling; an unregistered
+  app stays manifest-only, so a plain local clone is unchanged). The single-use
+  call nonce is consumed exactly once — enforcement verifies it inside `_gate`;
+  the observe hook steps aside when enforcing. New `enforce_binding` global row in
+  the gates panel surfaces the switch's live state beside `strict_trust_root`.
+- **Identity binding, observe-only** (`agent_registry.py`, `session_binder.py`) —
+  Phase 2 of the willow-gate integration (`docs/design/willow-gate-seam.md`,
+  hole H1): the mechanism that lets the gate know *which* agent is calling,
+  wired to LOG rather than enforce. An HMAC keystore lives at
+  `$WILLOW_HOME/gate/` (dir `0700`, registry `registry.json`, per-agent secret
+  `secrets/<agent_id>.key` `0600`); agents are registered CLI-only
+  (`register-agent --max-trust {0..4}` / `list-agents` / `revoke-agent`), never
+  by an app at runtime — registration is an operator authority, guarded like
+  the other sudo-invariant crossings. `SessionBinder.check_in(header)` verifies
+  a 13-field signed header (HMAC over the header, reserved-field trap,
+  persistent check-in-nonce replay defence, trust capped at the registered
+  ceiling) and mints a bound session; `verify_call(...)` re-checks a per-call
+  HMAC signature (over `session_id|app_id|tool|call_nonce`) so a bound
+  credential cannot be ridden, replayed, or tampered. Exposed as the
+  `session_bind` tool (header `agent_id` must equal the caller's `app_id`) under
+  a new `binding` group. The server observes the binding on EVERY gated call —
+  `_observe_binding()` reads a `_CALL_CREDENTIAL` contextvar, resolves the bound
+  tier, and writes a `bind_observed` receipt — but the outcome does not gate
+  anything and every failure is swallowed. This is deliberately
+  **observe-only**: it makes the identity signal real and auditable before any
+  Phase 3 turns it into enforcement, so the binding can be watched in receipts
+  without risking a lockout. Vendored/self-contained (seam-doc D5) — pure
+  `hashlib`/`hmac`/`os`, no `python-gnupg` dependency.
+- **Friction-floor watcher** (`friction.py` + vendored `friction_floor.py`) —
+  Phase 1 of the willow-gate integration (`docs/design/willow-gate-seam.md`): a
+  model-free, deterministic relationship smoke detector. It watches one thing —
+  whether the agent has stopped being *other* and is mirroring the user back,
+  smoothed, WHILE the user is escalating — and when a window of agent turns sits
+  below a friction floor during escalation it raises a loud, human-facing flag
+  ("the agent has stopped being 'other' — no pushback, no grounding, mostly
+  echo; look at turns …"). It NEVER blocks and NEVER egresses; it is a SIGNAL,
+  not a verdict (false-positives happen, a clever mirror can duck it) — its value
+  is observability: it makes an invisible thing leave a trace. Two tools:
+  `friction_scan` (scan a `[{role, text, ts?}]` window; persists any flag,
+  deduped by content, to the `friction_flags` collection) and
+  `friction_flags_list`. New `friction_read`/`friction_write` groups (both in
+  `full_access`). Orthogonal to the auth path — it wires to transcripts, not the
+  gate. The scanner is **vendored** from willow-gate (Apache-2.0) rather than
+  taken as a dependency, because it is pure stdlib while the willow-gate package
+  pulls `python-gnupg`; keeping the base dependency-free wins (seam-doc D5, for
+  this pure piece). Must be driven from OUTSIDE the watched model — a mirror
+  cannot audit itself.
+- **Lineage / provenance atoms** (`lineage.py`, prototype) — a queryable "story
+  of this willow" for the user-facing base store. Agents dropped into a running
+  willow keep asking where something came from, what was here before, and why it
+  is this way; a plain knowledge record answers "what is true", a lineage atom
+  answers **provenance**. Split into two layers, modeled on willow's own
+  `{from,to,relation,context}` edge graph: NODES are disciplined atoms
+  (rationale, evidence, authority) in the `lineage` collection; RELATIONSHIPS are
+  typed directional EDGES in `lineage_edges` (willow-mcp's own collection, not the
+  vault's inherited graph, so the base stays portable), and direction is QUERIED,
+  never stored twice — "is X current?" is "does any edge point `to: X` with
+  `relation: supersedes`?", which cannot drift the way a hand-kept back-pointer
+  can. Three traversed relations, each earning its place by changing what `why`
+  returns and what an agent does: `supersedes` (replaces — the old atom becomes
+  non-current), `derived_from` (came from but did NOT retire — both stay valid),
+  `motivated_by` (the friction behind it; may point at a gap id or external
+  node). Tools: `lineage_record`, `lineage_link` (add one edge post-hoc),
+  `lineage_why` (returns the atom plus its supersedes chain, derived_from, and
+  motivated_by — the lineage, not a blob), `lineage_list`. `record` REQUIRES a
+  non-empty rationale and at least one evidence citation — an atom that can't
+  cite is lore, not memory, and is refused. New `lineage_read`/`lineage_write`
+  groups (both in `full_access`). The MECHANISM is agent-neutral and ships in the
+  base; any one willow's specific story is content it records into its own store.
 - **Store/gap introspection & cleanup tools** — `whoami` (your own manifest and
   effective permissions; ungated like `diagnostic_summary`), `store_collections`
   and `store_stats` (list / count the SOIL collections in your `store_scope`

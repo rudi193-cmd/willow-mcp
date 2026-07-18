@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_receipts_app_id ON receipts(app_id);
 class ReceiptLog:
     """Append-only SQLite log of every tool call."""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, on_record=None):
         # Default under $WILLOW_HOME so the audit trail stays inside the
         # sovereign box (the data-vault boundary). Explicit db_path wins, then
         # the WILLOW_MCP_RECEIPT_DB override, then $WILLOW_HOME/mcp_receipt.db.
@@ -45,6 +45,12 @@ class ReceiptLog:
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+        # Optional post-write observer (app_id, tool, outcome, detail) → None. The
+        # announcement policy (Phase 5) rides here so it sees EVERY record site
+        # from one wiring point; it must never break the audit write, so its
+        # errors are swallowed. The log stays the single record — the observer
+        # only decides how loudly to surface a row, never writes a second one.
+        self.on_record = on_record
 
     def record(self, app_id: str, tool: str, outcome: str, detail: Optional[str] = None) -> None:
         ts = datetime.now(timezone.utc).isoformat()
@@ -54,6 +60,52 @@ class ReceiptLog:
                 (ts, app_id, tool, outcome, detail)
             )
             self._conn.commit()
+        if self.on_record is not None:
+            try:
+                self.on_record(app_id, tool, outcome, detail)
+            except Exception:
+                pass
+
+    def since(self, app_id: str, ts_iso: str, outcome: Optional[str] = None,
+              limit: int = 2000) -> list[dict]:
+        """This app_id's receipts at or after `ts_iso`, oldest first.
+
+        The session-reconciliation feed (willow-gate seam H3): `tools_used` must
+        come from the receipt log, or a declare-vs-did diff silently passes on
+        out-of-band use. ISO-8601 UTC timestamps sort lexicographically in
+        chronological order, so a string `ts >= ?` bound is a correct time window.
+        Optionally narrow to a single `outcome` (e.g. only calls that actually
+        ran). Scoped to one app_id, like tail() — never another identity's calls.
+        """
+        limit = max(1, min(int(limit), 10000))
+        q = ("SELECT ts, tool, outcome, detail FROM receipts "
+             "WHERE app_id = ? AND ts >= ?")
+        params: list = [app_id, ts_iso]
+        if outcome is not None:
+            q += " AND outcome = ?"
+            params.append(outcome)
+        q += " ORDER BY id ASC LIMIT ?"
+        params.append(limit)
+        with self._lock:
+            rows = self._conn.execute(q, tuple(params)).fetchall()
+        return [{"ts": r[0], "tool": r[1], "outcome": r[2], "detail": r[3]} for r in rows]
+
+    def distinct_tools(self, app_id: str, ts_iso: str,
+                       outcome: Optional[str] = None) -> list[str]:
+        """The DISTINCT set of tool names this app_id recorded at or after
+        `ts_iso` (optionally filtered to one `outcome`). Unbounded by row count on
+        purpose: this feeds session reconciliation, where a truncated row window
+        would let a late privileged call fall outside the diff and read as clean.
+        A DISTINCT tool set is small (bounded by the tool catalogue) regardless of
+        call volume, so there is nothing to cap."""
+        q = "SELECT DISTINCT tool FROM receipts WHERE app_id = ? AND ts >= ?"
+        params: list = [app_id, ts_iso]
+        if outcome is not None:
+            q += " AND outcome = ?"
+            params.append(outcome)
+        with self._lock:
+            rows = self._conn.execute(q, tuple(params)).fetchall()
+        return [r[0] for r in rows]
 
     def tail(self, app_id: str, limit: int = 20) -> list[dict]:
         """Return this app_id's own most-recent receipts, newest first.

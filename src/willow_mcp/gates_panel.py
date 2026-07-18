@@ -38,6 +38,7 @@ host that owns `$WILLOW_HOME`.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from html import escape as _esc
 from typing import Optional
@@ -129,6 +130,11 @@ FRIENDLY_LABELS: dict[str, str] = {
     "gap_purge": "Bulk-clear a whole topic of open questions",
     "gap_promote": "Make an answer official knowledge",
     "schema_admin": "Configure database field mapping",
+    "lineage_read": "Trace where things came from",
+    "lineage_write": "Record where things came from",
+    "friction_read": "See relationship-friction flags",
+    "friction_write": "Scan a transcript for relationship friction",
+    "binding": "Prove which agent is calling (signed check-in)",
     "full_access": "Full access to everything",
     "integration_read": "Check outside-service status",
     "integration_call": "Talk to outside services",
@@ -138,6 +144,8 @@ FRIENDLY_LABELS: dict[str, str] = {
     "consent.cloud_llm": "Allow cloud AI access, fleet-wide",
     "consent.lan": "Allow local network access, fleet-wide",
     "strict_trust_root": "Extra-strict security mode",
+    "enforce_binding": "Require signed agent identity (registered agents)",
+    "announce": "Announce actions louder for less-trusted callers",
     "severance": "Kept separate from other Willow installs",
     "human_orchestrator": "Requires a human in charge",
     "task worker": "Task runner",
@@ -233,6 +241,39 @@ def _global_rows() -> list[GateRow]:
         timer_shape="process",
         action_note=("set WILLOW_MCP_STRICT_TRUST_ROOT=1 in the server's environment "
                      "and restart — read once at process start"),
+    ))
+
+    enforce_binding = os.environ.get("WILLOW_MCP_ENFORCE_BINDING", "").strip().lower() in (
+        "1", "true", "yes", "on")
+    rows.append(GateRow(
+        id="enforce_binding", label="enforce_binding", scope="global",
+        state="on" if enforce_binding else "off",
+        detail=("registered agents must present a valid signed per-call credential and "
+                "clear the trust-tier ceiling; unregistered apps stay manifest-only"
+                if enforce_binding else
+                "willow-gate binding is observed only — registered agents are logged, "
+                "not gated (Phase 2 behavior)"),
+        timer_shape="process",
+        action_note=("set WILLOW_MCP_ENFORCE_BINDING=1 in the server's environment and "
+                     "restart — only after every registered agent's client can sign "
+                     "(an un-instrumented client cannot reach a gated tool)"),
+    ))
+
+    from . import announce as _announce
+    announce_on = _announce.enabled()
+    rows.append(GateRow(
+        id="announce", label="announce", scope="global",
+        state="on" if announce_on else "off",
+        detail=(f"graduated announcement volume on the operator log — audit_level="
+                f"{_announce.audit_level()} (louder for less-trusted callers; every "
+                f"denial/discrepancy escalated)"
+                if announce_on else
+                "receipt loudness policy off — decisions are logged to the receipt "
+                "trail but not announced on the operator channel"),
+        timer_shape="process",
+        action_note=("set WILLOW_MCP_ANNOUNCE=1 (and optionally "
+                     "WILLOW_MCP_AUDIT_LEVEL=minimal) in the server's environment "
+                     "and restart"),
     ))
 
     asserted = paths.severance_asserted()

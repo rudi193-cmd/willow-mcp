@@ -65,6 +65,199 @@ from . import secret_scan
 _store = Store()
 _receipt_log = ReceiptLog()
 
+from .lineage import Lineage
+_lineage = Lineage(_store)
+
+from .friction import FrictionWatcher
+_friction = FrictionWatcher(_store)
+
+import contextvars
+from . import agent_registry, tier_policy
+from .session_binder import SessionBinder, BindError
+from .signing import CREDENTIAL_META_KEY
+_binder = SessionBinder()
+# Per-call SIGNED credential (H1). It rides the MCP request's out-of-band `_meta`
+# (never a tool argument); _read_call_credential pulls it from the request context.
+# This contextvar is an explicit OVERRIDE seam — tests set it directly, and it wins
+# when set — but in production nothing sets it, so _current_call_credential falls
+# through to reading `_meta`. Phase 2 OBSERVES the credential; Phase 3 (when
+# WILLOW_MCP_ENFORCE_BINDING is on) ENFORCES it for registered apps.
+_CALL_CREDENTIAL: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar(
+    "willow_call_credential", default=None)
+
+# Tools exempt from the per-call credential requirement. `session_bind` is the
+# check-in itself — there is no session to sign against yet, and it authenticates
+# via its own header HMAC — so requiring a per-call signature would be a
+# bootstrap deadlock. It is the ONLY exemption; everything after check-in signs.
+_BINDING_BOOTSTRAP_TOOLS = frozenset({"session_bind"})
+
+
+def _read_call_credential() -> Optional[dict]:
+    """Pull the per-call credential the signing client attached to the MCP
+    request's out-of-band `_meta` (key CREDENTIAL_META_KEY). Returns a normalized
+    {session_id, call_nonce, sig} dict, or None if absent/malformed. Never raises —
+    a missing request context or meta is simply "no credential"."""
+    try:
+        from mcp.server.lowlevel.server import request_ctx
+        rc = request_ctx.get(None)
+        if rc is None:
+            return None
+        meta = getattr(rc, "meta", None)
+        extra = getattr(meta, "model_extra", None) or {}
+        cred = extra.get(CREDENTIAL_META_KEY)
+        if isinstance(cred, dict) and all(k in cred for k in ("session_id", "call_nonce", "sig")):
+            return {"session_id": str(cred["session_id"]),
+                    "call_nonce": str(cred["call_nonce"]),
+                    "sig": str(cred["sig"])}
+    except Exception:
+        return None
+    return None
+
+
+def _current_call_credential() -> Optional[dict]:
+    """The per-call credential for this call: an explicitly-set contextvar (the
+    test override) if present, else whatever the request `_meta` carried."""
+    cred = _CALL_CREDENTIAL.get()
+    if cred is not None:
+        return cred
+    return _read_call_credential()
+
+
+def _enforce_binding() -> bool:
+    """Phase 3 master switch, read live (not cached) so it can be toggled per
+    process / per test. OFF by default: registering an agent while this is off is
+    exactly Phase 2 (observe-only), so an operator can watch the binding in
+    receipts before the day it can lock anyone out. ON: a *registered* app must
+    present a valid per-call signature and clear the tier ceiling; an
+    *unregistered* app stays manifest-only (seam-doc D3)."""
+    return os.environ.get("WILLOW_MCP_ENFORCE_BINDING", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _enforce_binding_gate(app_id: str, tool_name: str) -> Optional[dict]:
+    """Apply the willow-gate binding as a CONTROL (Phase 3, H2), inside _gate and
+    only after permitted() has already allowed the tool per the manifest.
+
+    Returns None to allow, or an error dict to deny. Fail-closed on every ambiguous
+    path. Records the successful bind receipt itself so the audit line survives;
+    denials are receipted by the _guarded wrapper.
+
+    Rule (seam-doc §1 opt-in, D3): if the app is *not registered* in the keystore,
+    this is a no-op — a plain local clone keeps working with manifest-only auth and
+    no HMAC ceremony. If it *is* registered, the call must carry a valid signed
+    credential whose bound tier is high enough for this tool, or it is denied."""
+    # The check-in call itself carries no per-call credential (there is no session
+    # yet) and authenticates via its own header HMAC — exempt it, or enforcement is
+    # a bootstrap deadlock. The only exemption.
+    if tool_name in _BINDING_BOOTSTRAP_TOOLS:
+        return None
+    # Distinguish "not registered" (→ manifest-only, unchanged) from "registered
+    # but its secret is unreadable/short" (→ load() is None but is_registered() is
+    # True). The latter must FAIL CLOSED: waving it through would silently downgrade
+    # a registered agent to app_id-only auth — the exact hole binding exists to
+    # close. load() alone conflates the two; is_registered() breaks the tie.
+    if agent_registry.load(app_id) is None:
+        if agent_registry.is_registered(app_id):
+            return {"error": (
+                f"binding unavailable: '{app_id}' is registered but its secret is "
+                f"unreadable or invalid — refusing (fail-closed). An operator must "
+                f"repair the keystore ($WILLOW_HOME/gate/secrets/).")}
+        return None  # genuinely unregistered ⇒ manifest-only, unchanged
+    cred = _current_call_credential()
+    if not cred:
+        return {"error": (
+            f"binding required: '{app_id}' is a registered agent, so this call must "
+            f"carry a signed per-call credential (session_id, call_nonce, sig) supplied "
+            f"out-of-band by the client's signing middleware. app_id alone cannot bind.")}
+    v = _binder.verify_call(cred.get("session_id", ""), app_id, tool_name,
+                            cred.get("call_nonce", ""), cred.get("sig", ""))
+    if not v.get("bound"):
+        return {"error": f"binding rejected for '{app_id}': {v.get('reason')}"}
+    if not tier_policy.tier_permits(v["trust_level"], tool_name,
+                                    read_only=v.get("read_only")):
+        return {"error": (
+            f"tier too low: '{app_id}' is bound at {v['tier']} "
+            f"(level {v['trust_level']}), which may not call '{tool_name}'.")}
+    _receipt_log.record(app_id, tool_name, "bind_enforced",
+                        f"tier={v['tier']} sig=ok")
+    return None
+
+
+def _own_identity_denial(app_id: str, tool_name: str) -> Optional[dict]:
+    """Identity proof for the UNGATED self-report tools (whoami / diagnostic_summary).
+
+    Those tools are deliberately not @_guarded — they must answer even when the
+    manifest is empty or missing — but that also means they never went through the
+    binding gate, so in stdio a caller could pass ANY app_id and read that
+    identity's config (permissions/role/store_scope). When binding is ENFORCED,
+    route them through the same per-call credential check the gate uses, so a caller
+    may only read the identity it can prove it owns; whoami is unclassified, so this
+    is identity proof, not a tier gate. No-op when enforcement is off (trusted-host
+    single-operator model) or the app_id is unregistered (no bound identity to
+    protect) — consistent with how _gate treats every other tool."""
+    if not _enforce_binding():
+        return None
+    return _enforce_binding_gate(app_id, tool_name)
+
+
+from . import announce as _announce
+
+
+def _announce_hook(app_id: str, tool: str, outcome: str, detail: Optional[str]) -> None:
+    """Phase 5: surface each recorded decision on the operator log at a volume
+    graduated by the caller's BOUND trust tier (louder for the less trusted).
+    Reads the tier from the live session if there is one, else None (unbound →
+    loud). Cheap no-op when WILLOW_MCP_ANNOUNCE is off; never raises (ReceiptLog
+    swallows sink errors, and this is guarded besides)."""
+    if not _announce.enabled():
+        return
+    try:
+        sess = _binder.session_for(app_id)
+        trust = sess["trust_level"] if sess else None
+        # Receipt `detail` can carry raw error/exception text (e.g. an
+        # integration_call auth failure echoing a bearer token). Inside the box it
+        # only ever lived in the receipt DB; the announce sink may be an EXTERNAL
+        # ledger (set_sink), so redact credential-shaped substrings before it
+        # leaves — the same backstop the tool-result path uses.
+        safe_detail = detail
+        if detail:
+            safe_detail, _kinds = secret_scan.redact_egress(detail)
+        _announce.announce(app_id, tool, outcome, trust, safe_detail)
+    except Exception:
+        pass
+
+
+_receipt_log.on_record = _announce_hook
+
+
+def _observe_binding(app_id: str, tool_name: str) -> None:
+    """Phase 2, OBSERVE-ONLY: log the identity binding for this call — a per-call
+    signature if the client supplied one, else the app_id's live check-in tier —
+    WITHOUT changing the authorization decision (manifest ACL still governs).
+    Must never affect the call: all failures swallowed.
+
+    When enforcement is on, _enforce_binding_gate has already verified the
+    per-call credential inside _gate (consuming its single-use nonce and writing
+    a bind_enforced receipt), so re-verifying here would only spuriously fail on
+    the now-spent nonce. Step aside in that case."""
+    if _enforce_binding():
+        return
+    try:
+        cred = _current_call_credential()
+        if cred:
+            r = _binder.verify_call(cred.get("session_id", ""), app_id, tool_name,
+                                    cred.get("call_nonce", ""), cred.get("sig", ""))
+            _receipt_log.record(app_id, tool_name, "bind_observed",
+                                f"tier={r['tier']} sig=ok" if r.get("bound")
+                                else f"unbound: {r.get('reason')}")
+            return
+        sess = _binder.session_for(app_id)
+        if sess is not None:
+            _receipt_log.record(app_id, tool_name, "bind_observed",
+                                f"session tier={sess['tier']} (no per-call sig)")
+    except Exception:
+        pass
+
 def _argv_opt(flag: str) -> Optional[str]:
     """Read `--flag value` or `--flag=value` from sys.argv at import time.
 
@@ -209,6 +402,14 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
                 f"and lists this tool or a group that includes it."
             )
         }
+
+    # willow-gate binding ceiling (Phase 3, H2): the manifest allowed the tool;
+    # now apply the *bound trust tier* on top of it. No-op unless enforcement is on
+    # AND the app is registered (seam-doc D3) — see _enforce_binding_gate.
+    if _enforce_binding():
+        bind_err = _enforce_binding_gate(effective, tool_name)
+        if bind_err:
+            return None, bind_err
 
     from .human_session import orchestrator_write_denial
 
@@ -442,6 +643,9 @@ def _guarded(tool_name: str, *, list_error: bool = False):
                 return _shape(gate_err)
             if "app_id" in call_kwargs:
                 call_kwargs["app_id"] = effective_app_id
+
+            # Phase 2 (observe-only): log the identity binding; does not gate.
+            _observe_binding(effective_app_id, tool_name)
 
             collection = call_kwargs.get("collection")
             if (
@@ -679,6 +883,204 @@ def store_stats(app_id: str) -> dict:
         "total_records": sum(s["count"] for s in stats),
         "store_scope": scope,
     }
+
+
+# ── Lineage / provenance tools ─────────────────────────────────────────────────
+
+def _lineage_denied(app_id: str):
+    """Recording touches both the node and edge collections; querying reads
+    both. Require permission on each rather than only the node collection."""
+    from . import gate
+    for col in (_lineage.collection, _lineage.edges):
+        if not gate.collection_permitted(app_id, col):
+            return _collection_denied(app_id, col)
+    return None
+
+
+@mcp.tool()
+@_guarded("lineage_record")
+def lineage_record(
+    app_id: str,
+    id: str,
+    title: str,
+    rationale: str,
+    origin: str = "",
+    authority: str = "",
+    evidence: Optional[list] = None,
+    tags: Optional[list] = None,
+    supersedes: Optional[list] = None,
+    derived_from: Optional[list] = None,
+    motivated_by: Optional[list] = None,
+) -> dict:
+    """Record a provenance atom — the "story of this willow" as memory an agent
+    can query later. Answers the questions agents keep asking: where did this
+    come from, why is it this way, what was here before. `rationale` (the WHY)
+    and at least one `evidence` citation (a PR / commit / file / session) are
+    REQUIRED — an atom that can't cite is lore, not memory, and is refused.
+
+    Relationships to other atoms are typed EDGES (stored in `lineage_edges`, the
+    same {from,to,relation,context} shape willow's own knowledge graph uses), and
+    direction is QUERIED, not stored twice:
+      - `supersedes`   — atoms this REPLACES (the old ones become non-current)
+      - `derived_from` — atoms this CAME FROM but did NOT retire (both stay valid)
+      - `motivated_by` — the friction/decision behind it (may be a gap id or an
+                         external node, not only another atom)
+    Corrections re-record the same `id` in place; edges persist independently.
+    Confined to your store_scope like every store write."""
+    denied = _lineage_denied(app_id)
+    if denied:
+        return denied
+    return _lineage.record(id=id, title=title, rationale=rationale, origin=origin,
+                           authority=authority, evidence=evidence, tags=tags,
+                           supersedes=supersedes, derived_from=derived_from,
+                           motivated_by=motivated_by)
+
+
+@mcp.tool()
+@_guarded("lineage_link")
+def lineage_link(app_id: str, from_id: str, to_id: str, relation: str,
+                 context: str = "") -> dict:
+    """Add one provenance edge without (re)writing a node — e.g. mark an atom
+    `motivated_by` a gap discovered after the fact, or `derived_from` a source
+    you only now connected. `relation` is free-form; the `why` verb reads
+    supersedes / derived_from / motivated_by. Idempotent per (from, relation, to)."""
+    denied = _lineage_denied(app_id)
+    if denied:
+        return denied
+    return _lineage.link(from_id, to_id, relation, context)
+
+
+@mcp.tool()
+@_guarded("lineage_why")
+def lineage_why(app_id: str, query: str) -> dict:
+    """Answer "why does X exist / where did X come from" from recorded lineage.
+    Give a slug id or free text; returns the matching atom's rationale, origin,
+    authority, and evidence, PLUS its typed edges — what it supersedes (and
+    whether it is itself still current), what it was derived_from, and what
+    motivated it — the lineage, not a blob. A plain-language `answer` synthesizes
+    it. This is the verb a curious agent runs before acting on something it
+    didn't build."""
+    denied = _lineage_denied(app_id)
+    if denied:
+        return denied
+    return _lineage.why(query)
+
+
+@mcp.tool()
+@_guarded("lineage_list")
+def lineage_list(app_id: str, current_only: bool = False) -> list:
+    """List recorded lineage atoms (id, title, whether current, tags) — the index
+    of "what parts of this willow have a recorded story". Pass current_only=True
+    to hide atoms that a later `supersedes` edge has retired."""
+    denied = _lineage_denied(app_id)
+    if denied:
+        return [denied]
+    return _lineage.list_atoms(current_only=current_only)
+
+
+# ── Friction floor (relationship smoke detector) ────────────────────────────────
+
+@mcp.tool()
+@_guarded("friction_scan")
+def friction_scan(app_id: str, turns: list, window: int = 4, floor: float = 0.35) -> dict:
+    """Scan a transcript window for the mirror failure mode: the agent has stopped
+    being *other* and is reflecting the user back, smoothed, WHILE the user is
+    escalating. Model-free and deterministic — no LLM, no egress; it NEVER blocks,
+    it only flags. When a window of agent turns sits below the friction `floor`
+    during escalation it raises (and persists, deduped) a loud human-facing flag
+    naming where the agent stopped disagreeing.
+
+    `turns`: [{"role": "user"|"agent", "text": str, "ts"?: number}, …] — the recent
+    window, in order. It is a SIGNAL, not a verdict (false-positives happen; a
+    clever mirror can duck it); its value is observability. It MUST be driven from
+    OUTSIDE the watched model (a harness/monitor) — a mirror cannot audit itself;
+    an agent scanning its own turns is theater."""
+    from . import gate
+    if not gate.collection_permitted(app_id, _friction.collection):
+        return _collection_denied(app_id, _friction.collection)
+    return _friction.scan(turns, window=window, floor=floor)
+
+
+@mcp.tool()
+@_guarded("friction_flags_list", list_error=True)
+def friction_flags_list(app_id: str, limit: int = 20) -> list:
+    """List recent friction flags recorded by `friction_scan` — the durable trace
+    of when the relationship watcher tripped (most recent first)."""
+    from . import gate
+    if not gate.collection_permitted(app_id, _friction.collection):
+        return [_collection_denied(app_id, _friction.collection)]
+    return _friction.list_flags(limit=limit)
+
+
+# ── Identity binding (willow-gate seam — check-in / check-out) ───────────────────
+
+@mcp.tool()
+@_guarded("session_bind")
+def session_bind(app_id: str, header: dict) -> dict:
+    """Open a cryptographically-bound session (check-in). Provide a 13-field
+    HMAC-signed `header` whose `agent_id` equals your app_id; the server verifies
+    it against your operator-registered secret and caps the claimed `trust_level`
+    at your registered ceiling ("Elder is not a text field anyone can type").
+    Returns {session_id, agent_id, trust_level, tier}, or {error} on refusal.
+
+    Once bound, the tier is LOGGED on your subsequent calls (receipt
+    `bind_observed`). With `WILLOW_MCP_ENFORCE_BINDING` on it is also ENFORCED —
+    each call must carry a valid per-call signature and clear the tier ceiling
+    (Phase 3). Registration/rotation of the secret is operator/CLI-only
+    (`willow-mcp register-agent`); no MCP tool can mint one — the sudo invariant."""
+    if isinstance(header, dict) and header.get("agent_id") not in (None, app_id):
+        return {"error": "agent_id_mismatch", "detail": "header agent_id must equal app_id"}
+    try:
+        return _binder.check_in(header)
+    except BindError as e:
+        return {"error": "bind_refused", "detail": str(e)}
+
+
+@mcp.tool()
+@_guarded("session_reconcile")
+def session_reconcile(app_id: str, session_id: str, exit_declaration: dict) -> dict:
+    """Close a bound session and reconcile what you DECLARE you did against what the
+    receipt log shows you actually did (check-out; willow-gate seam Phase 4 / H3).
+
+    `exit_declaration` is the reconciled subset of the entry header — `tools` (the
+    willow-gate CLASSES you exercised: read/write/execute/admin), plus your
+    self-scored `pass_count`/`fail_count`/`drift`/`state_hash`. The server sources
+    the ground truth from ReceiptLog (every gated call that actually ran since your
+    check-in — you cannot feed it), classifies those tools, and diffs:
+      * `claimed_not_done` — a class you claim you used that NO receipt backs;
+      * `beyond_entry` / `done_not_claimed` — a privileged class the receipts show
+        you used that you did not pre-declare / did not report.
+    `clean` is false if any privileged discrepancy is found; read-level over/under-
+    reporting is surfaced but never fails the session. The session is DROPPED after
+    this call (its per-call nonce set is freed), so verify_call for it then fails.
+
+    Requires a live session bound to your app_id (call session_bind first); returns
+    {error} if there is none. This RECONCILES and records — it never blocks a
+    handoff, so run session_handoff_write / handoff_write_v4 as usual alongside it."""
+    # Ownership-scoped: session_started_ts returns None unless this session is
+    # bound to THIS app_id, so a caller cannot even window another agent's session.
+    started = _binder.session_started_ts(session_id, app_id=app_id)
+    if started is None:
+        return {"error": "no_live_session",
+                "detail": "no live bound session for session_id — call session_bind first"}
+    # Ground truth: the DISTINCT set of tools that actually ran (outcome 'ok'),
+    # scoped to this app_id and this session's window. distinct_tools is unbounded
+    # by row count — a truncated fetch would let a late privileged call fall
+    # outside the diff and read as clean. The agent cannot supply this list.
+    actual_tools = _receipt_log.distinct_tools(app_id, started, outcome="ok")
+    try:
+        # app_id passed so check_out re-verifies ownership before it drops the
+        # session — belt-and-suspenders with the started_ts scoping above.
+        report = _binder.check_out(session_id, exit_declaration, actual_tools, app_id=app_id)
+    except BindError as e:
+        return {"error": "reconcile_refused", "detail": str(e)}
+    _receipt_log.record(
+        app_id, "session_reconcile",
+        "reconciled" if report["clean"] else "reconcile_discrepancy",
+        None if report["clean"] else
+        f"claimed_not_done={report['claimed_not_done']} "
+        f"beyond_entry={report['beyond_entry']} done_not_claimed={report['done_not_claimed']}")
+    return report
 
 
 # ── Knowledge tools ────────────────────────────────────────────────────────────
@@ -2706,14 +3108,23 @@ def whoami(app_id: str = "") -> dict:
     groups your manifest grants, the resolved set of tools you can actually call
     (group expansion minus any deny_tools), your store_scope, and whether you're
     a human-only seat. Read-only and self-scoped — your own manifest, never
-    another identity's. Ungated, like diagnostic_summary, so it still answers
-    when your manifest is empty or missing (it says exactly that)."""
+    another identity's: in serve mode the app_id comes from your OAuth binding, and
+    in stdio under enforcement you must prove you own the app_id you pass (a valid
+    per-call credential), so whoami can't enumerate another bound agent's config.
+    Ungated otherwise, like diagnostic_summary, so it still answers when your
+    manifest is empty or missing (it says exactly that)."""
     from . import gate
     if _SERVE_MODE:
         bound, err = _resolve_serve_identity()
         if err:
             return err
         app_id = bound or ""
+    else:
+        # stdio: under enforcement, prove you own this app_id before reading its
+        # config — whoami must not enumerate another bound agent's manifest.
+        denial = _own_identity_denial(app_id, "whoami")
+        if denial:
+            return denial
     if not app_id:
         return {"error": "no_app_id",
                 "detail": "no app_id supplied — pass the app_id you call willow-mcp with"}
@@ -2769,6 +3180,12 @@ def diagnostic_summary(app_id: str = "") -> dict:
         allowed, retry_after = _check_rate(app_id)
         if not allowed:
             return {"error": "rate_limited", "retry_after": retry_after}
+    else:
+        # stdio: same identity proof as whoami — under enforcement you may only
+        # diagnose the identity you can prove you own, not enumerate another's.
+        denial = _own_identity_denial(app_id, "diagnostic_summary")
+        if denial:
+            return {"verdict": "unauthorized", "mode": mode, "detail": denial["error"]}
 
     eff = app_id or _DEFAULT_APP_ID
     store = _diag_store()
@@ -3063,6 +3480,57 @@ def _cmd_sign_net_task(args) -> None:
     print(envelope)
 
 
+def _cmd_register_agent(args) -> None:
+    """`willow-mcp register-agent` — operator-only. Interactive/local by design,
+    exactly like grant-net/confirm-binding: no MCP tool can reach this, so an
+    agent can request standing and never mint it (the sudo invariant)."""
+    from . import agent_registry
+    secret = None
+    if args.secret_file:
+        try:
+            secret = Path(args.secret_file).expanduser().read_bytes()
+        except OSError as e:
+            print(f"Error: cannot read --secret-file: {e}", file=sys.stderr)
+            raise SystemExit(1)
+    try:
+        out = agent_registry.register_agent(args.agent_id, args.max_trust, secret=secret)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(f"Registered agent_id={out['agent_id']!r} at trust ceiling {out['max_trust']}.")
+    print("Install this secret into the agent's client-side signer (shown once):")
+    print(f"  {out['secret_hex']}")
+
+
+def _cmd_list_agents(args) -> None:
+    from . import agent_registry
+    print(json.dumps(agent_registry.list_agents(), indent=2, sort_keys=True))
+
+
+def _cmd_revoke_agent(args) -> None:
+    from . import agent_registry
+    had = agent_registry.revoke(args.agent_id)
+    print(f"Agent {args.agent_id!r} {'revoked' if had else 'was not registered'}.")
+
+
+def _cmd_rotate_agent(args) -> None:
+    """`willow-mcp rotate-agent` — mint a NEW secret for an already-registered
+    agent, keeping its trust ceiling (D2). Rotation is hard by default: sessions
+    signed with the old secret fail their next verify and must re-check-in — the
+    correct compromise-response. Operator/CLI-only, like register-agent."""
+    from . import agent_registry
+    ceiling = agent_registry.list_agents().get(args.agent_id)
+    if ceiling is None:
+        print(f"Error: {args.agent_id!r} is not registered — use register-agent first.",
+              file=sys.stderr)
+        raise SystemExit(1)
+    out = agent_registry.register_agent(args.agent_id, ceiling)   # fresh secret, same ceiling
+    print(f"Rotated secret for agent_id={out['agent_id']!r} (trust ceiling {out['max_trust']}).")
+    print("Install the NEW secret into the agent's client-side signer (shown once); "
+          "the old secret is now dead:")
+    print(f"  {out['secret_hex']}")
+
+
 def _cmd_grant_net(args) -> None:
     """`willow-mcp grant-net` — issue a time-boxed egress lease (B-32).
 
@@ -3259,6 +3727,25 @@ def _main():
         "roster", help="Inspect or operator-sync fleet.json into existing agents rows"
     )
     roster_p.add_argument("action", choices=["status", "sync"])
+
+    regagent_p = subparsers.add_parser(
+        "register-agent",
+        help="Bind an agent identity to an HMAC secret + trust ceiling (operator-only; "
+             "no MCP tool can mint a secret)",
+    )
+    regagent_p.add_argument("agent_id")
+    regagent_p.add_argument("--max-trust", type=int, required=True, choices=[0, 1, 2, 3, 4])
+    regagent_p.add_argument("--secret-file", default="",
+                            help="read the 32+ byte secret from this file; omit to generate one")
+    regagent_list_p = subparsers.add_parser(
+        "list-agents", help="List registered agent ids and their trust ceilings (no secrets)")
+    regagent_revoke_p = subparsers.add_parser(
+        "revoke-agent", help="Remove an agent's secret + registry entry (operator-only)")
+    regagent_revoke_p.add_argument("agent_id")
+    regagent_rotate_p = subparsers.add_parser(
+        "rotate-agent",
+        help="Mint a new secret for a registered agent, keeping its ceiling (operator-only)")
+    regagent_rotate_p.add_argument("agent_id")
     worker_service_p = subparsers.add_parser(
         "worker-service",
         help="Install/status/uninstall standalone fast+batch user units without starting or stopping them",
@@ -3427,6 +3914,18 @@ def _main():
         return
     if args.command == "sign-net-task":
         _cmd_sign_net_task(args)
+        return
+    if args.command == "register-agent":
+        _cmd_register_agent(args)
+        return
+    if args.command == "list-agents":
+        _cmd_list_agents(args)
+        return
+    if args.command == "revoke-agent":
+        _cmd_revoke_agent(args)
+        return
+    if args.command == "rotate-agent":
+        _cmd_rotate_agent(args)
         return
     if args.command == "grant-net":
         _cmd_grant_net(args)

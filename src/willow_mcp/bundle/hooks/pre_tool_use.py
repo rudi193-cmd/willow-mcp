@@ -39,9 +39,16 @@ from typing import Optional
 # willow-mcp creates (knowledge, records, mcp_receipt.db). A bare `sqlite3`
 # or `psql` invocation with no such marker isn't ours to block — the host
 # may have unrelated databases.
-_CLIENT_RE = re.compile(r"\b(psql|psycopg2|sqlite3)\b")
+# Known limits (this is a tripwire, not an OS control — see module docstring):
+# it catches shell-native access via a named client to a marker-bearing target.
+# It does NOT catch a write performed inside a `python -c` one-liner (no client
+# token / no shell write-verb), an owned store reached by a bare absolute path
+# whose collection isn't named knowledge/records, or a DB client not listed
+# below. The real control is `chown` + WILLOW_MCP_STRICT_TRUST_ROOT (B-32).
+_CLIENT_RE = re.compile(r"\b(psql|psycopg[23]?|asyncpg|pg8000|sqlite3)\b")
 _OWNED_MARKER_RE = re.compile(
-    r"WILLOW_PG_DB|WILLOW_STORE_ROOT|\bknowledge\b|\brecords\b|mcp_receipt\.db"
+    r"WILLOW_PG_DB|WILLOW_STORE_ROOT|\bknowledge\b|\brecords\b"
+    r"|(?:mcp_receipt|vault|kart|store)\.db"
 )
 
 _TOOL_REDIRECTS = {
@@ -119,10 +126,15 @@ def check_task_submit(tool_input: dict) -> Optional[str]:
 # sudo invariant forbids: request and confirm are separate authorities, and the
 # agent holds only the first.
 _LEASE_DIR_RE = re.compile(r"mcp_apps/_net_leases\b")
+# The identity keystore ($WILLOW_HOME/gate/): per-agent HMAC secrets + the trust
+# registry. Minting/rotating an identity or a trust ceiling by writing these is
+# the same operator-only authority as minting a lease — an agent may request
+# standing, never write its own secret (D2). Reading is not blocked.
+_KEYSTORE_RE = re.compile(r"gate/(?:secrets\b|registry\.json)")
 _GRANT_CMD_RE = re.compile(
-    r"\bwillow-mcp\s+(?:grant-net|sign-net-task|consent\s+(?:set|reconcile)|roster\s+sync)\b"
-    r"|\bwillow_mcp\s+(?:grant-net|sign-net-task)\b"
-    r"|\b(?:lease\.grant|sign_envelope)\s*\("
+    r"\bwillow-mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent|rotate-agent|consent\s+(?:set|reconcile)|roster\s+sync)\b"
+    r"|\bwillow_mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent|rotate-agent)\b"
+    r"|\b(?:lease\.grant|sign_envelope|agent_registry\.(?:register_agent|revoke))\s*\("
     r"|\bconsent_admin\.(?:write_consent|set_key|reconcile)\s*\("
     r"|\bfleet_roster\.sync\s*\("
 )
@@ -144,6 +156,15 @@ _SELF_GRANT_REASON = (
     "Ask for the grant; do not write the file. (B-32)"
 )
 
+_KEYSTORE_REASON = (
+    "willow-mcp: this writes the identity keystore ($WILLOW_HOME/gate/ — per-agent "
+    "HMAC secrets and the trust registry). Minting or rotating an identity or a "
+    "trust ceiling is operator-only, done at the operator's terminal with "
+    "`willow-mcp register-agent / rotate-agent / revoke-agent`; no tool and no app "
+    "may write its own secret or raise its own trust. An agent may REQUEST "
+    "standing, never CONFIRM it (sudo invariant, D2). Reading is fine; writing is not."
+)
+
 
 def check_bash_self_grant(command: str) -> Optional[str]:
     """Block a command that mints a lease/envelope or grants itself task_net.
@@ -160,19 +181,24 @@ def check_bash_self_grant(command: str) -> Optional[str]:
         return None
     if _LEASE_DIR_RE.search(command):
         return _SELF_GRANT_REASON
+    if _KEYSTORE_RE.search(command):
+        return _KEYSTORE_REASON
     if _MANIFEST_RE.search(command) and _TASK_NET_RE.search(command):
         return _SELF_GRANT_REASON
     return None
 
 
 def check_trust_root_write(tool_input: dict) -> Optional[str]:
-    """Block a Write/Edit that mints a lease or slips `task_net` into a manifest."""
+    """Block a Write/Edit that mints a lease, writes an identity secret, or slips
+    `task_net` into a manifest."""
     tool_input = tool_input or {}
     path = str(tool_input.get("file_path", "") or "")
     if not path:
         return None
     if _LEASE_DIR_RE.search(path):
         return _SELF_GRANT_REASON
+    if _KEYSTORE_RE.search(path):
+        return _KEYSTORE_REASON
     if _MANIFEST_RE.search(path):
         # Only the permission that carries egress. Editing a manifest for any
         # other reason is ordinary work and must not be blocked.

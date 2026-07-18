@@ -112,6 +112,30 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "gap_purge": frozenset({
         "gap_purge_topic",
     }),
+    # Provenance/"story of this willow" atoms. Read (why/list) is broadly safe —
+    # it is exactly what a curious agent should be able to ask. Write is its own
+    # group so recording lineage is a deliberate grant, not a side effect of a
+    # store-write role.
+    "lineage_read": frozenset({
+        "lineage_why", "lineage_list",
+    }),
+    "lineage_write": frozenset({
+        "lineage_record", "lineage_link",
+    }),
+    # Relationship smoke detector (model-free; never blocks, never egresses).
+    # scan persists a flag when it trips, so it is a write; listing is a read.
+    "friction_read": frozenset({
+        "friction_flags_list",
+    }),
+    "friction_write": frozenset({
+        "friction_scan",
+    }),
+    # Cryptographic identity binding (willow-gate seam, Phase 2). The security is
+    # the HMAC signature, not this ACL; the group just lets a manifest opt an app
+    # into calling check-in. Registration stays operator/CLI-only.
+    "binding": frozenset({
+        "session_bind", "session_reconcile",
+    }),
     "integration_read": frozenset({
         "integration_list", "integration_status",
     }),
@@ -168,6 +192,12 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         # Gap backlog
         "gap_log", "gap_list", "gap_resolve", "gap_delete", "gap_purge_topic",
         "gap_promote",
+        # Lineage / provenance ("story of this willow")
+        "lineage_why", "lineage_list", "lineage_record", "lineage_link",
+        # Friction floor (relationship smoke detector)
+        "friction_scan", "friction_flags_list",
+        # Identity binding (check-in / check-out; registration is CLI-only)
+        "session_bind", "session_reconcile",
         # Integrations (read-only ledger; integration_call stays own-line)
         "integration_list", "integration_status",
     }),
