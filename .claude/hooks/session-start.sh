@@ -29,6 +29,15 @@ export WILLOW_PG_DB="${WILLOW_PG_DB:-willow}"
 export WILLOW_PG_USER="${WILLOW_PG_USER:-$(id -un)}"
 export WILLOW_APP_ID="${WILLOW_APP_ID:-willow}"
 
+# Best-effort: install bubblewrap. Kart sandboxes every task with `bwrap` for
+# network isolation, so without it submitted tasks execute-fail instead of
+# running. Non-fatal — the store/knowledge tools work regardless; only the task
+# queue needs it.
+if ! command -v bwrap >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1 \
+     && command -v sudo >/dev/null 2>&1; then
+  sudo apt-get install -y -q bubblewrap >&2 2>&1 || true
+fi
+
 # Best-effort: start a local Postgres cluster if one is installed but down.
 # Postgres is optional (the SOIL store stands alone), so every step here is
 # non-fatal — a failure just means knowledge_*/task_*/fleet_* degrade.
