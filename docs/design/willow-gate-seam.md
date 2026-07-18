@@ -149,9 +149,10 @@ build, plus one policy call and one upstream bug:
   willow-mcp tool takes `app_id` as a plaintext string. The HMAC binds a
   *session*, but nothing ties a given MCP call to that session — a caller passing
   `app_id=operator` rides operator's live session with no auth of its own. **The
-  full build must carry a per-call session credential (the check-in nonce, or a
-  derived session token) on every gated call; `app_id` alone cannot bind.** This
-  is the largest change and touches every tool signature.
+  full build must carry a per-call credential on every gated call; `app_id` alone
+  cannot bind.** Largest change; touches every tool signature. *Prototyped — see
+  "H1 prototype" below: a per-call HMAC signature (SIGNED) is the fix; a bearer
+  session token closes the ride but not replay.*
 - **H2 — willow-gate must BE `_gate`, not sit beside it.** `_gate` today
   authorizes via `permitted()` alone. Unless `authorize_tool` runs *inside*
   `_gate` as the sole funnel, willow-gate is a ledger, not a gate: a call that
@@ -169,11 +170,44 @@ build, plus one policy call and one upstream bug:
   is defined `entry_allowed=False`, but `check_in` never checks it, so an Exiled
   agent still gets a (read-only) session. Fix upstream in willow-gate.
 
+## H1 prototype — how a call binds to a session (resolved)
+
+A second spike prototyped the missing binder — what each call carries *besides*
+`app_id` — across three modes, attacking each with ride / replay / tamper:
+
+| mode | what the call carries | ride | replay | tamper |
+|---|---|---|---|---|
+| APPID_ONLY (today) | `app_id` only | **HOLE** | — | — |
+| BEARER | + a session token minted at check-in | closed | **HOLE** (token reusable for any later call) | HOLE |
+| SIGNED | + `(session_id, call_nonce, HMAC(secret, session_id\|app_id\|tool\|call_nonce))` | closed | closed (nonce single-use) | closed (sig binds app_id+tool) |
+
+**Decision: SIGNED per-call HMAC.** It is the only mode that closes all three —
+it extends check-in's exact HMAC model to every call. Bearer stops the ride (a
+real gain over today) but a captured token replays for any call for the session's
+lifetime, so it is acceptable *only* where the transport itself is the trust
+boundary.
+
+Practical shape:
+- **The MCP client signs, not the LLM.** The harness wrapping the agent holds the
+  per-agent secret and signs each call; the model never sees the secret and
+  cannot fabricate or omit a signature. This is client-side signing middleware —
+  a real integration cost, and the point: an un-instrumented client cannot call
+  gated tools.
+- **The credential rides out-of-band** (a transport/metadata field on the MCP
+  request), *not* as a tool parameter — tool schemas stay clean and the model
+  can't touch it. `_gate` reads it from the request context.
+- `_gate` becomes: read `(session_id, call_nonce, sig)` → resolve to `(agent_id,
+  trust)` → **require `agent_id == app_id`** → then today's `permitted()` + tier.
+- **Mode by deployment:** SIGNED is required for serve-mode / multi-agent. For a
+  single-agent stdio deployment where the private pipe already authenticates the
+  peer, BEARER (or a session handle) is an acceptable lighter choice.
+
+Residual limits to carry into the build: per-agent secret provisioning (D2); a
+per-session used-nonce set that is dropped at check-out (bounded growth); and the
+hard truth that any client not instrumented to sign simply cannot reach a gated
+tool.
+
 ## Open decisions (the forks to settle before wiring)
-- **D0 — session credential (was implicit; the spike made it a BLOCKER):** how a
-  per-call session token rides the MCP tool interface (an extra parameter vs an
-  out-of-band transport header), and how `_gate` maps it back to a live check-in.
-  H1 cannot be deferred — it is the reason to adopt willow-gate at all.
 - **D1 — tier↔group map:** ratify the class→group table in §2, especially where
   `execute`/`admin` land relative to `task_queue`, `integration_call`,
   `schema_admin`, `gap_purge`.
