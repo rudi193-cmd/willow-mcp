@@ -175,3 +175,57 @@ def test_signed_call_tool_attaches_meta_not_arguments():
     assert captured["arguments"] == {"app_id": "op", "id": "x"}   # credential NOT here
     assert signing.CREDENTIAL_META_KEY in captured["meta"]        # it's in _meta
     assert captured["meta"][signing.CREDENTIAL_META_KEY]["session_id"] == "sid"
+
+
+# ── SigningClientSession harness (over a fake MCP session) ────────────────────
+
+class _FakeMCP:
+    """Records every call_tool and returns a scripted CallToolResult-ish object."""
+    def __init__(self, replies):
+        self._replies = replies          # tool name -> dict to return
+        self.calls = []
+
+    async def call_tool(self, name, arguments=None, *, meta=None, **kw):
+        self.calls.append({"name": name, "arguments": arguments, "meta": meta})
+        return types.SimpleNamespace(structuredContent=self._replies.get(name, {}),
+                                     content=[], isError=False)
+
+
+def test_result_dict_unwraps_structured_and_text():
+    assert signing._result_dict(types.SimpleNamespace(structuredContent={"a": 1})) == {"a": 1}
+    # FastMCP wraps a non-model list return under "result"
+    wrapped = types.SimpleNamespace(structuredContent={"result": [1, 2]})
+    assert signing._result_dict(wrapped) == {"result": [1, 2]}
+    text = types.SimpleNamespace(structuredContent=None,
+                                 content=[types.SimpleNamespace(text='{"ok": true}')])
+    assert signing._result_dict(text) == {"ok": True}
+
+
+def test_harness_bind_then_signs_every_call():
+    fake = _FakeMCP({"session_bind": {"session_id": "S1", "agent_id": "op",
+                                      "trust_level": 3, "tier": "Veteran"}})
+    h = signing.SigningClientSession(fake, "op", b"k" * 32)
+    bound = asyncio.run(h.bind(3, tools=["read", "write"]))
+    assert bound["session_id"] == "S1" and h.session_id == "S1"
+    # bind carried the header, NOT a per-call credential (it's the bootstrap)
+    assert fake.calls[0]["name"] == "session_bind" and fake.calls[0]["meta"] is None
+    assert fake.calls[0]["arguments"]["header"]["agent_id"] == "op"
+
+    asyncio.run(h.call("store_get", {"record_id": "x"}))
+    call = fake.calls[1]
+    assert call["arguments"]["app_id"] == "op"                     # filled in
+    assert signing.CREDENTIAL_META_KEY in call["meta"]             # signed via _meta
+    assert call["meta"][signing.CREDENTIAL_META_KEY]["session_id"] == "S1"
+
+
+def test_harness_call_before_bind_raises():
+    h = signing.SigningClientSession(_FakeMCP({}), "op", b"k" * 32)
+    with pytest.raises(signing.SigningError):
+        asyncio.run(h.call("store_get"))
+
+
+def test_harness_bind_refusal_raises():
+    fake = _FakeMCP({"session_bind": {"error": "bind_refused", "detail": "nope"}})
+    h = signing.SigningClientSession(fake, "op", b"k" * 32)
+    with pytest.raises(signing.SigningError, match="refused"):
+        asyncio.run(h.bind(3, tools=["read"]))

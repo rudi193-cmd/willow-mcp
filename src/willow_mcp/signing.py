@@ -29,6 +29,7 @@ and the model cannot touch it.
 """
 from __future__ import annotations
 
+import json
 import secrets as _secrets
 from typing import Any, Optional
 
@@ -130,3 +131,85 @@ async def signed_call_tool(session: Any, signer: ClientSigner, name: str,
     credential rides `_meta`.
     """
     return await session.call_tool(name, arguments, meta=signer.meta_for(name), **kwargs)
+
+
+class SigningError(Exception):
+    """A signing-harness failure — a refused check-in, or a call before bind."""
+
+
+def _result_dict(result: Any) -> dict:
+    """Best-effort extraction of a willow-mcp tool's dict result from a
+    `CallToolResult`, duck-typed so this module never imports the MCP types.
+    Handles FastMCP's `structuredContent` (unwrapping its `{"result": …}` box)
+    and falls back to JSON in the first text content block."""
+    sc = getattr(result, "structuredContent", None)
+    if isinstance(sc, dict):
+        if set(sc) == {"result"} and isinstance(sc["result"], (dict, list)):
+            return sc["result"] if isinstance(sc["result"], dict) else {"result": sc["result"]}
+        return sc
+    for block in (getattr(result, "content", None) or []):
+        text = getattr(block, "text", None)
+        if text:
+            try:
+                parsed = json.loads(text)
+                return parsed if isinstance(parsed, dict) else {"result": parsed}
+            except (ValueError, TypeError):
+                pass
+    return {}
+
+
+class SigningClientSession:
+    """A real signing harness wrapping an MCP `ClientSession`.
+
+    The harness — not the model — holds the agent's secret. It checks in ONCE
+    (`bind`) and then signs EVERY subsequent tool call (`call`), so a model
+    driving the session never sees the secret or a signature and cannot reach a
+    gated tool un-instrumented. This is the client half of enforcement; the
+    operator installs the secret here out-of-band from `willow-mcp register-agent`.
+
+        harness = SigningClientSession(mcp_session, "worker", secret)
+        await harness.bind(trust_level=3, tools=["read", "write"])
+        await harness.call("store_put", {"collection": "notes", "record": {...}})
+        await harness.reconcile(tools=["read", "write"])   # check-out
+    """
+
+    def __init__(self, session: Any, agent_id: str, secret: bytes):
+        self._session = session
+        self.agent_id = agent_id
+        self._secret = secret
+        self._signer: Optional[ClientSigner] = None
+        self.session_id: Optional[str] = None
+
+    async def bind(self, trust_level: int, *, tools, **header_kw) -> dict:
+        """Check in (the one bootstrap call — no per-call credential yet, it
+        authenticates via the header HMAC) and arm the per-call signer. Returns
+        the session dict; raises SigningError if the gate refuses the header."""
+        header = build_checkin_header(self._secret, self.agent_id, trust_level,
+                                      tools=tools, **header_kw)
+        result = await self._session.call_tool(
+            "session_bind", {"app_id": self.agent_id, "header": header})
+        data = _result_dict(result)
+        if "error" in data or "session_id" not in data:
+            raise SigningError(f"check-in refused: {data or 'no result'}")
+        self.session_id = data["session_id"]
+        self._signer = ClientSigner(self.agent_id, self._secret, self.session_id)
+        return data
+
+    async def call(self, name: str, arguments: Optional[dict] = None):
+        """Call a gated tool as this agent, signing it. `app_id` is filled in
+        automatically; the credential rides `_meta`."""
+        if self._signer is None:
+            raise SigningError("call bind() before making signed calls")
+        args = dict(arguments or {})
+        args.setdefault("app_id", self.agent_id)
+        return await self._session.call_tool(name, args, meta=self._signer.meta_for(name))
+
+    async def reconcile(self, *, tools, pass_count: int = 0, fail_count: int = 0,
+                        drift: float = 0, state_hash: str = "") -> Any:
+        """Check out: declare the tool CLASSES you exercised and let the server
+        diff them against the receipt log. Signed like any other call."""
+        exit_declaration = {"tools": list(tools), "pass_count": pass_count,
+                            "fail_count": fail_count, "drift": drift, "state_hash": state_hash}
+        return await self.call(
+            "session_reconcile",
+            {"session_id": self.session_id, "exit_declaration": exit_declaration})
