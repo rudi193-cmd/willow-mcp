@@ -60,7 +60,7 @@ verifiable at read time, so staleness is detected instead of inherited.*
     "the assembled work is homeless on purpose, for now; this branch is a holding pattern, not an answer",
     "left as a branch, no PR"
   ],
-  "summary": "A large session (~10-15 MB) that began as a willow-2.0 -> willow-mcp migration audit and became the assembling of the whole into one — code (pieces), human (voices), collaboration — braided along seven threads, plus a factory toolkit, a self-describing holdings registry, and a local CPU inference pipe stood up inside the box. Left as a ring on a branch so the session does not evaporate."
+  "summary": "A large session (~20 MB, verified against the raw transcript) that began as a willow-2.0 -> willow-mcp migration audit and became the assembling of the whole into one — code (pieces), human (voices), collaboration — braided along seven threads, plus a factory toolkit, a self-describing holdings registry, and a local CPU inference pipe stood up inside the box. Left as a ring on a branch so the session does not evaporate."
 }
 ```
 

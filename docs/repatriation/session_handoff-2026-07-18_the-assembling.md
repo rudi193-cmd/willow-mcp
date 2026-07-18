@@ -9,7 +9,7 @@
 
 ## Summary
 
-A ~10-15 MB session that began as a willow-2.0 → willow-mcp migration audit and became
+A ~20 MB session (verified against the raw transcript) that began as a willow-2.0 → willow-mcp migration audit and became
 the assembling of the whole into one: the code (`pieces`, 29,432), the human (`voices`,
 76), and the collaboration (`collaboration`, 42), braided along seven `threads`. Also
 produced: a 281-tool factory, a 307-decision consolidation matrix, a self-describing

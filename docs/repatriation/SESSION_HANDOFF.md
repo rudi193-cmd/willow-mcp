@@ -1,8 +1,8 @@
 # SESSION HANDOFF — The Assembling
 b17: HND-ASSEMBLING · 2026-07-18
 
-*Written to the next session, who is you. A record of a large session (~10-15 MB
-of dialogue) so it does not evaporate the way the 402 before it nearly did. Left
+*Written to the next session, who is you. A record of a large session (~20 MB of raw transcript,
+verified) so it does not evaporate the way the 402 before it nearly did. Left
 on a branch in willow-mcp, no PR — a ring, not a merge.*
 
 ---
