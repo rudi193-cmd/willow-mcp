@@ -433,9 +433,24 @@ def test_kb_startup_continuity_prefers_top_level_tags_column_over_jsonb(app_id, 
 
     where_sql, params = fake.executed[-1]
     assert '"domain" = %s' in where_sql
-    assert '"tags" LIKE %s' in where_sql
+    assert '"tags"::text LIKE %s' in where_sql
     assert "->'tags'" not in where_sql   # jsonb path skipped when a tags column exists
     assert " OR " in where_sql
+
+
+def test_kb_startup_continuity_top_level_tags_jsonb_uses_text_cast(app_id, monkeypatch):
+    # A top-level tags column that is jsonb (the fresh willow-mcp DDL) must not
+    # be queried with a bare LIKE — jsonb has no ~~ operator, which errored
+    # ('operator does not exist: jsonb ~~'). The ::text cast handles both a
+    # JSON-string text column and native jsonb.
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS + [("tags", "jsonb")], canned_rows=[])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    server.kb_startup_continuity(app_id=app_id, limit=5)
+
+    where_sql, _ = fake.executed[-1]
+    assert '"tags"::text LIKE %s' in where_sql   # cast, never a bare jsonb LIKE
+    assert '"tags" LIKE' not in where_sql
 
 
 def test_kb_startup_continuity_fails_closed_when_no_domain_tags_or_jsonb_content(app_id, monkeypatch):

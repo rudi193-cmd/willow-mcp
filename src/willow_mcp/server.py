@@ -1203,9 +1203,14 @@ def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
         params.append("continuity")
         filters.append(f"{domain_col}='continuity'")
     if tags_col:
-        where_parts.append(f'"{tags_col}" LIKE %s')
+        # Cast to text before LIKE: a top-level tags column may be text holding
+        # a JSON array string ("[\"continuity\"]") OR native jsonb. jsonb has no
+        # LIKE (~~) operator, so a bare LIKE crashes on it ('operator does not
+        # exist: jsonb ~~'); ::text renders both forms to the same quoted-token
+        # string this pattern matches.
+        where_parts.append(f'"{tags_col}"::text LIKE %s')
         params.append('%"continuity"%')
-        filters.append(f"{tags_col} LIKE '\"continuity\"'")
+        filters.append(f"{tags_col}::text LIKE '\"continuity\"'")
     elif tags_jsonb_col:
         where_parts.append(f'"{tags_jsonb_col}"->\'tags\' @> %s::jsonb')
         params.append('["continuity"]')
