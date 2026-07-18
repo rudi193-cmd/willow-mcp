@@ -11,11 +11,17 @@ import tempfile
 
 import pytest
 
+# Force these to the throwaway tmp home — do NOT setdefault. A caller may have
+# WILLOW_HOME/WILLOW_STORE_ROOT exported (e.g. willow-mcp's own SessionStart
+# hook sets them for every web session); setdefault would silently defer to
+# those and run the suite against a real store — polluting it and failing the
+# gaps/knowledge tests on accumulated rows. Isolation must not be overridable
+# by the ambient environment.
 _tmp = tempfile.mkdtemp(prefix="willow_mcp_test_home_")
-os.environ.setdefault("WILLOW_HOME", _tmp)
-os.environ.setdefault("WILLOW_STORE_ROOT", os.path.join(_tmp, "store"))
-os.environ.setdefault("WILLOW_MCP_RECEIPT_DB", os.path.join(_tmp, "mcp_receipt.db"))
-os.environ.setdefault("WILLOW_MCP_APPS_ROOT", os.path.join(_tmp, "mcp_apps"))
+os.environ["WILLOW_HOME"] = _tmp
+os.environ["WILLOW_STORE_ROOT"] = os.path.join(_tmp, "store")
+os.environ["WILLOW_MCP_RECEIPT_DB"] = os.path.join(_tmp, "mcp_receipt.db")
+os.environ["WILLOW_MCP_APPS_ROOT"] = os.path.join(_tmp, "mcp_apps")
 
 
 @pytest.fixture
