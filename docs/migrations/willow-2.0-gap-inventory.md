@@ -185,6 +185,60 @@ Cross-repo blockers unchanged from Draft 0.1 (fixes live in willow-2.0): **B-31*
 
 ---
 
+## 7b. Driven comparison — what booting and using 2.0 actually revealed
+
+willow-2.0 was stood up (`/workspace/willow-2.0`, venv, `sap/sap_mcp.py` over
+stdio) and driven tool-by-tool against the live willow-mcp server. Driving
+corrected several paper ratings:
+
+**Boot friction (product-readiness gap, in willow-mcp's favor).** willow-2.0's
+MCP server would not start standalone. In order: it hard-imports the fleet
+`willow.fylgja` package (needs the whole repo on `PYTHONPATH`), refuses to boot
+without `WILLOW_AGENT_NAME` ("you cannot be in this system without an agent
+identity"), wants `WILLOW_SAFE_ROOT` or the SAP gate drops to RESTRICTED, and
+runs a psutil **process reaper at startup that SIGTERMs any process whose command
+line contains `sap_mcp` + the repo root** — which kills its own launcher unless
+`WILLOW_MCP_SHADOW=1` is set. willow-mcp boots clean with none of this and
+`diagnostic_summary` self-reports wiring. This is the productionization gap made
+concrete, and it runs the *opposite* direction from "port 2.0's features in."
+
+**Confirmed 🟢 — `code_graph_*` is the standout.** `code_graph_index` on the repo
+indexed **847 files / 10,756 symbols into a local SQLite `code_graph.db`** with no
+Postgres and no network; `code_graph_search "active_profile"` returned exact
+FQN + kind + file:line + signature (`() -> str`). Instantly useful, zero external
+deps, genuinely absent from willow-mcp. Strongest port candidate — elevate.
+
+**Downgrade — `fork_*` is Postgres-backed, not "bookkeeping."** `fork_create`/
+`fork_list` failed with `relation "forks" does not exist`: forks need their own
+Postgres table, so porting drags schema + migration, more weight than §3 credited.
+
+**Mixed — the `willow_*` facade.** `willow_status` genuinely delights: one call
+returned local store + Postgres table counts + host hardware + ollama + kart +
+human-required queue. But `willow_find` failed (`column "agent" does not exist`)
+— several facade verbs are welded to a specific fleet Postgres schema. And
+willow-mcp's `diagnostic_summary` already covers the *health*-facade need with a
+product-appropriate lens (severance, identity bindings, net-lease forgeability,
+schema-mapping state) that `willow_status` doesn't have. Port the *idea*
+(intent-shaped verbs), not the fleet-coupled implementation.
+
+**Confirmed real gap — `willow_web_search`.** Ran cleanly (returned 0 results —
+no egress/backend in the sandbox), but it *exists*; willow-mcp has no web path at
+all. Still the highest-value single gap.
+
+**A place willow-mcp is already better, not behind.** `soil_put` (2.0) rejects a
+record without a caller-supplied `id`/`_id`/`b17`; willow-mcp's `store_put`
+auto-generates the id (`record_id` optional) and returns `{id, action}`. The
+redesign improved caller ergonomics — not every difference is a gap to close.
+
+**Stricter gate, by design.** As `app_id=willow`, willow-2.0 grants a blanket ACL
+bypass (`_INFRA_ACL_BYPASS = {"willow"}`) — the seat can call anything. On
+willow-mcp the same seat is held to its narrow `orchestrator` allow-list and
+`store_put` is **gate-denied**. willow-mcp enforces least-privilege where 2.0
+trusts the primary interface. That is the severance posture working, not a
+missing feature.
+
+---
+
 ## 8. Method & caveats
 
 - willow-2.0 cloned to `/workspace/willow-2.0` (shallow); diff is against
