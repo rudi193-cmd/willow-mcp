@@ -1,0 +1,64 @@
+{
+  "schema": "nest-rules/v1",
+  "version": "seed-1",
+  "history": [],
+  "_note": "Generic, PII-free template. The operator's real ruleset lives in $WILLOW_HOME/nest_rules.json (materialized from this seed on first use) and is never written back to this file. Ratified rule deltas mutate the local store and bump its version, never the seed.",
+  "ignore": {
+    "names": [
+      "desktop.ini", "thumbs.db", "ntuser.dat", "ntuser.ini",
+      "boot.ini", "bootmgr", "pagefile.sys", "hiberfil.sys",
+      "swapfile.sys", "autorun.inf", "config.sys",
+      ".ds_store", ".localized"
+    ],
+    "dot_prefix": true
+  },
+  "tracks": {
+    "journal": {
+      "patterns": ["^\\d{4}-\\d{2}-\\d{2}\\.md$"],
+      "keywords": ["journal", "diary", "daily_note", "morning_pages"]
+    },
+    "legal": {
+      "patterns": [],
+      "keywords": ["contract", "agreement", "affidavit", "subpoena",
+                   "court", "filing", "notice_of", "settlement", "deed", "will"]
+    },
+    "financial": {
+      "patterns": [],
+      "keywords": ["invoice", "receipt", "statement", "tax", "budget",
+                   "payslip", "1099", "w2", "expense"]
+    },
+    "knowledge": {
+      "patterns": [],
+      "keywords": ["notes", "reference", "explainer", "howto", "how_to",
+                   "guide", "cheatsheet", "glossary"]
+    },
+    "specs": {
+      "patterns": [],
+      "keywords": ["spec", "design_doc", "rfc", "proposal", "architecture",
+                   "readme", "changelog", "whitepaper", "white_paper"]
+    },
+    "narrative": {
+      "patterns": [],
+      "keywords": ["chapter", "story", "draft", "manuscript", "outline",
+                   "scene", "worldbuilding"]
+    },
+    "correspondence": {
+      "patterns": [],
+      "keywords": ["letter", "email", "re_", "fwd_", "memo"]
+    },
+    "handoffs": {
+      "patterns": [],
+      "keywords": ["handoff", "session_handoff", "closeout"]
+    }
+  },
+  "images": {
+    "exts": [".jpg", ".jpeg", ".png", ".heic", ".webp"],
+    "personal_keywords": [],
+    "screenshot_keywords": ["screenshot", "screen shot", "capture"],
+    "camera_patterns": ["^IMG_", "^DSC", "^\\d{8}_\\d{6}", "^\\d{13}\\."],
+    "personal_track": "photos_personal",
+    "screenshot_track": "screenshots",
+    "camera_track": "photos_camera",
+    "default_track": "screenshots"
+  }
+}

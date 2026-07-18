@@ -75,11 +75,58 @@ redacted and receipted before it leaves.
 `test_bridge_emits_no_content_names_or_filenames` and the
 `test_bridge_drops_filename_labels` regression.
 
+## The live drop-folder router
+
+*"The pigeon sorts your desktop."* The second half of the Nest: a router that
+watches a drop folder, classifies each new file **by filename** into a *track*,
+and — on an explicit human gate action — moves it into place.
+
+| Tool | Group | Does |
+|------|-------|------|
+| `nest_intake_scan` | `nest_write` | Classify new files in the drop zone into tracks and **stage** a queue. Idempotent, non-destructive. |
+| `nest_intake_queue` | `nest_read` | List the pending queue with each file's predicted track. |
+| `nest_intake_file` | `nest_write` | **Move** the file to its track's destination (or `override_dest`). |
+| `nest_intake_skip` | `nest_write` | Leave the file; record the skip. |
+| `nest_intake_flags` | `nest_read` | Open rule-delta flags the classifier has proposed. |
+
+```
+drop folder ──► nest_intake_scan ──► review queue ──► nest_intake_file ──► ~/personal/<track>/
+ (~/Desktop/Nest)  (classify by name)   (nest_intake_queue)   (confirm / override / skip)
+                                                                      │
+                                                    override ─────────┘
+                                                    (correction counter → flag at threshold)
+```
+
+**Nothing moves without a confirm.** `nest_intake_scan` only stages; a file is
+moved only by an explicit `nest_intake_file` call naming the item. This is an
+**owner == subject, single-operator** surface: the queue names the operator's
+own files so they can decide, and that state lives in the local SOIL store — it
+is *not* promoted to any shared KB (that is `nest_promote`'s job, and it is
+walled). Filing moves files on the host, so `nest_intake_file` sits in
+`nest_write` and is subject to the same tier ceiling as any write.
+
+### The feedback edge — the classifier proposes, the human ratifies
+
+Every gate action records the classifier's **prediction** and the human
+**outcome**. When they differ (you filed it somewhere other than predicted), a
+correction counter keyed by `(predicted → outcome, extension)` increments; at
+`CORRECTION_FLAG_THRESHOLD` (3) a **flag** opens (`nest_intake_flags`) proposing
+a keyword/rule delta. The classifier **never rewrites its own rules** — the flag
+describes the delta; a human ratifies it by editing `$WILLOW_HOME/nest_rules.json`
+and bumping its version. This is the learning loop corpus-lens's static
+classifiers lack, kept honest by a human in the ratification seat.
+
+### The rules seed is generic — on purpose
+
+`rules.py` classifies by filename using `rules.seed.json`, a **PII-free** generic
+template. The willow-2.0 seed this was adapted from had leaked the operator's
+private keywords (case numbers, medical/legal matters, personal names); shipping
+those in a packaged engine would be the exact wall breach this project forbids.
+The operator's real ruleset lives only in their local `$WILLOW_HOME/nest_rules.json`
+(materialized from the seed on first use, then theirs to edit), never in the package.
+
 ## What is out of scope (by design)
 
-- **The live drop-folder router** (`willow-2.0` `nest_intake`): scan a desktop
-  folder, stage a review queue, human confirm/override/skip, move the file, and
-  learn from the correction. That workflow is the natural next step, not this cut.
 - **Owner ≠ subject.** A life dump contains people who are not its owner — a
   co-parent, a child. The Nest classifies them into `person` fragments locally;
   the wall keeps those out of the shared KB, but the deeper consent question

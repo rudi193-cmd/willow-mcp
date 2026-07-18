@@ -89,6 +89,11 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `nest_status` | Counts for a seeded Nest DB — sources by status, fragments by type, topical categories by size. Structure only; filename-labels are walled and counted as `uncategorised` |
 | `nest_digest` | A one-page Markdown map of a Nest DB — the **walled** view (person names, the date timeline, and filenames suppressed). The full digest is a local-CLI affordance only, never returned over MCP |
 | `nest_promote` | Promote a Nest's **structure** — counts, curated category names, redacted secret kinds, never content — into the knowledge base via the same core write as `knowledge_ingest`. `dry_run=True` returns the atoms that would be promoted |
+| `nest_intake_scan` | Live drop-folder router: classify new files in a drop zone by filename into a track and **stage** a review queue. Non-destructive — nothing moves until `nest_intake_file` |
+| `nest_intake_queue` | List the pending review queue with the track the classifier predicted for each file |
+| `nest_intake_file` | File a staged item: **move** the file to its predicted track's destination, or `override_dest` to correct it. An override feeds the correction counter |
+| `nest_intake_skip` | Skip a staged item — leave the file, record the decision |
+| `nest_intake_flags` | List open rule-delta flags — patterns overridden often enough that the classifier proposes a rules change (a human ratifies) |
 | `task_submit` | Submit task to Kart queue |
 | `task_status` | Check task status |
 | `task_list` | List pending tasks |

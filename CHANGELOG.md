@@ -46,6 +46,24 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   `register-agent`/`rotate-agent`/`revoke-agent` verbs; a `rotate-agent` CLI is added.
 
 ### Added
+- **The Nest — live drop-folder router** (`willow_mcp.nest.intake` + `rules`,
+  five gated tools: `nest_intake_scan` / `nest_intake_queue` / `nest_intake_file`
+  / `nest_intake_skip` / `nest_intake_flags`). Watch a drop folder, classify new
+  files by filename into a *track*, stage a review queue, and — on an explicit
+  gate action — move the file into place (`~/personal/<track>` or `$WILLOW_HOME`).
+  Nothing moves without a confirm; scan only stages. Includes the **feedback
+  edge**: every gate action records prediction vs. outcome, a mismatch increments
+  a correction counter, and at threshold a rule-delta flag opens — the classifier
+  proposes, a human ratifies (it never rewrites its own rules). State lives in the
+  SOIL store; router tools ride the existing `nest_read`/`nest_write` groups. The
+  rules seed (`rules.seed.json`) is a **generic, PII-free** template — the
+  willow-2.0 seed it was adapted from had leaked the operator's private keywords
+  (case numbers, medical/legal matters, names), which must never ship in a
+  packaged engine; the operator's real rules stay in their local
+  `$WILLOW_HOME/nest_rules.json` only. Held by `tests/test_nest_intake.py`
+  (incl. the correction→flag threshold). Completes the "dump your life and let the
+  pigeon figure it out" workflow (content pipeline + router). See
+  [docs/NEST.md](docs/NEST.md).
 - **The Nest — personal-file content pipeline** (`willow_mcp.nest`, four gated
   tools: `nest_scan` / `nest_status` / `nest_digest` / `nest_promote`). Walk a
   drop folder, extract text (OCR/PDF/docx/plaintext), classify fragments by

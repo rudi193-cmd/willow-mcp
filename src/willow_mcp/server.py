@@ -1333,6 +1333,80 @@ def nest_promote(app_id: str, db_path: str = "", dry_run: bool = False) -> dict:
             "owner": built.get("owner"), "source_ids": promoted, "errors": errors}
 
 
+# ── The Nest — live drop-folder router ──────────────────────────────────────────
+#
+# "The pigeon sorts your desktop." nest_intake_scan classifies new files in a
+# drop folder by filename into a track and STAGES a review queue — nothing moves.
+# nest_intake_file / nest_intake_skip are the human gate: file moves the file to
+# its track's destination, skip passes. Every gate action feeds a correction
+# counter; at threshold a rule-delta flag opens (nest_intake_flags) — the
+# classifier proposes, the human ratifies. This is an owner==subject, single-
+# operator surface: the queue names the operator's own files so they can decide,
+# and that state stays in the local SOIL store (it is not promoted to any shared
+# KB — that is nest_promote's job, and it is walled). See docs/NEST.md.
+
+
+@mcp.tool()
+@_guarded("nest_intake_scan")
+def nest_intake_scan(app_id: str, folder: str = "") -> dict:
+    """Scan drop zone(s), classify new files by filename into tracks, and stage a
+    review queue. Idempotent (a file already staged is not re-staged) and
+    non-destructive — nothing is moved until nest_intake_file. `folder` overrides
+    the default drop dirs (~/Desktop/Nest and $WILLOW_HOME/nest/inbox)."""
+    from .nest import intake as _intake
+    from pathlib import Path as _Path
+
+    folders = [_Path(folder).expanduser()] if folder else None
+    try:
+        staged = _intake.scan(_store, folders=folders)
+    except Exception as e:
+        return {"error": f"nest intake scan failed: {type(e).__name__}: {e}"}
+    return {"status": "ok", "newly_staged": len(staged), "items": staged}
+
+
+@mcp.tool()
+@_guarded("nest_intake_queue")
+def nest_intake_queue(app_id: str) -> dict:
+    """List the pending review queue — files staged by nest_intake_scan awaiting a
+    confirm/override/skip decision, with the track the classifier predicted."""
+    from .nest import intake as _intake
+    return {"status": "ok", "pending": _intake.get_queue(_store)}
+
+
+@mcp.tool()
+@_guarded("nest_intake_file")
+def nest_intake_file(app_id: str, item_id: str, override_dest: str = "") -> dict:
+    """File a staged item: MOVE the file to its predicted track's destination, or
+    to `override_dest` if you're correcting the classifier. An override (the
+    outcome track differs from the prediction) feeds the correction counter and,
+    at threshold, opens a rule-delta flag."""
+    from .nest import intake as _intake
+    try:
+        return _intake.confirm(_store, item_id,
+                               override_dest=override_dest or None, app_id=app_id)
+    except Exception as e:
+        return {"error": f"nest intake file failed: {type(e).__name__}: {e}"}
+
+
+@mcp.tool()
+@_guarded("nest_intake_skip")
+def nest_intake_skip(app_id: str, item_id: str) -> dict:
+    """Skip a staged item — leave the file where it is and record the skip
+    (removes it from the pending queue; the decision is logged as feedback)."""
+    from .nest import intake as _intake
+    return _intake.skip(_store, item_id, app_id=app_id)
+
+
+@mcp.tool()
+@_guarded("nest_intake_flags")
+def nest_intake_flags(app_id: str) -> dict:
+    """List open rule-delta flags — patterns the classifier got wrong often enough
+    (CORRECTION_FLAG_THRESHOLD overrides) that it proposes a rules change. The
+    classifier never rewrites its own rules; a human ratifies the delta."""
+    from .nest import intake as _intake
+    return {"status": "ok", "flags": _intake.open_flags(_store)}
+
+
 # ── Gap backlog tools ──────────────────────────────────────────────────────────
 #
 # "What don't we know yet" — a fleet-wide backlog (core/gaps.py), not scoped

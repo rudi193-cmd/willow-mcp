@@ -170,9 +170,14 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     # same reasoning as gap_promote / schema_admin above.
     "nest_read": frozenset({
         "nest_status", "nest_digest",
+        "nest_intake_queue", "nest_intake_flags",   # router review surface
     }),
     "nest_write": frozenset({
         "nest_scan", "nest_promote",
+        # live drop-folder router: scan stages a queue, file MOVES the file on the
+        # host, skip records the decision. Filing is a filesystem mutation, so it
+        # rides the write group (never nest_read).
+        "nest_intake_scan", "nest_intake_file", "nest_intake_skip",
     }),
     "full_access": frozenset({
         # Core store
@@ -214,8 +219,10 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "session_bind", "session_reconcile",
         # Integrations (read-only ledger; integration_call stays own-line)
         "integration_list", "integration_status",
-        # The Nest (content pipeline; nest_scan/nest_promote are writes)
+        # The Nest (content pipeline + live router; scan/promote/file/skip write)
         "nest_status", "nest_digest", "nest_scan", "nest_promote",
+        "nest_intake_scan", "nest_intake_queue", "nest_intake_file",
+        "nest_intake_skip", "nest_intake_flags",
     }),
 }
 
