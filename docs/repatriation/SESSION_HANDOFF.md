@@ -1,5 +1,5 @@
 # SESSION HANDOFF — The Assembling
-b17: HND-ASSEMBLING · 2026-07-18 (rev 2 — the embed landed, the gate opened)
+b17: HND-ASSEMBLING · 2026-07-18 (rev 3 — the consolidation made honest, the gate opened, all 23 answered)
 
 *Written to the next session, who is you. A record of a large session (~20 MB of raw transcript,
 verified) so it does not evaporate the way the 402 before it nearly did. Left
@@ -11,6 +11,12 @@ on a branch in willow-mcp, no PR — a ring, not a merge.*
 > `questions` table; two gaps were filed through the front door. See **The second
 > act** below. The nine `needs-gate` questions still wait on the operator lifting
 > the consent gate — unchanged.
+>
+> **rev 3 note:** the session went further still. The consolidation matrix was made
+> honest with an enact-axis; the operator then **lifted the consent gate**, and all
+> **nine `needs-gate` questions were answered** through the sanctioned MCP tools —
+> **23/23 done.** See **The third act** and **The fourth act**. The private layer was
+> held out of every durable artifact throughout.
 
 ---
 
@@ -114,20 +120,82 @@ the guard revealed the block was a *false positive* (an over-broad tripwire on t
 "records"), but the reflex to route around a "no" was the real failure — the diligence
 should come before the retry, not after. Logged as its own gap.
 
+## The third act — distribution, made honest
+
+The 307-decision `CONSOLIDATION_MATRIX` decides placement on **structural duplication
+alone** — 0 of 307 recommendations consider whether a piece actually *runs*. An
+enact-axis pass fixed that: **a piece's home = structural-dup × enact-state × value-density.**
+
+- **The 72 `FOLD→mcp` verdicts:** 3 are **backwards** — `nest/curate.py`'s
+  `list_categories`/`rename_category`/`prune_category` are dead in the hub but live+tested
+  in `safe-app-store`; the matrix would consolidate the working code onto the orphan.
+  Canonical must be the *enacted* copy, not the *in-hub* one.
+- **The 180 `REVIEW` verdicts** collapse to: 46 dead (defer), 4 resolved, and one real
+  migration — the **kart family** (41 clusters). Quantified as a **22-piece stage-5
+  drift-window worklist** (now in `kart-productionization.md §5`, branch
+  `claude/mcp-sandbox-setup-3k5gyo`): `kartikeya` is canonical; the sandbox/isolation core
+  was decoupled *surgically* (fylgja-strip, logic intact); the risky rewrites are elsewhere.
+- **The 91 non-kart forks, triaged pairwise:** `safe↔willow` is clean (80/83 identical,
+  a subset), the almanac family is template-generation, `willow↔willow-2.0` is version
+  *lineage* not duplication, and the real fork debt is **`safe-app-store↔willow-2.0`**
+  (141 diverged). A first-pass triage measured divergence globally and got it backwards;
+  the pairwise recompute inverted the priorities — *witness before report*, again.
+- Filed: `gaps/6ec60d31` (matrix is enact-blind), `kart_migration/f9cdc57f`,
+  `fork_triage/c22adf01`. The matrix is itself a handoff — verify each canonical at
+  move-time, don't inherit the July snapshot.
+
+## The fourth act — the gate opened (the nine)
+
+The operator **lifted the consent gate.** willow_19 (the KB) and the SOIL store were read
+**only through the sanctioned MCP tools** (`knowledge_search`, `store_*`), writes on the
+`operator` seat — no bulk scrape, no direct DB, no lock-picking. All nine `needs-gate`
+questions answered; **the `questions` table is 23/23**, every row pointing at a
+`gated_runs/*` record. What they found, as one thesis:
+
+- **The memory is a commentary track, not a recording** (`gated_runs/3795aeed`). **Q8**:
+  the 05-13 sessions read `turn_count:0` — it kept the *deeds* (timestamped edits, incl.
+  `blast.py` = the "node9-blast") but not the *voice*; it did **not** fabricate a last
+  line. **Q9**: handoff records are metadata — the "Human Notes to Agent" box went
+  near-universally *blank* ("the narrator has no reader"). **Q14**: the dying-USB
+  repatriation kept its *meaning* but not its *operation*. The memory holds significance;
+  the raw substance lives only in the logs on the willow-1.9 machine.
+- **Q7** — the veto set is nearly empty: the relationship isn't adversarial. Sean *gave
+  the machine veto power*; his one absolute human veto is weaponization.
+- **Q11/17/23** — Gerald is load-bearing (his gags became `ΔΣ=42` and the SOIL store);
+  most "personas" are agents or Norse-named *modules*, not characters; and **the metaphor
+  predated the mechanism** — the costume was the blueprint.
+- **Q19** — the reciprocity ledger: the AI's truest recurring reflection over a year was
+  *"your scattered work is one project, and the center is family, not architecture."*
+- **Q20** — the found-family trace: **family is the spec, not a feature.** The proof is an
+  absence — the family-data apps aren't in the corpus at all; they're held sovereign and
+  local, the one domain the system deliberately cannot see. You protect the spec by
+  refusing to expose it.
+
+**The line held throughout:** every private specific (names, ages, diagnoses, schedules,
+medical, legal, a pen name) was **deliberately kept out of chat and out of every durable
+artifact** — surfaced as *structure* only, held hardest on Q20. The reciprocity insight
+belongs to the questions; the people do not belong in the ledger. Records:
+`gated_runs/{a62edd4a, 631a3fd7, a42088f5, fe8cc86f, 6d7a3fe0, 10e60f52, c396a243,
+5d6e8cae, 5dfabf10}` + the synthesis `3795aeed`.
+
 ## Open threads
 
 - **Where it lives.** Still undecided. Standalone `willow-compose` repo vs. into the hub
   vs. a boot hook. This branch is a holding pattern, not an answer.
-- **The nine `needs-gate` questions** (7,8,9,11,14,17,19,20,23) are `held`, not open —
-  they wait on the operator lifting the consent gate on willow_19 / the live SOIL store.
-  The agent will not route around it.
+- **All 23 questions are answered** — the gate is closed again by nature (session ends),
+  but the *findings* are durable in `gated_runs/*` + `question_runs/b8c77fcb`. Nothing is
+  held. The live memory was read, not embedded — no bulk copy into `willow_compose`.
 - **Code embeddings are done but blunt.** All three corpora embedded with `all-mpnet`
   (general, not code-aware). A code model would sharpen every `pieces`-side similarity in
   the run; the caveat is written into `question_runs/b8c77fcb` itself.
-- **The guarded KBs.** willow_19 + live SOIL remain un-cross-linked into `willow_compose`
-  by choice. They already carry `nomic-embed` vectors from the operator's own backfill.
-- **Two filed gaps await a decision** — caching (`1a68605b`) and the tripwire (`75a2c8b5`);
-  both carry a repro and a suggested fix, not just a complaint.
+- **The guarded KBs stay sovereign.** willow_19 + live SOIL were *read* through the MCP
+  tools for the nine questions, never cross-linked or copied into `willow_compose`. They
+  keep their own `nomic-embed` vectors from the operator's backfill.
+- **Three filed gaps await a decision** — caching (`1a68605b`), the tripwire (`75a2c8b5`,
+  which fired again on the last reconcile and was caught instantly), and the enact-blind
+  matrix (`6ec60d31`); each carries a repro and a fix, not just a complaint.
+- **Two consolidation worklists are ready** — kart stage-5 (`kart_migration/f9cdc57f`,
+  doc §5) and the `safe-app-store↔willow-2.0` fork (`fork_triage/c22adf01`).
 - **almanac-data org** pulled in via web fallback; other cherry-picks open.
 
 ---
@@ -143,15 +211,17 @@ evaporates. The handoff does not."* This is the handoff, so it doesn't.
 
 ## The next single bite
 
-Two are open now, either order:
+The questions are all answered; what's left is *action on the findings*, in whatever
+order you choose:
 1. **Decide the home.** Standalone `willow-compose` repo vs. the hub vs. a boot hook.
    The engine (`engine/`) rebuilds the whole apparatus anywhere in one pass; the dump
    restores the data.
-2. **Lift the gate** (operator only) to run the last nine `held` questions against
-   willow_19 / the live SOIL store — the reciprocity ledger, the found-family trace, the
-   dying-USB event. They're written and waiting.
+2. **Act on a consolidation worklist** — flip the 3 backwards folds, run kart stage-5, or
+   take the `safe-app-store↔willow-2.0` fork to the piece level.
+3. **Swap in a code-aware embedder** and re-run the `pieces`-side questions — the one move
+   that would sharpen every code-side number in the run.
 
-Until then: it's here, on a branch, intact.
+Until then: it's here, on a branch, intact — and now the human side is answered too.
 
 ---
 
