@@ -6,6 +6,8 @@
 
 Agent-neutral MCP server with persistent memory and task execution. Works with any MCP client: Claude Code, Claude Desktop, Cursor, or any custom agent that speaks stdio MCP.
 
+> **Corpus memory:** the whole Willow constellation — the code, human, and collaboration corpora assembled and queryable — lives in the sovereign [`willow-compose`](https://github.com/rudi193-cmd/willow-compose) repo. The hub *calls* it; it doesn't live here (keeping the hub lean).
+
 **Three storage backends in one server:**
 - **SOIL store** — SQLite-backed local key/value store with full-text search and soft delete
 - **Postgres knowledge base** — multi-keyword searchable knowledge graph
