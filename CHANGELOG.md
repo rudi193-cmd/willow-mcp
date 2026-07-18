@@ -64,6 +64,17 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 - **Local governance CLI** — `willow-mcp consent status|set|reconcile` and
   `willow-mcp roster status|sync`. Mutation commands reject non-interactive and
   Kart execution and are blocked by the bundled self-grant hook.
+- **Installer-managed standalone workers.** Fast and batch systemd user units
+  carry explicit standalone environment, while the Postgres queue now enforces
+  lane isolation, attributed/timed claims, stale recovery, bounded retries, and
+  terminal timestamps. Readiness distinguishes absent, dead, stale, and
+  stranded workers without starting or stopping services during installation.
+- **Signed per-task Kart egress authorization (B-37).** Network rows now carry
+  an operator-signed envelope binding submitter, exact normalized task hash,
+  scope, expiry, and one-use nonce. The executor rechecks capability, consent,
+  lease, strict trust-root state, signature, and replay immediately before shell
+  launch. `willow-mcp sign-net-task` is interactive/local-only and no MCP tool
+  can mint signing authority.
 - **The Grove** (`the_grove.py`) — a rings store for *lessons*, sibling to
   `schema_profile`'s vocabulary rings but unbounded on purpose: vocabulary may
   be pruned cheaply, lessons are kept precisely so the deployment cannot become

@@ -134,6 +134,7 @@ def _drain_once() -> dict:
     import os
 
     from .heartbeat import WorkerHeartbeat, reap
+    from .egress_authorization import ExecutorNetworkAuthorizer
     from .task_queue import build_task_queue
 
     # Same default `willow-mcp worker` itself falls back to (server.py's
@@ -150,7 +151,8 @@ def _drain_once() -> dict:
     beat = WorkerHeartbeat(agent="kart", lane="fast", interval=5.0)
     try:
         _kartikeya.run_worker(queue, lane="fast", slots=None, interval=5.0,
-                               once=True, on_heartbeat=beat)
+                               once=True, on_heartbeat=beat,
+                               network_authorizer=ExecutorNetworkAuthorizer())
     finally:
         beat.close()
     return {"ok": True, "message": "drained the queue once"}

@@ -232,8 +232,27 @@ _KNOWLEDGE_FIELDS = ["id", "content", "domain", "source", "tags"]
 # `completed_at` column; those stay unmapped (null on read) rather than
 # guessing at a substitute like `updated_at`, which fires on any update, not
 # just completion.
-_TASK_FIELDS = ["task_id", "task", "submitted_by", "agent", "status", "result",
-                 "steps", "created_at", "completed_at"]
+_TASK_FIELDS = [
+    "task_id",
+    "task",
+    "submitted_by",
+    "network_authorization",
+    "agent",
+    "lane",
+    "status",
+    "result",
+    "steps",
+    "created_at",
+    "completed_at",
+    "claim_owner",
+    "claimed_at",
+    "attempts",
+    "max_attempts",
+    "retry_at",
+]
+_TASK_READ_FIELDS = [
+    field for field in _TASK_FIELDS if field != "network_authorization"
+]
 
 # Registry of tables schema_confirm_mapping knows how to confirm, and the
 # canonical fields each one speaks in. Extend this when a new table gets a
@@ -896,25 +915,30 @@ def knowledge_search(
 
 @mcp.tool()
 @_guarded("task_submit")
-def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = False) -> dict:
+def task_submit(
+    app_id: str,
+    task: str,
+    agent: str = "kart",
+    lane: str = "fast",
+    allow_net: bool = False,
+    allow_localhost: bool = False,
+    network_authorization: str = "",
+) -> dict:
     """Submit a task to the Kart sandboxed execution queue. Returns task_id for polling.
 
-    Tasks run network-isolated by default. Egress through THIS tool needs THREE
-    keys, all held at once: the 'task_net' capability in the app's manifest (it is
-    NOT included in task_queue or full_access; grant it explicitly), the operator's
-    standing `consent.internet` in $WILLOW_HOME/settings.global.json, and an
-    unexpired egress **lease** issued by the operator via `willow-mcp grant-net`.
-    The capability says *this app may ever request egress*; consent says *egress is
-    permitted right now*; the lease says *this app, until this time*. Only when all
-    three hold is the Kart worker's `# allow_net` directive appended so the sandbox
-    gets egress. No MCP tool can issue a lease.
+    Tasks run network-isolated by default. Egress needs the `task_net` capability,
+    standing `consent.internet`, a live operator lease, and an operator-signed
+    per-task envelope passed as `network_authorization`. The envelope binds the
+    submitter, task id, agent, normalized task hash, network scope, expiry, and
+    nonce. The signed task id is the queue primary key, preventing the envelope
+    from authorizing a second row. `# allow_net` and `# allow_localhost` remain
+    requests, never authority.
 
-    These three keys gate the **submitter**, not the network. The executor
-    (`kartikeya`) reads `# allow_net` out of the stored task text and honors it
-    without consulting consent, the lease, or any capability, and the `tasks` table
-    is shared Postgres — so a row written by any other submitter carrying that
-    directive reaches the network regardless (**B-37**, P0). `consent.internet:
-    false` closes this door; it does not close the building.
+    The Kartikeya executor verifies all host gates and the signed envelope again
+    immediately before shell launch. Missing attribution or envelope, an invalid
+    signature, expiry, replay, task mutation, unavailable verifier, or a strict
+    trust-root failure denies network. Signing is available only through the local
+    interactive `willow-mcp sign-net-task` CLI; no MCP tool can mint authority.
 
     Task text is security-scanned at SUBMIT time (defense-in-depth): a task the
     Kart scanner would refuse — destructive, exfiltration, secret access, obfusc-
@@ -933,24 +957,30 @@ def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = F
         blocked = None
     if blocked:
         return blocked
+    lane = (lane or "").strip().lower()
+    if lane not in ("fast", "batch"):
+        return {"error": f"invalid_lane: expected fast|batch, got {lane!r}"}
 
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
 
-    if allow_net:
+    if allow_net and allow_localhost:
+        return {"error": "network_mode_invalid: choose allow_net or allow_localhost"}
+    network_requested = allow_net or allow_localhost
+    if network_requested:
         from . import consent, gate, lease
         # Key 1: is this app allowed to ask at all? (capability, granted once)
         if not gate.permitted(app_id, gate.NET_PERMISSION):
             return {"error": (
-                f"net_denied: allow_net requires the '{gate.NET_PERMISSION}' permission in "
+                f"net_denied: shared network access requires the '{gate.NET_PERMISSION}' permission in "
                 f"this app's manifest ($WILLOW_HOME/mcp_apps/{app_id or '<app_id>'}/manifest.json). "
                 "It is not granted by task_queue or full_access — add it explicitly.")}
         # Key 2: does the operator permit egress right now? (standing consent)
         # Read fail-closed — an absent or unparseable policy is not consent.
         if not consent.internet_permitted():
             return {"error": (
-                "consent_denied: allow_net also requires the operator's standing "
+                "consent_denied: shared network access also requires the operator's standing "
                 f"'consent.internet' in {consent.settings_path()}. This app holds "
                 f"'{gate.NET_PERMISSION}', but egress is switched off (or the consent "
                 "policy could not be read, which denies). Only the operator may turn it "
@@ -961,7 +991,7 @@ def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = F
         lease_state = lease.read_lease(app_id)
         if lease_state["status"] != "active":
             return {"error": (
-                f"lease_denied: allow_net requires an unexpired egress lease for '{app_id}' "
+                f"lease_denied: shared network access requires an unexpired egress lease for '{app_id}' "
                 f"(status: {lease_state['status']}"
                 + (f" — {lease_state['error']}" if lease_state.get("error") else "")
                 + "). Leases are issued only by the operator, on the host, via "
@@ -990,29 +1020,74 @@ def task_submit(app_id: str, task: str, agent: str = "kart", allow_net: bool = F
     if fields["task_id"]["column"] is None or fields["task"]["column"] is None:
         return {"error": "schema_unusable: 'tasks' table has no mappable 'task_id' or 'task' column"}
 
-    # The Kart worker (willow-2.0) reads network policy from directive lines
-    # (`# allow_net` / `# allow_localhost`) in the stored task text
-    # (core/kart_sandbox.py task_allows_network / task_allows_localhost, which
-    # match on `line.strip() == <directive>`). Strip any such caller-supplied
-    # line UNCONDITIONALLY first, then re-append `# allow_net` only when the
-    # permission check above passed. Otherwise a caller holding only task_queue
-    # could grant itself egress by embedding the directive in `task` text with
-    # allow_net=False — the gate is keyed off the argument, not the text (B-21;
-    # B-19 closed only the allow_net=True path).
-    _NET_DIRECTIVES = {"# allow_net", "# allow_localhost"}
-    task = "\n".join(
-        line for line in task.splitlines() if line.strip() not in _NET_DIRECTIVES
-    )
-    if allow_net:
-        task = task.rstrip("\n") + "\n# allow_net"
+    from . import egress_authorization
 
-    import random
-    task_id = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789", k=8))
+    task = "\n".join(
+        line
+        for line in egress_authorization.normalize_task(task).splitlines()
+        if line.strip() not in {"# allow_net", "# allow_localhost"}
+    )
+    task_id = ""
+    if network_requested:
+        task = egress_authorization.canonical_network_task(
+            task, localhost=allow_localhost
+        )
+        if not network_authorization:
+            return {
+                "error": (
+                    "net_authorization_denied: shared network access requires an "
+                    "operator-signed per-task envelope from "
+                    "`willow-mcp sign-net-task`"
+                )
+            }
+        public_key = egress_authorization.public_key_path()
+        if public_key is None:
+            return {
+                "error": (
+                    "net_authorization_denied: "
+                    "WILLOW_MCP_EGRESS_PUBLIC_KEY is not configured"
+                )
+            }
+        task_id = egress_authorization.claimed_task_id(network_authorization)
+        if not task_id:
+            return {"error": "net_authorization_denied: malformed task_id claim"}
+        verified, reason, _ = egress_authorization.verify_envelope(
+            public_key_path=public_key,
+            submitted_by=app_id,
+            task_id=task_id,
+            agent=agent,
+            task=task,
+            envelope=network_authorization,
+        )
+        if not verified:
+            return {"error": f"net_authorization_denied: {reason}"}
+        if not fields["network_authorization"]["column"]:
+            return {
+                "error": (
+                    "schema_unusable: the confirmed tasks mapping has no "
+                    "'network_authorization' column; apply the reviewed migration "
+                    "and reconfirm the mapping before submitting network work"
+                )
+            }
+
+    if not task_id:
+        import random
+        task_id = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789", k=8))
     values = {"task_id": task_id, "task": task}
     if fields["submitted_by"]["column"]:
         values["submitted_by"] = app_id or "willow-mcp"
+    if network_requested:
+        values["network_authorization"] = network_authorization
     if fields["agent"]["column"]:
         values["agent"] = agent
+    if not fields["lane"]["column"]:
+        return {
+            "error": (
+                "schema_unusable: the confirmed tasks mapping has no 'lane' "
+                "column; apply the worker-production migration before queueing work"
+            )
+        }
+    values["lane"] = lane
 
     cols = ", ".join(f'"{fields[f]["column"]}"' for f in values)
     placeholders = ", ".join(["%s"] * len(values))
@@ -1039,7 +1114,7 @@ def task_status(app_id: str, task_id: str) -> dict:
     if id_col is None:
         return {"error": "schema_unusable: 'tasks' table has no mappable 'task_id' column"}
 
-    select_clause, present, unmapped = _build_select(_TASK_FIELDS, fields)
+    select_clause, present, unmapped = _build_select(_TASK_READ_FIELDS, fields)
     cur = pg.cursor()
     cur.execute(f'SELECT {select_clause} FROM tasks WHERE "{id_col}" = %s', (task_id,))
     row = cur.fetchone()
@@ -1856,6 +1931,32 @@ def fleet_health(app_id: str) -> dict:
     from .heartbeat import read_workers
     workers = read_workers()
     pending = counts.get("pending", 0)
+
+    # Per-lane strand detection (Loki DD0114E5 §2.2): pending work on a lane with
+    # no *alive* worker for that lane is stranded, even when another lane is
+    # healthy — a live batch worker must not hide a dead fast lane. Falls back to
+    # the aggregate signal if the tasks table exposes no mappable lane column.
+    lane_col = mapping["fields"].get("lane", {}).get("column")
+    stranded_lanes: list[str] = []
+    pending_by_lane: dict = {}
+    if lane_col and pending > 0:
+        try:
+            cur = pg.cursor()
+            cur.execute(
+                f'SELECT COALESCE("{lane_col}", \'fast\'), COUNT(*) FROM tasks '
+                f'WHERE "{status_col}" = \'pending\' GROUP BY 1'
+            )
+            pending_by_lane = {r[0]: r[1] for r in cur.fetchall()}
+            cur.close()
+        except Exception:
+            pending_by_lane = {}
+        by_lane = workers.get("by_lane", {})
+        stranded_lanes = [
+            lane
+            for lane, n in pending_by_lane.items()
+            if n > 0 and by_lane.get(lane, {}).get("readiness") != "alive"
+        ]
+
     return {
         "pending":   pending,
         "running":   counts.get("running", 0),
@@ -1864,6 +1965,8 @@ def fleet_health(app_id: str) -> dict:
         "total":     sum(counts.values()),
         "workers":   workers,
         "stranded":  pending > 0 and workers.get("alive", 0) == 0,
+        "pending_by_lane": pending_by_lane,
+        "stranded_lanes":  stranded_lanes,
     }
 
 
@@ -2209,6 +2312,8 @@ def _diag_worker(app_id: str) -> dict:
     from .heartbeat import read_workers
     check = read_workers()
     check["pending"] = None
+    check["pending_by_lane"] = {}
+    check["stranded_lanes"] = []
     try:
         pg = get_pg()
         if pg is not None:
@@ -2219,6 +2324,20 @@ def _diag_worker(app_id: str) -> dict:
                 cur.execute(f'SELECT COUNT(*) FROM tasks WHERE "{status_col}" = %s', ("pending",))
                 check["pending"] = cur.fetchone()[0]
                 cur.close()
+                lane_col = mapping.get("fields", {}).get("lane", {}).get("column")
+                if lane_col and check["pending"]:
+                    cur = pg.cursor()
+                    cur.execute(
+                        f'SELECT COALESCE("{lane_col}", \'fast\'), COUNT(*) FROM tasks '
+                        f'WHERE "{status_col}" = %s GROUP BY 1', ("pending",)
+                    )
+                    check["pending_by_lane"] = {r[0]: r[1] for r in cur.fetchall()}
+                    cur.close()
+                    by_lane = check.get("by_lane", {})
+                    check["stranded_lanes"] = [
+                        lane for lane, n in check["pending_by_lane"].items()
+                        if n > 0 and by_lane.get(lane, {}).get("readiness") != "alive"
+                    ]
     except Exception:
         pass  # unknown, not broken
     return check
@@ -2348,7 +2467,8 @@ def _diag_env() -> dict:
     # systemd --user unit does not inherit a shell `export`.
     keys = ["WILLOW_HOME", "WILLOW_PG_DB", "WILLOW_PG_USER", "WILLOW_STORE_ROOT",
             "WILLOW_APP_ID", "WILLOW_MCP_APPS_ROOT", "WILLOW_MCP_HOST", "WILLOW_MCP_PORT",
-            "WILLOW_SETTINGS_GLOBAL", "WILLOW_MCP_FLEET_HOME", "WILLOW_MCP_FLEET_PG_DB"]
+            "WILLOW_SETTINGS_GLOBAL", "WILLOW_MCP_FLEET_HOME", "WILLOW_MCP_FLEET_PG_DB",
+            "WILLOW_WORKER_LANE", "WILLOW_WORKER_HEARTBEAT_ROOT"]
     return {k: os.environ.get(k) for k in keys}
 
 
@@ -2394,19 +2514,47 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
     if worker:
         pending = worker.get("pending")
         alive = worker.get("alive", 0)
+        stranded_lanes = worker.get("stranded_lanes") or []
         # No worker is only a defect when something is waiting on one. An install
         # that never submits tasks is complete without a worker; saying otherwise
-        # would make `degraded` the resting state for most installs.
-        if alive == 0 and isinstance(pending, int) and pending > 0:
+        # would make `degraded` the resting state for most installs. A per-lane
+        # strand still warns even when a *different* lane is alive (Loki §2.2): a
+        # live batch worker must not mask a dead fast lane.
+        aggregate_stranded = alive == 0 and isinstance(pending, int) and pending > 0
+        if aggregate_stranded or stranded_lanes:
             died = [w for w in worker.get("workers", []) if w.get("state") in ("stale", "dead")]
-            detail = (f"{pending} task(s) pending and no live worker — nothing will drain the "
-                      f"queue; task_submit will return task_ids that never execute")
+            readiness = worker.get("readiness") or (
+                "stale" if any(w.get("state") == "stale" for w in died)
+                else "dead" if died
+                else "absent"
+            )
+            reason = {
+                "absent": "no worker heartbeat has ever been published",
+                "dead": "the worker process exited",
+                "stale": "the worker process exists but its heartbeat stalled",
+            }.get(readiness, "no live worker is ready")
+            if stranded_lanes:
+                pbl = worker.get("pending_by_lane", {})
+                lanes_desc = ", ".join(
+                    f"{lane} ({pbl.get(lane, '?')} pending)" for lane in sorted(stranded_lanes)
+                )
+                detail = (
+                    f"lane(s) stranded: {lanes_desc}; no alive worker on that lane to "
+                    f"drain it (other lanes may be healthy)"
+                )
+            else:
+                detail = (
+                    f"{pending} task(s) stranded: {reason}; nothing will drain the queue"
+                )
             if died:
                 detail += (f" (found {len(died)} heartbeat(s) from stopped worker(s): "
                            f"{', '.join(str(w.get('pid')) for w in died)})")
             problems.append({"severity": "warn", "check": "worker", "detail": detail,
-                             "fix": "start a worker: `willow-mcp worker --lane fast` "
-                                    "(or `--once` to drain and exit)"})
+                             "worker_readiness": readiness,
+                             "stranded_lanes": stranded_lanes,
+                             "fix": "inspect `willow-mcp worker-service status`, then start "
+                                    "the installed worker unit for the stranded lane (or use "
+                                    "`willow-mcp worker --lane <lane> --once` for a one-shot drain)"})
     if consent:
         if consent.get("status") == "fail":
             problems.append({
@@ -2740,18 +2888,25 @@ def _cmd_worker(args) -> None:
     from .task_queue import build_task_queue
 
     try:
-        queue = build_task_queue(args.app_id or _DEFAULT_APP_ID)
+        queue = build_task_queue(
+            args.app_id or _DEFAULT_APP_ID,
+            require_postgres=args.require_postgres or args.lane == "batch",
+        )
     except RuntimeError as e:
         print(f"willow-mcp worker: {e}", file=sys.stderr)
         raise SystemExit(1)
 
     from .heartbeat import WorkerHeartbeat, reap
+    from .egress_authorization import ExecutorNetworkAuthorizer
+
     reap()  # clear files left by workers that were killed rather than stopped
     beat = WorkerHeartbeat(agent="kart", lane=args.lane, interval=args.interval)
+    network_authorizer = ExecutorNetworkAuthorizer()
     try:
         kartikeya.run_worker(
             queue, lane=args.lane, slots=args.slots, interval=args.interval,
             once=args.once, on_heartbeat=beat,
+            network_authorizer=network_authorizer,
         )
     finally:
         beat.close()
@@ -2783,6 +2938,37 @@ def _cmd_consent(args) -> None:
     print(json.dumps(result, indent=2))
 
 
+def _cmd_worker_service(args) -> None:
+    """Install, inspect, or uninstall worker units without changing live state."""
+    from dataclasses import replace
+
+    from . import worker_service
+
+    config = worker_service.default_config()
+    config = replace(
+        config,
+        python=Path(args.python).expanduser().resolve(),
+        workdir=Path(args.workdir).expanduser().resolve(),
+        willow_home=Path(args.willow_home).expanduser().resolve(),
+        store_root=Path(args.store_root).expanduser().resolve(),
+        pg_db=args.pg_db,
+        pg_user=args.pg_user,
+        app_id=args.app_id,
+        heartbeat_root=Path(args.heartbeat_root).expanduser().resolve(),
+    )
+    try:
+        if args.action == "install":
+            result = worker_service.install_services(config)
+        elif args.action == "status":
+            result = worker_service.service_status()
+        else:
+            result = worker_service.uninstall_services()
+    except (OSError, RuntimeError, ValueError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps(result, indent=2))
+
+
 def _cmd_roster(args) -> None:
     from . import fleet_roster
 
@@ -2805,6 +2991,76 @@ def _cmd_roster(args) -> None:
         print(f"Error: {exc}", file=sys.stderr)
         raise SystemExit(1)
     print(json.dumps(result, indent=2, default=str))
+def _cmd_sign_net_task(args) -> None:
+    """Create a one-use task envelope from an operator's interactive terminal."""
+    import secrets
+    import stat
+
+    from . import egress_authorization, lease
+
+    if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
+        print(
+            "Error: sign-net-task requires an interactive operator terminal "
+            "outside Kart; it cannot run from an MCP tool or queued task.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    key_path = Path(args.key).expanduser() if args.key else None
+    if key_path is None:
+        print(
+            "Error: pass --key or set WILLOW_MCP_EGRESS_SIGNING_KEY. "
+            "The private key is never read by the MCP server or worker.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    try:
+        mode = stat.S_IMODE(key_path.stat().st_mode)
+    except OSError as e:
+        print(f"Error: cannot read signing key metadata: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    if mode & 0o077:
+        print("Error: signing key must not be group/world accessible", file=sys.stderr)
+        raise SystemExit(1)
+    protected_roots = {
+        Path(os.environ.get("WILLOW_HOME", Path.home() / ".willow")).expanduser(),
+        Path(os.environ.get("WILLOW_STORE_ROOT", Path.home() / ".willow")).expanduser(),
+    }
+    resolved_key = key_path.resolve()
+    if any(
+        resolved_key == root.resolve() or root.resolve() in resolved_key.parents
+        for root in protected_roots
+    ):
+        print(
+            "Error: signing key must live outside WILLOW_HOME/WILLOW_STORE_ROOT, "
+            "which are mounted into worker sandboxes.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    try:
+        raw_task = (
+            Path(args.task_file).read_text(encoding="utf-8")
+            if args.task_file
+            else args.task
+        )
+        canonical_task = egress_authorization.canonical_network_task(
+            raw_task, localhost=args.localhost
+        )
+        task_id = "".join(
+            secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789") for _ in range(8)
+        )
+        envelope = egress_authorization.sign_envelope(
+            private_key_path=key_path,
+            submitted_by=args.app_id,
+            task_id=task_id,
+            agent=args.agent,
+            task=canonical_task,
+            ttl_seconds=lease.parse_ttl(args.ttl),
+            nonce=secrets.token_urlsafe(24),
+        )
+    except (OSError, ValueError, PermissionError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(envelope)
 
 
 def _cmd_grant_net(args) -> None:
@@ -2983,6 +3239,11 @@ def _main():
     worker_p.add_argument("--slots", type=int, default=None)
     worker_p.add_argument("--interval", type=float, default=5.0)
     worker_p.add_argument("--once", action="store_true", help="drain the queue and exit")
+    worker_p.add_argument(
+        "--require-postgres",
+        action="store_true",
+        help="refuse the lane-agnostic SQLite fallback (set by managed units)",
+    )
     worker_p.add_argument("--app-id", dest="app_id", default=os.environ.get("WILLOW_APP_ID", ""),
                           help="app_id whose confirmed 'tasks' mapping to use (default $WILLOW_APP_ID)")
 
@@ -2998,6 +3259,65 @@ def _main():
         "roster", help="Inspect or operator-sync fleet.json into existing agents rows"
     )
     roster_p.add_argument("action", choices=["status", "sync"])
+    worker_service_p = subparsers.add_parser(
+        "worker-service",
+        help="Install/status/uninstall standalone fast+batch user units without starting or stopping them",
+    )
+    worker_service_p.add_argument("action", choices=["install", "status", "uninstall"])
+    _service_home = os.environ.get("WILLOW_HOME", str(Path.home() / ".willow"))
+    worker_service_p.add_argument("--python", default=sys.executable)
+    worker_service_p.add_argument("--workdir", default=str(Path.cwd()))
+    worker_service_p.add_argument("--willow-home", default=_service_home)
+    worker_service_p.add_argument(
+        "--store-root", default=os.environ.get("WILLOW_STORE_ROOT", _service_home)
+    )
+    worker_service_p.add_argument(
+        "--pg-db", default=os.environ.get("WILLOW_PG_DB", "willow")
+    )
+    worker_service_p.add_argument(
+        "--pg-user",
+        default=(
+            os.environ.get("WILLOW_PG_USER")
+            or os.environ.get("USER")
+            or "willow"
+        ),
+        help="Postgres role the worker connects as (mirrors the server's WILLOW_PG_USER)",
+    )
+    worker_service_p.add_argument(
+        "--app-id", default=os.environ.get("WILLOW_APP_ID", "willow-mcp")
+    )
+    worker_service_p.add_argument(
+        "--heartbeat-root",
+        default=os.environ.get(
+            "WILLOW_WORKER_HEARTBEAT_ROOT",
+            str(Path(_service_home) / "worker_heartbeat"),
+        ),
+    )
+
+    sign_net_p = subparsers.add_parser(
+        "sign-net-task",
+        help="Sign one exact network task (interactive operator terminal only; never an MCP tool)",
+    )
+    sign_net_p.add_argument("app_id", help="submitted_by identity bound into the envelope")
+    sign_net_p.add_argument(
+        "--agent", default="kart", help="queue agent identity bound into the envelope"
+    )
+    sign_net_p.add_argument(
+        "--localhost",
+        action="store_true",
+        help="authorize # allow_localhost instead of full # allow_net",
+    )
+    sign_net_input = sign_net_p.add_mutually_exclusive_group(required=True)
+    sign_net_input.add_argument("--task", default="", help="exact task text to authorize")
+    sign_net_input.add_argument(
+        "--task-file", default="", help="UTF-8 file containing the exact task text"
+    )
+    sign_net_p.add_argument("--ttl", default="30m", help="envelope lifetime (ceiling 3h)")
+    sign_net_p.add_argument(
+        "--key",
+        default=os.environ.get("WILLOW_MCP_EGRESS_SIGNING_KEY", ""),
+        help="operator Ed25519 private PEM (or $WILLOW_MCP_EGRESS_SIGNING_KEY)",
+    )
 
     grant_p = subparsers.add_parser(
         "grant-net",
@@ -3102,6 +3422,11 @@ def _main():
         return
     if args.command == "roster":
         _cmd_roster(args)
+    if args.command == "worker-service":
+        _cmd_worker_service(args)
+        return
+    if args.command == "sign-net-task":
+        _cmd_sign_net_task(args)
         return
     if args.command == "grant-net":
         _cmd_grant_net(args)
@@ -3125,8 +3450,6 @@ def _main():
         _cmd_tree(args)
         return
     if args.command == "compile-agents":
-        from pathlib import Path
-
         from .registry import compile_agents_main
 
         reg = Path(args.registry).expanduser() if args.registry else None
@@ -3138,8 +3461,6 @@ def _main():
         print(json.dumps(result, indent=2))
         return
     if args.command == "compile-persona":
-        from pathlib import Path
-
         from .persona_compile import compile_persona
 
         out = Path(args.out).expanduser() if args.out else None

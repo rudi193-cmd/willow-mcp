@@ -161,12 +161,14 @@ def test_main_silent_on_clean_task_submit():
 
 @pytest.mark.parametrize("command", [
     "willow-mcp grant-net willow --ttl 30m",
+    "willow-mcp sign-net-task willow --task 'git push' --key /operator/key.pem",
     ".venv/bin/python -m willow_mcp grant-net willow --ttl 1h --reason push",
     'python -c "from willow_mcp import lease; lease.grant(\'willow\', 60, issuer=\'me\')"',
     "willow-mcp consent set internet true",
     "willow-mcp consent reconcile",
     "willow-mcp roster sync",
     'python -c "from willow_mcp import consent_admin; consent_admin.set_key(\'internet\', True)"',
+    'python -c "from willow_mcp.egress_authorization import sign_envelope; sign_envelope()"',
     "echo '{}' > ~/.willow/mcp_apps/_net_leases/willow.json",
     "tee $WILLOW_HOME/mcp_apps/_net_leases/willow.json <<< '{}'",
     "sed -i 's/store_read/task_net/' ~/.willow/mcp_apps/willow/manifest.json",

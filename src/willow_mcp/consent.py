@@ -8,14 +8,11 @@ capability, granted once and rarely; the consent key is a switch the operator
 flips, without editing a single manifest; the lease is a time-boxed grant that
 expires on its own.
 
-**This is not a fleet-wide kill switch, and this docstring used to say it was.**
-All three keys are read by `task_submit` — the *submitter*. The *executor*
-(`kartikeya`) parses `# allow_net` from the stored task text and honors it on
-sight: `consent`, `lease`, and `task_net` appear nowhere in it. Because the
-`tasks` table is shared Postgres, any other submitter that writes a row bearing
-that directive reaches the network no matter what this file says (**B-37**, P0).
-Turning `internet` off stops egress through `task_submit`. It stops nothing else.
-Do not wire this module into a claim it cannot keep.
+All three standing keys are read by `task_submit`, then read again by the
+willow-mcp execution authorizer before Kartikeya launches a network shell.
+`# allow_net` is only a request: B-37 adds an operator-signed, task-bound envelope
+and a fail-closed host verifier at the executor. A direct row insert cannot turn
+this consent bit into authority by itself.
 
 This module only ever **reads**. Mutation is isolated in ``consent_admin`` and
 reachable only through willow-mcp's interactive operator CLI; runtime MCP tools
@@ -197,6 +194,6 @@ def permitted(key: str) -> bool:
 def internet_permitted() -> bool:
     """The standing, all-apps key of the three-key egress gate. See
     `gate.NET_PERMISSION` for the capability and `lease.active` for the time-boxed
-    grant. Read by `task_submit` only — see the module docstring on why this is not
-    a fleet-wide kill switch (B-37)."""
+    grant. Read at both submit time and execution time; the signed per-task
+    envelope supplies the separate one-use authority (B-37)."""
     return permitted("internet")

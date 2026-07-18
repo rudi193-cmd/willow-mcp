@@ -1,6 +1,6 @@
 ---
 name: kart-tasks
-description: Guided use of willow-mcp's Kart task queue — submit/poll, the three-key egress model (task_net + consent.internet + a time-boxed lease) and its footguns, and the worker-liveness caveat
+description: Guided use of willow-mcp's Kart task queue — submit/poll, signed per-task egress authorization, and worker liveness
 ---
 
 # /kart-tasks
@@ -68,13 +68,14 @@ sandbox. Returns a `task_id` for polling.
 ## 2. The network model — three keys, and its footguns
 
 Tasks run **network-isolated by default**. Egress is opt-in and needs **three
-separate keys**, all held at once (B-19, B-29, B-32):
+standing keys plus a one-use signed task envelope** (B-19, B-29, B-32, B-37):
 
 | Key | Question it answers | Where it lives | Who turns it |
 |---|---|---|---|
 | `task_net` | *May this app ever request egress?* | `mcp_apps/<app>/manifest.json` | operator, granted once |
 | `consent.internet` | *Is egress permitted right now?* | `$WILLOW_HOME/settings.global.json` | operator, flipped freely |
 | **egress lease** | *This app, until when?* | `mcp_apps/_net_leases/<app>.json` | operator, `willow-mcp grant-net`, expires |
+| **signed envelope** | *This submitter, exact task, scope, expiry, nonce?* | `tasks.network_authorization` | operator, `willow-mcp sign-net-task`, one use |
 
 - Pass **`allow_net=True`**. Without the **`task_net`** capability you get
   `net_denied`; with `task_net` but `consent.internet: false` you get
@@ -89,18 +90,13 @@ separate keys**, all held at once (B-19, B-29, B-32):
   its deadline, or a lease whose record names a *different* app than the file it
   sits in — all read as **denied**. Absence is not consent. A name is not an
   identity.
-- Flipping `consent.internet` to `false` stops egress through **`task_submit`**,
-  without editing a single manifest. Reach for it rather than revoking
-  capabilities one app at a time.
-- **It does not stop egress fleet-wide, and this doc used to say it did.** The
-  three keys gate the *submitter*. The *executor* — `kartikeya`, and willow-2.0's
-  own Kart copy — reads `# allow_net` out of the task text and honors it on sight:
-  no `consent`, no `lease`, no `task_net` appears anywhere in it. The `tasks`
-  table is shared Postgres, so any other submitter that writes a row carrying
-  that directive reaches the network regardless of what the consent file says
-  (**B-37**, P0). Verified live with `task_net` revoked and the lease expired.
-  Until B-37 lands, `consent.internet: false` is an off switch for one door in a
-  building with more than one door.
+- Flipping `consent.internet` to `false` denies at both submit and execution
+  time, without editing a single manifest.
+- **`# allow_net` is a request, never authority.** Kartikeya calls the host
+  authorizer before shell launch. It rechecks all three standing keys, strict
+  trust-root state, signature, exact task hash, expiry, and nonce replay. Direct
+  inserts and legacy rows have no signed envelope and therefore cannot get
+  network access (B-37).
 - **An agent may request egress; it may never grant itself egress.** If you find
   yourself about to write `task_net` into a manifest, or to run
   `willow-mcp grant-net`, so that your own next call succeeds — **stop.** That is
@@ -109,17 +105,17 @@ separate keys**, all held at once (B-19, B-29, B-32):
   push the branch — please run `willow-mcp grant-net <app> --ttl 15m`"*, not a
   file edit.
 - **Do not hand-embed `# allow_net` or `# allow_localhost` lines in `task`
-  text.** The Kart worker reads its network policy from exactly those directive
-  lines, so it's tempting to add one directly — but the server **strips any
+  text.** The server **strips any
   such caller-supplied line unconditionally** before storing the task (B-21 /
   L-NET-01). Embedding one does nothing except signal a misunderstanding of the
   gate. `# allow_net` can only enter the stored task through the
   permission-checked `allow_net=True` path; `# allow_localhost` cannot be
   self-granted at all. The PreToolUse hook warns if you try.
 
-So: **network = `allow_net=True` + `task_net` in the manifest + `consent.internet`
-from the operator + a live lease the operator issued.** Never a directive in the
-task string, never a manifest you edited yourself, never a lease you minted.
+So: **network = `allow_net=True` + `task_net` + `consent.internet` + a live
+lease + an operator-signed `network_authorization` envelope.** Never a directive
+in the task string, a manifest you edited, a lease you minted, or a reusable
+signature.
 
 ### What the lease does and does not buy
 

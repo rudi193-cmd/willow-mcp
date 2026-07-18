@@ -638,8 +638,12 @@ def test_kb_promote_schema_unusable_when_domain_unmapped_even_if_confirmed(app_i
 # as the knowledge_* tools.
 
 _TASKS_COLUMNS = [
-    ("id", "text"), ("task", "text"), ("submitted_by", "text"), ("agent", "text"),
+    ("id", "text"), ("task", "text"), ("submitted_by", "text"),
+    ("network_authorization", "text"), ("agent", "text"), ("lane", "text"),
     ("status", "text"), ("result", "jsonb"), ("created_at", "timestamp with time zone"),
+    ("completed_at", "timestamp with time zone"), ("claim_owner", "text"),
+    ("claimed_at", "timestamp with time zone"), ("attempts", "integer"),
+    ("max_attempts", "integer"), ("retry_at", "timestamp with time zone"),
 ]
 
 
@@ -656,7 +660,9 @@ def test_task_submit_writes_mapped_columns_after_confirm(app_id, monkeypatch):
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app_id, table="tasks")
 
-    result = server.task_submit(app_id=app_id, task="do a thing", agent="kart")
+    result = server.task_submit(
+        app_id=app_id, task="do a thing", agent="kart", lane="batch"
+    )
 
     assert result["status"] == "pending"
     assert "task_id" in result
@@ -665,7 +671,19 @@ def test_task_submit_writes_mapped_columns_after_confirm(app_id, monkeypatch):
     assert '"id"' in insert_sql          # task_id -> id, alias-mapped
     assert '"submitted_by"' in insert_sql
     assert '"agent"' in insert_sql
+    assert '"lane"' in insert_sql
+    assert params[-1] == "batch"
     assert params[0] == result["task_id"]
+
+
+def test_task_submit_rejects_unknown_lane_before_database_work(
+    app_id, monkeypatch
+):
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    result = server.task_submit(app_id=app_id, task="echo hi", lane="priority")
+    assert "invalid_lane" in result["error"]
+    assert fake.executed == []
 
 
 # Patterns the *currently published* kartikeya scanner blocks — this test
@@ -722,6 +740,26 @@ def _operator_leases(app, *, ttl_seconds=1800):
     return lease.grant(app, ttl_seconds, issuer="test-operator", reason="unit test")
 
 
+def _accepted_network_envelope(tmp_path, monkeypatch):
+    from willow_mcp import egress_authorization
+
+    public_key = tmp_path / "verify.pem"
+    public_key.write_text("test key")
+    monkeypatch.setattr(
+        egress_authorization, "public_key_path", lambda: public_key
+    )
+    monkeypatch.setattr(
+        egress_authorization,
+        "verify_envelope",
+        lambda **_kwargs: (
+            True,
+            "verified",
+            {"nonce": "test", "task_id": "NETTASK1", "agent": "kart"},
+        ),
+    )
+    return json.dumps({"payload": {"task_id": "NETTASK1"}, "signature": "test"})
+
+
 def test_task_submit_allow_net_denied_without_task_net_permission(tmp_path, monkeypatch):
     # B-19: full_access grants task_submit but NOT the escalated net capability.
     app = _app_with_perms(tmp_path, monkeypatch, "netless", ["full_access"])
@@ -745,14 +783,94 @@ def test_task_submit_allow_net_appends_directive_with_permission(tmp_path, monke
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
 
-    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+    result = server.task_submit(
+        app_id=app,
+        task="curl https://example.com",
+        allow_net=True,
+        network_authorization=envelope,
+    )
 
     assert result["status"] == "pending"
     insert_sql, params = fake.executed[-1]
     assert insert_sql.startswith("INSERT INTO tasks")
     # values dict order is task_id, task, ... so the task column value is params[1]
     assert params[1] == "curl https://example.com\n# allow_net"
+    assert '"network_authorization"' in insert_sql
+    assert params[3] == envelope
+
+
+def test_task_submit_allow_localhost_requires_and_binds_signed_authority(
+    tmp_path, monkeypatch
+):
+    app = _app_with_perms(
+        tmp_path, monkeypatch, "localapp", ["full_access", "task_net"]
+    )
+    _operator_consents(tmp_path)
+    _operator_leases(app)
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
+
+    result = server.task_submit(
+        app_id=app,
+        task="curl http://127.0.0.1:11434",
+        agent="kart",
+        allow_localhost=True,
+        network_authorization=envelope,
+    )
+
+    assert result == {"task_id": "NETTASK1", "status": "pending"}
+    insert_sql, params = fake.executed[-1]
+    assert params[1] == "curl http://127.0.0.1:11434\n# allow_localhost"
+    assert '"network_authorization"' in insert_sql
+
+
+def test_task_submit_allow_net_requires_signed_envelope(tmp_path, monkeypatch):
+    app = _app_with_perms(
+        tmp_path, monkeypatch, "unsigned", ["full_access", "task_net"]
+    )
+    _operator_consents(tmp_path)
+    _operator_leases(app)
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+
+    result = server.task_submit(
+        app_id=app, task="curl https://example.com", allow_net=True
+    )
+
+    assert "operator-signed per-task envelope" in result["error"]
+    assert not any("INSERT" in sql for sql, _ in fake.executed)
+
+
+def test_task_submit_network_denied_when_envelope_column_unmapped(
+    tmp_path, monkeypatch
+):
+    app = _app_with_perms(
+        tmp_path, monkeypatch, "oldschema", ["full_access", "task_net"]
+    )
+    _operator_consents(tmp_path)
+    _operator_leases(app)
+    old_columns = [
+        column for column in _TASKS_COLUMNS if column[0] != "network_authorization"
+    ]
+    fake = _FakePg(columns=old_columns)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
+
+    result = server.task_submit(
+        app_id=app,
+        task="curl https://example.com",
+        allow_net=True,
+        network_authorization=envelope,
+    )
+
+    assert "network_authorization" in result["error"]
+    assert not any("INSERT" in sql for sql, _ in fake.executed)
 
 
 def test_task_submit_allow_net_denied_when_operator_consent_is_off(tmp_path, monkeypatch):
@@ -849,9 +967,13 @@ def test_task_submit_permitted_net_survives_caller_directive_dedup(tmp_path, mon
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
 
     result = server.task_submit(
-        app_id=app, task="curl https://example.com\n# allow_net", allow_net=True
+        app_id=app,
+        task="curl https://example.com\n# allow_net",
+        allow_net=True,
+        network_authorization=envelope,
     )
 
     assert result["status"] == "pending"
@@ -969,8 +1091,14 @@ def test_task_submit_strict_trust_root_denies_when_keys_are_self_writable(tmp_pa
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
 
-    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+    result = server.task_submit(
+        app_id=app,
+        task="curl https://example.com",
+        allow_net=True,
+        network_authorization=envelope,
+    )
 
     assert "trust_root_denied" in result["error"]
     assert not any("INSERT" in sql for sql, _ in fake.executed)
@@ -986,8 +1114,14 @@ def test_task_submit_strict_trust_root_off_by_default(tmp_path, monkeypatch):
     fake = _FakePg(columns=_TASKS_COLUMNS)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=app, table="tasks")
+    envelope = _accepted_network_envelope(tmp_path, monkeypatch)
 
-    result = server.task_submit(app_id=app, task="curl https://example.com", allow_net=True)
+    result = server.task_submit(
+        app_id=app,
+        task="curl https://example.com",
+        allow_net=True,
+        network_authorization=envelope,
+    )
 
     assert result["status"] == "pending"
 
@@ -1001,7 +1135,24 @@ def test_task_status_not_found(app_id, monkeypatch):
 def test_task_status_maps_id_to_task_id_and_surfaces_unmapped(app_id, monkeypatch):
     fake = _FakePg(
         columns=_TASKS_COLUMNS,
-        canned_rows=[("T1", "do a thing", "willow", "kart", "pending", None, "2026-07-08")],
+        canned_rows=[
+            (
+                "T1",
+                "do a thing",
+                "willow",
+                "kart",
+                "fast",
+                "pending",
+                None,
+                "2026-07-08",
+                None,
+                None,
+                None,
+                0,
+                3,
+                None,
+            )
+        ],
     )
     monkeypatch.setattr(server, "get_pg", lambda: fake)
 
@@ -1009,7 +1160,8 @@ def test_task_status_maps_id_to_task_id_and_surfaces_unmapped(app_id, monkeypatc
 
     assert result["task_id"] == "T1"
     assert result["status"] == "pending"
-    assert set(result["_unmapped"]) == {"steps", "completed_at"}
+    assert "network_authorization" not in result
+    assert set(result["_unmapped"]) == {"steps"}
     select_sql, params = fake.executed[-1]
     assert '"id" AS "task_id"' in select_sql
     assert 'WHERE "id" = %s' in select_sql
@@ -1052,8 +1204,8 @@ def test_fleet_health_counts_by_mapped_status_column(app_id, monkeypatch, tmp_pa
     # 3 pending with nothing draining them: queued is not the same as progressing.
     assert result["stranded"] is True
     assert result["workers"]["alive"] == 0
-    select_sql, params = fake.executed[-1]
-    assert select_sql == 'SELECT "status", COUNT(*) FROM tasks GROUP BY "status"'
+    issued = [s for s, _ in fake.executed]
+    assert 'SELECT "status", COUNT(*) FROM tasks GROUP BY "status"' in issued
 
 
 def test_fleet_health_not_stranded_when_a_worker_is_alive(app_id, monkeypatch, tmp_path):
@@ -1078,6 +1230,37 @@ def test_fleet_health_not_stranded_when_queue_is_empty(app_id, monkeypatch, tmp_
     result = server.fleet_health(app_id=app_id)
 
     assert result["stranded"] is False
+
+
+def test_fleet_health_reports_per_lane_stranding(app_id, monkeypatch, tmp_path):
+    # With a mapped lane column and pending work, fleet_health issues the per-lane
+    # pending query and reports stranded_lanes for any lane with no alive worker
+    # (Loki DD0114E5 §2.2). (_FakePg returns the same rows for every query, so the
+    # lane label is a test-double artifact; the clean per-lane semantics live in
+    # test_heartbeat's read_workers/_derive_problems tests.)
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))  # no live workers → nothing ready
+    fake = _FakePg(columns=_TASKS_COLUMNS, canned_rows=[("pending", 2)])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.fleet_health(app_id=app_id)
+
+    issued = [s for s, _ in fake.executed]
+    assert any("GROUP BY 1" in s and "= 'pending'" in s for s in issued), \
+        "the per-lane pending query must be issued"
+    assert result["pending_by_lane"]  # populated
+    assert result["stranded_lanes"], "a lane with pending work and no alive worker is stranded"
+
+
+def test_fleet_health_no_per_lane_query_when_queue_empty(app_id, monkeypatch, tmp_path):
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
+    fake = _FakePg(columns=_TASKS_COLUMNS, canned_rows=[("completed", 7)])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.fleet_health(app_id=app_id)
+
+    issued = [s for s, _ in fake.executed]
+    assert not any("GROUP BY 1" in s for s in issued)
+    assert result["stranded_lanes"] == []
 
 
 def test_fleet_health_table_not_found(app_id, monkeypatch):

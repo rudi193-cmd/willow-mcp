@@ -59,7 +59,14 @@ CANONICAL_ALIASES: dict[str, tuple[str, ...]] = {
     "task": ("cmd_line", "cmdline", "command", "cmd", "cmd_text", "script", "action", "payload"),
     "submitted_by": ("submitter", "requestor", "requester", "created_by", "owner",
                      "username", "usr", "user", "author"),
+    "network_authorization": (
+        "net_authorization",
+        "egress_authorization",
+        "network_envelope",
+        "egress_envelope",
+    ),
     "agent": ("worker", "executor", "runner", "processor", "handler"),
+    "lane": ("queue_lane", "worker_lane", "priority_lane"),
     "status": ("stat", "state", "job_state", "proc_state", "status_code", "st"),
     "result": ("output", "outblob", "result_text", "response", "stdout", "res", "log"),
     "steps": ("nsteps", "num_steps", "step_count", "step_cnt"),
@@ -67,6 +74,11 @@ CANONICAL_ALIASES: dict[str, tuple[str, ...]] = {
                    "date_created", "queued_at", "submit_time", "ctime"),
     "completed_at": ("fin_dt", "finished_at", "completed", "done_at", "end_time",
                      "finish_time", "mtime"),
+    "claim_owner": ("claimed_by", "worker_id", "lock_owner"),
+    "claimed_at": ("claim_time", "locked_at", "started_at"),
+    "attempts": ("attempt_count", "tries", "retry_count"),
+    "max_attempts": ("max_tries", "retry_limit"),
+    "retry_at": ("next_attempt_at", "retry_after"),
 }
 
 # Column data types that must be cast to text before use in an ILIKE
@@ -324,8 +336,15 @@ _EXPECTED_SHAPES: dict[str, frozenset] = {
     "created_at": frozenset({"timestamp"}),
     "completed_at": frozenset({"timestamp"}),
     "agent": frozenset({"enum", "identifier"}),
+    "lane": frozenset({"enum", "identifier"}),
     "submitted_by": frozenset({"identifier", "enum", "freetext", "prose"}),
+    "network_authorization": frozenset({"freetext", "prose"}),
     "result": frozenset({"freetext", "command", "prose", "reference"}),
+    "claim_owner": frozenset({"identifier", "enum", "freetext", "reference"}),
+    "claimed_at": frozenset({"timestamp"}),
+    "attempts": frozenset({"integer"}),
+    "max_attempts": frozenset({"integer"}),
+    "retry_at": frozenset({"timestamp"}),
     # knowledge side. `content` is the one field that expects prose but NOT
     # reference — a content column full of citations is the trap, so it flags.
     # Everyone else accepts reference too (permissive), so splitting freetext

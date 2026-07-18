@@ -117,14 +117,15 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 
 ### Egress needs three keys
 
-A task that reaches the network requires **all three** of these, and any one
-missing denies before anything is written:
+A task that reaches the network requires **all three standing keys** plus a
+one-use signed task envelope. Any missing element denies before shell launch:
 
 | Key | Question | Where | Turned by |
 |---|---|---|---|
 | `task_net` | May this app *ever* request egress? | `mcp_apps/<app_id>/manifest.json` | operator, granted once |
 | `consent.internet` | Is egress permitted *right now*? | `$WILLOW_HOME/settings.global.json` | operator, flipped freely |
 | egress lease | For *this app*, until *when*? | `mcp_apps/_net_leases/<app_id>.json` | operator, `willow-mcp grant-net`, expires on its own |
+| signed task envelope | This submitter, exact task, scope, expiry, and nonce? | `tasks.network_authorization` | operator, `willow-mcp sign-net-task`, one use |
 
 ```jsonc
 // $WILLOW_HOME/settings.global.json — the off switch
@@ -133,6 +134,7 @@ missing denies before anything is written:
 
 ```console
 $ willow-mcp grant-net myapp --ttl 30m --reason "publish the release"
+$ willow-mcp sign-net-task myapp --task-file task.sh --key /operator/egress-key.pem
 $ willow-mcp net-status          # what is live, and for how much longer
 $ willow-mcp revoke-net myapp    # or just wait; the ceiling is 3h
 ```
@@ -143,17 +145,24 @@ capability (rarely granted, deliberately excluded from `full_access`);
 `consent.internet` is a switch; the lease is a **time-boxed grant** that an agent
 may ask for and never issue. No MCP tool can mint one — `grant-net` is local CLI
 only, exactly like `confirm-binding`. An agent may *request* egress and may never
-*grant it to itself*.
+*grant it to itself*. `sign-net-task` requires an interactive host terminal and
+an Ed25519 private key outside `WILLOW_HOME`/`WILLOW_STORE_ROOT`; no MCP tool or
+worker receives that key.
 
-> **It is not a fleet-wide kill switch, and this README used to say it was.** The
-> three keys gate the **submitter**. The **executor** — `kartikeya`, and
-> willow-2.0's own Kart copy — reads `# allow_net` out of the task text and honors
-> it on sight; `consent`, `lease`, and `task_net` appear nowhere in it. The `tasks`
-> table is shared Postgres, so any *other* submitter that writes a row carrying
-> that directive reaches the network regardless of this file (**B-37**, P0,
-> verified live with `task_net` revoked and the lease expired). Until B-37 lands,
-> `consent.internet: false` is an off switch for one door in a building with more
-> than one door.
+At execution, Kartikeya treats `# allow_net` only as a request and calls the
+willow-mcp host authorizer. The authorizer rechecks capability, consent, lease,
+strict trust-root state, signature, exact normalized task hash, expiry, and the
+one-use nonce. Direct task-table inserts and legacy rows have no envelope, so
+they remain runnable only as network-isolated work (B-37).
+
+Deployment is deliberately explicit: apply
+`docs/schema/tasks-add-network-authorization.sql`, reconfirm the `tasks` mapping,
+set `WILLOW_MCP_EGRESS_PUBLIC_KEY` to an operator-owned Ed25519 public PEM that
+the worker cannot write, set a worker-writable `WILLOW_MCP_EGRESS_REPLAY_ROOT`,
+and enable `WILLOW_MCP_STRICT_TRUST_ROOT=1`. The matching private key must remain
+outside `WILLOW_HOME` and `WILLOW_STORE_ROOT`; only the interactive
+`sign-net-task` command reads it. Until those conditions hold, network tasks deny
+closed while ordinary isolated tasks remain unchanged.
 
 Consent and leases are both read **fail-closed**: a missing file, an unparseable
 file, a non-boolean value (`"true"`, `1`), a lease past its deadline, a deadline
@@ -511,6 +520,25 @@ just ask to turn serve mode on or off.
 > tool over the serve endpoint: a `table_not_found` / `relation … does not
 > exist` on data that stdio can see is the signature of this env gap.
 
+### Installing standalone workers
+
+`willow-mcp worker-service` manages separate fast and batch systemd user units.
+It writes every required environment value into the units, so workers do not
+inherit hidden willow-2.0 paths or depend on shell exports:
+
+```bash
+willow-mcp worker-service install
+willow-mcp worker-service status
+willow-mcp worker-service uninstall
+```
+
+Install and uninstall never start or stop services. Uninstall refuses while a
+worker is active; live state changes remain an explicit operator action. Before
+starting either unit, apply `docs/schema/tasks-worker-production.sql` and
+reconfirm the `tasks` mapping. The queue then isolates `fast`/`batch` claims,
+records claim owner/time, recovers stale claims, applies bounded retries, and
+timestamps terminal rows.
+
 ## Configuration
 
 | Env var | Default | Description |
@@ -522,6 +550,9 @@ just ask to turn serve mode on or off.
 | `WILLOW_MCP_FLEET_PG_DB` | *(unset)* | The fleet database this install claims to be severed from |
 | `WILLOW_APP_ID` | `willow-mcp` | Default app_id if not passed per-call |
 | `WILLOW_HOME` | `~/.willow` | Root for manifests, vault, and identity bindings |
+| `WILLOW_WORKER_LANE` | set by worker unit | Worker lane (`fast` or `batch`) |
+| `WILLOW_WORKER_HEARTBEAT_ROOT` | `$WILLOW_HOME/worker_heartbeat` | Explicit worker heartbeat directory |
+| `WILLOW_WORKER_STALE_SECONDS` | `1800` | Age after which an uncompleted claim is recovered |
 | `WILLOW_MCP_HOST` | `127.0.0.1` | Serve-mode bind host (`--host` overrides) |
 | `WILLOW_MCP_PORT` | `8765` | Serve-mode bind port (`--port` overrides) |
 | `WILLOW_MCP_URL` | *(derived)* | Public base URL for OAuth issuer/callbacks in serve mode |

@@ -16,15 +16,54 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 from pathlib import Path
+from uuid import uuid4
 
 from psycopg2.extras import Json
 
 from . import schema_profile as sp
 from .db import get_pg
 
-_TASK_FIELDS = ["task_id", "task", "submitted_by", "agent", "status", "result",
-                "steps", "created_at", "completed_at"]
+_TASK_FIELDS = [
+    "task_id",
+    "task",
+    "submitted_by",
+    "network_authorization",
+    "agent",
+    "lane",
+    "status",
+    "result",
+    "steps",
+    "created_at",
+    "completed_at",
+    "claim_owner",
+    "claimed_at",
+    "attempts",
+    "max_attempts",
+    "retry_at",
+]
+
+
+def _parse_claim_owner(owner: str) -> tuple[str, int] | None:
+    """Recover ``(host, pid)`` from a ``host:pid:nonce`` claim owner.
+
+    Claim owners are minted as ``f"{hostname}:{pid}:{uuid4().hex[:12]}"``; the
+    nonce and pid are the last two ``:``-delimited fields, so hostnames that
+    themselves contain ``:`` still parse. Anything that does not match (a legacy
+    or externally-set owner) returns ``None`` and is treated as not-live, so it
+    is still recoverable once past the stale window.
+    """
+    if not owner:
+        return None
+    parts = owner.rsplit(":", 2)
+    if len(parts) != 3:
+        return None
+    host, pid_str, _nonce = parts
+    try:
+        return host, int(pid_str)
+    except ValueError:
+        return None
 
 
 def _require_kartikeya():
@@ -47,8 +86,28 @@ class WillowMcpTaskQueue:
     `FOR UPDATE SKIP LOCKED`.
     """
 
-    def __init__(self, pg, app_id: str):
+    def __init__(
+        self,
+        pg,
+        app_id: str,
+        *,
+        claim_owner: str = "",
+        retry_delay_seconds: int = 5,
+        stale_after_seconds: int | None = None,
+    ):
         self._pg = pg
+        self.claim_owner = claim_owner or (
+            f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex[:12]}"
+        )
+        self.retry_delay_seconds = max(0, int(retry_delay_seconds))
+        configured_stale = os.environ.get(
+            "WILLOW_WORKER_STALE_SECONDS", "1800"
+        )
+        self.stale_after_seconds = (
+            int(configured_stale)
+            if stale_after_seconds is None
+            else int(stale_after_seconds)
+        )
         mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
         if "error" in mapping:
             raise RuntimeError(mapping["error"])
@@ -63,50 +122,92 @@ class WillowMcpTaskQueue:
         for req in ("task_id", "task", "agent", "status"):
             if not self._col[req]:
                 raise RuntimeError(f"tasks table has no mappable '{req}' column")
+        production_fields = (
+            "lane",
+            "claim_owner",
+            "claimed_at",
+            "attempts",
+            "max_attempts",
+            "retry_at",
+            "completed_at",
+        )
+        missing = [field for field in production_fields if not self._col[field]]
+        if missing:
+            raise RuntimeError(
+                "tasks schema is missing worker-production fields: "
+                + ", ".join(missing)
+                + " — apply the reviewed worker migration and reconfirm the mapping"
+            )
 
     def _q(self, field: str) -> str:
         return f'"{self._col[field]}"'
 
     def claim_pending(self, agent: str, limit: int, lane: str | None = None):
         from kartikeya import TaskRow  # lazy — this backend is only used with kartikeya present
+
+        lane = (lane or "fast").strip().lower()
+        if lane not in ("fast", "batch"):
+            raise ValueError(f"lane must be fast|batch, got {lane!r}")
         c = self._col
         order = c["created_at"] or c["task_id"]
-        ret = [c["task_id"], c["task"], c["agent"]]
-        if c["submitted_by"]:
-            ret.append(c["submitted_by"])
+        ret_fields = ["task_id", "task", "agent"]
+        for optional in ("submitted_by", "network_authorization"):
+            if c[optional]:
+                ret_fields.append(optional)
+        ret = [c[field] for field in ret_fields]
         ret_cols = ", ".join(f'"{x}"' for x in ret)
         sql = (
-            f'UPDATE tasks SET {self._q("status")} = \'running\' '
+            f'UPDATE tasks SET {self._q("status")} = \'running\', '
+            f'{self._q("claim_owner")} = %s, {self._q("claimed_at")} = now(), '
+            f'{self._q("attempts")} = COALESCE({self._q("attempts")}, 0) + 1 '
             f'WHERE {self._q("task_id")} IN ('
             f'  SELECT {self._q("task_id")} FROM tasks '
             f'  WHERE {self._q("status")} = \'pending\' AND {self._q("agent")} = %s '
+            f'  AND {self._q("lane")} = %s '
+            f'  AND ({self._q("retry_at")} IS NULL OR {self._q("retry_at")} <= now()) '
+            f'  AND COALESCE({self._q("attempts")}, 0) < '
+            f'      COALESCE({self._q("max_attempts")}, 3) '
             f'  ORDER BY "{order}" LIMIT %s FOR UPDATE SKIP LOCKED'
-            f') RETURNING {ret_cols}'
+            f') AND {self._q("status")} = \'pending\' RETURNING {ret_cols}'
         )
         cur = self._pg.cursor()
-        cur.execute(sql, (agent, limit))
+        cur.execute(sql, (self.claim_owner, agent, lane, limit))
         rows = cur.fetchall()
         cur.close()
         self._pg.commit()
         out = []
         for r in rows:
-            submitted_by = r[3] if c["submitted_by"] and len(r) > 3 else ""
-            out.append(TaskRow(task_id=r[0], task=r[1] or "", agent=r[2] or agent,
-                               submitted_by=submitted_by or "", status="running"))
+            values = dict(zip(ret_fields, r))
+            out.append(
+                TaskRow(
+                    task_id=values["task_id"],
+                    task=values["task"] or "",
+                    agent=values["agent"] or agent,
+                    submitted_by=values.get("submitted_by") or "",
+                    network_authorization=values.get("network_authorization") or "",
+                    status="running",
+                )
+            )
         return out
 
     def mark_running(self, task_id: str) -> None:
         cur = self._pg.cursor()
         cur.execute(
-            f'UPDATE tasks SET {self._q("status")} = \'running\' '
+            f'UPDATE tasks SET {self._q("status")} = \'running\', '
+            f'{self._q("claim_owner")} = %s, '
+            f'{self._q("claimed_at")} = COALESCE({self._q("claimed_at")}, now()) '
             f'WHERE {self._q("task_id")} = %s AND {self._q("status")} <> \'running\'',
-            (task_id,),
+            (self.claim_owner, task_id),
         )
         cur.close()
         self._pg.commit()
 
     def mark_done(self, task_id: str, *, status: str, result: str) -> None:
         c = self._col
+        if status not in ("completed", "failed"):
+            raise ValueError(
+                f"terminal status must be completed|failed, got {status!r}"
+            )
         if self._result_jsonb:
             try:
                 stored = Json(json.loads(result))
@@ -114,17 +215,111 @@ class WillowMcpTaskQueue:
                 stored = Json(result)
         else:
             stored = result
-        sets = [f'{self._q("status")} = %s', f'{self._q("result")} = %s']
-        params = [status, stored]
-        if c["completed_at"]:
-            sets.append(f'{self._q("completed_at")} = now()')
+        retrying = (
+            f"%s = 'failed' AND COALESCE({self._q('attempts')}, 0) "
+            f"< COALESCE({self._q('max_attempts')}, 3)"
+        )
+        sets = [
+            f"{self._q('status')} = CASE WHEN {retrying} "
+            f"THEN 'pending' ELSE %s END",
+            f'{self._q("result")} = %s',
+            f"{self._q('retry_at')} = CASE WHEN {retrying} "
+            f"THEN now() + (%s * GREATEST(COALESCE({self._q('attempts')}, 1), 1)) "
+            f"* INTERVAL '1 second' ELSE NULL END",
+            f"{self._q('completed_at')} = CASE WHEN {retrying} "
+            f"THEN NULL ELSE now() END",
+            f'{self._q("claim_owner")} = NULL',
+            f'{self._q("claimed_at")} = NULL',
+        ]
+        params = [
+            status,
+            status,
+            stored,
+            status,
+            self.retry_delay_seconds,
+            status,
+        ]
         cur = self._pg.cursor()
         cur.execute(
-            f'UPDATE tasks SET {", ".join(sets)} WHERE {self._q("task_id")} = %s',
-            (*params, task_id),
+            f'UPDATE tasks SET {", ".join(sets)} '
+            f'WHERE {self._q("task_id")} = %s '
+            f'AND {self._q("status")} = \'running\' '
+            f'AND {self._q("claim_owner")} = %s',
+            (*params, task_id, self.claim_owner),
         )
         cur.close()
         self._pg.commit()
+
+    def reap_stale(self) -> int:
+        """Recover claims held by *dead* workers, exhausting rows at max_attempts.
+
+        Liveness-aware (Loki DD0114E5 §2.1). A fixed age is not evidence a worker
+        died: kartikeya runs each task in a thread pool while the main loop keeps
+        ticking `on_heartbeat` every ~5s, so a worker draining a task for longer
+        than `stale_after_seconds` is still alive and still publishing liveness.
+        Reclaiming its row on age alone would re-dispatch live work and execute it
+        twice. So a candidate (running past the stale window) is reclaimed only
+        when its owning worker is gone — absent from the heartbeat's live set and,
+        for a same-host owner, holding no live pid. The `claimed_at` guard is
+        re-applied in the UPDATE so a claim renewed between the probe and the
+        write is never stolen.
+        """
+        from . import heartbeat
+
+        cur = self._pg.cursor()
+        cur.execute(
+            f'SELECT {self._q("task_id")}, {self._q("claim_owner")} FROM tasks '
+            f'WHERE {self._q("status")} = \'running\' '
+            f'AND {self._q("claimed_at")} < '
+            f"now() - (%s * INTERVAL '1 second')",
+            (self.stale_after_seconds,),
+        )
+        candidates = cur.fetchall()
+        cur.close()
+        if not candidates:
+            self._pg.commit()
+            return 0
+
+        alive_keys = heartbeat.live_worker_keys()
+        this_host = socket.gethostname()
+        dead_ids = []
+        for task_id, owner in candidates:
+            parsed = _parse_claim_owner(owner or "")
+            if parsed is not None:
+                host, pid = parsed
+                if (host, pid) in alive_keys:
+                    continue  # a fresh heartbeat proves this owner is alive
+                if host == this_host and heartbeat._pid_alive(pid):
+                    continue  # live local pid, even if its heartbeat file is gone
+            dead_ids.append(task_id)
+
+        if not dead_ids:
+            self._pg.commit()
+            return 0
+
+        cur = self._pg.cursor()
+        cur.execute(
+            f'UPDATE tasks SET {self._q("status")} = CASE '
+            f'WHEN COALESCE({self._q("attempts")}, 0) >= '
+            f'COALESCE({self._q("max_attempts")}, 3) '
+            f"THEN 'failed' ELSE 'pending' END, "
+            f'{self._q("completed_at")} = CASE '
+            f'WHEN COALESCE({self._q("attempts")}, 0) >= '
+            f'COALESCE({self._q("max_attempts")}, 3) '
+            f"THEN now() ELSE NULL END, "
+            f'{self._q("retry_at")} = NULL, '
+            f'{self._q("claim_owner")} = NULL, '
+            f'{self._q("claimed_at")} = NULL '
+            f'WHERE {self._q("task_id")} = ANY(%s) '
+            f'AND {self._q("status")} = \'running\' '
+            f'AND {self._q("claimed_at")} < '
+            f"now() - (%s * INTERVAL '1 second')",
+            (dead_ids, self.stale_after_seconds),
+        )
+        changed = max(int(cur.rowcount), 0)
+        cur.close()
+        self._pg.commit()
+        return changed
 
     def stats(self):
         from kartikeya import QueueStats
@@ -141,12 +336,17 @@ class WillowMcpTaskQueue:
         )
 
 
-def build_task_queue(app_id: str):
+def build_task_queue(app_id: str, *, require_postgres: bool = False):
     """Pick a backend: Postgres (adopted `tasks` table) if reachable, else
     kartikeya's bundled SqliteTaskQueue under WILLOW_STORE_ROOT."""
     pg = get_pg()
     if pg is not None:
         return WillowMcpTaskQueue(pg, app_id)
+    if require_postgres:
+        raise RuntimeError(
+            "Postgres is required for managed lane workers; refusing the "
+            "lane-agnostic SQLite fallback"
+        )
     k = _require_kartikeya()
     root = os.environ.get("WILLOW_STORE_ROOT") or str(Path.home() / ".willow")
     db_path = Path(root).expanduser() / "kart.db"

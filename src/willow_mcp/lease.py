@@ -115,6 +115,30 @@ def _nearest_existing(path: Path) -> Optional[Path]:
     return None
 
 
+def path_is_self_writable_or_replaceable(path: Path) -> bool:
+    """Whether this process can alter ``path`` or replace it through an ancestor.
+
+    Checking only the leaf is insufficient: a read-only file in a writable
+    directory can be unlinked and replaced, and a protected directory beneath a
+    writable parent can be renamed wholesale.  Walk to the filesystem root so
+    strict trust mode describes the complete pathname authority.
+    """
+    try:
+        target = path.expanduser().resolve(strict=False)
+    except OSError:
+        target = path.expanduser().absolute()
+    existing = _nearest_existing(target)
+    if existing is None:
+        return True
+    for candidate in (existing, *existing.parents):
+        try:
+            if os.access(candidate, os.W_OK):
+                return True
+        except OSError:
+            return True
+    return False
+
+
 def parse_ttl(value: str) -> int:
     """`90s` / `30m` / `2h` / bare seconds -> int seconds. Raises on anything else."""
     m = _TTL_RE.match(str(value).strip())
@@ -292,8 +316,7 @@ def self_writable_trust_paths(app_id: str = "") -> list[dict]:
     # *create* it — so the question is really about the nearest ancestor that does
     # exist. Reporting "not writable" for an absent directory would be a lie that
     # reads as hardening.
-    probe = _nearest_existing(lease_root)
-    if probe is not None and os.access(probe, os.W_OK):
+    if path_is_self_writable_or_replaceable(lease_root):
         found.append({"key": "lease_root", "path": str(lease_root)})
 
     if app_id:
@@ -302,7 +325,7 @@ def self_writable_trust_paths(app_id: str = "") -> list[dict]:
         manifest = root / app_id / "manifest.json"
         # A manifest that does not exist grants nothing, so it is not a key that
         # could be forged into one — the gate denies an unmanifested app outright.
-        if manifest.exists() and os.access(manifest, os.W_OK):
+        if manifest.exists() and path_is_self_writable_or_replaceable(manifest):
             found.append({"key": "manifest", "path": str(manifest)})
     return found
 

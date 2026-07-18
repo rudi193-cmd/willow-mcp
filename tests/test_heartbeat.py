@@ -16,6 +16,7 @@ from willow_mcp import heartbeat as hb
 @pytest.fixture
 def hb_root(tmp_path, monkeypatch):
     monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
+    monkeypatch.delenv("WILLOW_WORKER_HEARTBEAT_ROOT", raising=False)
     return tmp_path / "worker_heartbeat"
 
 
@@ -39,6 +40,14 @@ def test_heartbeat_writes_a_readable_record(hb_root):
     assert record["pid"] == os.getpid()
     assert record["lane"] == "fast"
     assert record["tick_ok"] is True
+
+
+def test_heartbeat_root_honors_explicit_service_environment(
+    tmp_path, monkeypatch
+):
+    configured = tmp_path / "service-heartbeats"
+    monkeypatch.setenv("WILLOW_WORKER_HEARTBEAT_ROOT", str(configured))
+    assert hb.heartbeat_root() == configured
 
 
 def test_heartbeat_throttles_writes(hb_root):
@@ -75,13 +84,20 @@ def test_heartbeat_never_raises_when_root_is_unwritable(hb_root, monkeypatch):
 
 def test_read_workers_empty_when_no_root(hb_root):
     out = hb.read_workers()
-    assert out == {"root": str(hb_root), "workers": [], "alive": 0, "status": "ok"}
+    assert out == {
+        "root": str(hb_root),
+        "workers": [],
+        "alive": 0,
+        "readiness": "absent",
+        "status": "ok",
+    }
 
 
 def test_live_pid_with_fresh_tick_is_alive(hb_root):
     _write(hb_root, "kart-fast-1.json")
     out = hb.read_workers()
     assert out["alive"] == 1
+    assert out["readiness"] == "alive"
     assert out["workers"][0]["state"] == "alive"
 
 
@@ -91,6 +107,7 @@ def test_dead_pid_is_dead_even_when_fresh(hb_root):
     out = hb.read_workers()
     assert out["alive"] == 0
     assert out["workers"][0]["state"] == "dead"
+    assert out["readiness"] == "dead"
 
 
 def test_live_pid_with_old_tick_is_stale(hb_root):
@@ -99,6 +116,7 @@ def test_live_pid_with_old_tick_is_stale(hb_root):
     out = hb.read_workers()
     assert out["alive"] == 0
     assert out["workers"][0]["state"] == "stale"
+    assert out["readiness"] == "stale"
 
 
 def test_foreign_host_record_is_judged_on_age_alone(hb_root):
@@ -131,6 +149,38 @@ def test_reap_removes_only_dead_records(hb_root):
     assert not (hb_root / "dead.json").exists()
 
 
+# ── per-lane readiness (Loki DD0114E5 §2.2) ─────────────────────────────────
+
+def test_read_workers_reports_readiness_per_lane(hb_root):
+    _write(hb_root, "kart-fast.json", lane="fast")                       # live
+    _write(hb_root, "kart-batch.json", lane="batch", pid=999_999_998)    # dead
+    out = hb.read_workers()
+    assert out["by_lane"]["fast"]["readiness"] == "alive"
+    assert out["by_lane"]["batch"]["readiness"] == "dead"
+
+
+def test_alive_lane_does_not_mask_a_stranded_peer_lane(hb_root):
+    # The whole point of §2.2: a healthy batch worker must not make the fast
+    # lane read ready when the fast lane's own worker has stopped ticking.
+    _write(hb_root, "kart-batch.json", lane="batch")                       # live
+    _write(hb_root, "kart-fast.json", lane="fast", ts=time.time() - 120.0) # stale ticks
+    out = hb.read_workers()
+    assert out["by_lane"]["batch"]["readiness"] == "alive"
+    assert out["by_lane"]["fast"]["readiness"] == "stale"
+
+
+def test_live_worker_keys_returns_only_alive_host_pids(hb_root):
+    _write(hb_root, "kart-fast.json", lane="fast")                       # live
+    _write(hb_root, "kart-batch.json", lane="batch", pid=999_999_998)    # dead
+    keys = hb.live_worker_keys()
+    assert (hb.socket.gethostname(), os.getpid()) in keys
+    assert (hb.socket.gethostname(), 999_999_998) not in keys
+
+
+def test_live_worker_keys_empty_when_no_root(hb_root):
+    assert hb.live_worker_keys() == set()
+
+
 # ── diagnostic_summary rollup ────────────────────────────────────────────────
 
 def test_pending_with_no_worker_is_a_warn():
@@ -139,7 +189,8 @@ def test_pending_with_no_worker_is_a_warn():
     problems = server._derive_problems({}, {}, {}, "stdio", worker)
     assert [p["check"] for p in problems] == ["worker"]
     assert problems[0]["severity"] == "warn"
-    assert "willow-mcp worker" in problems[0]["fix"]
+    assert problems[0]["worker_readiness"] == "absent"
+    assert "worker-service status" in problems[0]["fix"]
 
 
 def test_pending_with_no_worker_names_the_stopped_workers():
@@ -148,6 +199,21 @@ def test_pending_with_no_worker_names_the_stopped_workers():
               "workers": [{"state": "dead", "pid": 4242}, {"state": "stale", "pid": 4243}]}
     detail = server._derive_problems({}, {}, {}, "stdio", worker)[0]["detail"]
     assert "4242" in detail and "4243" in detail
+
+
+def test_diagnostics_distinguish_dead_and_stale_workers():
+    from willow_mcp import server
+
+    dead = server._derive_problems(
+        {}, {}, {}, "stdio",
+        {"alive": 0, "pending": 1, "readiness": "dead", "workers": []},
+    )[0]
+    stale = server._derive_problems(
+        {}, {}, {}, "stdio",
+        {"alive": 0, "pending": 1, "readiness": "stale", "workers": []},
+    )[0]
+    assert "exited" in dead["detail"]
+    assert "heartbeat stalled" in stale["detail"]
 
 
 def test_no_worker_and_no_pending_is_not_a_problem():
@@ -169,6 +235,20 @@ def test_live_worker_with_pending_is_not_a_problem():
     from willow_mcp import server
     worker = {"alive": 1, "pending": 9, "workers": [{"state": "alive", "pid": 1}]}
     assert server._derive_problems({}, {}, {}, "stdio", worker) == []
+
+
+def test_alive_worker_does_not_hide_a_stranded_lane():
+    from willow_mcp import server
+    # A live batch worker (alive=1) must not suppress the warning that the fast
+    # lane is stranded with pending work and no fast worker (Loki DD0114E5 §2.2).
+    worker = {"alive": 1, "pending": 2,
+              "workers": [{"state": "alive", "pid": 1, "lane": "batch"}],
+              "stranded_lanes": ["fast"], "pending_by_lane": {"fast": 2}}
+    problems = server._derive_problems({}, {}, {}, "stdio", worker)
+    worker_problems = [p for p in problems if p.get("check") == "worker"]
+    assert worker_problems, "a stranded fast lane must warn even with a live batch worker"
+    assert "fast" in worker_problems[0]["detail"]
+    assert worker_problems[0]["stranded_lanes"] == ["fast"]
 
 
 def test_stranded_queue_degrades_the_verdict():

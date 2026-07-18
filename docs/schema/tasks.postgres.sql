@@ -3,7 +3,8 @@
 -- willow-mcp ADAPTS to an existing `tasks` table when one is present (see
 -- docs/design/schema-adaptation.md); this DDL is for a fresh install that has
 -- no such table yet. Columns match the canonical _TASK_FIELDS the server maps
--- (server.py: task_id, task, submitted_by, agent, status, result, steps,
+-- (server.py: task_id, task, submitted_by, network_authorization, agent, lane,
+-- status, result, steps, claim metadata,
 -- created_at, completed_at). After creating it, confirm the mapping once:
 --   schema_confirm_mapping(app_id=..., table="tasks")
 --
@@ -14,16 +15,24 @@ CREATE TABLE IF NOT EXISTS tasks (
     task_id       text PRIMARY KEY,
     task          text NOT NULL,
     submitted_by  text NOT NULL DEFAULT '',
+    network_authorization text NOT NULL DEFAULT '',
     agent         text NOT NULL DEFAULT 'kart',
+    lane          text NOT NULL DEFAULT 'fast' CHECK (lane IN ('fast', 'batch')),
     status        text NOT NULL DEFAULT 'pending',   -- pending | running | completed | failed
     result        jsonb,
     steps         integer,
     created_at    timestamptz NOT NULL DEFAULT now(),
-    completed_at  timestamptz
+    completed_at  timestamptz,
+    claim_owner   text,
+    claimed_at    timestamptz,
+    attempts      integer NOT NULL DEFAULT 0,
+    max_attempts  integer NOT NULL DEFAULT 3,
+    retry_at      timestamptz
 );
 
 -- Claim path: WHERE status='pending' AND agent=? ORDER BY created_at.
-CREATE INDEX IF NOT EXISTS idx_tasks_claim ON tasks (status, agent, created_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_claim
+    ON tasks (status, agent, lane, retry_at, created_at);
 
 -- Optional: self-populate completed_at when a row reaches a terminal state
 -- (mirrors the trigger B-17 added to the shared fleet DB). Safe to skip if the
