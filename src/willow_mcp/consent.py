@@ -17,9 +17,9 @@ that directive reaches the network no matter what this file says (**B-37**, P0).
 Turning `internet` off stops egress through `task_submit`. It stops nothing else.
 Do not wire this module into a claim it cannot keep.
 
-This module only ever **reads**. `settings.global.json` is authored by
-willow-2.0's `willow/fylgja/global_settings.py`; willow-mcp is a consumer, and a
-consumer that writes the policy it is checked against is not a gate.
+This module only ever **reads**. Mutation is isolated in ``consent_admin`` and
+reachable only through willow-mcp's interactive operator CLI; runtime MCP tools
+remain consumers and cannot write the policy they are checked against.
 
 **Fail-closed, deliberately diverging from the writer.** willow-2.0's
 `DEFAULT_CONSENT` is all-`True` and its `_normalize_consent()` returns those

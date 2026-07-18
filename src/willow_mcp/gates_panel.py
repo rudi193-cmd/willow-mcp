@@ -120,6 +120,8 @@ FRIENDLY_LABELS: dict[str, str] = {
     "dispatch_write": "Assign and complete work",
     "orchestrator": "Direct the whole team",
     "fleet_read": "See the helper team",
+    "frank_write": "Append to the tamper-evident ledger",
+    "envelope_apply": "Apply a pre-approved authority envelope",
     "context": "Remember short-term notes",
     "audit": "See its own activity log",
     "gap_read": "See open questions",

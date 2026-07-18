@@ -1717,21 +1717,112 @@ def agent_seed_mirror(app_id: str, agent_id: str, slice: str = "") -> dict:
 @mcp.tool()
 @_guarded("fleet_status")
 def fleet_status(app_id: str) -> dict:
-    """List agents registered in the fleet (public.agents table)."""
+    """Canonical fleet.json roster with additive Postgres drift diagnostics."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
     try:
-        cur = pg.cursor()
-        cur.execute(
-            "SELECT id, name, role, trust, created_at FROM agents ORDER BY name"
-        )
-        rows = cur.fetchall()
-        cur.close()
+        from .fleet_roster import status
+
+        return status(pg)
     except Exception as e:
         return {"error": f"fleet_unavailable: {e}"}
-    return {"agents": [{"id": r[0], "name": r[1], "role": r[2],
-                         "trust": r[3], "since": str(r[4])} for r in rows]}
+
+
+@mcp.tool()
+@_guarded("frank_read")
+def frank_read(app_id: str, project: str = "", limit: int = 50) -> dict:
+    """Read the existing FRANK chain without creating a parallel ledger."""
+    if limit < 1 or limit > 500:
+        return {"error": "limit must be between 1 and 500"}
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    cur = pg.cursor()
+    try:
+        if project:
+            cur.execute(
+                "SELECT id, project, event_type, content, created_at, prev_hash, hash "
+                "FROM frank_ledger WHERE project=%s ORDER BY created_at DESC LIMIT %s",
+                (project, limit),
+            )
+        else:
+            cur.execute(
+                "SELECT id, project, event_type, content, created_at, prev_hash, hash "
+                "FROM frank_ledger ORDER BY created_at DESC LIMIT %s",
+                (limit,),
+            )
+        keys = ("id", "project", "event_type", "content", "created_at", "prev_hash", "hash")
+        return {"entries": [dict(zip(keys, row)) for row in cur.fetchall()]}
+    except Exception as exc:
+        return {"error": f"frank_unavailable: {exc}"}
+    finally:
+        cur.close()
+
+
+@mcp.tool()
+@_guarded("frank_verify")
+def frank_verify(app_id: str) -> dict:
+    """Verify every link in the existing FRANK chain."""
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    try:
+        from .governance_ledger import GovernanceLedger
+
+        return GovernanceLedger(pg).verify()
+    except Exception as exc:
+        return {"error": f"frank_unavailable: {exc}"}
+
+
+@mcp.tool()
+@_guarded("frank_append")
+def frank_append(
+    app_id: str, project: str, event_type: str, content: dict
+) -> dict:
+    """Append one established-shape event to the shared FRANK chain."""
+    if not project or not event_type or not isinstance(content, dict):
+        return {"error": "project, event_type, and object content are required"}
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    try:
+        from .governance_ledger import GovernanceLedger
+
+        record_id = GovernanceLedger(pg).append(project, event_type, content)
+        return {"id": record_id, "project": project, "event_type": event_type}
+    except Exception as exc:
+        return {"error": f"frank_append_failed: {exc}"}
+
+
+@mcp.tool()
+@_guarded("envelope_apply")
+def envelope_apply(
+    app_id: str,
+    envelope_id: str,
+    verb: str,
+    call_args: dict,
+    project: str,
+    session: str,
+) -> dict:
+    """Mechanically check an active grant and append its citation before acting."""
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+    try:
+        from .envelopes import EnvelopeAuthority
+        from .governance_ledger import GovernanceLedger
+
+        return EnvelopeAuthority(GovernanceLedger(pg)).authorize_and_cite(
+            envelope_id,
+            actor=app_id,
+            verb=verb,
+            call_args=call_args,
+            project=project,
+            session=session,
+        )
+    except Exception as exc:
+        return {"error": f"envelope_apply_failed: {exc}"}
 
 
 @mcp.tool()
@@ -2346,12 +2437,12 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                            f"willow-2.0 rewrites on every save and reads only when the "
                            f"canonical file is absent — so it is a stale mirror, not an "
                            f"inert file, and deleting it will not keep it gone."),
-                "fix": ("decide which value states your intent. To keep the canonical "
-                        "one, re-sync the mirror: `python -c \"from "
-                        "willow.fylgja.global_settings import read_consent, "
-                        "_write_legacy_consent as w; w(read_consent())\"`. To change "
-                        f"policy, edit {consent.get('canonical_path')} — the mirror "
-                        "follows on the next save.")})
+                "fix": (
+                    "decide which value states your intent. To keep the canonical "
+                    "one and atomically re-sync its mirror, run from an operator "
+                    "terminal: `willow-mcp consent reconcile`. To change one key, "
+                    "run `willow-mcp consent set <key> <true|false>`."
+                )})
     if net_lease:
         lease_state = net_lease.get("lease", {})
         status = lease_state.get("status")
@@ -2666,6 +2757,56 @@ def _cmd_worker(args) -> None:
         beat.close()
 
 
+def _cmd_consent(args) -> None:
+    from . import consent
+    from . import consent_admin
+
+    if args.action == "status":
+        print(json.dumps(consent.read_consent(), indent=2))
+        return
+    if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
+        print(
+            "Error: consent mutation requires an interactive operator terminal",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    try:
+        if args.action == "reconcile":
+            result = consent_admin.reconcile()
+        else:
+            if args.value not in ("true", "false"):
+                raise ValueError("value must be exactly true or false")
+            result = consent_admin.set_key(args.key, args.value == "true")
+    except (OSError, PermissionError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps(result, indent=2))
+
+
+def _cmd_roster(args) -> None:
+    from . import fleet_roster
+
+    pg = get_pg()
+    if not pg:
+        print("Error: Postgres unavailable", file=sys.stderr)
+        raise SystemExit(1)
+    if args.action == "sync" and (
+        os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty()
+    ):
+        print("Error: roster sync requires an interactive operator terminal", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        result = (
+            fleet_roster.sync(pg)
+            if args.action == "sync"
+            else fleet_roster.status(pg)
+        )
+    except (OSError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps(result, indent=2, default=str))
+
+
 def _cmd_grant_net(args) -> None:
     """`willow-mcp grant-net` — issue a time-boxed egress lease (B-32).
 
@@ -2845,6 +2986,19 @@ def _main():
     worker_p.add_argument("--app-id", dest="app_id", default=os.environ.get("WILLOW_APP_ID", ""),
                           help="app_id whose confirmed 'tasks' mapping to use (default $WILLOW_APP_ID)")
 
+    consent_p = subparsers.add_parser(
+        "consent",
+        help="Read or atomically reconcile operator consent (mutation is interactive CLI-only)",
+    )
+    consent_p.add_argument("action", choices=["status", "set", "reconcile"])
+    consent_p.add_argument("key", nargs="?", default="")
+    consent_p.add_argument("value", nargs="?", default="")
+
+    roster_p = subparsers.add_parser(
+        "roster", help="Inspect or operator-sync fleet.json into existing agents rows"
+    )
+    roster_p.add_argument("action", choices=["status", "sync"])
+
     grant_p = subparsers.add_parser(
         "grant-net",
         help="Issue a time-boxed egress lease for an app_id (local-only — never an MCP tool)",
@@ -2942,6 +3096,12 @@ def _main():
         return
     if args.command == "worker":
         _cmd_worker(args)
+        return
+    if args.command == "consent":
+        _cmd_consent(args)
+        return
+    if args.command == "roster":
+        _cmd_roster(args)
         return
     if args.command == "grant-net":
         _cmd_grant_net(args)
