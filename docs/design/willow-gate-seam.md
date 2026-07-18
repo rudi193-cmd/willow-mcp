@@ -235,12 +235,91 @@ behind a `@guarded` wrapper over the **real** `ReceiptLog`, and showed:
 So H2 = swap the `app_id`-verbatim step in `_gate` for `_gate_v2`; H3 = compute
 `tools_used` from `ReceiptLog` at `check_out`. Neither needs new plumbing.
 
+## D1 — tier ↔ permission-group map (settled)
+
+willow-gate's tiers unlock **classes** cumulatively (Rookie=`read`; Steady
+=`read,write`; Veteran=`+query,execute`; Elder=`+admin`); each class maps to a
+set of willow-mcp permission **groups**. Effective authorization is:
+
+```
+effective = expand(manifest.permissions) ∩ groups(tier_classes) ,
+            with write-class stripped when the tier is read_only,
+            and egress requiring BOTH the export axis AND the manifest own-line.
+```
+
+| class | tier ≥ | willow-mcp groups it unlocks |
+|---|---|---|
+| **read** | Rookie(1) | `store_read`, `knowledge_read`, `gap_read`, `dispatch_read`, `fleet_read`, `integration_read`, `audit`, `lineage_read`, and `session_enter` / `context_get` / `context_list` |
+| **query** | Veteran(3) | **≡ read today** — reserved. willow-mcp has no capability that is "query but not read" (`store_scope` already confines breadth), so `query` unlocks nothing extra *yet*. If a genuinely broad/expensive discovery tool is added, it moves to a `query`-only group; until then Veteran's real gain is `execute`. |
+| **write** | Steady(2) | `store_write`, `knowledge_write`, `gap_write`, `dispatch_write`, `lineage_write`, and `context_save` / `context_expire` |
+| **execute** | Veteran(3) | `task_queue`, `agent_dispatch` (`agent_route` / `agent_dispatch_result`); **export-gated** `integration_call` / `task_net` (still require the manifest's own-line grant) |
+| **admin** | Elder(4) | `schema_admin`, `gap_purge`, `gap_promote` |
+
+Ratified edge calls:
+- **Egress stays double-gated.** `integration_call` / `task_net` are unlocked by
+  `execute` **only when** the tier's `write_export_allowed` is true **and** the
+  manifest grants them on their own line. Even Elder cannot egress without the
+  manifest grant — the existing own-line invariant is preserved, not softened.
+- **`admin` ≠ sudo.** The `admin` class reaches `schema_admin` / `gap_purge` /
+  `gap_promote`, **never** authority: minting manifests, secrets, or trust
+  ceilings stays CLI/operator-only and is not a tool at any tier.
+- **`store_purge_collection` stays `write`-class**, not elevated to `admin`: it
+  is reversible (archive-don't-delete) and already confirm-guarded, so Steady may
+  use it — matching today's ACL. Only genuinely irreversible/rule-changing verbs
+  are `admin`.
+- **Reads fail-closed, not universal.** Per the policy call above, an
+  unmanifested/unscoped `app_id` is denied even for `read` — willow-gate's
+  "read-universal" does not survive the seam; `store_scope` confines.
+- **Tier caps `full_access`.** A `full_access` manifest at Steady tier can still
+  only reach `read`+`write` groups — the intersection is the point.
+
+## D2 — secret store, rotation, and CLI (settled)
+
+**Layout.** Per-agent secrets live operator-side, in a dedicated keystore
+**outside** `mcp_apps/` so no store/list tool can even enumerate them:
+
+```
+$WILLOW_HOME/gate/registry.json          # {agent_id: {max_trust}}  — auditable, no secrets
+$WILLOW_HOME/gate/secrets/<agent_id>.key # 32 random bytes, 0600, atomic write (os.replace)
+```
+
+This **splits** willow-gate's default (which bundles `secret.hex()` + `max_trust`
+in one `registry.json`): the ceiling registry stays readable/auditable while
+secret material sits in per-agent `0600` files. The whole `gate/` dir is
+`0700`, operator-owned, and added to the PreToolUse guard's owned markers so no
+Bash/tool path may read or write it — it is a keystore, guarded like one.
+(Upstream nicety to file: have willow-gate `0600` its own `registry.json`.)
+
+**Provisioning is symmetric and two-sided.** The same secret is held by the gate
+(to verify) and by the MCP **client's** signing middleware (to sign, per H1). The
+CLI generates it; the operator installs the printed key into the client config
+out-of-band. Asymmetric (client signs with a private key, registry holds only the
+public key — no shared secret) is the stronger end-state but needs willow-gate's
+`signature` field widened beyond 64 hex; **filed as a future hardening, symmetric
+for v1** to match willow-gate as-is.
+
+**Rotation.** `rotate-agent` writes a new `<agent_id>.key`. Rotation is **hard by
+default**: sessions signed with the old secret fail their next `authorize_tool`
+(signature mismatch) and must re-check-in — correct behaviour for a
+compromise-response. An optional grace window (registry holds `{current, previous,
+expires}`, both accepted until expiry) is a willow-gate enhancement to file if
+zero-downtime rotation is wanted; a key-version stamped into each ledger entry
+records which key signed.
+
+**CLI, never a tool** (same constraint as `confirm-binding` — stdio-only, host
+that owns `$WILLOW_HOME`):
+- `willow-mcp register-agent <agent_id> --max-trust N [--generate | --secret-file P]`
+  — **requires an existing manifest** for `<agent_id>` (identity and ACL are
+  provisioned together; the seam ties `agent_id == app_id`), generates a 32-byte
+  secret when `--generate`, writes it `0600`, and prints it **once** for the
+  operator to install in the client.
+- `willow-mcp rotate-agent <agent_id>` / `revoke-agent <agent_id>` for lifecycle.
+- All are authority acts — excluded from every permission group and unreachable
+  from the MCP surface, upholding the sudo invariant.
+
 ## Open decisions (the forks to settle before wiring)
-- **D1 — tier↔group map:** ratify the class→group table in §2, especially where
-  `execute`/`admin` land relative to `task_queue`, `integration_call`,
-  `schema_admin`, `gap_purge`.
-- **D2 — secret store & rotation:** exact on-disk layout and rotation story for
-  per-agent secrets; how `register_agent` is exposed on the CLI.
+- **D1 — tier↔group map:** **settled — see "D1" above.**
+- **D2 — secret store, rotation, CLI:** **settled — see "D2" above.**
 - **D3 — stdio default:** confirm "unregistered ⇒ manifest-only, registered ⇒
   must-sign" is the right opt-in trigger (vs. an explicit env flag).
 - **D4 — 13-field declaration schema:** what willow-mcp agents declare at
