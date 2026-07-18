@@ -90,6 +90,23 @@ class ReceiptLog:
             rows = self._conn.execute(q, tuple(params)).fetchall()
         return [{"ts": r[0], "tool": r[1], "outcome": r[2], "detail": r[3]} for r in rows]
 
+    def distinct_tools(self, app_id: str, ts_iso: str,
+                       outcome: Optional[str] = None) -> list[str]:
+        """The DISTINCT set of tool names this app_id recorded at or after
+        `ts_iso` (optionally filtered to one `outcome`). Unbounded by row count on
+        purpose: this feeds session reconciliation, where a truncated row window
+        would let a late privileged call fall outside the diff and read as clean.
+        A DISTINCT tool set is small (bounded by the tool catalogue) regardless of
+        call volume, so there is nothing to cap."""
+        q = "SELECT DISTINCT tool FROM receipts WHERE app_id = ? AND ts >= ?"
+        params: list = [app_id, ts_iso]
+        if outcome is not None:
+            q += " AND outcome = ?"
+            params.append(outcome)
+        with self._lock:
+            rows = self._conn.execute(q, tuple(params)).fetchall()
+        return [r[0] for r in rows]
+
     def tail(self, app_id: str, limit: int = 20) -> list[dict]:
         """Return this app_id's own most-recent receipts, newest first.
 

@@ -97,6 +97,22 @@ def test_check_out_unknown_session_raises(home):
         b.check_out("nope", _exit(["read"]), [])
 
 
+def test_check_out_rejects_a_non_owner_and_keeps_the_session(home):
+    b = sb.SessionBinder()
+    _, sid = _bind(b, "op", 3)
+    # An attacker who learned op's session_id must not be able to close it.
+    with pytest.raises(sb.BindError, match="not bound to this app_id"):
+        b.check_out(sid, _exit(["read"]), ["store_get"], app_id="attacker")
+    assert b.session_started_ts(sid) is not None          # victim's session intact
+
+
+def test_session_started_ts_is_owner_scoped(home):
+    b = sb.SessionBinder()
+    _, sid = _bind(b, "op", 3)
+    assert b.session_started_ts(sid, app_id="op") is not None
+    assert b.session_started_ts(sid, app_id="attacker") is None
+
+
 def test_check_out_rejects_malformed_exit_tools(home):
     b = sb.SessionBinder()
     _, sid = _bind(b, "op", 3)
@@ -129,6 +145,17 @@ def test_since_filters_by_outcome(tmp_path):
     log.record("me", "store_put", "denied", None)
     rows = log.since("me", "0000", outcome="ok")
     assert [r["tool"] for r in rows] == ["store_get"]
+
+
+def test_distinct_tools_is_unbounded_and_scoped(tmp_path):
+    log = ReceiptLog(str(tmp_path / "r.db"))
+    for _ in range(3000):
+        log.record("me", "store_get", "ok", None)          # well past any row limit
+    log.record("me", "store_put", "ok", None)
+    log.record("me", "task_submit", "denied", None)        # wrong outcome
+    log.record("other", "store_delete", "ok", None)        # wrong app
+    tools = set(log.distinct_tools("me", "0000", outcome="ok"))
+    assert tools == {"store_get", "store_put"}             # the late write is present
 
 
 # ── end-to-end tool ───────────────────────────────────────────────────────────
@@ -183,6 +210,30 @@ def test_reconcile_tool_without_session_errors(env):
     out = _fn(server.session_reconcile)(
         app_id="worker", session_id="ghost", exit_declaration=_exit([tp.READ]))
     assert out["error"] == "no_live_session"
+
+
+def test_reconcile_tool_cannot_close_another_agents_session(env):
+    env("victim"); env("attacker")
+    _, sid = _bind(server._binder, "victim", 3, tools=["read"])
+    # Attacker knows victim's session_id and tries to reconcile (= close) it.
+    out = _fn(server.session_reconcile)(
+        app_id="attacker", session_id=sid, exit_declaration=_exit([tp.READ]))
+    assert out["error"] == "no_live_session"                       # owner-scoped lookup
+    assert server._binder.session_started_ts(sid) is not None      # victim's session survives
+
+
+def test_reconcile_not_truncated_by_receipt_volume(env):
+    env("worker")
+    _, sid = _bind(server._binder, "worker", 3, tools=["read", "write"])
+    # A long read-heavy session followed by ONE late, undeclared privileged write.
+    # A truncated (oldest-N) feed would drop the write and read as clean; the
+    # DISTINCT-tool feed must still catch it.
+    for _ in range(2100):
+        server._receipt_log.record("worker", "store_get", "ok", None)
+    server._receipt_log.record("worker", "store_put", "ok", None)     # call #2101
+    out = _fn(server.session_reconcile)(
+        app_id="worker", session_id=sid, exit_declaration=_exit([tp.READ]))  # omits write
+    assert out["clean"] is False and tp.WRITE in out["done_not_claimed"]
 
 
 def test_reconcile_tool_only_counts_calls_that_ran(env):

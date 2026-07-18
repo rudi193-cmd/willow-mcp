@@ -63,6 +63,12 @@ def test_soft_failure_floor_is_high():
     assert announce.volume(4, "rate_limited") == announce.HIGH
 
 
+def test_credential_returned_is_alert_even_for_elder():
+    # A real secret leaving the box under an exemption must never be silent.
+    assert announce.volume(4, "credential_returned") == announce.ALERT
+    assert announce.announce("elder", "integration_call", "credential_returned", 4) == announce.ALERT
+
+
 # ── mechanism receipts are never announced (no double lines) ──────────────────
 
 @pytest.mark.parametrize("outcome", ["bind_observed", "bind_enforced"])

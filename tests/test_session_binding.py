@@ -60,6 +60,20 @@ def test_register_rejects_bad_trust():
         reg.register_agent("op", 5)
 
 
+def test_load_rejects_a_short_secret(tmp_path):
+    reg.register_agent("op", 4)
+    (tmp_path / "gate" / "secrets" / "op.key").write_bytes(b"tooshort")   # <32 bytes
+    assert reg.load("op") is None                       # rejected on read, not just register
+
+
+def test_is_registered_distinguishes_missing_secret(tmp_path):
+    reg.register_agent("op", 4)
+    (tmp_path / "gate" / "secrets" / "op.key").unlink()  # entry stays, secret gone
+    assert reg.load("op") is None                        # unusable
+    assert reg.is_registered("op") is True               # but still registered → must fail closed
+    assert reg.is_registered("ghost") is False
+
+
 # ── check_in ────────────────────────────────────────────────────────────────
 
 def test_check_in_valid_opens_bound_session():
@@ -95,6 +109,23 @@ def test_check_in_reserved_trap_and_replay():
     b.check_in(_header("op", secret, 4, nonce=n))
     with pytest.raises(sb.BindError):
         b.check_in(_header("op", secret, 4, nonce=n))               # replay
+
+
+def test_check_in_exiled_trust0_entry_denied():
+    secret = _register("exile", 0)
+    with pytest.raises(sb.BindError, match="Exiled"):
+        sb.SessionBinder().check_in(_header("exile", secret, 0))
+
+
+def test_check_in_fails_closed_when_nonce_store_unreadable(tmp_path):
+    secret = _register("op", 4)
+    b = sb.SessionBinder()
+    # Make the nonce file unreadable-as-a-file (a directory → OSError that is NOT
+    # FileNotFoundError). The read must fail CLOSED, not treat it as "nothing used".
+    b._used_nonces_file.parent.mkdir(parents=True, exist_ok=True)
+    b._used_nonces_file.mkdir()
+    with pytest.raises(sb.BindError, match="unreadable"):
+        b.check_in(_header("op", secret, 4))
 
 
 # ── per-call verify (the H1 result) ───────────────────────────────────────────

@@ -15,11 +15,26 @@ from willow_mcp import tier_policy as tp
 _SERVER = Path(__file__).resolve().parents[1] / "src" / "willow_mcp" / "server.py"
 
 
+_GUARDED_NAME_RE = re.compile(r"""@_guarded\(\s*['"]([a-zA-Z0-9_]+)['"]""")
+_GUARDED_ANY_RE = re.compile(r"@_guarded\(")
+
+
 def _guarded_tools() -> set[str]:
     """Every tool the server funnels through @_guarded — the exact set the tier
-    ceiling must classify, read straight from source so it can't drift."""
+    ceiling must classify, read straight from source so it can't drift. Accepts
+    either quote style."""
     src = _SERVER.read_text(encoding="utf-8")
-    return set(re.findall(r'@_guarded\(\s*"([a-zA-Z0-9_]+)"', src))
+    return set(_GUARDED_NAME_RE.findall(src))
+
+
+def test_every_guarded_decorator_uses_a_string_literal_name():
+    """The completeness check below rests on reading the tool name from the
+    decorator source. If a @_guarded(...) ever used a variable/f-string/constant
+    instead of a plain string literal, its name would not be extracted — the tool
+    would silently escape BOTH this test and the tier ceiling (tier_permits waves
+    through anything unclassified). Assert every @_guarded( is a literal form."""
+    src = _SERVER.read_text(encoding="utf-8")
+    assert len(_GUARDED_ANY_RE.findall(src)) == len(_GUARDED_NAME_RE.findall(src))
 
 
 # ── completeness: the ceiling must classify every gated tool ──────────────────

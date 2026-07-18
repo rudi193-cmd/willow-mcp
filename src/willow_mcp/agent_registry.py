@@ -16,15 +16,20 @@ it). See docs/design/willow-gate-seam.md §D2.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import secrets as _secrets
+import threading
 from pathlib import Path
 from typing import Optional
 
 from . import paths
 
+logger = logging.getLogger(__name__)
+
 _ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
+_SECRET_MIN_BYTES = 32
 
 
 def _gate_dir() -> Path:
@@ -32,8 +37,10 @@ def _gate_dir() -> Path:
     d.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(d, 0o700)
-    except OSError:
-        pass
+    except OSError as e:
+        # A keystore dir we could not lock down to 0700 is a hardening failure —
+        # surface it loudly rather than silently trusting a possibly-0755 dir.
+        logger.warning("agent_registry: could not chmod 0700 %s: %s", d, e)
     return d
 
 
@@ -46,9 +53,15 @@ def _secrets_dir() -> Path:
     d.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(d, 0o700)
-    except OSError:
-        pass
+    except OSError as e:
+        logger.warning("agent_registry: could not chmod 0700 %s: %s", d, e)
     return d
+
+
+def _tmp_suffix() -> str:
+    # pid + thread id + random token: two threads (or interpreters) writing the
+    # same agent's key/registry cannot share a temp path and publish a torn file.
+    return f".tmp-{os.getpid()}-{threading.get_ident()}-{_secrets.token_hex(4)}"
 
 
 def _validate_id(agent_id: str) -> str:
@@ -70,7 +83,7 @@ def _read_registry() -> dict:
 
 def _write_registry(reg: dict) -> None:
     p = _registry_path()
-    tmp = p.with_suffix(f".tmp-{os.getpid()}")
+    tmp = p.with_suffix(_tmp_suffix())
     tmp.write_text(json.dumps(reg, indent=2, sort_keys=True))
     os.replace(tmp, p)
 
@@ -83,11 +96,11 @@ def register_agent(agent_id: str, max_trust: int, secret: Optional[bytes] = None
     _validate_id(agent_id)
     if not isinstance(max_trust, int) or not 0 <= max_trust <= 4:
         raise ValueError("max_trust must be an int in 0..4")
-    secret = secret if secret is not None else _secrets.token_bytes(32)
-    if len(secret) < 32:
-        raise ValueError("secret must be >= 32 bytes")
+    secret = secret if secret is not None else _secrets.token_bytes(_SECRET_MIN_BYTES)
+    if len(secret) < _SECRET_MIN_BYTES:
+        raise ValueError(f"secret must be >= {_SECRET_MIN_BYTES} bytes")
     key_path = _secrets_dir() / f"{agent_id}.key"
-    tmp = key_path.with_suffix(f".tmp-{os.getpid()}")
+    tmp = key_path.with_suffix(_tmp_suffix())
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         os.write(fd, secret)
@@ -100,9 +113,26 @@ def register_agent(agent_id: str, max_trust: int, secret: Optional[bytes] = None
     return {"agent_id": agent_id, "max_trust": max_trust, "secret_hex": secret.hex()}
 
 
+def is_registered(agent_id: str) -> bool:
+    """True if a registry ENTRY exists for this agent, regardless of whether its
+    secret file is currently readable. The enforcement gate needs this distinct
+    from load(): a registered agent whose secret is momentarily unreadable must
+    fail CLOSED (deny), not be mistaken for an unregistered one and waved through
+    on manifest-only auth."""
+    try:
+        _validate_id(agent_id)
+    except ValueError:
+        return False
+    rec = _read_registry().get(agent_id)
+    return isinstance(rec, dict) and "max_trust" in rec
+
+
 def load(agent_id: str) -> Optional[tuple[bytes, int]]:
-    """(secret, max_trust) for a registered agent, else None. The one reader the
-    binder uses; never exposed through an MCP tool."""
+    """(secret, max_trust) for a registered agent whose secret is present, readable,
+    and long enough, else None. The one reader the binder uses; never exposed
+    through an MCP tool. Callers that must distinguish "not registered" from
+    "registered but secret unusable" pair this with is_registered() and fail
+    closed on the latter."""
     try:
         _validate_id(agent_id)
     except ValueError:
@@ -114,9 +144,14 @@ def load(agent_id: str) -> Optional[tuple[bytes, int]]:
     key_path = _secrets_dir() / f"{agent_id}.key"
     try:
         secret = key_path.read_bytes()
-    except OSError:
+    except OSError as e:
+        logger.warning("agent_registry: secret for %r unreadable: %s", agent_id, e)
         return None
-    if not secret:
+    # A short/corrupt key (torn write, truncation, tampering within 0600) would
+    # collapse the HMAC keyspace — reject it on read, not only on register.
+    if len(secret) < _SECRET_MIN_BYTES:
+        logger.warning("agent_registry: secret for %r is too short (%d bytes) — rejecting",
+                       agent_id, len(secret))
         return None
     return secret, int(rec["max_trust"])
 

@@ -128,9 +128,13 @@ want a quick, low-risk win.)
    tier-below-tool → deny, same as an unmanifested `app_id` today.
 3. **Agent-neutral base stays usable locally.** Binding is opt-in; a plain local
    clone keeps working with manifest-only auth and no HMAC ceremony.
-4. **Secrets are never MCP-writable.** Per-agent secrets live beside manifests
-   under `$WILLOW_HOME/mcp_apps/…`, on the PreToolUse guard's owned-marker side —
-   provisioned by the operator, never reachable from a tool.
+4. **Secrets are never MCP-writable.** Per-agent secrets live in the keystore
+   **outside** `mcp_apps/` — `$WILLOW_HOME/gate/secrets/<agent_id>.key` (`0600`)
+   with the ceiling registry at `$WILLOW_HOME/gate/registry.json` — so no
+   store/list tool can even enumerate them (D2). They are provisioned by the
+   operator (`register-agent`/`rotate-agent`), never reachable from a tool, and
+   the `gate/` path is on the PreToolUse guard's owned-marker side (`_KEYSTORE_RE`)
+   so a Bash/Write path that tries to mint or rotate a secret is blocked too.
 5. **The two ledgers stay distinct.** willow-gate's ledger is a *custody* story
    (who did what, at what trust); `lineage` is a *decision* story (why things
    are). Complementary, not merged.
@@ -368,16 +372,40 @@ that owns `$WILLOW_HOME`):
    wired without the base taking on python-gnupg (D5). **The seam's four holes
    (H1/H2/H3 + policy) and D1–D5 are all closed.**
 
+### Residuals after the build (known, tracked)
+The mechanism is complete and fail-closed; two things remain before enforcement is
+*useful* rather than merely *safe*, plus one pre-existing gap the review surfaced:
+- **The per-call credential is not yet populated in production.** `_CALL_CREDENTIAL`
+  is a contextvar the enforcement gate reads, but nothing yet reads the MCP request's
+  out-of-band transport field to fill it — the client-side signing middleware (H1
+  "practical shape") is the remaining integration cost. Consequence: turning
+  `WILLOW_MCP_ENFORCE_BINDING` on today denies *every* call from a registered agent
+  (fail-closed — an un-instrumented client cannot reach a gated tool, exactly as
+  designed), so the allow-path is exercised only by tests until the signer ships.
+  Enforcement should stay off in production until then; observe-only (Phase 2) is the
+  usable mode now. This is the one integration seam to build next.
+- **A registered agent with an unreadable/short secret fails closed** (not open):
+  `_enforce_binding_gate` pairs `agent_registry.load()` with `is_registered()` so a
+  broken keystore denies rather than silently downgrading to manifest-only. An
+  operator must repair `$WILLOW_HOME/gate/secrets/` to restore that agent.
+- **Pre-existing, out of scope for the seam:** `whoami(app_id)` in stdio mode returns
+  *any* app's manifest (permissions/role/`store_scope`) with no proof the caller owns
+  that identity — a cross-identity config-disclosure primitive independent of the
+  binding work, mitigated today only by the single-operator stdio trust model. Worth
+  closing separately (bind `whoami` to the caller's own resolved identity).
+
 ### D4 — the declaration schema (settled by Phase 4)
 The 13-field check-in header is the ENTRY declaration (already implemented, H1).
 Only a subset is reconciled — the *did-diff* has no independent ground truth for
 identity/crypto fields, so the reconciled set is `session_binder.RECONCILED_FIELDS`
 = `{tools, pass_count, fail_count, drift, state_hash}`:
 - **`tools`** is the willow-gate CLASS list (read/write/execute/admin), diffed
-  against the receipt log. Ground truth is `ReceiptLog.since(app_id, started_ts,
-  outcome="ok")` — only calls that actually ran, scoped to the session window by a
-  SERVER-stamped start time (never the agent-supplied `timestamp`), classified via
-  `tier_policy`. The agent cannot feed this list (H3).
+  against the receipt log. Ground truth is `ReceiptLog.distinct_tools(app_id,
+  started_ts, outcome="ok")` — the DISTINCT set of tools that actually ran, scoped
+  to the session window by a SERVER-stamped start time (never the agent-supplied
+  `timestamp`), classified via `tier_policy`. It is a DISTINCT-tool query, not a
+  row fetch, so a late privileged call in a high-volume session cannot fall outside
+  a truncated window and read as clean. The agent cannot feed this list (H3).
 - **`pass_count` / `fail_count` / `drift` / `state_hash`** are the agent's
   self-scored task metrics — willow-mcp has no independent ground truth, so they
   are *echoed* in the report, never judged.

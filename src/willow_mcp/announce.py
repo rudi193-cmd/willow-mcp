@@ -39,6 +39,9 @@ _BASE = {None: HIGH, 0: ALERT, 1: HIGH, 2: NORMAL, 3: LOW, 4: SILENT}
 # reconcile summary carry no floor of their own (their volume is the tier's).
 _OUTCOME_FLOOR = {
     "denied": ALERT, "reconcile_discrepancy": ALERT,
+    # A real secret left the box under an operator exemption — loud regardless of
+    # tier, or the one event you most want to see stays silent for a trusted app.
+    "credential_returned": ALERT,
     "error": HIGH, "rate_limited": HIGH,
 }
 

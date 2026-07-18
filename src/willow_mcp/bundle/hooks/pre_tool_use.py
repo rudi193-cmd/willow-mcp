@@ -126,9 +126,14 @@ def check_task_submit(tool_input: dict) -> Optional[str]:
 # sudo invariant forbids: request and confirm are separate authorities, and the
 # agent holds only the first.
 _LEASE_DIR_RE = re.compile(r"mcp_apps/_net_leases\b")
+# The identity keystore ($WILLOW_HOME/gate/): per-agent HMAC secrets + the trust
+# registry. Minting/rotating an identity or a trust ceiling by writing these is
+# the same operator-only authority as minting a lease — an agent may request
+# standing, never write its own secret (D2). Reading is not blocked.
+_KEYSTORE_RE = re.compile(r"gate/(?:secrets\b|registry\.json)")
 _GRANT_CMD_RE = re.compile(
-    r"\bwillow-mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent|consent\s+(?:set|reconcile)|roster\s+sync)\b"
-    r"|\bwillow_mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent)\b"
+    r"\bwillow-mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent|rotate-agent|consent\s+(?:set|reconcile)|roster\s+sync)\b"
+    r"|\bwillow_mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent|rotate-agent)\b"
     r"|\b(?:lease\.grant|sign_envelope|agent_registry\.(?:register_agent|revoke))\s*\("
     r"|\bconsent_admin\.(?:write_consent|set_key|reconcile)\s*\("
     r"|\bfleet_roster\.sync\s*\("
@@ -151,6 +156,15 @@ _SELF_GRANT_REASON = (
     "Ask for the grant; do not write the file. (B-32)"
 )
 
+_KEYSTORE_REASON = (
+    "willow-mcp: this writes the identity keystore ($WILLOW_HOME/gate/ — per-agent "
+    "HMAC secrets and the trust registry). Minting or rotating an identity or a "
+    "trust ceiling is operator-only, done at the operator's terminal with "
+    "`willow-mcp register-agent / rotate-agent / revoke-agent`; no tool and no app "
+    "may write its own secret or raise its own trust. An agent may REQUEST "
+    "standing, never CONFIRM it (sudo invariant, D2). Reading is fine; writing is not."
+)
+
 
 def check_bash_self_grant(command: str) -> Optional[str]:
     """Block a command that mints a lease/envelope or grants itself task_net.
@@ -167,19 +181,24 @@ def check_bash_self_grant(command: str) -> Optional[str]:
         return None
     if _LEASE_DIR_RE.search(command):
         return _SELF_GRANT_REASON
+    if _KEYSTORE_RE.search(command):
+        return _KEYSTORE_REASON
     if _MANIFEST_RE.search(command) and _TASK_NET_RE.search(command):
         return _SELF_GRANT_REASON
     return None
 
 
 def check_trust_root_write(tool_input: dict) -> Optional[str]:
-    """Block a Write/Edit that mints a lease or slips `task_net` into a manifest."""
+    """Block a Write/Edit that mints a lease, writes an identity secret, or slips
+    `task_net` into a manifest."""
     tool_input = tool_input or {}
     path = str(tool_input.get("file_path", "") or "")
     if not path:
         return None
     if _LEASE_DIR_RE.search(path):
         return _SELF_GRANT_REASON
+    if _KEYSTORE_RE.search(path):
+        return _KEYSTORE_REASON
     if _MANIFEST_RE.search(path):
         # Only the permission that carries egress. Editing a manifest for any
         # other reason is ordinary work and must not be blocked.

@@ -105,8 +105,18 @@ def _enforce_binding_gate(app_id: str, tool_name: str) -> Optional[dict]:
     this is a no-op — a plain local clone keeps working with manifest-only auth and
     no HMAC ceremony. If it *is* registered, the call must carry a valid signed
     credential whose bound tier is high enough for this tool, or it is denied."""
+    # Distinguish "not registered" (→ manifest-only, unchanged) from "registered
+    # but its secret is unreadable/short" (→ load() is None but is_registered() is
+    # True). The latter must FAIL CLOSED: waving it through would silently downgrade
+    # a registered agent to app_id-only auth — the exact hole binding exists to
+    # close. load() alone conflates the two; is_registered() breaks the tie.
     if agent_registry.load(app_id) is None:
-        return None  # unregistered ⇒ manifest-only, unchanged
+        if agent_registry.is_registered(app_id):
+            return {"error": (
+                f"binding unavailable: '{app_id}' is registered but its secret is "
+                f"unreadable or invalid — refusing (fail-closed). An operator must "
+                f"repair the keystore ($WILLOW_HOME/gate/secrets/).")}
+        return None  # genuinely unregistered ⇒ manifest-only, unchanged
     cred = _CALL_CREDENTIAL.get()
     if not cred:
         return {"error": (
@@ -141,7 +151,15 @@ def _announce_hook(app_id: str, tool: str, outcome: str, detail: Optional[str]) 
     try:
         sess = _binder.session_for(app_id)
         trust = sess["trust_level"] if sess else None
-        _announce.announce(app_id, tool, outcome, trust, detail)
+        # Receipt `detail` can carry raw error/exception text (e.g. an
+        # integration_call auth failure echoing a bearer token). Inside the box it
+        # only ever lived in the receipt DB; the announce sink may be an EXTERNAL
+        # ledger (set_sink), so redact credential-shaped substrings before it
+        # leaves — the same backstop the tool-result path uses.
+        safe_detail = detail
+        if detail:
+            safe_detail, _kinds = secret_scan.redact_egress(detail)
+        _announce.announce(app_id, tool, outcome, trust, safe_detail)
     except Exception:
         pass
 
@@ -976,16 +994,21 @@ def session_reconcile(app_id: str, session_id: str, exit_declaration: dict) -> d
     Requires a live session bound to your app_id (call session_bind first); returns
     {error} if there is none. This RECONCILES and records — it never blocks a
     handoff, so run session_handoff_write / handoff_write_v4 as usual alongside it."""
-    started = _binder.session_started_ts(session_id)
+    # Ownership-scoped: session_started_ts returns None unless this session is
+    # bound to THIS app_id, so a caller cannot even window another agent's session.
+    started = _binder.session_started_ts(session_id, app_id=app_id)
     if started is None:
         return {"error": "no_live_session",
                 "detail": "no live bound session for session_id — call session_bind first"}
-    # Ground truth: only calls that actually ran (outcome 'ok'), scoped to this
-    # app_id and this session's window. The agent cannot supply this list.
-    rows = _receipt_log.since(app_id, started, outcome="ok")
-    actual_tools = [r["tool"] for r in rows]
+    # Ground truth: the DISTINCT set of tools that actually ran (outcome 'ok'),
+    # scoped to this app_id and this session's window. distinct_tools is unbounded
+    # by row count — a truncated fetch would let a late privileged call fall
+    # outside the diff and read as clean. The agent cannot supply this list.
+    actual_tools = _receipt_log.distinct_tools(app_id, started, outcome="ok")
     try:
-        report = _binder.check_out(session_id, exit_declaration, actual_tools)
+        # app_id passed so check_out re-verifies ownership before it drops the
+        # session — belt-and-suspenders with the started_ts scoping above.
+        report = _binder.check_out(session_id, exit_declaration, actual_tools, app_id=app_id)
     except BindError as e:
         return {"error": "reconcile_refused", "detail": str(e)}
     _receipt_log.record(
@@ -3412,6 +3435,24 @@ def _cmd_revoke_agent(args) -> None:
     print(f"Agent {args.agent_id!r} {'revoked' if had else 'was not registered'}.")
 
 
+def _cmd_rotate_agent(args) -> None:
+    """`willow-mcp rotate-agent` — mint a NEW secret for an already-registered
+    agent, keeping its trust ceiling (D2). Rotation is hard by default: sessions
+    signed with the old secret fail their next verify and must re-check-in — the
+    correct compromise-response. Operator/CLI-only, like register-agent."""
+    from . import agent_registry
+    ceiling = agent_registry.list_agents().get(args.agent_id)
+    if ceiling is None:
+        print(f"Error: {args.agent_id!r} is not registered — use register-agent first.",
+              file=sys.stderr)
+        raise SystemExit(1)
+    out = agent_registry.register_agent(args.agent_id, ceiling)   # fresh secret, same ceiling
+    print(f"Rotated secret for agent_id={out['agent_id']!r} (trust ceiling {out['max_trust']}).")
+    print("Install the NEW secret into the agent's client-side signer (shown once); "
+          "the old secret is now dead:")
+    print(f"  {out['secret_hex']}")
+
+
 def _cmd_grant_net(args) -> None:
     """`willow-mcp grant-net` — issue a time-boxed egress lease (B-32).
 
@@ -3623,6 +3664,10 @@ def _main():
     regagent_revoke_p = subparsers.add_parser(
         "revoke-agent", help="Remove an agent's secret + registry entry (operator-only)")
     regagent_revoke_p.add_argument("agent_id")
+    regagent_rotate_p = subparsers.add_parser(
+        "rotate-agent",
+        help="Mint a new secret for a registered agent, keeping its ceiling (operator-only)")
+    regagent_rotate_p.add_argument("agent_id")
     worker_service_p = subparsers.add_parser(
         "worker-service",
         help="Install/status/uninstall standalone fast+batch user units without starting or stopping them",
@@ -3800,6 +3845,9 @@ def _main():
         return
     if args.command == "revoke-agent":
         _cmd_revoke_agent(args)
+        return
+    if args.command == "rotate-agent":
+        _cmd_rotate_agent(args)
         return
     if args.command == "grant-net":
         _cmd_grant_net(args)

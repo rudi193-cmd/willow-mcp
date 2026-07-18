@@ -66,6 +66,21 @@ def _sign_call(secret, session_id, app_id, tool):
 
 # ── enforcement is off / app unregistered: nothing changes ────────────────────
 
+def _fn(tool):
+    return getattr(tool, "fn", tool)
+
+
+def test_observe_only_records_bind_observed_receipt(env, monkeypatch):
+    # Phase 2 path: a bound session, enforcement OFF → the tier is LOGGED, not gated.
+    env("worker")
+    _check_in("worker", 3)
+    server._CALL_CREDENTIAL.set(None)
+    _fn(server.receipts_tail)(app_id="worker", limit=5)   # any guarded call
+    rows = server._receipt_log.tail("worker")
+    assert any(r["outcome"] == "bind_observed" and "tier=Veteran" in (r["detail"] or "")
+               for r in rows)
+
+
 def test_off_registered_agent_without_credential_still_passes(env, monkeypatch):
     env("veep")
     _check_in("veep", 3)                       # registered, but enforcement OFF
@@ -82,6 +97,17 @@ def test_on_unregistered_app_is_manifest_only(env, monkeypatch):
 
 
 # ── enforcement on + registered: the credential is required and checked ────────
+
+def test_registered_but_unreadable_secret_fails_closed(env, monkeypatch, tmp_path):
+    env("veep")
+    _check_in("veep", 3)
+    (tmp_path / "gate" / "secrets" / "veep.key").unlink()   # registered, secret gone
+    _enforce(monkeypatch)
+    server._CALL_CREDENTIAL.set(None)
+    eff, err = server._gate("veep", "store_get")
+    # Must NOT silently downgrade to manifest-only — that's the fail-open hole.
+    assert eff is None and "binding unavailable" in err["error"]
+
 
 def test_registered_agent_without_credential_is_denied(env, monkeypatch):
     env("veep")

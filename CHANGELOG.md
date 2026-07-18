@@ -9,6 +9,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
+### Security (willow-gate seam — hardening from adversarial review)
+- **Enforcement no longer fails OPEN on a broken keystore.** `_enforce_binding_gate`
+  now pairs `agent_registry.load()` with a new `is_registered()`: a registered agent
+  whose secret is momentarily unreadable/short is DENIED (fail-closed), not silently
+  downgraded to app_id-only manifest auth. `load()` also rejects a `<32`-byte secret
+  on read, not only on register.
+- **Check-out is ownership-scoped.** `session_reconcile` / `SessionBinder.check_out`
+  now require the session's bound `agent_id == app_id` (the rule `verify_call` already
+  enforced), and `session_started_ts` is owner-scoped — closing a cross-agent
+  session-destroy (DoS) and audit-forgery path where any caller who learned another
+  agent's `session_id` could close and mis-attribute its session.
+- **Reconciliation can't be truncated past the diff.** The ground-truth feed uses a
+  new unbounded `ReceiptLog.distinct_tools()` (DISTINCT tool set) instead of a
+  row-limited `since()`, so a late privileged call in a high-volume session can no
+  longer fall outside the window and read as `clean`.
+- **Check-in replay protection fails closed.** An unreadable (vs absent) check-in
+  nonce file now raises instead of being treated as "nothing used".
+- **Announcement redacts before the sink.** Receipt `detail` (which can carry raw
+  error text embedding a token) is run through `secret_scan` before it reaches the
+  announcement sink, which may be an external ledger; `credential_returned` gets an
+  ALERT floor so an exemption-bypassed secret egress is never silent.
+- **Thread-safety + hardening.** `SessionBinder` state is guarded by a lock (FastMCP
+  threadpool); Exiled (trust 0) is denied at check-in; `call_sig` uses an unambiguous
+  structured encoding; keystore temp files are pid+thread+random-unique; keystore
+  `chmod` failures are logged, not swallowed. The PreToolUse guard now blocks writes
+  to the `gate/` keystore (both hook copies, kept byte-identical) and the
+  `register-agent`/`rotate-agent`/`revoke-agent` verbs; a `rotate-agent` CLI is added.
+
 ### Added
 - **Graduated announcement volume** (`announce.py`, the `ReceiptLog.on_record`
   hook) — Phase 5 of the willow-gate integration
