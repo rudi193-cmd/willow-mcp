@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_receipts_app_id ON receipts(app_id);
 class ReceiptLog:
     """Append-only SQLite log of every tool call."""
 
-    def __init__(self, db_path: Optional[str] = None):
+    def __init__(self, db_path: Optional[str] = None, on_record=None):
         # Default under $WILLOW_HOME so the audit trail stays inside the
         # sovereign box (the data-vault boundary). Explicit db_path wins, then
         # the WILLOW_MCP_RECEIPT_DB override, then $WILLOW_HOME/mcp_receipt.db.
@@ -45,6 +45,12 @@ class ReceiptLog:
         self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+        # Optional post-write observer (app_id, tool, outcome, detail) → None. The
+        # announcement policy (Phase 5) rides here so it sees EVERY record site
+        # from one wiring point; it must never break the audit write, so its
+        # errors are swallowed. The log stays the single record — the observer
+        # only decides how loudly to surface a row, never writes a second one.
+        self.on_record = on_record
 
     def record(self, app_id: str, tool: str, outcome: str, detail: Optional[str] = None) -> None:
         ts = datetime.now(timezone.utc).isoformat()
@@ -54,6 +60,11 @@ class ReceiptLog:
                 (ts, app_id, tool, outcome, detail)
             )
             self._conn.commit()
+        if self.on_record is not None:
+            try:
+                self.on_record(app_id, tool, outcome, detail)
+            except Exception:
+                pass
 
     def since(self, app_id: str, ts_iso: str, outcome: Optional[str] = None,
               limit: int = 2000) -> list[dict]:

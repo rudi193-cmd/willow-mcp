@@ -10,6 +10,24 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Graduated announcement volume** (`announce.py`, the `ReceiptLog.on_record`
+  hook) — Phase 5 of the willow-gate integration
+  (`docs/design/willow-gate-seam.md` §5): a policy *over* the receipt log, not a
+  second log. It decides how loudly each recorded decision is surfaced on the
+  operator's log channel, graduated by the caller's BOUND trust tier (louder for
+  the less trusted — an unbound caller is loud, Elder's routine calls are silent),
+  with every denial and reconciliation discrepancy escalated to ALERT regardless
+  of who did it. `WILLOW_MCP_ANNOUNCE` gates it (off by default ⇒ a plain local box
+  is unchanged and the record path pays nothing beyond the switch check);
+  `WILLOW_MCP_AUDIT_LEVEL` = `full` (per-volume) or `minimal` (only the loud stuff —
+  untrusted callers and every denial). Wired through a single `ReceiptLog.on_record`
+  observer so it sees every record site from one point and can NEVER break the
+  audit write it rides on (sink errors swallowed; the log stays the sole record).
+  Binding-mechanism receipts (`bind_observed`/`bind_enforced`) are never announced
+  (they ride every call — announcing them would just double each line). Pure
+  stdlib; willow-gate's PGP-encrypted announcement ledger is a pluggable
+  `announce.set_sink()`, so the base never imports `python-gnupg` (seam-doc D5).
+  New `announce` global row in the gates panel surfaces the switch + audit level.
 - **Session reconciliation** (`session_binder.reconcile` / `check_out`,
   `ReceiptLog.since`, the `session_reconcile` tool) — Phase 4 of the willow-gate
   integration (`docs/design/willow-gate-seam.md`, hole H3): a check-out

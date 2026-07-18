@@ -107,7 +107,9 @@ Keep `ReceiptLog` as the record of every gated call; layer willow-gate's
 **graduated announcement volume** (louder for the *less* trusted) and
 `audit_level` (`full` vs `minimal`) as a policy over it, and optionally its
 PGP-encrypted ledger for the announcement channel. Receipts already log every
-`_gate` decision — this adds *how loudly*, not a second log.
+`_gate` decision — this adds *how loudly*, not a second log. **SHIPPED —
+`announce.py`; the volume/`audit_level` policy is pure stdlib and the encrypted
+ledger is a pluggable `set_sink()`, so the base never imports python-gnupg (D5).**
 
 ### 6. friction_floor — orthogonal, not part of the gate seam
 `friction_floor` watches the agent→**user relationship** (sycophantic mirroring
@@ -326,9 +328,11 @@ that owns `$WILLOW_HOME`):
 - **D4 — declaration schema:** **settled — see "D4" above.** Entry = the 13-field
   check-in header; the reconciled subset is `{tools, pass_count, fail_count, drift,
   state_hash}`, of which only `tools` has receipt-log ground truth.
-- **D5 — vendoring:** willow-gate as a pip dependency (`python-gnupg` pulls in)
-  vs. vendored subset; whether the base takes on the PGP dep at all or gates it
-  behind `require_pgp=False`-style dev mode.
+- **D5 — vendoring:** **settled — vendored/pure, no PGP dep.** Every shipped
+  piece (`friction_floor`, `agent_registry`, `session_binder`, `tier_policy`,
+  `announce`) is stdlib-only; willow-gate's PGP-encrypted announcement ledger is
+  left as a pluggable `announce.set_sink()` an operator can wire, so the base
+  never takes on `python-gnupg`. The base stays dependency-free.
 
 ## A phased path (each phase is independently shippable)
 1. **friction_floor watcher** — orthogonal, no auth-path risk; net-new signal.
@@ -352,7 +356,17 @@ that owns `$WILLOW_HOME`):
    `session_handoff_write`, never blocking it: it RECONCILES and records (receipt
    `reconciled` / `reconcile_discrepancy`), it does not gate the handoff. See D4.
 5. **Announcement/ledger policy** — graduated loudness + optional encrypted
-   channel over `ReceiptLog`. *(next)*
+   channel over `ReceiptLog`. **SHIPPED** (`announce.py`, the
+   `ReceiptLog.on_record` hook, the `announce` gates-panel row). A policy over the
+   log, not a second log: it decides how loudly each recorded decision is
+   surfaced on the operator channel — graduated by bound tier (louder for the less
+   trusted; unbound is loud; Elder's routine calls silent), every denial/
+   discrepancy escalated to ALERT. `WILLOW_MCP_ANNOUNCE` gates it (off ⇒ a plain
+   box is unchanged and the record path pays nothing); `WILLOW_MCP_AUDIT_LEVEL`
+   = `full`|`minimal` sets whether routine trusted activity is surfaced or only the
+   loud stuff. The PGP-encrypted ledger stays a pluggable `set_sink()` so it can be
+   wired without the base taking on python-gnupg (D5). **The seam's four holes
+   (H1/H2/H3 + policy) and D1–D5 are all closed.**
 
 ### D4 — the declaration schema (settled by Phase 4)
 The 13-field check-in header is the ENTRY declaration (already implemented, H1).

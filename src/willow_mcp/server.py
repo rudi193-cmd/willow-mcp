@@ -127,6 +127,28 @@ def _enforce_binding_gate(app_id: str, tool_name: str) -> Optional[dict]:
     return None
 
 
+from . import announce as _announce
+
+
+def _announce_hook(app_id: str, tool: str, outcome: str, detail: Optional[str]) -> None:
+    """Phase 5: surface each recorded decision on the operator log at a volume
+    graduated by the caller's BOUND trust tier (louder for the less trusted).
+    Reads the tier from the live session if there is one, else None (unbound →
+    loud). Cheap no-op when WILLOW_MCP_ANNOUNCE is off; never raises (ReceiptLog
+    swallows sink errors, and this is guarded besides)."""
+    if not _announce.enabled():
+        return
+    try:
+        sess = _binder.session_for(app_id)
+        trust = sess["trust_level"] if sess else None
+        _announce.announce(app_id, tool, outcome, trust, detail)
+    except Exception:
+        pass
+
+
+_receipt_log.on_record = _announce_hook
+
+
 def _observe_binding(app_id: str, tool_name: str) -> None:
     """Phase 2, OBSERVE-ONLY: log the identity binding for this call — a per-call
     signature if the client supplied one, else the app_id's live check-in tier —
