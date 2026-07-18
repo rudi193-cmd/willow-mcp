@@ -4,3 +4,11 @@ Copyright 2026 Sean Campbell
 This product includes the Nest content engine (src/willow_mcp/nest/), vendored
 from rudi193-cmd/safe-app-store (apps/nest-seed), which is licensed under the
 MIT License.
+
+The Nest live drop-folder router (src/willow_mcp/nest/intake.py and rules.py) is
+adapted from rudi193-cmd/willow-2.0 (sap/core/nest_intake.py and nest_rules.py),
+which is copyright Sean Campbell under the PolyForm Noncommercial License 1.0.0.
+As the copyright holder of both works, the author relicenses this adaptation
+under this project's Apache-2.0 license. The generic rules seed
+(src/willow_mcp/nest/rules.seed.json) is original to this project and contains
+none of the upstream seed's operator-specific content.

@@ -59,6 +59,7 @@ TOOL_CLASS: dict[str, str] = {
     "session_bind": READ, "session_reconcile": READ,
     "context_get": READ, "context_list": READ,
     "nest_status": READ, "nest_digest": READ,   # digest is the walled view
+    "nest_intake_queue": READ, "nest_intake_flags": READ,
     # ── write ───────────────────────────────────────────────────────────────
     "store_put": WRITE, "store_update": WRITE, "store_delete": WRITE,
     "store_purge_collection": WRITE,          # reversible + confirm-guarded — stays write (D1)
@@ -76,6 +77,8 @@ TOOL_CLASS: dict[str, str] = {
     # atoms to the KB — same class as knowledge_ingest/kb_promote (its own
     # permission group handles grant hygiene, not the tier ceiling).
     "nest_scan": WRITE, "nest_promote": WRITE,
+    # router: scan stages the queue, file moves the host file, skip records it
+    "nest_intake_scan": WRITE, "nest_intake_file": WRITE, "nest_intake_skip": WRITE,
     # ── execute ─────────────────────────────────────────────────────────────
     "task_submit": EXECUTE, "task_status": EXECUTE, "task_list": EXECUTE,
     "agent_route": EXECUTE, "agent_dispatch_result": EXECUTE,
