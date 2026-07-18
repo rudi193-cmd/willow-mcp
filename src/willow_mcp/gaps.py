@@ -127,6 +127,17 @@ def resolve(gap_id: str, note: str = "") -> dict[str, Any]:
     return {"id": gap_id, "status": "resolved"}
 
 
+def delete(gap_id: str) -> dict[str, Any]:
+    """Soft-delete a single gap — for clearing junk or test entries the backlog
+    accumulated, without touching the collection's real gaps (which is why this
+    is gap-level, not a whole-collection purge). Archive, not drop: the record
+    is retained (deleted=1) and simply falls out of list_gaps. Returns
+    {deleted, id}, or {error: not_found} for an unknown id."""
+    if not _store.get(_COLLECTION, gap_id):
+        return {"error": "not_found", "id": gap_id}
+    return {"deleted": _store.delete(_COLLECTION, gap_id), "id": gap_id}
+
+
 def mark_promoted(gap_id: str, knowledge_id: str) -> None:
     """Called by server.gap_promote after a successful knowledge write —
     not a public tool itself, so it doesn't validate gap_id existence the

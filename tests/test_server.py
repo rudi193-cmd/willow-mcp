@@ -1409,3 +1409,58 @@ def test_full_access_grants_specialist_reads():
     assert "specialist_list" in gate.PERMISSION_GROUPS["full_access"]
     assert "specialist_get" in gate.PERMISSION_GROUPS["full_access"]
     assert gate.PERMISSION_GROUPS["full_access"].isdisjoint({"task_net", "integration_call"})
+
+
+# ── store_stats + gap_delete (dogfood tools, round 2) ───────────────────────
+
+def test_store_stats_counts_live_records(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app = _write_app(apps_root, "statapp",
+                     {"permissions": ["full_access"], "store_scope": ["st_uniq_*"]})
+    for i in range(3):
+        server.store_put(app_id=app, collection="st_uniq_a", record={"i": i})
+    server.store_put(app_id=app, collection="st_uniq_b", record={"x": 1})
+    # purge b — soft-deleted records must not be counted
+    server.store_purge_collection(app_id=app, collection="st_uniq_b", confirm="st_uniq_b")
+
+    result = server.store_stats(app_id=app)
+    counts = {c["collection"]: c["count"] for c in result["collections"]}
+    assert counts == {"st_uniq_a": 3, "st_uniq_b": 0}
+    assert result["total_records"] == 3
+    assert result["total_collections"] == 2
+    # largest first
+    assert result["collections"][0]["collection"] == "st_uniq_a"
+
+
+def test_store_stats_requires_store_read(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app = _write_app(apps_root, "noread2", {"permissions": ["knowledge_read"]})
+    result = server.store_stats(app_id=app)
+    assert "error" in result and "denied" in result["error"]
+
+
+def test_gap_delete_removes_from_list(app_id):
+    logged = server.gap_log(app_id=app_id, topic="gd_uniq", question="junk fixture q")
+    gid = logged["id"]
+    assert any(g.get("_id") == gid for g in server.gap_list(app_id=app_id, topic="gd_uniq"))
+
+    res = server.gap_delete(app_id=app_id, gap_id=gid)
+    assert res["deleted"] is True
+    assert res["id"] == gid
+    # gone from the backlog view (soft-deleted, but invisible to list)
+    assert not any(g.get("_id") == gid for g in server.gap_list(app_id=app_id, topic="gd_uniq"))
+
+
+def test_gap_delete_not_found(app_id):
+    res = server.gap_delete(app_id=app_id, gap_id="no-such-gap")
+    assert res["error"] == "not_found"
+
+
+def test_gap_delete_requires_gap_write(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app = _write_app(apps_root, "gapreader", {"permissions": ["gap_read"]})
+    res = server.gap_delete(app_id=app, gap_id="whatever")
+    assert "error" in res and "denied" in res["error"]

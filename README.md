@@ -71,6 +71,7 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `store_search_all` | Search across all collections |
 | `store_collections` | List the SOIL collections you can see (narrowed to your `store_scope`) — learn the collection names without running a search |
 | `store_purge_collection` | Bulk soft-delete every record in a collection (e.g. leftover test/scratch data). Reversible (archive-don't-delete — the store.db is kept); requires `confirm=<collection name>` and stays within your `store_scope` |
+| `store_stats` | Per-collection live-record counts (within your `store_scope`), largest first, plus store-wide totals — the numeric companion to `store_collections` for spotting a bloated or polluted collection |
 | `knowledge_ingest` | Add a knowledge atom (requires a confirmed schema mapping — see `schema_confirm_mapping`) |
 | `knowledge_search` | Multi-keyword search in the Postgres knowledge base |
 | `kb_at` | Fetch a single knowledge atom by ID |
@@ -81,6 +82,7 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `gap_log` | Log or bump a "we don't know this yet" entry (fleet-wide backlog, SOIL-only, no Postgres needed) — see [docs/design/gap-backlog.md](docs/design/gap-backlog.md) |
 | `gap_list` | List gaps, most-asked first — filter by `topic` and/or `status` (`open`/`resolved`/`promoted`) |
 | `gap_resolve` | Mark a gap as being worked or answered — bookkeeping only, does not write to the knowledge base |
+| `gap_delete` | Soft-delete a single gap by id — clear junk/test entries without disturbing real gaps. Reversible (archive-don't-delete) |
 | `gap_promote` | Turn a resolved gap into a knowledge atom. Requires `answer`, at least one `source`, and `confirmed_by`; writes through the same schema-confirmation gate as `knowledge_ingest` and closes the gap out |
 | `task_submit` | Submit task to Kart queue |
 | `task_status` | Check task status |

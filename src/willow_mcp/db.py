@@ -263,6 +263,22 @@ class Store:
             conn.commit()
         return result.rowcount > 0
 
+    def stats(self, scope: Optional[list] = None) -> list[dict]:
+        """Per-collection live-record counts (deleted=0), for the collections
+        visible under `scope`. Same enumeration as list_collections, plus a
+        COUNT per collection — a cheap "what's in the store, and how much".
+        Returned sorted by count descending, then name."""
+        out = []
+        for col in self.list_collections(scope=scope):
+            with self._lock:
+                conn = self._conn(col)
+                n = conn.execute(
+                    "SELECT COUNT(*) FROM records WHERE deleted = 0"
+                ).fetchone()[0]
+            out.append({"collection": col, "count": n})
+        out.sort(key=lambda r: (-r["count"], r["collection"]))
+        return out
+
     def purge_collection(self, collection: str) -> int:
         """Soft-delete every live record in a collection at once — a bulk
         `delete`. Archive, not drop: rows stay in the db (deleted=1) and remain

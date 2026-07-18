@@ -622,6 +622,25 @@ def store_collections(app_id: str) -> dict:
     return {"collections": names, "count": len(names), "store_scope": scope}
 
 
+@mcp.tool()
+@_guarded("store_stats")
+def store_stats(app_id: str) -> dict:
+    """Per-collection live-record counts for the collections you can see
+    (narrowed to your store_scope) — the numeric companion to store_collections.
+    Counts only live records (soft-deleted ones don't show). Returns each
+    collection with its count (largest first), plus store-wide totals — handy
+    for spotting a polluted or runaway collection before deciding what to purge."""
+    from . import gate
+    scope = gate.store_scope(app_id)
+    stats = _store.stats(scope=scope)
+    return {
+        "collections": stats,
+        "total_collections": len(stats),
+        "total_records": sum(s["count"] for s in stats),
+        "store_scope": scope,
+    }
+
+
 # ── Knowledge tools ────────────────────────────────────────────────────────────
 
 def _knowledge_ingest_core(
@@ -725,6 +744,16 @@ def gap_resolve(app_id: str, gap_id: str, note: str = "") -> dict:
     write to the knowledge base. Use gap_promote to actually land a
     verified answer and close the gap out."""
     return gap_backlog.resolve(gap_id, note=note)
+
+
+@mcp.tool()
+@_guarded("gap_delete")
+def gap_delete(app_id: str, gap_id: str) -> dict:
+    """Soft-delete a single gap by id — for clearing junk or test entries from
+    the backlog without disturbing its real gaps. Archive, not drop: the gap is
+    retained (deleted=1) and just stops appearing in gap_list. Returns
+    {deleted, id}, or {error: not_found}."""
+    return gap_backlog.delete(gap_id)
 
 
 @mcp.tool()
