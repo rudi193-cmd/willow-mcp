@@ -1,2 +1,6 @@
 willow-mcp
 Copyright 2026 Sean Campbell
+
+This product includes the Nest content engine (src/willow_mcp/nest/), vendored
+from rudi193-cmd/safe-app-store (apps/nest-seed), which is licensed under the
+MIT License.

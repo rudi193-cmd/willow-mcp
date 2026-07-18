@@ -85,6 +85,10 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `gap_delete` | Soft-delete a single gap by id — clear junk/test entries without disturbing real gaps. Reversible (archive-don't-delete) |
 | `gap_purge_topic` | Soft-delete every gap under an exact topic in one call — bulk cleanup without the per-call rate limit. Promoted gaps (they point at a landed atom) are left intact; requires `confirm=<topic>` |
 | `gap_promote` | Turn a resolved gap into a knowledge atom. Requires `answer`, at least one `source`, and `confirmed_by`; writes through the same schema-confirmation gate as `knowledge_ingest` and closes the gap out |
+| `nest_scan` | Walk a drop folder, extract + classify its files by meaning, and write a canonical SQLite Nest DB. Returns counts only; `dry_run=True` (default) reports without writing — see [docs/NEST.md](docs/NEST.md) |
+| `nest_status` | Counts for a seeded Nest DB — sources by status, fragments by type, topical categories by size. Structure only; filename-labels are walled and counted as `uncategorised` |
+| `nest_digest` | A one-page Markdown map of a Nest DB — the **walled** view (person names, the date timeline, and filenames suppressed). The full digest is a local-CLI affordance only, never returned over MCP |
+| `nest_promote` | Promote a Nest's **structure** — counts, curated category names, redacted secret kinds, never content — into the knowledge base via the same core write as `knowledge_ingest`. `dry_run=True` returns the atoms that would be promoted |
 | `task_submit` | Submit task to Kart queue |
 | `task_status` | Check task status |
 | `task_list` | List pending tasks |

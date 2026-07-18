@@ -58,6 +58,7 @@ TOOL_CLASS: dict[str, str] = {
     "friction_flags_list": READ,
     "session_bind": READ, "session_reconcile": READ,
     "context_get": READ, "context_list": READ,
+    "nest_status": READ, "nest_digest": READ,   # digest is the walled view
     # ── write ───────────────────────────────────────────────────────────────
     "store_put": WRITE, "store_update": WRITE, "store_delete": WRITE,
     "store_purge_collection": WRITE,          # reversible + confirm-guarded — stays write (D1)
@@ -71,6 +72,10 @@ TOOL_CLASS: dict[str, str] = {
     "friction_scan": WRITE,
     "context_save": WRITE, "context_expire": WRITE,
     "frank_append": WRITE,
+    # nest_scan writes a local SQLite Nest DB; nest_promote writes structure-only
+    # atoms to the KB — same class as knowledge_ingest/kb_promote (its own
+    # permission group handles grant hygiene, not the tier ceiling).
+    "nest_scan": WRITE, "nest_promote": WRITE,
     # ── execute ─────────────────────────────────────────────────────────────
     "task_submit": EXECUTE, "task_status": EXECUTE, "task_list": EXECUTE,
     "agent_route": EXECUTE, "agent_dispatch_result": EXECUTE,
