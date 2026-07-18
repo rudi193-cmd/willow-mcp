@@ -133,7 +133,47 @@ want a quick, low-risk win.)
    (who did what, at what trust); `lineage` is a *decision* story (why things
    are). Complementary, not merged.
 
+## Holes found (spike)
+
+A runnable spike composed the *intended* bridge above and attacked it. willow-gate's
+crypto core held through the bridge — trust-ceiling cap, forged signature, nonce
+replay, and the `reserved` trap were all rejected — and the intended composition
+closed the obvious over-grants (a read-only-manifest agent could **not** write by
+passing `app_id=operator`; egress needed *both* manifest and tier). Two "holes"
+the spike shows are really *build-it-right constraints*: a bridge that trusts the
+`app_id` argument, or leans on the tier without the manifest ∩, over-grants — the
+intended bridge already denies both. Three genuine holes remain for the full
+build, plus one policy call and one upstream bug:
+
+- **H1 — session↔app_id binding is the whole ballgame (BLOCKER).** Every
+  willow-mcp tool takes `app_id` as a plaintext string. The HMAC binds a
+  *session*, but nothing ties a given MCP call to that session — a caller passing
+  `app_id=operator` rides operator's live session with no auth of its own. **The
+  full build must carry a per-call session credential (the check-in nonce, or a
+  derived session token) on every gated call; `app_id` alone cannot bind.** This
+  is the largest change and touches every tool signature.
+- **H2 — willow-gate must BE `_gate`, not sit beside it.** `_gate` today
+  authorizes via `permitted()` alone. Unless `authorize_tool` runs *inside*
+  `_gate` as the sole funnel, willow-gate is a ledger, not a gate: a call that
+  reaches a tool any other way is neither prevented nor recorded.
+- **H3 — reconciliation needs a real `tools_used` feed.** `check_out`'s
+  declare-vs-did diff only sees tools that passed through `authorize_tool`. It
+  must be fed from `ReceiptLog` (which already records every `_gate` decision),
+  or reconciliation silently passes on out-of-band use.
+- **Policy — read-universal does NOT survive the seam.** willow-gate grants read
+  to everyone (even Exiled); willow-mcp fail-closes an unmanifested/unscoped
+  `app_id`, and in the bridge that WINS. Bringing in willow-gate does **not** make
+  willow-mcp reads universal — `store_scope` still confines. State it; don't
+  inherit it by accident.
+- **Upstream bug — `entry_allowed` unenforced in willow-gate.** Level 0 (Exiled)
+  is defined `entry_allowed=False`, but `check_in` never checks it, so an Exiled
+  agent still gets a (read-only) session. Fix upstream in willow-gate.
+
 ## Open decisions (the forks to settle before wiring)
+- **D0 — session credential (was implicit; the spike made it a BLOCKER):** how a
+  per-call session token rides the MCP tool interface (an extra parameter vs an
+  out-of-band transport header), and how `_gate` maps it back to a live check-in.
+  H1 cannot be deferred — it is the reason to adopt willow-gate at all.
 - **D1 — tier↔group map:** ratify the class→group table in §2, especially where
   `execute`/`admin` land relative to `task_queue`, `integration_call`,
   `schema_admin`, `gap_purge`.
@@ -149,11 +189,19 @@ want a quick, low-risk win.)
 
 ## A phased path (each phase is independently shippable)
 1. **friction_floor watcher** — orthogonal, no auth-path risk; net-new signal.
-2. **Identity binding (read-only)** — `register_agent` + `check_in` HMAC-verify
-   feeding `_gate`, *observed only* (log bound tier, don't enforce yet).
-3. **Tier ceiling enforced** — `authorize_tool` in `_gate` applies §2 once D1 is
-   ratified.
+   Unblocked by every hole below — the safe first slice.
+2. **Session credential + identity binding (read-only)** — add the per-call
+   session token (**H1**), `register_agent` + `check_in` HMAC-verify feeding
+   `_gate`, *observed only* (log the bound tier, don't enforce). Nothing after
+   this works without H1, so it leads.
+3. **Tier ceiling enforced** — `authorize_tool` *inside* `_gate` as the sole
+   funnel (**H2**), applying §2 once D1 is ratified.
 4. **Session reconciliation** — `check_out` declare-vs-did on top of
-   `session_handoff_write` (needs D4).
+   `session_handoff_write`, with `tools_used` fed from `ReceiptLog` (**H3**);
+   needs D4.
 5. **Announcement/ledger policy** — graduated loudness + optional encrypted
    channel over `ReceiptLog`.
+
+Before any of this, upstream a fix (or a tracked issue) for willow-gate's
+unenforced `entry_allowed`, and write the read-universal policy call into the
+gate's docs so the seam's read semantics are chosen, not inherited.
