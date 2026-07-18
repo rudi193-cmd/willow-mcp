@@ -138,6 +138,27 @@ def delete(gap_id: str) -> dict[str, Any]:
     return {"deleted": _store.delete(_COLLECTION, gap_id), "id": gap_id}
 
 
+def purge_topic(topic: str) -> dict[str, Any]:
+    """Soft-delete every gap under an exact `topic` in one pass — a bulk
+    gap_delete for clearing a whole junk/test namespace without making one
+    rate-limited MCP call per gap. Promoted gaps are left intact: they point at
+    a real knowledge atom, so they're protected here the same way resolve()
+    refuses them. Archive, not drop — purged gaps are retained (deleted=1) and
+    just fall out of gap_list. Returns {purged, skipped_promoted, topic}."""
+    topic = (topic or "").strip()
+    if not topic:
+        return {"error": "topic is required"}
+    rows = [r for r in _store.all(_COLLECTION) if r.get("topic") == topic]
+    purged = skipped = 0
+    for r in rows:
+        if r.get("status") == "promoted":
+            skipped += 1
+            continue
+        if _store.delete(_COLLECTION, r["_id"]):
+            purged += 1
+    return {"purged": purged, "skipped_promoted": skipped, "topic": topic}
+
+
 def mark_promoted(gap_id: str, knowledge_id: str) -> None:
     """Called by server.gap_promote after a successful knowledge write —
     not a public tool itself, so it doesn't validate gap_id existence the
