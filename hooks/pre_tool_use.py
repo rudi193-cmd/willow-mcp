@@ -127,9 +127,9 @@ def check_task_submit(tool_input: dict) -> Optional[str]:
 # agent holds only the first.
 _LEASE_DIR_RE = re.compile(r"mcp_apps/_net_leases\b")
 _GRANT_CMD_RE = re.compile(
-    r"\bwillow-mcp\s+(?:grant-net|sign-net-task|consent\s+(?:set|reconcile)|roster\s+sync)\b"
-    r"|\bwillow_mcp\s+(?:grant-net|sign-net-task)\b"
-    r"|\b(?:lease\.grant|sign_envelope)\s*\("
+    r"\bwillow-mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent|consent\s+(?:set|reconcile)|roster\s+sync)\b"
+    r"|\bwillow_mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent)\b"
+    r"|\b(?:lease\.grant|sign_envelope|agent_registry\.(?:register_agent|revoke))\s*\("
     r"|\bconsent_admin\.(?:write_consent|set_key|reconcile)\s*\("
     r"|\bfleet_roster\.sync\s*\("
 )

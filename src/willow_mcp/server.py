@@ -71,6 +71,36 @@ _lineage = Lineage(_store)
 from .friction import FrictionWatcher
 _friction = FrictionWatcher(_store)
 
+import contextvars
+from .session_binder import SessionBinder, BindError
+_binder = SessionBinder()
+# Per-call SIGNED credential (H1), if a signing client supplies one out-of-band.
+# A contextvar so it never rides a tool's argument list. Phase 2 only OBSERVES it.
+_CALL_CREDENTIAL: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar(
+    "willow_call_credential", default=None)
+
+
+def _observe_binding(app_id: str, tool_name: str) -> None:
+    """Phase 2, OBSERVE-ONLY: log the identity binding for this call — a per-call
+    signature if the client supplied one, else the app_id's live check-in tier —
+    WITHOUT changing the authorization decision (manifest ACL still governs).
+    Enforcement is Phase 3. Must never affect the call: all failures swallowed."""
+    try:
+        cred = _CALL_CREDENTIAL.get()
+        if cred:
+            r = _binder.verify_call(cred.get("session_id", ""), app_id, tool_name,
+                                    cred.get("call_nonce", ""), cred.get("sig", ""))
+            _receipt_log.record(app_id, tool_name, "bind_observed",
+                                f"tier={r['tier']} sig=ok" if r.get("bound")
+                                else f"unbound: {r.get('reason')}")
+            return
+        sess = _binder.session_for(app_id)
+        if sess is not None:
+            _receipt_log.record(app_id, tool_name, "bind_observed",
+                                f"session tier={sess['tier']} (no per-call sig)")
+    except Exception:
+        pass
+
 def _argv_opt(flag: str) -> Optional[str]:
     """Read `--flag value` or `--flag=value` from sys.argv at import time.
 
@@ -449,6 +479,9 @@ def _guarded(tool_name: str, *, list_error: bool = False):
             if "app_id" in call_kwargs:
                 call_kwargs["app_id"] = effective_app_id
 
+            # Phase 2 (observe-only): log the identity binding; does not gate.
+            _observe_binding(effective_app_id, tool_name)
+
             collection = call_kwargs.get("collection")
             if (
                 isinstance(collection, str)
@@ -812,6 +845,30 @@ def friction_flags_list(app_id: str, limit: int = 20) -> list:
     if not gate.collection_permitted(app_id, _friction.collection):
         return [_collection_denied(app_id, _friction.collection)]
     return _friction.list_flags(limit=limit)
+
+
+# ── Identity binding (willow-gate seam, Phase 2 — observe-only) ──────────────────
+
+@mcp.tool()
+@_guarded("session_bind")
+def session_bind(app_id: str, header: dict) -> dict:
+    """Open a cryptographically-bound session. Provide a 13-field HMAC-signed
+    `header` whose `agent_id` equals your app_id; the server verifies it against
+    your operator-registered secret and caps the claimed `trust_level` at your
+    registered ceiling ("Elder is not a text field anyone can type"). Returns
+    {session_id, agent_id, trust_level, tier}, or {error} on refusal.
+
+    OBSERVE-ONLY today: once bound, the tier is LOGGED on your subsequent calls
+    (receipt outcome `bind_observed`) but does NOT yet change authorization — the
+    manifest ACL still governs (enforcement is Phase 3). Registration/rotation of
+    the secret is operator/CLI-only (`willow-mcp register-agent`); no MCP tool can
+    mint one — the sudo invariant."""
+    if isinstance(header, dict) and header.get("agent_id") not in (None, app_id):
+        return {"error": "agent_id_mismatch", "detail": "header agent_id must equal app_id"}
+    try:
+        return _binder.check_in(header)
+    except BindError as e:
+        return {"error": "bind_refused", "detail": str(e)}
 
 
 # ── Knowledge tools ────────────────────────────────────────────────────────────
@@ -3196,6 +3253,39 @@ def _cmd_sign_net_task(args) -> None:
     print(envelope)
 
 
+def _cmd_register_agent(args) -> None:
+    """`willow-mcp register-agent` — operator-only. Interactive/local by design,
+    exactly like grant-net/confirm-binding: no MCP tool can reach this, so an
+    agent can request standing and never mint it (the sudo invariant)."""
+    from . import agent_registry
+    secret = None
+    if args.secret_file:
+        try:
+            secret = Path(args.secret_file).expanduser().read_bytes()
+        except OSError as e:
+            print(f"Error: cannot read --secret-file: {e}", file=sys.stderr)
+            raise SystemExit(1)
+    try:
+        out = agent_registry.register_agent(args.agent_id, args.max_trust, secret=secret)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(f"Registered agent_id={out['agent_id']!r} at trust ceiling {out['max_trust']}.")
+    print("Install this secret into the agent's client-side signer (shown once):")
+    print(f"  {out['secret_hex']}")
+
+
+def _cmd_list_agents(args) -> None:
+    from . import agent_registry
+    print(json.dumps(agent_registry.list_agents(), indent=2, sort_keys=True))
+
+
+def _cmd_revoke_agent(args) -> None:
+    from . import agent_registry
+    had = agent_registry.revoke(args.agent_id)
+    print(f"Agent {args.agent_id!r} {'revoked' if had else 'was not registered'}.")
+
+
 def _cmd_grant_net(args) -> None:
     """`willow-mcp grant-net` — issue a time-boxed egress lease (B-32).
 
@@ -3392,6 +3482,21 @@ def _main():
         "roster", help="Inspect or operator-sync fleet.json into existing agents rows"
     )
     roster_p.add_argument("action", choices=["status", "sync"])
+
+    regagent_p = subparsers.add_parser(
+        "register-agent",
+        help="Bind an agent identity to an HMAC secret + trust ceiling (operator-only; "
+             "no MCP tool can mint a secret)",
+    )
+    regagent_p.add_argument("agent_id")
+    regagent_p.add_argument("--max-trust", type=int, required=True, choices=[0, 1, 2, 3, 4])
+    regagent_p.add_argument("--secret-file", default="",
+                            help="read the 32+ byte secret from this file; omit to generate one")
+    regagent_list_p = subparsers.add_parser(
+        "list-agents", help="List registered agent ids and their trust ceilings (no secrets)")
+    regagent_revoke_p = subparsers.add_parser(
+        "revoke-agent", help="Remove an agent's secret + registry entry (operator-only)")
+    regagent_revoke_p.add_argument("agent_id")
     worker_service_p = subparsers.add_parser(
         "worker-service",
         help="Install/status/uninstall standalone fast+batch user units without starting or stopping them",
@@ -3560,6 +3665,15 @@ def _main():
         return
     if args.command == "sign-net-task":
         _cmd_sign_net_task(args)
+        return
+    if args.command == "register-agent":
+        _cmd_register_agent(args)
+        return
+    if args.command == "list-agents":
+        _cmd_list_agents(args)
+        return
+    if args.command == "revoke-agent":
+        _cmd_revoke_agent(args)
         return
     if args.command == "grant-net":
         _cmd_grant_net(args)

@@ -39,9 +39,16 @@ from typing import Optional
 # willow-mcp creates (knowledge, records, mcp_receipt.db). A bare `sqlite3`
 # or `psql` invocation with no such marker isn't ours to block — the host
 # may have unrelated databases.
-_CLIENT_RE = re.compile(r"\b(psql|psycopg2|sqlite3)\b")
+# Known limits (this is a tripwire, not an OS control — see module docstring):
+# it catches shell-native access via a named client to a marker-bearing target.
+# It does NOT catch a write performed inside a `python -c` one-liner (no client
+# token / no shell write-verb), an owned store reached by a bare absolute path
+# whose collection isn't named knowledge/records, or a DB client not listed
+# below. The real control is `chown` + WILLOW_MCP_STRICT_TRUST_ROOT (B-32).
+_CLIENT_RE = re.compile(r"\b(psql|psycopg[23]?|asyncpg|pg8000|sqlite3)\b")
 _OWNED_MARKER_RE = re.compile(
-    r"WILLOW_PG_DB|WILLOW_STORE_ROOT|\bknowledge\b|\brecords\b|mcp_receipt\.db"
+    r"WILLOW_PG_DB|WILLOW_STORE_ROOT|\bknowledge\b|\brecords\b"
+    r"|(?:mcp_receipt|vault|kart|store)\.db"
 )
 
 _TOOL_REDIRECTS = {
@@ -120,9 +127,9 @@ def check_task_submit(tool_input: dict) -> Optional[str]:
 # agent holds only the first.
 _LEASE_DIR_RE = re.compile(r"mcp_apps/_net_leases\b")
 _GRANT_CMD_RE = re.compile(
-    r"\bwillow-mcp\s+(?:grant-net|sign-net-task|consent\s+(?:set|reconcile)|roster\s+sync)\b"
-    r"|\bwillow_mcp\s+(?:grant-net|sign-net-task)\b"
-    r"|\b(?:lease\.grant|sign_envelope)\s*\("
+    r"\bwillow-mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent|consent\s+(?:set|reconcile)|roster\s+sync)\b"
+    r"|\bwillow_mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent)\b"
+    r"|\b(?:lease\.grant|sign_envelope|agent_registry\.(?:register_agent|revoke))\s*\("
     r"|\bconsent_admin\.(?:write_consent|set_key|reconcile)\s*\("
     r"|\bfleet_roster\.sync\s*\("
 )

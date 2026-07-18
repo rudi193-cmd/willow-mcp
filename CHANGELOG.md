@@ -10,6 +10,29 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Identity binding, observe-only** (`agent_registry.py`, `session_binder.py`) —
+  Phase 2 of the willow-gate integration (`docs/design/willow-gate-seam.md`,
+  hole H1): the mechanism that lets the gate know *which* agent is calling,
+  wired to LOG rather than enforce. An HMAC keystore lives at
+  `$WILLOW_HOME/gate/` (dir `0700`, registry `registry.json`, per-agent secret
+  `secrets/<agent_id>.key` `0600`); agents are registered CLI-only
+  (`register-agent --max-trust {0..4}` / `list-agents` / `revoke-agent`), never
+  by an app at runtime — registration is an operator authority, guarded like
+  the other sudo-invariant crossings. `SessionBinder.check_in(header)` verifies
+  a 13-field signed header (HMAC over the header, reserved-field trap,
+  persistent check-in-nonce replay defence, trust capped at the registered
+  ceiling) and mints a bound session; `verify_call(...)` re-checks a per-call
+  HMAC signature (over `session_id|app_id|tool|call_nonce`) so a bound
+  credential cannot be ridden, replayed, or tampered. Exposed as the
+  `session_bind` tool (header `agent_id` must equal the caller's `app_id`) under
+  a new `binding` group. The server observes the binding on EVERY gated call —
+  `_observe_binding()` reads a `_CALL_CREDENTIAL` contextvar, resolves the bound
+  tier, and writes a `bind_observed` receipt — but the outcome does not gate
+  anything and every failure is swallowed. This is deliberately
+  **observe-only**: it makes the identity signal real and auditable before any
+  Phase 3 turns it into enforcement, so the binding can be watched in receipts
+  without risking a lockout. Vendored/self-contained (seam-doc D5) — pure
+  `hashlib`/`hmac`/`os`, no `python-gnupg` dependency.
 - **Friction-floor watcher** (`friction.py` + vendored `friction_floor.py`) —
   Phase 1 of the willow-gate integration (`docs/design/willow-gate-seam.md`): a
   model-free, deterministic relationship smoke detector. It watches one thing —
