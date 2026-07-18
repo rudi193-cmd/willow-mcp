@@ -39,7 +39,7 @@ def _validate_app_id(app_id: str) -> str:
 PERMISSION_GROUPS: dict[str, frozenset] = {
     "store_read": frozenset({
         "store_get", "store_search", "store_list", "store_search_all",
-        "store_collections",
+        "store_collections", "store_stats",
     }),
     "store_write": frozenset({
         "store_put", "store_update", "store_delete", "store_purge_collection",
@@ -48,7 +48,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "store_all": frozenset({
         "store_put", "store_get", "store_list", "store_update",
         "store_search", "store_delete", "store_purge_collection",
-        "store_search_all", "store_collections",
+        "store_search_all", "store_collections", "store_stats",
     }),
     "knowledge_read": frozenset({
         "knowledge_search",
@@ -95,7 +95,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "gap_list",
     }),
     "gap_write": frozenset({
-        "gap_log", "gap_resolve",
+        "gap_log", "gap_resolve", "gap_delete",
     }),
     "integration_read": frozenset({
         "integration_list", "integration_status",
@@ -125,7 +125,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         # Core store
         "store_put", "store_get", "store_list", "store_update",
         "store_search", "store_delete", "store_purge_collection",
-        "store_search_all", "store_collections",
+        "store_search_all", "store_collections", "store_stats",
         # Knowledge
         "knowledge_search", "knowledge_ingest",
         "kb_search", "kb_at", "kb_startup_continuity",
@@ -150,7 +150,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         # Self-audit
         "receipts_tail",
         # Gap backlog
-        "gap_log", "gap_list", "gap_resolve", "gap_promote",
+        "gap_log", "gap_list", "gap_resolve", "gap_delete", "gap_promote",
         # Integrations (read-only ledger; integration_call stays own-line)
         "integration_list", "integration_status",
     }),
