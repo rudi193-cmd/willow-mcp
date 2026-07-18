@@ -41,6 +41,7 @@ def test_compile_manifests_only_missing(home):
 
     manifest = json.loads((home / "mcp_apps" / "hanuman" / "manifest.json").read_text())
     assert manifest["permissions"] == [
+        "dispatch_read",
         "dispatch_write",
         "task_queue",
         "store_read",

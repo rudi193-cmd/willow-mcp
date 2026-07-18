@@ -33,7 +33,12 @@ def main() -> None:
         payload = json.load(sys.stdin)
         print(json.dumps(handle(payload if isinstance(payload, dict) else {})))
     except Exception as exc:
-        print(json.dumps({"additional_context": f"session_enter unavailable: {exc}"}))
+        # Fail VISIBLY (Loki C303AA2F §3.3): the hook is failClosed=false so a
+        # failure must not silently drop orientation. Surface it in the session
+        # context AND on stderr so it is loud in both the transcript and logs.
+        message = f"WILLOW session_enter FAILED — orientation did not run: {exc}"
+        print(f"[willow.session_start] {message}", file=sys.stderr)
+        print(json.dumps({"additional_context": message}))
 
 
 if __name__ == "__main__":

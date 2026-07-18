@@ -3,7 +3,7 @@
   "hooks": {
     "sessionStart": [
       {
-        "command": "python -m willow_mcp.session_start_hook",
+        "command": "python3 -m willow_mcp.session_start_hook",
         "timeout": 15,
         "failClosed": false
       }

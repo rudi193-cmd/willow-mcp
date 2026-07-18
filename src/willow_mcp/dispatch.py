@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -51,14 +52,24 @@ def project_context(project: str = "", workspace: str = "") -> dict:
     ).strip()
     root = Path(root_value).expanduser().resolve() if root_value else None
     name = (project or os.environ.get("WILLOW_HANDOFF_PROJECT", "")).strip()
+    derived = False
     if not name and root:
-        name = root.name
+        # Collision-safe derivation (Loki C303AA2F §3.5): the bare basename
+        # collides — /a/charter and /b/charter would share one project state.
+        # Disambiguate a human-readable prefix with a short digest of the
+        # *canonical* (resolved) path so distinct workspaces never merge. An
+        # explicit project id always wins over this and is used verbatim.
+        digest = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:8]
+        prefix = re.sub(r"[^A-Za-z0-9_.-]", "-", root.name).strip("-") or "project"
+        name = f"{prefix}-{digest}"
+        derived = True
     if name and not _PROJECT_RE.fullmatch(name):
         return {"error": "invalid_project", "project": name}
     return {
         "name": name or None,
         "root": str(root) if root else None,
         "workspace": str(root) if root else (workspace or None),
+        "derived_from_workspace": derived,
     }
 
 

@@ -74,16 +74,32 @@ def manifest_from_row(
     return manifest
 
 
+def _read_manifest_json(path: Path) -> dict[str, Any]:
+    """Best-effort read of an existing manifest; {} on absence or corruption."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def compile_manifests(
     registry: dict[str, Any] | None = None,
     *,
     only_missing: bool = False,
     dry_run: bool = False,
 ) -> dict[str, list[str]]:
-    """Write manifests under $WILLOW_HOME/mcp_apps from registry rows."""
+    """Write manifests under $WILLOW_HOME/mcp_apps from registry rows.
+
+    Overwriting an existing manifest MERGES rather than clobbers (Loki C303AA2F
+    §3.4): registry-owned fields are authoritative, but operator-added local keys
+    are preserved. Any registry field that replaces a differing local value is
+    reported in ``overridden`` so the override is visible, never silent.
+    """
     reg = registry if registry is not None else load_registry()
     written: list[str] = []
     skipped: list[str] = []
+    overridden: list[dict[str, Any]] = []
 
     for row in iter_registry_rows(reg):
         agent_id = str(row.get("agent_id", "")).strip()
@@ -100,6 +116,18 @@ def compile_manifests(
             row,
             collection_aliases=reg.get("collection_aliases") or {},
         )
+        if manifest_path.exists():
+            existing = _read_manifest_json(manifest_path)
+            if existing:
+                changed = sorted(
+                    key for key, value in manifest.items()
+                    if key in existing and existing[key] != value
+                )
+                if changed:
+                    overridden.append({"manifest": rel, "keys": changed})
+                merged = dict(existing)   # keep operator-added local-only keys
+                merged.update(manifest)   # registry-owned fields win
+                manifest = merged
         if dry_run:
             written.append(rel)
             continue
@@ -108,7 +136,7 @@ def compile_manifests(
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         written.append(rel)
 
-    return {"written": written, "skipped": skipped}
+    return {"written": written, "skipped": skipped, "overridden": overridden}
 
 
 def compile_agents_main(

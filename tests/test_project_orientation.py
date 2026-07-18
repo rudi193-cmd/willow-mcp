@@ -1,7 +1,11 @@
+import io
 import json
+from pathlib import Path
 
 from willow_mcp import dispatch, gate, registry, server
+from willow_mcp import session_start_hook as ssh
 from willow_mcp.db import Store
+from willow_mcp.paths import mcp_app_dir
 from willow_mcp.session_start_hook import handle
 
 
@@ -169,3 +173,112 @@ def test_session_start_bridge_invokes_session_enter_without_legacy_hook(
     result = handle({"session_id": "s", "workspace": "/workspace/project"})
     assert seen["workspace"] == "/workspace/project"
     assert "persona" in json.loads(result["additional_context"])
+
+
+# ── §3.1 dispatch_read grant, pinned so compile-agents cannot erase it ───────
+
+def test_hanuman_manifest_grants_dispatch_read():
+    reg = registry.load_registry(prefer_home=False)
+    row = registry.specialist_row("hanuman", registry=reg)
+    manifest = registry.manifest_from_row(row, collection_aliases=reg["collection_aliases"])
+    assert "dispatch_read" in manifest["permissions"], (
+        "Hanuman must hold dispatch_read in the SOURCE registry, or the next "
+        "compile-agents run erases the live permission repair (Loki C303AA2F §3.1)"
+    )
+
+
+# ── §3.2 explicit physical project scopes, fail-closed (no wildcard) ─────────
+
+def test_orchestrator_scope_is_explicit_projects_not_wildcard():
+    reg = registry.load_registry(prefer_home=False)
+    scope = reg["orchestrator_seat"]["store_scope"]
+    assert "projects_*" not in scope, "the broad projects_* wildcard must be gone"
+    project_scopes = [s for s in scope if s.startswith("projects_")]
+    assert project_scopes
+    assert all(s.startswith("projects_willow_") and "*" not in s for s in project_scopes)
+    # every declared alias target is covered by an explicit scope
+    assert set(reg["collection_aliases"].values()) <= set(project_scopes)
+
+
+# ── §3.3 hook: stable interpreter + fail-visible ─────────────────────────────
+
+def test_cursor_hook_uses_a_stable_available_interpreter():
+    hooks = Path(__file__).resolve().parents[1] / "deploy" / "cursor" / "hooks.json"
+    cmd = json.loads(hooks.read_text())["hooks"]["sessionStart"][0]["command"]
+    assert cmd.startswith("python3 "), "bare `python` may be absent or py2; pin python3"
+
+
+def test_session_start_hook_fails_visibly(monkeypatch, capsys):
+    monkeypatch.setattr(ssh.sys, "stdin", io.StringIO("this is not json"))
+    ssh.main()
+    captured = capsys.readouterr()
+    assert "session_enter FAILED" in captured.err  # loud on stderr / logs
+    payload = json.loads(captured.out)
+    assert "FAILED" in payload["additional_context"]  # and in the session context
+
+
+# ── §3.4 compile merges local policy, reports overrides (never silent) ───────
+
+def test_compile_merges_local_keys_and_reports_overrides(tmp_path, monkeypatch):
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "mcp_apps"))
+    reg = {
+        "collection_aliases": {},
+        "specialists": [{
+            "agent_id": "hanuman", "role": "builder",
+            "permissions": ["dispatch_read", "dispatch_write"],
+            "deny_tools": [], "store_scope": ["hanuman_*"],
+        }],
+    }
+    mpath = mcp_app_dir("hanuman") / "manifest.json"
+    mpath.parent.mkdir(parents=True, exist_ok=True)
+    mpath.write_text(json.dumps({
+        "permissions": ["dispatch_write"],   # stale — must be refreshed
+        "local_lease": "operator-added",      # local-only — must survive
+    }))
+
+    result = registry.compile_manifests(reg, only_missing=False)
+
+    merged = json.loads(mpath.read_text())
+    assert merged["local_lease"] == "operator-added"      # local policy preserved
+    assert "dispatch_read" in merged["permissions"]        # registry field refreshed
+    assert any("permissions" in o["keys"] for o in result["overridden"]), (
+        "a registry field replacing a differing local value must be reported"
+    )
+
+
+def test_compile_creates_missing_manifest_with_no_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "mcp_apps"))
+    reg = {"collection_aliases": {}, "specialists": [{
+        "agent_id": "hanuman", "role": "builder",
+        "permissions": ["dispatch_read"], "deny_tools": [], "store_scope": ["hanuman_*"],
+    }]}
+    result = registry.compile_manifests(reg, only_missing=False)
+    assert result["overridden"] == []
+    assert (mcp_app_dir("hanuman") / "manifest.json").exists()
+
+
+# ── §3.5 collision-safe project identity ─────────────────────────────────────
+
+def test_project_identity_is_collision_safe_across_workspaces(tmp_path):
+    a = tmp_path / "a" / "charter"; a.mkdir(parents=True)
+    b = tmp_path / "b" / "charter"; b.mkdir(parents=True)
+    na = dispatch.project_context(workspace=str(a))["name"]
+    nb = dispatch.project_context(workspace=str(b))["name"]
+    assert na != nb                                   # same basename, distinct paths
+    assert na.startswith("charter-") and nb.startswith("charter-")
+
+
+def test_explicit_project_id_wins_over_workspace_derivation(tmp_path):
+    ws = tmp_path / "whatever"; ws.mkdir()
+    ctx = dispatch.project_context(project="alpha", workspace=str(ws))
+    assert ctx["name"] == "alpha"
+    assert ctx["derived_from_workspace"] is False
+
+
+def test_derived_project_name_is_stable_for_one_path(tmp_path):
+    ws = tmp_path / "charter"; ws.mkdir()
+    first = dispatch.project_context(workspace=str(ws))["name"]
+    second = dispatch.project_context(workspace=str(ws))["name"]
+    assert first == second and dispatch._PROJECT_RE.fullmatch(first)
