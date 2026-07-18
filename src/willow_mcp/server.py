@@ -757,6 +757,21 @@ def gap_delete(app_id: str, gap_id: str) -> dict:
 
 
 @mcp.tool()
+@_guarded("gap_purge_topic")
+def gap_purge_topic(app_id: str, topic: str, confirm: str = "") -> dict:
+    """Soft-delete every gap under an exact topic in ONE call — bulk cleanup of a
+    junk/test namespace without hitting gap_delete's per-call rate limit. Promoted
+    gaps (which point at a landed knowledge atom) are left intact. Archive, not
+    drop: purged gaps are retained (deleted=1), just removed from gap_list. Pass
+    confirm=<topic> to proceed. Returns {purged, skipped_promoted, topic}."""
+    if confirm != topic:
+        return {"error": "confirm_required",
+                "detail": f"pass confirm='{topic}' to purge all gaps under topic "
+                          f"'{topic}' — a bulk soft-delete (reversible)"}
+    return gap_backlog.purge_topic(topic)
+
+
+@mcp.tool()
 @_guarded("gap_promote")
 def gap_promote(
     app_id: str,

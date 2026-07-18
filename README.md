@@ -83,6 +83,7 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `gap_list` | List gaps, most-asked first — filter by `topic` and/or `status` (`open`/`resolved`/`promoted`) |
 | `gap_resolve` | Mark a gap as being worked or answered — bookkeeping only, does not write to the knowledge base |
 | `gap_delete` | Soft-delete a single gap by id — clear junk/test entries without disturbing real gaps. Reversible (archive-don't-delete) |
+| `gap_purge_topic` | Soft-delete every gap under an exact topic in one call — bulk cleanup without the per-call rate limit. Promoted gaps (they point at a landed atom) are left intact; requires `confirm=<topic>` |
 | `gap_promote` | Turn a resolved gap into a knowledge atom. Requires `answer`, at least one `source`, and `confirmed_by`; writes through the same schema-confirmation gate as `knowledge_ingest` and closes the gap out |
 | `task_submit` | Submit task to Kart queue |
 | `task_status` | Check task status |

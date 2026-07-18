@@ -1464,3 +1464,35 @@ def test_gap_delete_requires_gap_write(tmp_path, monkeypatch):
     app = _write_app(apps_root, "gapreader", {"permissions": ["gap_read"]})
     res = server.gap_delete(app_id=app, gap_id="whatever")
     assert "error" in res and "denied" in res["error"]
+
+
+# ── gap_purge_topic (bulk, rate-limit-friendly) ─────────────────────────────
+
+def test_gap_purge_topic_purges_and_protects_promoted(app_id):
+    from willow_mcp import gaps
+    g1 = server.gap_log(app_id=app_id, topic="pt_uniq", question="junk one")["id"]
+    g2 = server.gap_log(app_id=app_id, topic="pt_uniq", question="junk two")["id"]
+    gp = server.gap_log(app_id=app_id, topic="pt_uniq", question="promoted one")["id"]
+    gaps.mark_promoted(gp, "KID999")  # a promoted gap points at a knowledge atom
+
+    res = server.gap_purge_topic(app_id=app_id, topic="pt_uniq", confirm="pt_uniq")
+    assert res["purged"] == 2
+    assert res["skipped_promoted"] == 1
+    ids = {g.get("_id") for g in server.gap_list(app_id=app_id, topic="pt_uniq")}
+    assert g1 not in ids and g2 not in ids   # junk gone
+    assert gp in ids                          # promoted survives, protected
+
+
+def test_gap_purge_topic_requires_confirm(app_id):
+    server.gap_log(app_id=app_id, topic="pt_confirm", question="x")
+    res = server.gap_purge_topic(app_id=app_id, topic="pt_confirm")
+    assert res["error"] == "confirm_required"
+    assert len(server.gap_list(app_id=app_id, topic="pt_confirm")) == 1  # untouched
+
+
+def test_gap_purge_topic_requires_gap_write(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app = _write_app(apps_root, "gapreader2", {"permissions": ["gap_read"]})
+    res = server.gap_purge_topic(app_id=app, topic="x", confirm="x")
+    assert "error" in res and "denied" in res["error"]

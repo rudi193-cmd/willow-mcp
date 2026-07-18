@@ -95,7 +95,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "gap_list",
     }),
     "gap_write": frozenset({
-        "gap_log", "gap_resolve", "gap_delete",
+        "gap_log", "gap_resolve", "gap_delete", "gap_purge_topic",
     }),
     "integration_read": frozenset({
         "integration_list", "integration_status",
@@ -150,7 +150,8 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         # Self-audit
         "receipts_tail",
         # Gap backlog
-        "gap_log", "gap_list", "gap_resolve", "gap_delete", "gap_promote",
+        "gap_log", "gap_list", "gap_resolve", "gap_delete", "gap_purge_topic",
+        "gap_promote",
         # Integrations (read-only ledger; integration_call stays own-line)
         "integration_list", "integration_status",
     }),
