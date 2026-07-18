@@ -42,11 +42,13 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "store_collections",
     }),
     "store_write": frozenset({
-        "store_put", "store_update", "store_delete", "agent_seed_mirror",
+        "store_put", "store_update", "store_delete", "store_purge_collection",
+        "agent_seed_mirror",
     }),
     "store_all": frozenset({
         "store_put", "store_get", "store_list", "store_update",
-        "store_search", "store_delete", "store_search_all", "store_collections",
+        "store_search", "store_delete", "store_purge_collection",
+        "store_search_all", "store_collections",
     }),
     "knowledge_read": frozenset({
         "knowledge_search",
@@ -122,7 +124,8 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "full_access": frozenset({
         # Core store
         "store_put", "store_get", "store_list", "store_update",
-        "store_search", "store_delete", "store_search_all", "store_collections",
+        "store_search", "store_delete", "store_purge_collection",
+        "store_search_all", "store_collections",
         # Knowledge
         "knowledge_search", "knowledge_ingest",
         "kb_search", "kb_at", "kb_startup_continuity",
@@ -136,6 +139,8 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "session_read", "session_enter", "session_handoff_write",
         "agent_seed_mirror",
         "exposure_config_get", "exposure_slice",
+        # Specialist registry (read-only routing/orchestrator desk)
+        "specialist_list", "specialist_get",
         # Fleet (read-only)
         "fleet_status", "fleet_health",
         # Schema admin

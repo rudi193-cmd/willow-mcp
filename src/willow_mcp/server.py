@@ -579,6 +579,28 @@ def store_delete(app_id: str, collection: str, record_id: str) -> dict:
 
 
 @mcp.tool()
+@_guarded("store_purge_collection")
+def store_purge_collection(app_id: str, collection: str, confirm: str = "") -> dict:
+    """Soft-delete EVERY record in a collection at once — a bulk store_delete,
+    for clearing out a whole collection (e.g. leftover test/scratch data).
+    Archive, not drop: records are retained (deleted=1) and stay recoverable,
+    they just fall out of get/list/search, matching the store's soft-delete
+    model. The collection's store.db is never removed — hard removal is an
+    operator/filesystem act, deliberately outside the tool surface. Guarded
+    against fat-finger accidents: pass confirm=<collection name> to proceed.
+    Confined to your store_scope like every other store_* tool."""
+    from . import gate
+    if not gate.collection_permitted(app_id, collection):
+        return _collection_denied(app_id, collection)
+    if confirm != collection:
+        return {"error": "confirm_required",
+                "detail": f"pass confirm='{collection}' to purge all records in "
+                          f"'{collection}' — a bulk soft-delete (reversible)"}
+    purged = _store.purge_collection(collection)
+    return {"purged": purged, "collection": collection}
+
+
+@mcp.tool()
 @_guarded("store_search_all", list_error=True)
 def store_search_all(app_id: str, query: str) -> list:
     """Search across ALL SOIL collections (or only this app's store_scope, if it has one). Use when the collection is unknown."""

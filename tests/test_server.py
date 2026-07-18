@@ -1361,3 +1361,51 @@ def test_whoami_is_ungated_and_answers_for_missing_manifest():
 def test_whoami_requires_an_app_id():
     w = server.whoami(app_id="")
     assert w["error"] == "no_app_id"
+
+
+# ── store_purge_collection + full_access specialist reads ───────────────────
+
+def test_store_purge_collection_soft_deletes_all(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app = _write_app(apps_root, "purgeapp",
+                     {"permissions": ["full_access"], "store_scope": ["purge_uniq_*"]})
+    for i in range(3):
+        server.store_put(app_id=app, collection="purge_uniq_c", record={"i": i})
+    assert len(server.store_list(app_id=app, collection="purge_uniq_c")) == 3
+
+    result = server.store_purge_collection(app_id=app, collection="purge_uniq_c",
+                                           confirm="purge_uniq_c")
+    assert result == {"purged": 3, "collection": "purge_uniq_c"}
+    # gone from reads (soft-delete: invisible to list/search)
+    assert server.store_list(app_id=app, collection="purge_uniq_c") == []
+
+
+def test_store_purge_collection_requires_confirm(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app = _write_app(apps_root, "purgeapp2",
+                     {"permissions": ["full_access"], "store_scope": ["pc_*"]})
+    server.store_put(app_id=app, collection="pc_x", record={"v": 1})
+    result = server.store_purge_collection(app_id=app, collection="pc_x")  # no confirm
+    assert result["error"] == "confirm_required"
+    # nothing purged — record still there
+    assert len(server.store_list(app_id=app, collection="pc_x")) == 1
+
+
+def test_store_purge_collection_denied_outside_scope(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app = _write_app(apps_root, "purgeapp3",
+                     {"permissions": ["full_access"], "store_scope": ["mine_*"]})
+    result = server.store_purge_collection(app_id=app, collection="not_mine",
+                                           confirm="not_mine")
+    assert "collection_denied" in result["error"]
+
+
+def test_full_access_grants_specialist_reads():
+    from willow_mcp import gate
+    # documented contract: full_access = all gated tools except the egress ones.
+    assert "specialist_list" in gate.PERMISSION_GROUPS["full_access"]
+    assert "specialist_get" in gate.PERMISSION_GROUPS["full_access"]
+    assert gate.PERMISSION_GROUPS["full_access"].isdisjoint({"task_net", "integration_call"})
