@@ -10,6 +10,21 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **Lineage / provenance atoms** (`lineage.py`, prototype) — a queryable "story
+  of this willow" for the user-facing base store. Agents dropped into a running
+  willow keep asking where something came from, what was here before, and why
+  it is this way; a plain knowledge record answers "what is true", a lineage
+  atom answers **provenance** (origin, rationale, supersession history). Three
+  tools: `lineage_record` (write; `rationale` and at least one `evidence`
+  citation are REQUIRED — an atom that can't cite is lore, not memory, and is
+  refused), `lineage_why` (answer "why does X exist / where did X come from",
+  returning the supersession chain and current-vs-superseded status, not a
+  blob), and `lineage_list`. Recording a supersession patches the predecessor's
+  back-pointer both directions so history stays walkable and the old atom knows
+  it is no longer current. New `lineage_read`/`lineage_write` permission groups
+  (both in `full_access`). The MECHANISM is agent-neutral and ships in the base;
+  any one willow's specific story is content it records into its own store, not
+  baked in.
 - **Store/gap introspection & cleanup tools** — `whoami` (your own manifest and
   effective permissions; ungated like `diagnostic_summary`), `store_collections`
   and `store_stats` (list / count the SOIL collections in your `store_scope`

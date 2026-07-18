@@ -112,6 +112,16 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "gap_purge": frozenset({
         "gap_purge_topic",
     }),
+    # Provenance/"story of this willow" atoms. Read (why/list) is broadly safe —
+    # it is exactly what a curious agent should be able to ask. Write is its own
+    # group so recording lineage is a deliberate grant, not a side effect of a
+    # store-write role.
+    "lineage_read": frozenset({
+        "lineage_why", "lineage_list",
+    }),
+    "lineage_write": frozenset({
+        "lineage_record",
+    }),
     "integration_read": frozenset({
         "integration_list", "integration_status",
     }),
@@ -168,6 +178,8 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         # Gap backlog
         "gap_log", "gap_list", "gap_resolve", "gap_delete", "gap_purge_topic",
         "gap_promote",
+        # Lineage / provenance ("story of this willow")
+        "lineage_why", "lineage_list", "lineage_record",
         # Integrations (read-only ledger; integration_call stays own-line)
         "integration_list", "integration_status",
     }),
