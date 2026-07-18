@@ -590,6 +590,8 @@ def store_purge_collection(app_id: str, collection: str, confirm: str = "") -> d
     against fat-finger accidents: pass confirm=<collection name> to proceed.
     Confined to your store_scope like every other store_* tool."""
     from . import gate
+    if not collection:
+        return {"error": "collection is required"}
     if not gate.collection_permitted(app_id, collection):
         return _collection_denied(app_id, collection)
     if confirm != collection:
@@ -763,7 +765,13 @@ def gap_purge_topic(app_id: str, topic: str, confirm: str = "") -> dict:
     junk/test namespace without hitting gap_delete's per-call rate limit. Promoted
     gaps (which point at a landed knowledge atom) are left intact. Archive, not
     drop: purged gaps are retained (deleted=1), just removed from gap_list. Pass
-    confirm=<topic> to proceed. Returns {purged, skipped_promoted, topic}."""
+    confirm=<topic> to proceed. Returns {purged, skipped_promoted, topic}.
+
+    Note: gaps are a FLEET-SHARED backlog, not store_scoped — this purges every
+    app's gaps under the topic, so it's gated on its own `gap_purge` permission
+    (not the everyday `gap_write`) rather than handed out broadly."""
+    if not topic:
+        return {"error": "topic is required"}
     if confirm != topic:
         return {"error": "confirm_required",
                 "detail": f"pass confirm='{topic}' to purge all gaps under topic "
@@ -1269,11 +1277,10 @@ def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
     # one, and read continuity tags from content->'tags' (a string array,
     # e.g. ["release-process","ci"]). Only consulted when there is no
     # top-level tags column to filter on.
+    cols_by_name = {c.name: c for c in sp.introspect(pg, "knowledge")}
     tags_jsonb_col = None
     if tags_col is None:
-        jsonb_cols = {c.name for c in sp.introspect(pg, "knowledge")
-                      if c.data_type in ("jsonb", "json")}
-        if "content" in jsonb_cols:
+        if cols_by_name.get("content") and cols_by_name["content"].data_type in ("jsonb", "json"):
             tags_jsonb_col = "content"
 
     select_clause, present, unmapped = _build_select(_KNOWLEDGE_FIELDS, fields)
@@ -1283,14 +1290,23 @@ def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
         params.append("continuity")
         filters.append(f"{domain_col}='continuity'")
     if tags_col:
-        # Cast to text before LIKE: a top-level tags column may be text holding
-        # a JSON array string ("[\"continuity\"]") OR native jsonb. jsonb has no
-        # LIKE (~~) operator, so a bare LIKE crashes on it ('operator does not
-        # exist: jsonb ~~'); ::text renders both forms to the same quoted-token
-        # string this pattern matches.
-        where_parts.append(f'"{tags_col}"::text LIKE %s')
-        params.append('%"continuity"%')
-        filters.append(f"{tags_col}::text LIKE '\"continuity\"'")
+        tags_type = cols_by_name[tags_col].data_type if tags_col in cols_by_name else None
+        if tags_type == "ARRAY":
+            # Native array (e.g. text[]): match an exact element. NOT ::text LIKE
+            # — Postgres renders an array as {continuity} (no quotes), so the
+            # quoted-token pattern silently misses it. `= ANY` is also more
+            # precise (no 'discontinuity' false positive).
+            where_parts.append(f'%s = ANY("{tags_col}")')
+            params.append("continuity")
+            filters.append(f'"continuity" = ANY({tags_col})')
+        else:
+            # text holding a JSON array string ("[\"continuity\"]") OR native
+            # jsonb. jsonb has no LIKE (~~) operator, so a bare LIKE crashes on
+            # it; ::text renders both forms to the same quoted-token string this
+            # pattern matches.
+            where_parts.append(f'"{tags_col}"::text LIKE %s')
+            params.append('%"continuity"%')
+            filters.append(f"{tags_col}::text LIKE '\"continuity\"'")
     elif tags_jsonb_col:
         where_parts.append(f'"{tags_jsonb_col}"->\'tags\' @> %s::jsonb')
         params.append('["continuity"]')

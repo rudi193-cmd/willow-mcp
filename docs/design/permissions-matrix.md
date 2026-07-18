@@ -23,8 +23,8 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 
 | Group | Tools (summary) |
 |-------|-----------------|
-| `store_read` | store_get, store_search, store_list, store_search_all |
-| `store_write` | store_put, store_update, store_delete |
+| `store_read` | store_get, store_search, store_list, store_search_all, store_collections, store_stats |
+| `store_write` | store_put, store_update, store_delete, store_purge_collection |
 | `knowledge_read` | knowledge_search, kb_search, kb_at, kb_startup_continuity |
 | `knowledge_write` | knowledge_ingest, kb_ingest, kb_journal, kb_promote |
 | `task_queue` | task_submit, task_status, task_list |
@@ -33,9 +33,12 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 | `orchestrator` | Desk + dispatch + context + fleet read + limited store/kb read |
 | `fleet_read` | fleet_status, fleet_health |
 | `context` | context_save, context_get, context_list, context_expire |
+| `gap_write` | gap_log, gap_resolve, gap_delete |
+| `gap_purge` | gap_purge_topic (bulk, fleet-shared — its own opt-in line) |
 | `schema_admin` | schema_confirm_mapping |
 | `audit` | receipts_tail |
-| `full_access` | All gated tools except `task_net` |
+| `whoami` | *(ungated — like `diagnostic_summary`, always answers about your own manifest)* |
+| `full_access` | All gated tools **except** the two egress lines (`task_net`, `integration_call`). Includes the store/gap/specialist reads and the purge tools |
 
 `diagnostic_summary` is intentionally **ungated** (self-check must work when manifest is broken).
 

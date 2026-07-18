@@ -124,6 +124,7 @@ FRIENDLY_LABELS: dict[str, str] = {
     "audit": "See its own activity log",
     "gap_read": "See open questions",
     "gap_write": "Log and answer open questions",
+    "gap_purge": "Bulk-clear a whole topic of open questions",
     "gap_promote": "Make an answer official knowledge",
     "schema_admin": "Configure database field mapping",
     "full_access": "Full access to everything",

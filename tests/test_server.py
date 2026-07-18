@@ -1490,9 +1490,37 @@ def test_gap_purge_topic_requires_confirm(app_id):
     assert len(server.gap_list(app_id=app_id, topic="pt_confirm")) == 1  # untouched
 
 
-def test_gap_purge_topic_requires_gap_write(tmp_path, monkeypatch):
+def test_gap_purge_topic_needs_its_own_group_not_gap_write(tmp_path, monkeypatch):
+    from willow_mcp import gate
+    # bulk cross-app purge is its own opt-in line, NOT folded into gap_write
+    assert "gap_purge_topic" not in gate.PERMISSION_GROUPS["gap_write"]
+    assert "gap_purge_topic" in gate.PERMISSION_GROUPS["gap_purge"]
+    assert "gap_purge_topic" in gate.PERMISSION_GROUPS["full_access"]
+
     apps_root = tmp_path / "mcp_apps"
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
-    app = _write_app(apps_root, "gapreader2", {"permissions": ["gap_read"]})
-    res = server.gap_purge_topic(app_id=app, topic="x", confirm="x")
-    assert "error" in res and "denied" in res["error"]
+    # an app with everyday gap_write can no longer bulk-purge
+    writer = _write_app(apps_root, "gapwriter", {"permissions": ["gap_write"]})
+    assert "denied" in server.gap_purge_topic(app_id=writer, topic="x", confirm="x")["error"]
+    # but gap_purge grants it
+    purger = _write_app(apps_root, "gappurger", {"permissions": ["gap_purge"]})
+    res = server.gap_purge_topic(app_id=purger, topic="none_here", confirm="none_here")
+    assert res.get("purged") == 0 and "error" not in res
+
+
+def test_purge_tools_reject_empty_target_cleanly(app_id):
+    # empty name would make the confirm guard degenerate ("" == ""); reject first
+    assert server.store_purge_collection(app_id=app_id, collection="")["error"] == "collection is required"
+    assert server.gap_purge_topic(app_id=app_id, topic="")["error"] == "topic is required"
+
+
+def test_kb_startup_continuity_text_array_tags_uses_any(app_id, monkeypatch):
+    # a native text[] tags column must match by element (= ANY), not ::text LIKE
+    # (Postgres renders {continuity} without quotes, so the quoted pattern misses)
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_NO_TAGS + [("tags", "ARRAY")], canned_rows=[])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.kb_startup_continuity(app_id=app_id, limit=5)
+    where_sql, params = fake.executed[-1]
+    assert '= ANY("tags")' in where_sql
+    assert "::text LIKE" not in where_sql
+    assert "continuity" in params

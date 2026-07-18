@@ -95,7 +95,14 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "gap_list",
     }),
     "gap_write": frozenset({
-        "gap_log", "gap_resolve", "gap_delete", "gap_purge_topic",
+        "gap_log", "gap_resolve", "gap_delete",
+    }),
+    # Bulk-purging a whole topic hits the FLEET-SHARED gaps backlog across every
+    # app, not just the caller's own — a more consequential act than logging,
+    # resolving, or deleting one gap, so it's its own opt-in line rather than
+    # folded into gap_write (same reasoning as gap_promote / schema_admin).
+    "gap_purge": frozenset({
+        "gap_purge_topic",
     }),
     "integration_read": frozenset({
         "integration_list", "integration_status",
