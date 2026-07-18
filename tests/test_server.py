@@ -1295,3 +1295,69 @@ def test_egress_exemption_is_per_tool_not_blanket(exempt_app_id):
     listed = server.store_list(app_id=exempt_app_id, collection="per_tool")
     assert secret not in str(listed)
     assert "[REDACTED:aws_access_key_id]" in str(listed)
+
+
+# ── store_collections + whoami (dogfood tools) ──────────────────────────────
+
+def _write_app(apps_root, name, manifest):
+    import os
+    d = os.path.join(str(apps_root), name)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, "manifest.json"), "w") as f:
+        f.write(json.dumps(manifest))
+    return name
+
+
+def test_store_collections_lists_scoped_collections(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app = _write_app(apps_root, "sc_app",
+                     {"permissions": ["full_access"], "store_scope": ["sc_uniq_*"]})
+    server.store_put(app_id=app, collection="sc_uniq_a", record={"v": 1})
+    server.store_put(app_id=app, collection="sc_uniq_b", record={"v": 2})
+
+    result = server.store_collections(app_id=app)
+    # store_scope confines the listing to this app's own collections, so the
+    # shared test store's other collections don't leak in.
+    assert set(result["collections"]) == {"sc_uniq_a", "sc_uniq_b"}
+    assert result["count"] == 2
+    assert result["store_scope"] == ["sc_uniq_*"]
+
+
+def test_store_collections_requires_store_read(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app = _write_app(apps_root, "noread", {"permissions": ["knowledge_read"]})
+    result = server.store_collections(app_id=app)
+    assert "error" in result and "denied" in result["error"]
+
+
+def test_whoami_reports_effective_permissions(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app = _write_app(apps_root, "wapp", {
+        "permissions": ["store_read"],
+        "role": "reader",
+        "store_scope": ["w_*"],
+        "deny_tools": ["store_search_all"],
+    })
+    w = server.whoami(app_id=app)
+    assert w["app_id"] == "wapp"
+    assert w["role"] == "reader"
+    assert w["store_scope"] == ["w_*"]
+    assert w["permissions"] == ["store_read"]
+    assert "store_get" in w["tools_allowed"]
+    # deny_tools is subtracted from the effective set
+    assert "store_search_all" not in w["tools_allowed"]
+    assert w["deny_tools"] == ["store_search_all"]
+
+
+def test_whoami_is_ungated_and_answers_for_missing_manifest():
+    w = server.whoami(app_id="ghost-app-xyz")
+    assert w["app_id"] == "ghost-app-xyz"
+    assert w["error"] == "no_manifest"
+
+
+def test_whoami_requires_an_app_id():
+    w = server.whoami(app_id="")
+    assert w["error"] == "no_app_id"

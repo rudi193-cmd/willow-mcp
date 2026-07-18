@@ -69,6 +69,7 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `store_search` | Multi-keyword AND search in a collection |
 | `store_delete` | Soft-delete a record by `record_id` |
 | `store_search_all` | Search across all collections |
+| `store_collections` | List the SOIL collections you can see (narrowed to your `store_scope`) — learn the collection names without running a search |
 | `knowledge_ingest` | Add a knowledge atom (requires a confirmed schema mapping — see `schema_confirm_mapping`) |
 | `knowledge_search` | Multi-keyword search in the Postgres knowledge base |
 | `kb_at` | Fetch a single knowledge atom by ID |
@@ -104,6 +105,7 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `integration_status` | Offline readiness readout for one adapter — live/stub, credential presence, and whether the egress gate would pass. No network call |
 | `integration_call` | Call an external API through a registered adapter — behind the three-key egress gate, keyed on `integration_net` (own line, never implied by `task_net` or `full_access`) |
 | `receipts_tail` | Read your own most-recent tool-call receipts — a self-audit trail scoped to your `app_id` |
+| `whoami` | Report your own identity and effective permissions — app_id, role, permission groups, the resolved set of tools you can call (minus `deny_tools`), and your `store_scope`. Ungated, like `diagnostic_summary` |
 | `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/worker/consent/egress-lease/env health, with a verdict and named fixes. Ungated — see below |
 
 ### Egress needs three keys

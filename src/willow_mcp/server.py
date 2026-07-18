@@ -586,6 +586,20 @@ def store_search_all(app_id: str, query: str) -> list:
     return _store.search_all(query, scope=gate.store_scope(app_id))
 
 
+@mcp.tool()
+@_guarded("store_collections")
+def store_collections(app_id: str) -> dict:
+    """List the SOIL collections you can see — every collection under the store,
+    narrowed to your `store_scope` if your manifest sets one. Answers "what's in
+    the store" without running a search (store_list needs a collection name;
+    this is how you learn the names). Returns the collection names, a count, and
+    the scope that was applied (null = unrestricted within this store)."""
+    from . import gate
+    scope = gate.store_scope(app_id)
+    names = _store.list_collections(scope=scope)
+    return {"collections": names, "count": len(names), "store_scope": scope}
+
+
 # ── Knowledge tools ────────────────────────────────────────────────────────────
 
 def _knowledge_ingest_core(
@@ -2286,6 +2300,47 @@ def _collapse_home(obj):
     if isinstance(obj, list):
         return [_collapse_home(v) for v in obj]
     return obj
+
+
+@mcp.tool()
+def whoami(app_id: str = "") -> dict:
+    """Report who you are and what you may do: your app_id, role, the permission
+    groups your manifest grants, the resolved set of tools you can actually call
+    (group expansion minus any deny_tools), your store_scope, and whether you're
+    a human-only seat. Read-only and self-scoped — your own manifest, never
+    another identity's. Ungated, like diagnostic_summary, so it still answers
+    when your manifest is empty or missing (it says exactly that)."""
+    from . import gate
+    if _SERVE_MODE:
+        bound, err = _resolve_serve_identity()
+        if err:
+            return err
+        app_id = bound or ""
+    if not app_id:
+        return {"error": "no_app_id",
+                "detail": "no app_id supplied — pass the app_id you call willow-mcp with"}
+    manifest = gate._load_manifest(app_id)
+    if manifest is None:
+        return {"app_id": app_id, "error": "no_manifest",
+                "detail": f"no manifest at {gate._apps_root()}/{app_id}/manifest.json "
+                          "— every call is denied"}
+    perms = manifest.get("permissions", []) or []
+    allowed: set = set()
+    for p in perms:
+        g = gate.PERMISSION_GROUPS.get(p)
+        allowed.update(g if g is not None else {p})
+    deny = manifest.get("deny_tools") or []
+    if isinstance(deny, list):
+        allowed -= set(deny)
+    return {
+        "app_id": app_id,
+        "role": manifest.get("role", ""),
+        "human_only": bool(manifest.get("human_only", False)),
+        "permissions": perms,
+        "tools_allowed": sorted(allowed),
+        "deny_tools": deny if isinstance(deny, list) else [],
+        "store_scope": manifest.get("store_scope"),
+    }
 
 
 @mcp.tool()
