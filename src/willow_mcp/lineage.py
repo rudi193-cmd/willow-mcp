@@ -1,64 +1,94 @@
-"""Lineage — the story of *this* willow, as queryable atoms.
+"""Lineage — the story of *this* willow, as queryable atoms and edges.
 
 Agents dropped into a running willow keep asking the same class of question:
 "where did this come from, what was here before, why is it this way." A plain
 knowledge record answers "what is true"; a lineage atom answers **provenance** —
-origin, rationale, and supersession history — so an agent can act competently
-instead of re-deriving intent from scratch.
+origin, rationale, and the typed relationships to what came before.
 
 The MECHANISM is portable (every willow instance fills it with its OWN story);
-the CONTENT is not (willow's specific history ships, if at all, as a separate
-seed/lore pack, kept out of the agent-neutral base). This module is the
-mechanism: a thin lineage graph over one SOIL collection, with two verbs —
-`record` (write an atom) and `why` (answer the question, returning the chain,
-not a blob).
+the CONTENT is not (willow's specific history, if it ships at all, is a separate
+seed/lore pack kept out of the agent-neutral base).
 
-An atom (stored as the SOIL record `data`, keyed by its own stable slug id):
+Two layers, split deliberately after seeing willow's own 647k-edge
+`knowledge_edges` graph (which is a `{from, to, relation, context}` triple store
+with an open relation vocabulary — `explains`, `precedes`, `implements`,
+`depends_on`, …):
 
-    id            stable handle, e.g. "corpus-lens-dual-backend"
-    title         one line
-    rationale     WHY it exists / why this way  ← the load-bearing field
-    origin        where it came from (a session, a commit, a prior system)
-    authority     who or what decided
-    supersedes    [ids] this atom replaces (older decisions)
-    superseded_by [ids] that later replaced THIS one (kept current automatically)
-    evidence      [citations] — a PR, a commit, a file, a session
-    tags          [str]
+  * NODES — the disciplined part `knowledge_edges` does NOT provide: an atom with
+    rationale, evidence, authority, and the cite-or-refuse rule. Stored in the
+    `lineage` collection, keyed by a stable slug id.
+  * EDGES — the SAME shape willow already proved, but in our OWN `lineage_edges`
+    collection (not the vault's, so the base stays portable and we never write
+    into inherited personal data). A relationship is a row
+    `{from, to, relation, context}`; DIRECTION IS QUERIED, never stored twice —
+    "is X current?" is "does any edge point `to: X` with `relation: supersedes`?",
+    which cannot drift the way a hand-kept `superseded_by` array can.
 
-The one discipline that keeps this from rotting into self-congratulatory lore:
-every atom must answer a question an agent will actually ask (a non-empty
-`rationale`) AND cite something (at least one `evidence` item). An atom that
-can't cite is a story, not memory — `record` refuses it.
+Three relations are traversed by `why`, each earning its place because it makes
+`why` render differently AND an agent act differently:
+
+    supersedes     B replaces A  → an agent must NOT follow the superseded atom
+    derived_from   B came from A, both still valid → answers "where from" WITHOUT
+                   falsely retiring A (the distinction a single `supersedes` edge
+                   would collapse — and did, in the first prototype)
+    motivated_by   B exists because of some friction/decision (may point at a gap
+                   id, another atom, or an external node) → answers "why now"
+
+The relation vocabulary is open (edges may carry any relation), but these three
+are what the provenance verbs read.
+
+Discipline that keeps this from rotting into self-congratulatory lore: an atom
+must answer a question an agent will actually ask (a non-empty `rationale`) AND
+cite something (at least one `evidence` item). An atom that can't cite is a
+story, not memory — `record` refuses it.
 """
 from __future__ import annotations
 
 from typing import Optional
 
-COLLECTION = "lineage"
+NODES = "lineage"
+EDGES = "lineage_edges"
 
-
-def _strip_meta(record: dict) -> dict:
-    """Drop the Store's injected _id/_created/... keys so a re-write persists only
-    the atom's own fields (the meta keys are re-injected on the next read)."""
-    return {k: v for k, v in record.items() if not k.startswith("_")}
+SUPERSEDES = "supersedes"
+DERIVED_FROM = "derived_from"
+MOTIVATED_BY = "motivated_by"
+_TRAVERSED = (SUPERSEDES, DERIVED_FROM, MOTIVATED_BY)
 
 
 class Lineage:
-    """A provenance graph over one SOIL collection. Uses the atom's slug as the
-    Store record id, so `supersedes`/`superseded_by` references ARE record ids —
-    no second index to keep in sync."""
+    """Provenance as nodes (`lineage`) plus typed directional edges
+    (`lineage_edges`). The atom's slug is its Store record id, so an edge's
+    `from`/`to` are just those slugs (or any external node id — the edge store
+    enforces no referential integrity, exactly like willow's own edge graph)."""
 
-    def __init__(self, store, collection: str = COLLECTION):
+    def __init__(self, store, nodes: str = NODES, edges: str = EDGES):
         self.store = store
-        self.collection = collection
+        self.collection = nodes      # node collection (kept name `collection`
+        self.edges = edges           # for the server's collection_permitted check)
+
+    # ── edge primitives ──────────────────────────────────────────────────────
+    def _edge_id(self, frm: str, relation: str, to: str) -> str:
+        # composite id → re-recording the same edge is idempotent (no dupes)
+        return f"{frm}::{relation}::{to}"
+
+    def _put_edge(self, frm: str, to: str, relation: str, context: str = "") -> None:
+        self.store.put(self.edges,
+                       {"from": frm, "to": to, "relation": relation, "context": context or ""},
+                       record_id=self._edge_id(frm, relation, to))
+
+    def _all_edges(self) -> list:
+        # The lineage edge set is this willow's OWN provenance — small (not the
+        # vault's 647k). A full read is fine at this scale; if it ever grows,
+        # this is the one place to add a from/to index.
+        return self.store.all(self.edges)
 
     # ── write ────────────────────────────────────────────────────────────────
     def record(self, id: str, title: str, rationale: str, origin: str = "",
-               authority: str = "", supersedes: Optional[list] = None,
-               evidence: Optional[list] = None, tags: Optional[list] = None) -> dict:
-        supersedes = list(supersedes or [])
+               authority: str = "", evidence: Optional[list] = None,
+               tags: Optional[list] = None, supersedes: Optional[list] = None,
+               derived_from: Optional[list] = None, motivated_by: Optional[list] = None,
+               edge_context: str = "") -> dict:
         evidence = list(evidence or [])
-        tags = list(tags or [])
         if not id or not id.strip():
             return {"error": "id_required", "detail": "a lineage atom needs a stable slug id"}
         if not rationale or not rationale.strip():
@@ -69,90 +99,100 @@ class Lineage:
                     "detail": "cite at least one source (PR / commit / file / session) — "
                               "an atom that can't cite is lore, not memory"}
 
-        atom = {
-            "id": id, "title": title or id, "rationale": rationale.strip(),
-            "origin": origin, "authority": authority,
-            "supersedes": supersedes, "superseded_by": [],
-            "evidence": evidence, "tags": tags,
-        }
-        # Re-recording the same slug corrects in place, but must not drop the
-        # supersession pointers later atoms have already added to it.
-        existing = self.store.get(self.collection, id)
-        if existing:
-            atom["superseded_by"] = existing.get("superseded_by", [])
-        self.store.put(self.collection, atom, record_id=id)
+        # The node carries NO edge arrays — relationships live in `lineage_edges`.
+        node = {"id": id, "title": title or id, "rationale": rationale.strip(),
+                "origin": origin, "authority": authority,
+                "evidence": evidence, "tags": list(tags or [])}
+        self.store.put(self.collection, node, record_id=id)
 
-        # Patch each predecessor so the graph is walkable both directions and a
-        # `why` on the old atom knows it is no longer current.
-        patched = []
-        missing = []
-        for pid in supersedes:
-            pred = self.store.get(self.collection, pid)
-            if pred is None:
-                missing.append(pid)
-                continue
-            sb = set(pred.get("superseded_by", []))
-            if id not in sb:
-                sb.add(id)
-                clean = _strip_meta(pred)
-                clean["superseded_by"] = sorted(sb)
-                self.store.update(self.collection, pid, clean)
-                patched.append(pid)
+        written = []
+        for relation, targets in ((SUPERSEDES, supersedes),
+                                  (DERIVED_FROM, derived_from),
+                                  (MOTIVATED_BY, motivated_by)):
+            for t in (targets or []):
+                if not t:
+                    continue
+                self._put_edge(id, t, relation, edge_context)
+                written.append({"relation": relation, "to": t})
         out = {"id": id, "recorded": True}
-        if patched:
-            out["superseded_marked"] = patched
-        if missing:
-            out["supersedes_unknown"] = missing   # named, not hidden
+        if written:
+            out["edges"] = written
         return out
 
+    def link(self, frm: str, to: str, relation: str, context: str = "") -> dict:
+        """Add a single edge without (re)writing a node — e.g. mark an atom
+        `motivated_by` a gap discovered after the fact. Relation is free-form; the
+        provenance verbs read supersedes / derived_from / motivated_by."""
+        if not frm or not to or not relation:
+            return {"error": "from_to_relation_required"}
+        self._put_edge(frm, to, relation, context)
+        return {"linked": {"from": frm, "to": to, "relation": relation}}
+
     # ── query ────────────────────────────────────────────────────────────────
-    def _resolve(self, query: str) -> Optional[dict]:
-        """An exact slug wins; otherwise full-text search the collection and
-        prefer a CURRENT atom (not yet superseded) over an archived one."""
+    def _resolve(self, query: str, superseded: Optional[set] = None) -> Optional[dict]:
+        """Exact slug wins; else full-text search the node collection, preferring
+        a CURRENT atom (nothing supersedes it) over an archived one."""
         atom = self.store.get(self.collection, query)
         if atom is not None:
             return atom
         hits = self.store.search(self.collection, query)
         if not hits:
             return None
-        hits.sort(key=lambda a: (bool(a.get("superseded_by")), a.get("_id", "")))
+        superseded = superseded if superseded is not None else self._superseded_set()
+        hits.sort(key=lambda a: (a.get("_id") in superseded, a.get("_id", "")))
         return hits[0]
+
+    def _superseded_set(self, edges: Optional[list] = None) -> set:
+        edges = edges if edges is not None else self._all_edges()
+        return {e["to"] for e in edges if e.get("relation") == SUPERSEDES and e.get("to")}
+
+    def _node_summary(self, node_id: str) -> dict:
+        n = self.store.get(self.collection, node_id)
+        if n is None:
+            return {"id": node_id, "title": "(not a recorded atom)", "external": True}
+        return {"id": node_id, "title": n.get("title", ""), "rationale": n.get("rationale", "")}
+
+    def _walk_supersedes(self, start: str, edges: list) -> list:
+        """Outgoing `supersedes` edges, transitively → the decision history
+        (what this atom replaced, and what THAT replaced). Cycle-guarded."""
+        chain, seen = [], set()
+        frontier = [e["to"] for e in edges if e.get("from") == start and e.get("relation") == SUPERSEDES]
+        while frontier:
+            nid = frontier.pop(0)
+            if nid in seen:
+                continue
+            seen.add(nid)
+            chain.append(self._node_summary(nid))
+            frontier.extend(e["to"] for e in edges
+                            if e.get("from") == nid and e.get("relation") == SUPERSEDES)
+        return chain
 
     def why(self, query: str) -> dict:
         q = (query or "").strip()
         if not q:
             return {"error": "query_required"}
-        atom = self._resolve(q)
+        edges = self._all_edges()
+        superseded = self._superseded_set(edges)
+        atom = self._resolve(q, superseded)
         if atom is None:
             return {"query": q, "matched": None,
                     "answer": f"no lineage atom found for {q!r} — nothing recorded its provenance yet"}
-        # Normalize: a search hit lacks the Store's _created meta that get() injects,
-        # so re-fetch by id and the "recorded_at" is consistent however we matched.
+        # A search hit lacks the _created meta that get() injects; re-fetch by id
+        # so `recorded_at` is consistent however the atom was matched.
         atom = self.store.get(self.collection, atom["_id"]) or atom
+        aid = atom["_id"]
 
-        # Walk `supersedes` backwards for the decision history (older → what it
-        # replaced), breadth-first, cycle-guarded.
-        chain = []
-        seen = set()
-        frontier = list(atom.get("supersedes", []))
-        while frontier:
-            pid = frontier.pop(0)
-            if pid in seen:
-                continue
-            seen.add(pid)
-            pred = self.store.get(self.collection, pid)
-            if pred is None:
-                chain.append({"id": pid, "title": "(unknown)", "rationale": "", "missing": True})
-                continue
-            chain.append({"id": pid, "title": pred.get("title", ""),
-                          "rationale": pred.get("rationale", "")})
-            frontier.extend(pred.get("supersedes", []))
-
-        superseded_by = atom.get("superseded_by", [])
+        out_edges = [e for e in edges if e.get("from") == aid]
+        superseded_by = [e["from"] for e in edges
+                         if e.get("to") == aid and e.get("relation") == SUPERSEDES]
+        chain = self._walk_supersedes(aid, edges)
+        derived_from = [self._node_summary(e["to"]) for e in out_edges
+                        if e.get("relation") == DERIVED_FROM]
+        motivated_by = [e["to"] for e in out_edges if e.get("relation") == MOTIVATED_BY]
         is_current = not superseded_by
         return {
             "query": q,
-            "matched": atom["_id"],
+            "matched": aid,
             "atom": {
                 "id": atom.get("id"), "title": atom.get("title"),
                 "rationale": atom.get("rationale"), "origin": atom.get("origin"),
@@ -162,15 +202,22 @@ class Lineage:
             },
             "supersedes_chain": chain,
             "superseded_by": superseded_by,
-            "answer": self._synthesize(atom, chain, superseded_by),
+            "derived_from": derived_from,
+            "motivated_by": motivated_by,
+            "answer": self._synthesize(atom, chain, superseded_by, derived_from, motivated_by),
         }
 
     @staticmethod
-    def _synthesize(atom: dict, chain: list, superseded_by: list) -> str:
+    def _synthesize(atom: dict, chain: list, superseded_by: list,
+                    derived_from: list, motivated_by: list) -> str:
         title = atom.get("title") or atom.get("id")
         parts = [f"{title} exists because {atom.get('rationale')}"]
         if atom.get("origin"):
             parts.append(f"It came from {atom['origin']}")
+        if derived_from:
+            parts.append("Derived from: " + "; ".join(d["id"] for d in derived_from))
+        if motivated_by:
+            parts.append("Motivated by: " + "; ".join(motivated_by))
         if chain:
             parts.append("It replaced: " + "; ".join(c["id"] for c in chain))
         if superseded_by:
@@ -184,13 +231,13 @@ class Lineage:
 
     # ── list ───────────────────────────────────────────────────────────────────
     def list_atoms(self, current_only: bool = False) -> list:
-        rows = self.store.all(self.collection)
+        superseded = self._superseded_set()
         out = []
-        for a in rows:
-            if current_only and a.get("superseded_by"):
+        for a in self.store.all(self.collection):
+            aid = a.get("id")
+            if current_only and aid in superseded:
                 continue
-            out.append({"id": a.get("id"), "title": a.get("title"),
-                        "is_current": not a.get("superseded_by"),
-                        "tags": a.get("tags", [])})
+            out.append({"id": aid, "title": a.get("title"),
+                        "is_current": aid not in superseded, "tags": a.get("tags", [])})
         out.sort(key=lambda r: r["id"])
         return out

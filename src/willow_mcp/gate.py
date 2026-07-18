@@ -120,7 +120,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "lineage_why", "lineage_list",
     }),
     "lineage_write": frozenset({
-        "lineage_record",
+        "lineage_record", "lineage_link",
     }),
     "integration_read": frozenset({
         "integration_list", "integration_status",
@@ -179,7 +179,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "gap_log", "gap_list", "gap_resolve", "gap_delete", "gap_purge_topic",
         "gap_promote",
         # Lineage / provenance ("story of this willow")
-        "lineage_why", "lineage_list", "lineage_record",
+        "lineage_why", "lineage_list", "lineage_record", "lineage_link",
         # Integrations (read-only ledger; integration_call stays own-line)
         "integration_list", "integration_status",
     }),

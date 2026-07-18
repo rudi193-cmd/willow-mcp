@@ -12,19 +12,26 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 ### Added
 - **Lineage / provenance atoms** (`lineage.py`, prototype) — a queryable "story
   of this willow" for the user-facing base store. Agents dropped into a running
-  willow keep asking where something came from, what was here before, and why
-  it is this way; a plain knowledge record answers "what is true", a lineage
-  atom answers **provenance** (origin, rationale, supersession history). Three
-  tools: `lineage_record` (write; `rationale` and at least one `evidence`
-  citation are REQUIRED — an atom that can't cite is lore, not memory, and is
-  refused), `lineage_why` (answer "why does X exist / where did X come from",
-  returning the supersession chain and current-vs-superseded status, not a
-  blob), and `lineage_list`. Recording a supersession patches the predecessor's
-  back-pointer both directions so history stays walkable and the old atom knows
-  it is no longer current. New `lineage_read`/`lineage_write` permission groups
-  (both in `full_access`). The MECHANISM is agent-neutral and ships in the base;
-  any one willow's specific story is content it records into its own store, not
-  baked in.
+  willow keep asking where something came from, what was here before, and why it
+  is this way; a plain knowledge record answers "what is true", a lineage atom
+  answers **provenance**. Split into two layers, modeled on willow's own
+  `{from,to,relation,context}` edge graph: NODES are disciplined atoms
+  (rationale, evidence, authority) in the `lineage` collection; RELATIONSHIPS are
+  typed directional EDGES in `lineage_edges` (willow-mcp's own collection, not the
+  vault's inherited graph, so the base stays portable), and direction is QUERIED,
+  never stored twice — "is X current?" is "does any edge point `to: X` with
+  `relation: supersedes`?", which cannot drift the way a hand-kept back-pointer
+  can. Three traversed relations, each earning its place by changing what `why`
+  returns and what an agent does: `supersedes` (replaces — the old atom becomes
+  non-current), `derived_from` (came from but did NOT retire — both stay valid),
+  `motivated_by` (the friction behind it; may point at a gap id or external
+  node). Tools: `lineage_record`, `lineage_link` (add one edge post-hoc),
+  `lineage_why` (returns the atom plus its supersedes chain, derived_from, and
+  motivated_by — the lineage, not a blob), `lineage_list`. `record` REQUIRES a
+  non-empty rationale and at least one evidence citation — an atom that can't
+  cite is lore, not memory, and is refused. New `lineage_read`/`lineage_write`
+  groups (both in `full_access`). The MECHANISM is agent-neutral and ships in the
+  base; any one willow's specific story is content it records into its own store.
 - **Store/gap introspection & cleanup tools** — `whoami` (your own manifest and
   effective permissions; ungated like `diagnostic_summary`), `store_collections`
   and `store_stats` (list / count the SOIL collections in your `store_scope`

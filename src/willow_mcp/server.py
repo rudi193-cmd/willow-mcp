@@ -686,6 +686,16 @@ def store_stats(app_id: str) -> dict:
 
 # ── Lineage / provenance tools ─────────────────────────────────────────────────
 
+def _lineage_denied(app_id: str):
+    """Recording touches both the node and edge collections; querying reads
+    both. Require permission on each rather than only the node collection."""
+    from . import gate
+    for col in (_lineage.collection, _lineage.edges):
+        if not gate.collection_permitted(app_id, col):
+            return _collection_denied(app_id, col)
+    return None
+
+
 @mcp.tool()
 @_guarded("lineage_record")
 def lineage_record(
@@ -695,26 +705,48 @@ def lineage_record(
     rationale: str,
     origin: str = "",
     authority: str = "",
-    supersedes: Optional[list] = None,
     evidence: Optional[list] = None,
     tags: Optional[list] = None,
+    supersedes: Optional[list] = None,
+    derived_from: Optional[list] = None,
+    motivated_by: Optional[list] = None,
 ) -> dict:
     """Record a provenance atom — the "story of this willow" as memory an agent
     can query later. Answers the questions agents keep asking: where did this
     come from, why is it this way, what was here before. `rationale` (the WHY)
     and at least one `evidence` citation (a PR / commit / file / session) are
     REQUIRED — an atom that can't cite is lore, not memory, and is refused.
-    `supersedes` links older atoms this replaces; their back-pointers are patched
-    so history stays walkable and the old atom knows it is no longer current.
-    Corrections re-record the same `id` in place (append-in-spirit: the
-    supersession chain preserves what changed). Stored in the `lineage`
-    collection; confined to your store_scope like every store write."""
-    from . import gate
-    if not gate.collection_permitted(app_id, _lineage.collection):
-        return _collection_denied(app_id, _lineage.collection)
+
+    Relationships to other atoms are typed EDGES (stored in `lineage_edges`, the
+    same {from,to,relation,context} shape willow's own knowledge graph uses), and
+    direction is QUERIED, not stored twice:
+      - `supersedes`   — atoms this REPLACES (the old ones become non-current)
+      - `derived_from` — atoms this CAME FROM but did NOT retire (both stay valid)
+      - `motivated_by` — the friction/decision behind it (may be a gap id or an
+                         external node, not only another atom)
+    Corrections re-record the same `id` in place; edges persist independently.
+    Confined to your store_scope like every store write."""
+    denied = _lineage_denied(app_id)
+    if denied:
+        return denied
     return _lineage.record(id=id, title=title, rationale=rationale, origin=origin,
-                           authority=authority, supersedes=supersedes,
-                           evidence=evidence, tags=tags)
+                           authority=authority, evidence=evidence, tags=tags,
+                           supersedes=supersedes, derived_from=derived_from,
+                           motivated_by=motivated_by)
+
+
+@mcp.tool()
+@_guarded("lineage_link")
+def lineage_link(app_id: str, from_id: str, to_id: str, relation: str,
+                 context: str = "") -> dict:
+    """Add one provenance edge without (re)writing a node — e.g. mark an atom
+    `motivated_by` a gap discovered after the fact, or `derived_from` a source
+    you only now connected. `relation` is free-form; the `why` verb reads
+    supersedes / derived_from / motivated_by. Idempotent per (from, relation, to)."""
+    denied = _lineage_denied(app_id)
+    if denied:
+        return denied
+    return _lineage.link(from_id, to_id, relation, context)
 
 
 @mcp.tool()
@@ -722,13 +754,14 @@ def lineage_record(
 def lineage_why(app_id: str, query: str) -> dict:
     """Answer "why does X exist / where did X come from" from recorded lineage.
     Give a slug id or free text; returns the matching atom's rationale, origin,
-    authority, and evidence, PLUS the supersession chain (what it replaced) and
-    whether it is still current or has been superseded — the lineage, not a blob.
-    A plain-language `answer` synthesizes it in one line. This is the verb a
-    curious agent runs before acting on something it didn't build."""
-    from . import gate
-    if not gate.collection_permitted(app_id, _lineage.collection):
-        return _collection_denied(app_id, _lineage.collection)
+    authority, and evidence, PLUS its typed edges — what it supersedes (and
+    whether it is itself still current), what it was derived_from, and what
+    motivated it — the lineage, not a blob. A plain-language `answer` synthesizes
+    it. This is the verb a curious agent runs before acting on something it
+    didn't build."""
+    denied = _lineage_denied(app_id)
+    if denied:
+        return denied
     return _lineage.why(query)
 
 
@@ -737,10 +770,10 @@ def lineage_why(app_id: str, query: str) -> dict:
 def lineage_list(app_id: str, current_only: bool = False) -> list:
     """List recorded lineage atoms (id, title, whether current, tags) — the index
     of "what parts of this willow have a recorded story". Pass current_only=True
-    to hide atoms that later decisions have superseded."""
-    from . import gate
-    if not gate.collection_permitted(app_id, _lineage.collection):
-        return [_collection_denied(app_id, _lineage.collection)]
+    to hide atoms that a later `supersedes` edge has retired."""
+    denied = _lineage_denied(app_id)
+    if denied:
+        return [denied]
     return _lineage.list_atoms(current_only=current_only)
 
 
