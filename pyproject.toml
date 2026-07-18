@@ -23,6 +23,20 @@ dependencies = [
     "kartikeya>=0.0.3,<0.1.0",
 ]
 
+[project.optional-dependencies]
+# The Nest content pipeline (willow_mcp.nest) runs on the stdlib for text, code,
+# JSON, and --llm (local Ollama over urllib). These unlock extra source types —
+# OCR, PDF, and .docx — and the engine degrades gracefully when they are absent,
+# so `pip install willow-mcp` stays lean and `pip install willow-mcp[nest]` opts
+# in. System packages tesseract-ocr and poppler-utils are installed separately.
+nest = [
+    "pytesseract>=0.3.10",
+    "Pillow>=10.0.0",
+    "pdfplumber>=0.10.0",
+    "pdf2image>=1.16.0",
+    "python-docx>=1.2.0",
+]
+
 [project.scripts]
 willow-mcp = "willow_mcp.server:main"
 willow-mcp-init = "willow_mcp.home_init:main"

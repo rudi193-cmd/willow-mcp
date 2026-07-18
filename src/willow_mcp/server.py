@@ -1148,6 +1148,191 @@ def knowledge_ingest(
     return _knowledge_ingest_core(app_id, content, domain=domain, source=source, tags=tags)
 
 
+# ── The Nest — personal-file content pipeline ───────────────────────────────────
+#
+# "Dump your life and let the pigeon figure it out." nest_scan walks a folder,
+# extracts text (OCR/PDF/docx/plaintext), and classifies fragments by meaning
+# into a canonical SQLite Nest DB — the local PII zone. nest_status / nest_digest
+# read it back (digest is the WALLED view over MCP). nest_promote pushes the
+# Nest's *structure* — counts, curated category names, redacted secret kinds,
+# never fragment content — into the knowledge base via the same core write
+# knowledge_ingest uses. The wall (willow_mcp.nest): structure is process
+# (shareable); content is person (walled). See docs/NEST.md.
+
+
+def _nest_db_path(db_path: str) -> Path:
+    """Resolve a Nest DB path, defaulting under $WILLOW_HOME/nest/seed.db."""
+    if db_path:
+        return Path(db_path).expanduser()
+    return paths.willow_home() / "nest" / "seed.db"
+
+
+@mcp.tool()
+@_guarded("nest_scan")
+def nest_scan(
+    app_id: str,
+    folder: str,
+    owner: str = "",
+    db_path: str = "",
+    dry_run: bool = True,
+    use_llm: bool = False,
+    use_embed: bool = True,
+) -> dict:
+    """Walk a drop folder, extract + classify its files, and write a canonical
+    SQLite Nest DB. Returns structure only (counts by source status and fragment
+    type) — never file content.
+
+    dry_run=True (default): classify and report counts WITHOUT writing the DB —
+    inspect what a dump would become before committing it. dry_run=False writes.
+    use_embed uses a local Ollama embedding model when present (falls back to
+    regex offline); use_llm escalates the uncertain tail to a local text/vision
+    model. Nothing leaves the machine; no cloud inference.
+    """
+    import contextlib
+    import io
+
+    from .nest import ingest as _ingest
+
+    src = Path(folder).expanduser()
+    if not src.exists() or not src.is_dir():
+        return {"error": f"folder not found or not a directory: {folder}"}
+
+    db = _nest_db_path(db_path)
+    if not dry_run:
+        db.parent.mkdir(parents=True, exist_ok=True)
+
+    # The engine prints progress/dry-run detail to stdout; on an stdio MCP
+    # transport that would corrupt the protocol, so capture and discard it.
+    sink = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(sink):
+            counts = _ingest.run(
+                folder=src,
+                db_path=db,
+                owner=owner or app_id,
+                dry_run=dry_run,
+                verbose=False,
+                use_llm=use_llm,
+                use_embed=use_embed,
+            )
+    except Exception as e:  # engine failure must not take the server down
+        return {"error": f"nest scan failed: {type(e).__name__}: {e}"}
+
+    return {
+        "status": "ok",
+        "dry_run": dry_run,
+        "db_path": str(db) if not dry_run else None,
+        "counts": counts,
+    }
+
+
+@mcp.tool()
+@_guarded("nest_status")
+def nest_status(app_id: str, db_path: str = "") -> dict:
+    """Counts for a seeded Nest DB — sources by status, fragments by type,
+    topical categories by size. Structure only; no content."""
+    import sqlite3
+
+    from .nest.digest import is_category_name
+
+    db = _nest_db_path(db_path)
+    if not db.exists():
+        return {"error": f"no Nest DB at {db} — run nest_scan first"}
+    try:
+        conn = sqlite3.connect(str(db))
+        q = lambda s: conn.execute(s).fetchall()
+        sources = {r[0]: r[1] for r in q(
+            "select status, count(*) from sources group by 1")}
+        frags = {r[0]: r[1] for r in q(
+            "select fragment_type, count(*) from fragments group by 1")}
+        raw_cats = q(
+            "select label, count(*) from fragments where label!='' and "
+            "fragment_type in ('document','note','receipt') group by 1 order by 2 desc")
+        owner_row = conn.execute("select owner from nest_meta where id=1").fetchone()
+        conn.close()
+    except sqlite3.Error as e:
+        return {"error": f"could not read Nest DB: {e}"}
+    # The wall (same as bridge/digest): a filename-as-label is not a category and
+    # must not surface here — count it as uncategorised instead of naming it.
+    cats = {lbl: n for lbl, n in raw_cats if is_category_name(lbl)}
+    uncategorised = sum(n for lbl, n in raw_cats if not is_category_name(lbl))
+    return {
+        "status": "ok",
+        "owner": owner_row[0] if owner_row else "unknown",
+        "sources": sources,
+        "fragments": frags,
+        "categories": cats,
+        "uncategorised": uncategorised,
+    }
+
+
+@mcp.tool()
+@_guarded("nest_digest")
+def nest_digest(app_id: str, db_path: str = "") -> dict:
+    """A one-page Markdown map of a seeded Nest DB — the WALLED view: category
+    breakdown, discovered clusters, secret *kinds*, and how files were read.
+    Person names, the date timeline, and source filenames are suppressed (they
+    are content, not structure). The full unwalled digest is a local-CLI
+    affordance only; it is never returned over MCP."""
+    from .nest import digest as _digest
+
+    db = _nest_db_path(db_path)
+    if not db.exists():
+        return {"error": f"no Nest DB at {db} — run nest_scan first"}
+    try:
+        md = _digest.build_digest(str(db), wall=True)
+    except Exception as e:
+        return {"error": f"could not build digest: {type(e).__name__}: {e}"}
+    return {"status": "ok", "walled": True, "digest": md}
+
+
+@mcp.tool()
+@_guarded("nest_promote")
+def nest_promote(app_id: str, db_path: str = "", dry_run: bool = False) -> dict:
+    """Promote a Nest's STRUCTURE into the knowledge base. Reads structure-only
+    atoms from bridge.build_bridge — counts, curated category names, and redacted
+    secret kinds, never fragment content, filenames, or person names — and
+    ingests each through the same core write knowledge_ingest uses.
+
+    dry_run=True: return the atoms that WOULD be promoted (safe to inspect —
+    they are structure only) without writing. dry_run=False ingests them."""
+    from .nest import bridge as _bridge
+
+    db = _nest_db_path(db_path)
+    if not db.exists():
+        return {"error": f"no Nest DB at {db} — run nest_scan first"}
+    try:
+        built = _bridge.build_bridge(str(db))
+    except Exception as e:
+        return {"error": f"could not build bridge: {type(e).__name__}: {e}"}
+    atoms = built.get("atoms", [])
+
+    if dry_run:
+        return {"status": "ok", "dry_run": True, "would_promote": len(atoms),
+                "owner": built.get("owner"), "atoms": atoms}
+
+    promoted, errors = [], []
+    for atom in atoms:
+        res = _knowledge_ingest_core(
+            app_id,
+            content=atom.get("summary", ""),
+            domain="nest",
+            source=atom.get("source_id", ""),
+            tags=atom.get("tags"),
+        )
+        if isinstance(res, dict) and res.get("error"):
+            # postgres_unavailable / unconfirmed schema is fatal for the whole
+            # batch — surface it once rather than repeating it per atom.
+            if res["error"] in ("postgres_unavailable",) or "confirm" in res["error"]:
+                return {"error": res["error"], "promoted": len(promoted)}
+            errors.append({"source_id": atom.get("source_id"), "error": res["error"]})
+        else:
+            promoted.append(atom.get("source_id"))
+
+    return {"status": "ok", "dry_run": False, "promoted": len(promoted),
+            "owner": built.get("owner"), "source_ids": promoted, "errors": errors}
+
+
 # ── Gap backlog tools ──────────────────────────────────────────────────────────
 #
 # "What don't we know yet" — a fleet-wide backlog (core/gaps.py), not scoped

@@ -160,6 +160,20 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "schema_admin": frozenset({
         "schema_confirm_mapping",
     }),
+    # The Nest — content-pipeline surface (willow_mcp.nest). Read is the
+    # walled-digest / structure view (no content leaves); write walks a drop
+    # folder into a local SQLite Nest DB and promotes its *structure* (counts,
+    # curated category names, redacted secret kinds — never fragment content)
+    # into the knowledge base. nest_promote is a write that reaches the KB, so
+    # it is gated here rather than folded into knowledge_write: promoting a
+    # whole dump's structure is a more consequential act than one atom ingest,
+    # same reasoning as gap_promote / schema_admin above.
+    "nest_read": frozenset({
+        "nest_status", "nest_digest",
+    }),
+    "nest_write": frozenset({
+        "nest_scan", "nest_promote",
+    }),
     "full_access": frozenset({
         # Core store
         "store_put", "store_get", "store_list", "store_update",
@@ -200,6 +214,8 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "session_bind", "session_reconcile",
         # Integrations (read-only ledger; integration_call stays own-line)
         "integration_list", "integration_status",
+        # The Nest (content pipeline; nest_scan/nest_promote are writes)
+        "nest_status", "nest_digest", "nest_scan", "nest_promote",
     }),
 }
 

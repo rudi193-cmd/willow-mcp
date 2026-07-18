@@ -46,6 +46,22 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
   `register-agent`/`rotate-agent`/`revoke-agent` verbs; a `rotate-agent` CLI is added.
 
 ### Added
+- **The Nest — personal-file content pipeline** (`willow_mcp.nest`, four gated
+  tools: `nest_scan` / `nest_status` / `nest_digest` / `nest_promote`). Walk a
+  drop folder, extract text (OCR/PDF/docx/plaintext), classify fragments by
+  meaning (regex → local-embedding → LLM cascade) into a canonical SQLite Nest
+  DB, and promote its **structure** — counts, curated category names, redacted
+  secret kinds, never content — into the knowledge base. The engine is vendored
+  from `rudi193-cmd/safe-app-store` `apps/nest-seed` (MIT); base install stays
+  dependency-free, `pip install willow-mcp[nest]` unlocks OCR/PDF/docx. New
+  `nest_read`/`nest_write` permission groups (gate.py + tier_policy + gates_panel
+  labels). **The wall** is enforced mechanically: `nest_promote` can reach only
+  the structure-only bridge; a category allowlist keeps filename-labels out of
+  every surface (counted as `uncategorised`, not hidden); `nest_digest` returns a
+  walled view (names/dates/filenames suppressed) over MCP. Held to those claims
+  by `tests/test_nest.py` (incl. `test_bridge_emits_no_content_names_or_filenames`).
+  See [docs/NEST.md](docs/NEST.md). This first cut is the content pipeline; the
+  live drop-folder router is a later step.
 - **Lineage seed pack** (`seed/lineage_willow.py`) — real, cited provenance atoms
   for willow-mcp's own build story (the willow-gate seam: the three holes H1/H2/H3,
   the settled decisions D1–D5, the five phases, the adversarial-review hardening,
