@@ -78,6 +78,22 @@ if [ ! -f "$REPO/.mcp.json" ]; then
 JSON
 fi
 
+# Optional data-vault restore. If WILLOW_VAULT_RESTORE names an executable, run
+# it and adopt any WILLOW_STORE_ROOT / WILLOW_PG_DB it prints on stdout. This is
+# how a persistent data-vault (e.g. a cloned snapshot repo) supplies the real
+# store + knowledge base at session start, without hardcoding any personal vault
+# in this agent-neutral hook — the restore logic lives with the vault. Runs
+# after Postgres is up (the vault may load a dump); best-effort and non-fatal.
+if [ -n "${WILLOW_VAULT_RESTORE:-}" ] && [ -x "${WILLOW_VAULT_RESTORE}" ]; then
+  if _vault_env="$("${WILLOW_VAULT_RESTORE}" 2>>"$WILLOW_HOME/logs/vault-restore.log" || true)"; then
+    while IFS='=' read -r _k _v; do
+      case "$_k" in
+        WILLOW_STORE_ROOT|WILLOW_PG_DB) [ -n "$_v" ] && export "$_k=$_v" ;;
+      esac
+    done <<< "$_vault_env"
+  fi
+fi
+
 # Persist the env for the whole session so the client-spawned MCP server (and
 # any shell you open) inherits it — this is why .mcp.json needs no env block.
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
