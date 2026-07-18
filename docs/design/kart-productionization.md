@@ -7,7 +7,8 @@ as **B-22 Fixed** (`docs/BUGS.md`); engineering detail in `kart-lift-spec.md`
 (stages 1–4 shipped via PRs #35/#36, worker heartbeat as B-26). This doc is
 retained as the direction/decision record. **Still open:** stage 5 — willow-2.0
 migrating off its own `core/kart_*` copy to depend on `kartikeya` (the drift
-window), which lives on the willow-2.0 side, not here.
+window), which lives on the willow-2.0 side, not here. The drift window is now
+**measured** — see §5 for the 22-piece worklist.
 
 Original status (2026-07-08): DIRECTION SET — staged migration, not yet started.
 
@@ -74,7 +75,70 @@ fleet's.
    `diagnostic_summary` so "queued, unattended" is distinguishable from
    "queued, about to run" (the external review's §1).
 
-## 5. Relationship to other work
+## 5. The drift window — measured worklist (2026-07-18)
+
+Stage 5 is willow-2.0 retiring its own `core/kart_*` copy in favour of the
+shipped `kartikeya`. How big is that drift? A read-only pass over the indexed
+corpus (both trees, compared by content-SHA, then true-fork vs. label-collision
+separated by line-set Jaccard ≥ 0.2) puts a number on it: **22 pieces have
+genuinely diverged** between `kartikeya` (canonical) and `willow-2.0/core/kart_*`.
+An earlier count of "33" was inflated by same-name collisions across unrelated
+files (`__init__`, `mark_done`, `stats`, a `kart_timeout` that is a full rewrite,
+not a fork) — those are excluded here.
+
+**Dominant pattern:** kartikeya strips the `willow.fylgja` fleet dependency from
+the sandbox while preserving the logic. The large isolation primitives are
+near-identical (Jaccard > 0.9) apart from the removed `fylgja` import — this §3
+decoupling is *done*, and the diff proves it was surgical, not a rewrite.
+
+Retirement risk falls into three tiers:
+
+**Tier 1 — clean fleet-strip (Jaccard > 0.85; logic intact, only `fylgja`/`core`
+import removed). Safe for willow-2.0 to drop its copy and depend on kartikeya:**
+
+| piece | file | lines | jac |
+|-------|------|------:|----:|
+| `build_bwrap_argv` | sandbox | 146 | .97 |
+| `collect_bind_mounts` | sandbox | 73 | .97 |
+| `kart_env` | sandbox | 110 | .96 |
+| `collect_mcp_trust_ro_overlays` | sandbox | 27 | .92 |
+| `run_shell` | sandbox | 129 | .91 |
+| `scan_bash` | security_scan | 13 | .92 |
+| `_run_one_shell` | execute | 19 | .89 |
+| `venv_candidates`, `willow_python` | pyenv | 27, 12 | .85, .82 |
+
+**Tier 2 — reimplementation (Jaccard < 0.4; size changed because the fleet had
+been *providing* something kartikeya now rebuilds standalone). Verify behaviour
+before willow-2.0 switches:**
+
+| piece | file | lines kart→w2.0 | jac | note |
+|-------|------|:---------------:|----:|------|
+| `execute_task_row` | execute | 70 → 30 | .27 | inlined what `core` provided (doubled) |
+| `load_sandbox_config` | sandbox | 25 → 9 | .29 | fleet loaded config; now standalone |
+| `drain_claimed_tasks` | execute | 31 → 28 | .35 | queue drainer rewritten |
+| `reaper_alignment_warning` | lanes | 12 → 19 | .29 | fleet-liveness reaper reworked |
+
+**Tier 3 — moderate (Jaccard 0.4–0.85; review, tractable):** `run_shell_task`
+(67→94, .65), `check_hook_tamper` (.50), `_parse_task_network_directives` (.50),
+`trim_task_result` (.75), `_hook_tamper_fragment` (.60), `_kart_logs_root` (.50),
+`willow_home` / `willow_home_alias` (.20, .50), `venv_bin_dirs` (.78).
+
+**Security read.** The diverged set is concentrated in the sandbox/isolation core
+(bwrap argv, bind mounts, trust-ro overlays, hook-tamper, network-directive
+parsing) — but those are almost all Tier 1, decoupled by surgical `fylgja`
+removal with logic preserved. The isolation guarantees were unplugged from the
+fleet, not rewritten. The **one** Tier-2 piece with isolation blast-radius is
+`load_sandbox_config` (it feeds the sandbox): confirm the standalone config load
+enforces the same mount/network policy before relying on it.
+
+**Verdict for stage 5:** `kartikeya` is canonical. Tier 1 → willow-2.0 drops its
+copy as-is. Tier 2/3 → merge-with-review, not a blind swap; each reimplemented
+piece must be shown to preserve the guarantee it replaced (especially
+`load_sandbox_config`). Method caveat: line-set Jaccard is coarse — treat this as
+the review *worklist*, not the review itself; witness each piece at merge time.
+Provenance: `willow_compose` store record `kart_migration/f9cdc57f`.
+
+## 6. Relationship to other work
 
 - `skills/kart-tasks.md` already documents the *current* (worker-required)
   reality and the network-permission footguns (B-19/B-21), with the worker-run
