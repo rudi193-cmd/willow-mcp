@@ -21,10 +21,17 @@ import os
 ORCHESTRATOR_APP_ID = "willow"
 
 # Tools that advance fleet work on behalf of the operator — never agent-autonomous.
+# frank_append and envelope_apply mutate the shared governance chain; a process
+# claiming app_id=willow must be a human-attested orchestrator host to run them,
+# so a prompt-injected agent forging the willow seat cannot append or cite as the
+# orchestrator (Loki B5FB7E2B §4.2). A non-willow app still reaches them only
+# through its own capability grant; this boundary blocks the willow-seat bypass.
 ORCHESTRATOR_WRITE_TOOLS = frozenset({
     "dispatch_send",
     "verify_handoff",
     "agent_clear",
+    "frank_append",
+    "envelope_apply",
 })
 
 
@@ -43,6 +50,33 @@ def human_orchestrator_attested() -> bool:
         "true",
         "yes",
     )
+
+
+def require_operator_terminal() -> None:
+    """Fail-closed operator-presence gate for local mutation CLIs (Loki §4.3).
+
+    ``sys.stdin.isatty()`` alone is forgeable — an agent process can allocate a
+    pty and pass it. This adds two checks a sandboxed or re-parented agent cannot
+    satisfy: it must not be running inside the Kart sandbox, and its controlling
+    terminal must be owned by the real invoking user. An agent draining tasks has
+    no operator-owned controlling tty, so it fails closed here even if it fakes
+    isatty().
+    """
+    import sys
+
+    if os.environ.get("WILLOW_IN_KART", "").strip():
+        raise PermissionError("mutation refused inside the Kart sandbox")
+    if not sys.stdin.isatty():
+        raise PermissionError("mutation requires an interactive operator terminal")
+    try:
+        terminal = os.ttyname(sys.stdin.fileno())
+        owner_uid = os.stat(terminal).st_uid
+    except OSError as exc:
+        raise PermissionError(f"operator terminal not verifiable: {exc}")
+    if owner_uid != os.getuid():
+        raise PermissionError(
+            "controlling terminal is not owned by the invoking operator"
+        )
 
 
 def orchestrator_write_denial(app_id: str, tool_name: str, *, serve_mode: bool) -> str | None:

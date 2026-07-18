@@ -18,6 +18,10 @@ def roster_path() -> Path:
 
 
 def load_roster() -> dict:
+    # Authenticate the roster's trust root before reconciling from it (§4.6).
+    from .paths import trusted_read
+
+    trusted_read(roster_path())
     data = json.loads(roster_path().read_text(encoding="utf-8"))
     agents = data.get("agents")
     if not isinstance(agents, dict):
@@ -35,6 +39,11 @@ def load_roster() -> dict:
 
 def _id(name: str) -> str:
     return hashlib.sha256(f"willow-fleet:{name}".encode()).hexdigest()[:8].upper()
+
+
+def _roster_digest() -> str:
+    """SHA-256 of the on-disk roster bytes — the source pin for §4.7's recheck."""
+    return hashlib.sha256(roster_path().read_bytes()).hexdigest()
 
 
 def db_rows(pg) -> list[dict]:
@@ -116,11 +125,18 @@ def status(pg) -> dict:
 
 
 def sync(pg) -> dict:
-    if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
-        raise PermissionError("roster sync requires an operator terminal")
+    # Non-forgeable operator boundary (§4.3) replaces the bare isatty() gate.
+    from .human_session import require_operator_terminal
+
+    require_operator_terminal()
+    # Source-digest recheck (§4.7): pin the roster we reconciled from and refuse
+    # to write if the file changed under us between read and write (TOCTOU).
+    source_digest = _roster_digest()
     snapshot = status(pg)
     canonical = load_roster()["agents"]
     existing = {row["name"]: row for row in db_rows(pg)}
+    if _roster_digest() != source_digest:
+        raise RuntimeError("fleet roster changed during sync; aborted before writing")
     cur = pg.cursor()
     written = []
     for name, expected in canonical.items():

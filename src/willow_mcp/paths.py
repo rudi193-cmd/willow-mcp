@@ -7,10 +7,33 @@ Import from here — do not scatter path joins across the codebase.
 from __future__ import annotations
 
 import os
+import stat
 import re
 from pathlib import Path
 
 LAYOUT_VERSION = 1
+
+
+def trusted_read(path: Path) -> None:
+    """Fail-closed authentication of a policy/source file before it is trusted.
+
+    Loki B5FB7E2B §4.6: an envelope registry, syscall table, or fleet roster the
+    agent (or anyone but the operator) can replace must not be believed. Refuses
+    a symlinked path or parent, foreign ownership, or a group/other-writable file
+    or parent — the same trust-root shape ``consent_admin`` already enforces on
+    the write side, now applied to reads of governance inputs.
+    """
+    if path.is_symlink() or path.parent.is_symlink():
+        raise PermissionError(f"symlinked source path refused: {path}")
+    euid = os.geteuid()
+    for target in (path.parent, path):
+        if not target.exists():
+            raise PermissionError(f"source path missing: {target}")
+        info = target.stat()
+        if info.st_uid != euid or stat.S_IMODE(info.st_mode) & 0o022:
+            raise PermissionError(
+                f"untrusted ownership or permissions on source path: {target}"
+            )
 
 _DISPATCH_ID_RE = re.compile(r"^[A-Z0-9]{8}$")
 _APP_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
