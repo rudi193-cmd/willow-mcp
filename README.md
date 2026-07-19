@@ -6,6 +6,8 @@
 
 Agent-neutral MCP server with persistent memory and task execution. Works with any MCP client: Claude Code, Claude Desktop, Cursor, or any custom agent that speaks stdio MCP.
 
+> **Corpus memory:** the whole Willow constellation — the code, human, and collaboration corpora assembled and queryable — lives in the sovereign [`willow-compose`](https://github.com/rudi193-cmd/willow-compose) repo. The hub *calls* it; it doesn't live here (keeping the hub lean).
+
 **Three storage backends in one server:**
 - **SOIL store** — SQLite-backed local key/value store with full-text search and soft delete
 - **Postgres knowledge base** — multi-keyword searchable knowledge graph
@@ -423,7 +425,14 @@ works unmodified on any clone once the venv above exists):
 Point `WILLOW_PG_DB` / `WILLOW_STORE_ROOT` at your host fleet store when you
 need Postgres knowledge or shared SOIL data.
 
-You can also run the full [willow-2.0](https://github.com/rudi193-cmd/willow-2.0) server directly — the tool API is identical, apps work against both transparently.
+willow-mcp re-implements the SOIL / knowledge / dispatch core of the larger
+[willow-2.0](https://github.com/rudi193-cmd/willow-2.0) fleet server as a
+standalone product with a redesigned, smaller surface — **not** a drop-in copy of
+its tool API. Many tools were renamed in the redesign (`soil_*` → `store_*`,
+`ledger_*` → `frank_*`, `agent_task_*` → `task_*`), so an app is not portable
+between the two unchanged. See
+[`docs/migrations/willow-2.0-gap-inventory.md`](docs/migrations/willow-2.0-gap-inventory.md)
+for the verified tool-by-tool diff.
 
 ## HTTP serve mode (OAuth)
 
