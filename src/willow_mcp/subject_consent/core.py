@@ -21,6 +21,9 @@ unparseability, a broken chain, `pending`, or `revoked` all resolve to denied.
 Mutation (`grant`/`revoke`) is a library primitive an *operator CLI* calls — an
 app can never grant consent on a subject's behalf; enforcing that is the
 binding's job, not this core's.
+
+Provenance: VENDORED from rudi193-cmd/safe-app-store ``libs/subject-consent``
+(MIT). Canonical lives there; keep this copy in sync, do not diverge it in place.
 """
 from __future__ import annotations
 

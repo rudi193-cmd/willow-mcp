@@ -1,7 +1,12 @@
 # The guardian-consent seam: representing a subject who isn't the owner
 
-Status: **core + binding shipped; call-site subject_ids pending.** Both halves
-this doc maps now exist:
+Status: **core extracted + binding shipped + gate live.** The stdlib-only core
+now has a single **canonical home** at
+[`safe-app-store` `libs/subject-consent`](https://github.com/rudi193-cmd/safe-app-store)
+(the vendor pattern `willow_mcp.nest` uses for `apps/nest-seed`, chosen over a new
+repo). willow-mcp's copy is VENDORED from there and carries a provenance header;
+UTETY and corpus-lens adopt the same canonical next — so the primitive is built
+once and single-sourced, not forked three ways. Both halves this doc maps exist:
 
 - **Core** — [`src/willow_mcp/subject_consent/core.py`](../../src/willow_mcp/subject_consent/core.py)
   (tests: [`tests/test_subject_consent.py`](../../tests/test_subject_consent.py),
@@ -318,9 +323,14 @@ not to pretend the *unrepresentable* away.
    contains a family member's file, is the default `local_only` (safest, requires
    an explicit grant to ever promote) — or is the router simply owner-only until a
    household roster is declared?
-4. **The stdlib-only split.** Confirm the core must stay import-clean so UTETY can
+4. ~~**The stdlib-only split.** Confirm the core must stay import-clean so UTETY can
    consume it — or accept that UTETY keeps its own copy and only the *semantics*
-   are shared (a spec, not a dependency).
+   are shared (a spec, not a dependency).~~ **RESOLVED 2026-07-20 (operator): the
+   vendor middle path.** The core stays import-clean AND is single-sourced — one
+   canonical copy in `safe-app-store/libs/subject-consent`, vendored into each
+   consumer with a provenance header (not a PyPI dependency, not three independent
+   copies). No new repo; the Nest's `nest-seed` pattern. UTETY/corpus-lens vendor
+   from the same canonical next.
 
 *This is the map. The wall has always had two halves — "what may leave" (built
 four times over) and "whose data is it, and did they agree" (built once, in a

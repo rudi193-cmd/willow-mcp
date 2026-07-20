@@ -11,6 +11,13 @@ standard library — that boundary is what lets UTETY run it on a child's device
 and corpus-lens depend on it under its stdlib-only charter. The willow-mcp
 binding (gate wiring, ReceiptLog) is a separate, heavier module; it may import
 this core, never the other way around.
+
+Provenance: VENDORED from rudi193-cmd/safe-app-store ``libs/subject-consent`` (MIT)
+— the canonical shared home, the same vendor pattern ``willow_mcp.nest`` uses for
+``apps/nest-seed``. This is a single-sourced copy, not a fork: the core lives once
+in safe-app-store and willow-mcp, UTETY, and corpus-lens each carry a copy kept in
+sync (the stdlib-only boundary test here catches accidental divergence). Edit the
+canonical and re-vendor; do not diverge this copy in place.
 """
 from __future__ import annotations
 
