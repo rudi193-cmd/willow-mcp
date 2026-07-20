@@ -1,26 +1,30 @@
 """subject_consent.core — consent for a subject who isn't the owner.
 
-The stdlib-only, egress-free heart of the guardian-consent seam
-(docs/design/guardian-consent-seam.md). It answers a question no other
-authorization surface in the stack can: *did this person — or a guardian on
-their behalf — agree to their data being used this way?*
+The stdlib-only, egress-free heart of the guardian-consent seam. It answers a
+question no other authorization surface in the stack can: *did this person — or a
+guardian on their behalf — agree to their data being used this way?*
 
 This is the convergence of a gap that was designed twice and built zero times:
 corpus-lens named `owner != subject` its "biggest unshipped gap" and refused to
 ship it; the willow-mcp seam doc mapped it; UTETY built a private copy for a
-child learner. This module is the one shared primitive all three can depend on.
+child learner. This module is the one shared primitive all three depend on.
 
 HARD CONSTRAINT — stdlib only, no network, no FFI, no willow-mcp runtime deps.
 UTETY runs this on a child's device; corpus-lens is stdlib-only by charter. So
 this file imports nothing but the standard library, and `tests/` enforces it.
-The willow-mcp binding (gate wiring, ReceiptLog) lives in a separate module that
-may import the engine; this core must not drag it in behind it.
 
-Everything here is FAIL-CLOSED, exactly like willow_mcp.consent: absence,
-unparseability, a broken chain, `pending`, or `revoked` all resolve to denied.
-Mutation (`grant`/`revoke`) is a library primitive an *operator CLI* calls — an
-app can never grant consent on a subject's behalf; enforcing that is the
-binding's job, not this core's.
+Everything here is FAIL-CLOSED: absence, unparseability, a broken chain, a
+truncated chain, `pending`, or `revoked` all resolve to denied. Mutation
+(`grant`/`revoke`) is a library primitive an *operator CLI* calls — an app can
+never grant consent on a subject's behalf; enforcing that is the binding's job.
+
+STORAGE IS PLUGGABLE (v0.0.2). The chain logic — hashing, prev-links, and the
+head **anchor** that makes tail-truncation detectable (backported from UTETY's
+store, audit B4) — lives here, storage-free. Where the rows land is a `Backend`.
+The default `FileBackend` writes append-only JSONL + a sibling anchor file; UTETY
+plugs a SQLite backend so its consent lives in the one on-device store beside the
+learner, atomically. Every public function takes `store`, which may be a
+filesystem path (wrapped in a `FileBackend`) or any `Backend` instance.
 
 Provenance: VENDORED from rudi193-cmd/safe-app-store ``libs/subject-consent``
 (MIT). Canonical lives there; keep this copy in sync, do not diverge it in place.
@@ -32,6 +36,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 # ── vocabulary ────────────────────────────────────────────────────────────────
 
@@ -68,7 +73,7 @@ class DeidentificationError(SubjectConsentError):
 
 
 class ChainTamperError(SubjectConsentError):
-    """A hash chain failed verification (mid-chain edit or tail truncation)."""
+    """A hash chain failed verification (mid-chain edit, or tail truncation)."""
 
 
 # ── records ───────────────────────────────────────────────────────────────────
@@ -87,7 +92,7 @@ class Subject:
 class Consent:
     """One transition in a subject's consent chain. Tamper-evident: `hash`
     covers the canonical payload AND `prev_hash`, so any edit or truncation
-    breaks the links."""
+    breaks the links (or the anchor)."""
     subject_id: str
     scope: str
     status: str
@@ -122,47 +127,123 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-# ── store layout ───────────────────────────────────────────────────────────────
-# A store is a directory:
-#   <store>/consent.jsonl                 — the consent transition chain
-#   <store>/disclosures/<subject_id>.jsonl — per-subject disclosure chain
-# Both are append-only, hash-chained JSONL. Nothing is ever rewritten in place;
-# revocation adds a row, never removes one (erasing *when* consent was withdrawn
-# would gut the audit trail — UTETY audit B2).
+# ── storage backend (pluggable) ────────────────────────────────────────────────
+# The core owns the chain LOGIC; a Backend owns WHERE rows land. There are two
+# chains, addressed by a string id: the consent chain (`_CONSENT_CHAIN`) and one
+# disclosure chain per subject (`_disclosure_chain(subject_id)` — the subject_id
+# is hashed, so an opaque id never leaks into a chain name / filename).
 
-def _consent_path(store: Path) -> Path:
-    return store / "consent.jsonl"
+_CONSENT_CHAIN = "consent"
 
 
-def _disclosure_path(store: Path, subject_id: str) -> Path:
-    # subject_id is opaque; hash it for the filename so an id can never escape
-    # the directory or leak a name onto the filesystem.
+def _disclosure_chain(subject_id: str) -> str:
     safe = hashlib.sha256(subject_id.encode("utf-8")).hexdigest()[:32]
-    return store / "disclosures" / f"{safe}.jsonl"
+    return f"disclosure/{safe}"
 
 
-def _read_chain(path: Path) -> list[dict] | None:
-    """Return the raw rows, or None if the file is absent/unreadable. Never
-    raises — a caller in the deny path must not be handed an exception."""
-    if not path.is_file():
-        return None
-    rows: list[dict] = []
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            if not isinstance(obj, dict):
-                return None
-            rows.append(obj)
-    except Exception:
-        return None
-    return rows
+@runtime_checkable
+class Backend(Protocol):
+    """Where a hash-chained log is stored. Four operations, each per-chain:
+
+      read_rows    — the rows in order, or None if the chain is absent/unreadable
+                     (None is "not there", distinct from [] "there and empty").
+      append_row   — append one row (the core has already chained + hashed it).
+      read_anchor  — the {"hash","count"} head anchor, or None if absent.
+      write_anchor — persist the head anchor after an append.
+
+    A backend that can make append_row + write_anchor atomic (e.g. one SQLite
+    transaction, as UTETY does) closes the crash window the FileBackend documents.
+    """
+
+    def read_rows(self, chain: str) -> list[dict] | None: ...
+    def append_row(self, chain: str, row: dict) -> None: ...
+    def read_anchor(self, chain: str) -> dict | None: ...
+    def write_anchor(self, chain: str, anchor: dict) -> None: ...
 
 
-def _chain_ok(rows: list[dict]) -> bool:
-    """Verify the hash links end to end. A break anywhere ⇒ not ok."""
+class FileBackend:
+    """Default backend: append-only hash-chained JSONL + a sibling anchor file.
+
+        <root>/consent.jsonl                     (+ consent.anchor.json)
+        <root>/disclosures/<subject_hash>.jsonl  (+ <subject_hash>.anchor.json)
+
+    Append writes the row, then the anchor (atomic tmp+replace). A crash *between*
+    the two leaves rows/anchor out of step — which `_verify` reads as tampered and
+    FAILS CLOSED (deny), never silently accepts. A backend needing crash atomicity
+    should make the pair transactional (that is why the backend is pluggable)."""
+
+    def __init__(self, root: Path | str) -> None:
+        self.root = Path(root)
+
+    def _base(self, chain: str) -> Path:
+        if chain == _CONSENT_CHAIN:
+            return self.root / "consent"
+        if chain.startswith("disclosure/"):
+            return self.root / "disclosures" / chain.split("/", 1)[1]
+        raise SubjectConsentError(f"unknown chain: {chain!r}")
+
+    def read_rows(self, chain: str) -> list[dict] | None:
+        path = self._base(chain).with_suffix(".jsonl")
+        if not path.is_file():
+            return None
+        rows: list[dict] = []
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                if not isinstance(obj, dict):
+                    return None
+                rows.append(obj)
+        except Exception:
+            return None
+        return rows
+
+    def append_row(self, chain: str, row: dict) -> None:
+        path = self._base(chain).with_suffix(".jsonl")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, sort_keys=True) + "\n")
+
+    def read_anchor(self, chain: str) -> dict | None:
+        path = self._base(chain).with_suffix(".anchor.json")
+        if not path.is_file():
+            return None
+        try:
+            obj = json.loads(path.read_text(encoding="utf-8"))
+            return obj if isinstance(obj, dict) else None
+        except Exception:
+            return None
+
+    def write_anchor(self, chain: str, anchor: dict) -> None:
+        path = self._base(chain).with_suffix(".anchor.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(anchor, sort_keys=True), encoding="utf-8")
+        tmp.replace(path)
+
+
+def _as_backend(store: "Path | str | Backend") -> Backend:
+    """A path/str becomes a FileBackend; a Backend is used as-is. This keeps the
+    public API a single `store` parameter for both the default and a plugged one."""
+    if isinstance(store, Backend):
+        return store
+    return FileBackend(store)
+
+
+# ── chain verification (links + the truncation anchor) ─────────────────────────
+
+def _verify(rows: list[dict], anchor: dict | None) -> bool:
+    """Two properties, both required:
+
+      1. LINKS — every row's prev_hash equals the prior row's hash, and every
+         hash recomputes (a mid-chain edit or delete breaks this).
+      2. ANCHOR — the head anchor names the last row's hash and the row count, so
+         DELETING THE NEWEST ROWS is detected even though the shorter chain still
+         links cleanly (UTETY audit B4). An empty chain must have no anchor; a
+         non-empty chain with a missing/mismatched anchor is tampered.
+    """
     prev = _GENESIS
     for row in rows:
         h = row.get("hash")
@@ -172,41 +253,43 @@ def _chain_ok(rows: list[dict]) -> bool:
         if not isinstance(h, str) or _row_hash(payload) != h:
             return False
         prev = h
-    return True
+    if not rows:
+        return anchor is None
+    if not isinstance(anchor, dict):
+        return False
+    return anchor.get("hash") == rows[-1]["hash"] and anchor.get("count") == len(rows)
 
 
-def _append(path: Path, payload: dict) -> str:
-    """Append one hash-chained row, linking to the current tail. Returns the new
-    head hash. Verifies the existing chain first and REFUSES to extend a broken
-    one (a tampered store must not be silently continued)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = _read_chain(path) or []
-    if existing and not _chain_ok(existing):
+def _append(backend: Backend, chain: str, payload: dict) -> str:
+    """Append one hash-chained row + advance the anchor. Returns the new head hash.
+    Verifies the existing chain first and REFUSES to extend a broken or truncated
+    one — a tampered store must not be silently continued."""
+    existing = backend.read_rows(chain) or []
+    if existing and not _verify(existing, backend.read_anchor(chain)):
         raise ChainTamperError("refusing to append to a broken chain")
     prev = existing[-1]["hash"] if existing else _GENESIS
     payload = dict(payload, prev_hash=prev)
     h = _row_hash(payload)
-    row = dict(payload, hash=h)
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(row, sort_keys=True) + "\n")
+    backend.append_row(chain, dict(payload, hash=h))
+    backend.write_anchor(chain, {"hash": h, "count": len(existing) + 1})
     return h
 
 
 # ── consent: mutation (operator/CLI primitives — never an MCP tool) ────────────
 
-def grant(store: Path, subject_id: str, scope: str, granted_by: str) -> Consent:
+def grant(store: "Path | str | Backend", subject_id: str, scope: str, granted_by: str) -> Consent:
     """Record a GRANTED transition. Raises on an unknown scope or empty grantor
     (a grant with no author is not a grant)."""
     return _transition(store, subject_id, scope, GRANTED, granted_by)
 
 
-def revoke(store: Path, subject_id: str, scope: str, revoked_by: str) -> Consent:
+def revoke(store: "Path | str | Backend", subject_id: str, scope: str, revoked_by: str) -> Consent:
     """Record a REVOKED transition. Denies from this moment on, permanently on
     the record."""
     return _transition(store, subject_id, scope, REVOKED, revoked_by)
 
 
-def _transition(store: Path, subject_id: str, scope: str, status: str, by: str) -> Consent:
+def _transition(store: "Path | str | Backend", subject_id: str, scope: str, status: str, by: str) -> Consent:
     if scope not in SCOPES:
         raise SubjectConsentError(f"unknown scope: {scope!r}")
     if status not in _STATUSES:
@@ -222,29 +305,30 @@ def _transition(store: Path, subject_id: str, scope: str, status: str, by: str) 
         "granted_by": by,
         "at": _now(),
     }
-    h = _append(_consent_path(store), payload)
+    h = _append(_as_backend(store), _CONSENT_CHAIN, payload)
     return Consent(hash=h, prev_hash="", **payload)  # prev_hash set inside _append; returned value is informational
 
 
-# ── consent: the gate (read-only, fail-closed — mirrors consent.permitted) ─────
+# ── consent: the gate (read-only, fail-closed) ─────────────────────────────────
 
-def permitted(store: Path, subject_id: str, scope: str) -> bool:
+def permitted(store: "Path | str | Backend", subject_id: str, scope: str) -> bool:
     """True only when the latest transition for (subject_id, scope) is a
     verified GRANTED. Fail-closed on every other path:
 
-      - store/file absent            → False
-      - unparseable or broken chain  → False
-      - no record for this pair      → False
-      - latest is pending or revoked → False
+      - store absent                    → False
+      - unparseable / broken / truncated → False
+      - no record for this pair          → False
+      - latest is pending or revoked     → False
 
-    Unknown scope is a programming error, denied loudly-in-log but still False.
-    Owner == subject is NOT special-cased here; that exemption (if any) belongs
-    to the binding that knows who the owner is. This core only knows grants.
+    Unknown scope is a programming error, denied but still False. Owner == subject
+    is NOT special-cased here; that exemption (if any) belongs to the binding that
+    knows who the owner is. This core only knows grants.
     """
     if scope not in SCOPES:
         return False
-    rows = _read_chain(_consent_path(store))
-    if not rows or not _chain_ok(rows):
+    backend = _as_backend(store)
+    rows = backend.read_rows(_CONSENT_CHAIN)
+    if not rows or not _verify(rows, backend.read_anchor(_CONSENT_CHAIN)):
         return False
     latest: dict | None = None
     for row in rows:
@@ -253,13 +337,14 @@ def permitted(store: Path, subject_id: str, scope: str) -> bool:
     return bool(latest) and latest.get("status") == GRANTED
 
 
-def verify_consent_chain(store: Path) -> None:
+def verify_consent_chain(store: "Path | str | Backend") -> None:
     """Admin/diagnostic path: raise ChainTamperError if the consent chain is
-    broken (the gate silently denies; this one tells you *why*)."""
-    rows = _read_chain(_consent_path(store))
+    broken or truncated (the gate silently denies; this one tells you *why*)."""
+    backend = _as_backend(store)
+    rows = backend.read_rows(_CONSENT_CHAIN)
     if rows is None:
         return  # absent is not tampered
-    if not _chain_ok(rows):
+    if not _verify(rows, backend.read_anchor(_CONSENT_CHAIN)):
         raise ChainTamperError("consent chain failed verification")
 
 
@@ -273,6 +358,10 @@ def deidentify(text: str, identifiers: list[str]) -> str:
     identifier survives (case-insensitive), this raises DeidentificationError —
     and the error NEVER contains the surviving value or the text, exactly like
     UTETY's `deidentify()`. `identified is person; de-identified is process`.
+
+    This removes NAMED identifiers (a subject's name you already hold). It composes
+    with — does not replace — a pattern scrubber like UTETY's egress-query
+    `deidentify` (email/phone/SSN): different jobs, both fail-closed.
     """
     if not isinstance(text, str):
         raise DeidentificationError("de-identification input was not text")
@@ -300,7 +389,7 @@ def deidentify(text: str, identifiers: list[str]) -> str:
 
 # ── the disclosure chain (per subject — the guardian's readable record) ────────
 
-def record_disclosure(store: Path, subject_id: str, action: str, detail: str = "") -> str:
+def record_disclosure(store: "Path | str | Backend", subject_id: str, action: str, detail: str = "") -> str:
     """Append a hash-chained disclosure row: what was done with this subject's
     data. This is the record a guardian can read ("what the tutor discussed with
     your child"). Returns the new head hash."""
@@ -312,16 +401,18 @@ def record_disclosure(store: Path, subject_id: str, action: str, detail: str = "
         "detail": detail,
         "at": _now(),
     }
-    return _append(_disclosure_path(store, subject_id), payload)
+    return _append(_as_backend(store), _disclosure_chain(subject_id), payload)
 
 
-def read_disclosures(store: Path, subject_id: str) -> list[dict]:
-    """Return the verified disclosure chain for a subject. Raises
-    ChainTamperError if the chain is broken — a guardian's record that cannot
-    prove its own integrity must announce that, not quietly return rows."""
-    rows = _read_chain(_disclosure_path(store, subject_id))
+def read_disclosures(store: "Path | str | Backend", subject_id: str) -> list[dict]:
+    """Return the verified disclosure chain for a subject. Raises ChainTamperError
+    if the chain is broken OR truncated — a guardian's record that cannot prove its
+    own integrity must announce that, not quietly return rows."""
+    backend = _as_backend(store)
+    chain = _disclosure_chain(subject_id)
+    rows = backend.read_rows(chain)
     if rows is None:
         return []
-    if not _chain_ok(rows):
+    if not _verify(rows, backend.read_anchor(chain)):
         raise ChainTamperError("disclosure chain failed verification")
     return rows

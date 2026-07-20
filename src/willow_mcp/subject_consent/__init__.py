@@ -1,32 +1,32 @@
 """subject_consent — consent for a subject who isn't the owner.
 
-The stdlib-only, egress-free core of the guardian-consent seam
-(docs/design/guardian-consent-seam.md). One shared primitive for the gap that
-corpus-lens named its "biggest unshipped gap", the willow-mcp seam doc mapped,
-and UTETY built privately: *did this person — or a guardian on their behalf —
-agree to their data being used this way?*
+The stdlib-only, egress-free core of the guardian-consent seam. One shared
+primitive for the gap that corpus-lens named its "biggest unshipped gap", the
+willow-mcp seam doc mapped, and UTETY built privately: *did this person — or a
+guardian on their behalf — agree to their data being used this way?*
 
-Import only `willow_mcp.subject_consent.core` and you pull in nothing but the
-standard library — that boundary is what lets UTETY run it on a child's device
-and corpus-lens depend on it under its stdlib-only charter. The willow-mcp
-binding (gate wiring, ReceiptLog) is a separate, heavier module; it may import
-this core, never the other way around.
+This is the extracted, standalone package (the Kart/`kartikeya` pattern applied
+to the consent primitive): three consumers depend on it rather than each carrying
+a copy — **willow-mcp** (a thin binding wires it into its gate + ReceiptLog),
+**UTETY** (the reference implementation, on a child's device), and **corpus-lens**
+(its `person_inference` capability). It imports nothing but the standard library,
+and `tests/` enforces that boundary — that is what lets a child-device consumer
+and a stdlib-only-charter consumer both depend on it without dragging a runtime
+in behind it. Bindings may import this core; this core imports none of them.
 
-Provenance: VENDORED from rudi193-cmd/safe-app-store ``libs/subject-consent`` (MIT)
-— the canonical shared home, the same vendor pattern ``willow_mcp.nest`` uses for
-``apps/nest-seed``. This is a single-sourced copy, not a fork: the core lives once
-in safe-app-store and willow-mcp, UTETY, and corpus-lens each carry a copy kept in
-sync (the stdlib-only boundary test here catches accidental divergence). Edit the
-canonical and re-vendor; do not diverge this copy in place.
+Provenance: VENDORED from rudi193-cmd/safe-app-store ``libs/subject-consent``
+(MIT). Canonical lives there; keep this copy in sync, do not diverge it in place.
 """
 from __future__ import annotations
 
 from .core import (
     RELATIONS,
     SCOPES,
+    Backend,
     ChainTamperError,
     Consent,
     DeidentificationError,
+    FileBackend,
     Subject,
     SubjectConsentError,
     deidentify,
@@ -43,6 +43,8 @@ __all__ = [
     "RELATIONS",
     "Subject",
     "Consent",
+    "Backend",
+    "FileBackend",
     "SubjectConsentError",
     "DeidentificationError",
     "ChainTamperError",
