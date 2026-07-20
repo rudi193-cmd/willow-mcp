@@ -200,6 +200,19 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "commitment_write": frozenset({
         "commitment_ingest", "commitment_acknowledge",
     }),
+    # code_graph (willow_mcp.code_graph) — a local, rebuildable symbol graph over a
+    # repo (stdlib ast + sqlite, no network/Postgres). Read is the query surface
+    # (search/explain/walk/suggest/impact); write is indexing, which builds the
+    # local SQLite DB — same read/write split as the Nest (scan writes, digest
+    # reads). Nothing here reaches the SOIL store or the KB, so it is its own pair
+    # of groups rather than folded into store_*/knowledge_*.
+    "code_graph_read": frozenset({
+        "code_graph_search", "code_graph_explain", "code_graph_walk",
+        "code_graph_suggest", "code_graph_impact",
+    }),
+    "code_graph_write": frozenset({
+        "code_graph_index",
+    }),
     "full_access": frozenset({
         # Core store
         "store_put", "store_get", "store_list", "store_update",
@@ -248,6 +261,9 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         # writes the calendar back — no new authority)
         "commitment_surface", "commitment_list",
         "commitment_ingest", "commitment_acknowledge",
+        # code_graph (index writes a local SQLite graph; the rest query it)
+        "code_graph_index", "code_graph_search", "code_graph_explain",
+        "code_graph_walk", "code_graph_suggest", "code_graph_impact",
     }),
 }
 

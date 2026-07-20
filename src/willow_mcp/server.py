@@ -3786,6 +3786,122 @@ def commitment_list(app_id: str, state: str = "") -> dict:
     return {"status": "ok", "count": len(rows), "commitments": rows}
 
 
+# ── code_graph — a local, budget-aware symbol graph (willow-2.0 port) ───────────
+#
+# The top 🟢 item on the migration shortlist (docs/migrations/willow-2.0-gap-
+# inventory.md §6): the only call-graph capability willow-mcp lacked, and a
+# self-contained one — stdlib ast + sqlite3, no Postgres, no network, no external
+# CLI. The engine (willow_mcp.code_graph) is a verbatim port; these six tools are
+# the willow-mcp surface. `code_graph_index` writes a local SQLite DB (WRITE);
+# search/explain/walk/suggest/impact are read-only queries over it.
+
+def _code_graph_db(db_path: str = "") -> Path:
+    """Resolve the symbol-graph DB. Explicit db_path wins; else WILLOW_CODE_GRAPH_DB;
+    else $WILLOW_HOME/code_graph/graph.db (kept out of the SOIL store — it is a
+    rebuildable index of source, not fleet state)."""
+    if db_path:
+        return Path(db_path).expanduser()
+    env = os.environ.get("WILLOW_CODE_GRAPH_DB", "").strip()
+    if env:
+        return Path(env).expanduser()
+    return paths.willow_home() / "code_graph" / "graph.db"
+
+
+@mcp.tool()
+@_guarded("code_graph_index")
+def code_graph_index(app_id: str, repo_root: str, db_path: str = "", force: bool = False) -> dict:
+    """Index a repository's Python + JS/TS files into a local SQLite symbol graph
+    (symbols, import/inherit edges, per-file stats). Run once before the read
+    tools. Pure stdlib `ast` — no network, no Postgres, no external CLI.
+
+    `repo_root` (required): the directory to index. `db_path`: override the graph
+    DB location (default $WILLOW_HOME/code_graph/graph.db, or WILLOW_CODE_GRAPH_DB).
+    `force`: reserved (the indexer upserts, so re-running is already idempotent)."""
+    root = Path(repo_root).expanduser()
+    if not root.is_dir():
+        return {"error": f"repo_root not found or not a directory: {repo_root}"}
+    from .code_graph import index_repo
+    try:
+        return index_repo(root, _code_graph_db(db_path), force=force)
+    except Exception as e:
+        return {"error": f"index failed: {type(e).__name__}: {e}"}
+
+
+@mcp.tool()
+@_guarded("code_graph_search")
+def code_graph_search(app_id: str, query: str, kinds: Optional[list] = None,
+                      max_results: int = 20, db_path: str = "") -> dict:
+    """Fuzzy symbol search over the graph: exact → prefix → contains →
+    camelCase/snake_case token split. `kinds` filters by symbol type
+    (module|class|function|method); omit for all. Read-only."""
+    db = _code_graph_db(db_path)
+    if not db.is_file():
+        return {"error": f"no symbol graph at {db} — run code_graph_index first"}
+    from .code_graph import search_symbols
+    results = search_symbols(db, query, max_results=max_results, kinds=kinds)
+    return {"query": query, "count": len(results), "results": results}
+
+
+@mcp.tool()
+@_guarded("code_graph_explain")
+def code_graph_explain(app_id: str, symbol: str, db_path: str = "") -> dict:
+    """Explain a symbol: signature, file location, callers (inbound edges), and
+    callees (outbound). `symbol` is a name or fully-qualified name
+    (e.g. 'permitted' or 'willow_mcp.gate.permitted'). Read-only."""
+    db = _code_graph_db(db_path)
+    if not db.is_file():
+        return {"error": f"no symbol graph at {db} — run code_graph_index first"}
+    from .code_graph import explain_symbol
+    return explain_symbol(db, symbol)
+
+
+@mcp.tool()
+@_guarded("code_graph_walk")
+def code_graph_walk(app_id: str, anchor: str, hop_depth: int = 2,
+                    max_tokens: int = 8000, db_path: str = "") -> dict:
+    """BFS from an anchor symbol along import + inherit edges, collecting context
+    until a token budget is hit. Deterministic (alphabetical within each hop).
+    `anchor`: symbol name or fqn. Read-only."""
+    db = _code_graph_db(db_path)
+    if not db.is_file():
+        return {"error": f"no symbol graph at {db} — run code_graph_index first"}
+    from .code_graph import walk
+    result = walk(db, anchor, hop_depth=hop_depth, max_tokens=max_tokens)
+    return {
+        "anchor_fqn": result.anchor_fqn,
+        "hops_traversed": result.hops_traversed,
+        "tokens_returned": result.tokens_returned,
+        "files": result.files,
+        "symbols": result.symbols,
+    }
+
+
+@mcp.tool()
+@_guarded("code_graph_suggest")
+def code_graph_suggest(app_id: str, task: str, max_results: int = 10,
+                       db_path: str = "") -> dict:
+    """Suggest the files most relevant to a task description, ranked by keyword
+    overlap with symbol names + file paths. No embeddings, no LLM. Read-only."""
+    db = _code_graph_db(db_path)
+    if not db.is_file():
+        return {"error": f"no symbol graph at {db} — run code_graph_index first"}
+    from .code_graph import suggest_files
+    files = suggest_files(db, task, max_results=max_results)
+    return {"task": task[:100], "suggestions": files}
+
+
+@mcp.tool()
+@_guarded("code_graph_impact")
+def code_graph_impact(app_id: str, file_paths: list, db_path: str = "") -> dict:
+    """Blast radius: which files/symbols import from the given files? `file_paths`
+    are repo-relative (e.g. ['src/willow_mcp/gate.py']). Read-only."""
+    db = _code_graph_db(db_path)
+    if not db.is_file():
+        return {"error": f"no symbol graph at {db} — run code_graph_index first"}
+    from .code_graph import analyze_impact
+    return analyze_impact(db, file_paths)
+
+
 # ── Entry points ───────────────────────────────────────────────────────────────
 
 def _cmd_setup(args) -> None:

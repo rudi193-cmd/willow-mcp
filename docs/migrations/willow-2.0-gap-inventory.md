@@ -147,7 +147,9 @@ Not "get everything over" — get the **used** gaps over:
 ```
 🟢 PORT (genuine gap + was core/standard + self-contained)
   [ ] willow_web_search / willow_web_fetch   the only open-web path; product has none
-  [ ] code_graph_*                            self-contained symbol graph
+  [x] code_graph_*                            PORTED 2026-07-20 (willow-mcp#TBD) — src/willow_mcp/code_graph/
+                                              + 6 tools (index/search/explain/walk/suggest/impact),
+                                              code_graph_read/write gate groups, 13 tests
   [ ] fork_* + env_check                      bounded work-units over existing store
   [ ] human_attestation_* / human_required_*  human-in-loop trust queue
 
