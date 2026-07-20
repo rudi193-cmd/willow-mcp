@@ -132,6 +132,8 @@ FRIENDLY_LABELS: dict[str, str] = {
     "schema_admin": "Configure database field mapping",
     "nest_read": "See what's in the Nest and its review queue",
     "nest_write": "Sort a file dump, file it into place, and promote its structure",
+    "commitment_read": "See upcoming commitments and what needs attention",
+    "commitment_write": "Record calendar commitments and acknowledge changes",
     "lineage_read": "Trace where things came from",
     "lineage_write": "Record where things came from",
     "friction_read": "See relationship-friction flags",

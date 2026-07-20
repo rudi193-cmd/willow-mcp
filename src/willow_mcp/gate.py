@@ -186,6 +186,20 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         # rides the write group (never nest_read).
         "nest_intake_scan", "nest_intake_file", "nest_intake_skip",
     }),
+    # The Commitment Membrane (willow_mcp.commitments) — the operator's kept record
+    # of their own calendar commitments (Jarvis layer 2). Read is the dew-rule surface
+    # + a facts-only list (title + time, never the event body). Write ingests calendar
+    # facts into the ledger and acknowledges changes — but NEVER writes the calendar
+    # back: propose_action and the SAFE gate are deliberately not exposed over MCP, so
+    # this group introduces no new authority (same reasoning that keeps integration_call
+    # and task_net on their own lines). Body/notes/location are dropped at ingest and a
+    # persistence-boundary guard refuses to store them, so even a write cannot record.
+    "commitment_read": frozenset({
+        "commitment_surface", "commitment_list",
+    }),
+    "commitment_write": frozenset({
+        "commitment_ingest", "commitment_acknowledge",
+    }),
     "full_access": frozenset({
         # Core store
         "store_put", "store_get", "store_list", "store_update",
@@ -230,6 +244,10 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "nest_status", "nest_digest", "nest_scan", "nest_promote",
         "nest_intake_scan", "nest_intake_queue", "nest_intake_file",
         "nest_intake_skip", "nest_intake_flags",
+        # The Commitment Membrane (read surface + ledger ingest/acknowledge; never
+        # writes the calendar back — no new authority)
+        "commitment_surface", "commitment_list",
+        "commitment_ingest", "commitment_acknowledge",
     }),
 }
 

@@ -3591,6 +3591,201 @@ def diagnostic_summary(app_id: str = "") -> dict:
     return report
 
 
+# ── The Commitment Membrane — the operator's kept record of their commitments ────
+#
+# Jarvis layer 2 (willow_mcp.commitments), the OUTWARD mirror of the voice ingress
+# membrane. The engine (ledger + persistence + calendar source) landed in the tree
+# with tests but no front door; these four tools ARE that door, under the membrane's
+# own three disciplines:
+#   - receipt-not-recording — the store holds the FACT (title/when/who/state), never
+#     the event body/notes/location; the ledger drops body at ingest and a
+#     persistence-boundary guard (_assert_no_forbidden) refuses to store it.
+#   - states-not-deletions — a cancel is a WITHDRAWN state, a move keeps the old time
+#     in history; nothing is deleted.
+#   - NO NEW AUTHORITY — these tools read the calendar into fleet memory and surface
+#     it; they NEVER write the calendar back. propose_action and the SAFE gate are
+#     deliberately not exposed over MCP.
+# The live gcal transport is unwired (OAuth is a home-box step), so `commitment_ingest`
+# reads from operator-supplied events today and goes live when the transport lands —
+# the same "live but dormant" shape the rest of the fleet ships.
+
+# Physical SOIL collection. The membrane package's DEFAULT_COLLECTION is the logical
+# name `willow/commitments`; the store validator only accepts physical names (no
+# slash — the `/` form is resolved by the manifest alias layer, which this internal
+# persistence deliberately bypasses), so the binding pins a physical name here.
+_COMMITMENT_COLLECTION = "willow_commitments"
+
+
+def _commitment_persistence():
+    # References the module-level _store at call time so tests that monkeypatch
+    # server._store are honored (same pattern as the store_* tools).
+    from .commitments.commitment_store import CommitmentPersistence
+    return CommitmentPersistence(_store, collection=_COMMITMENT_COLLECTION)
+
+
+def _commitment_ledger_restored():
+    """A fresh ledger with persisted commitments rehydrated — no calendar fetch."""
+    from .commitments.commitment_ledger import CommitmentLedger, StubCalendarSource
+    ledger = CommitmentLedger(source=StubCalendarSource())
+    _commitment_persistence().restore_into(ledger)
+    return ledger
+
+
+def _commitment_parse_dt(raw: str):
+    """ISO-8601 -> naive UTC datetime (the membrane's internal convention, matching
+    GCalSyncSource which clocks on datetime.utcnow()). A tz-aware input is converted
+    to UTC then stripped; a naive input is taken as already-UTC."""
+    from datetime import datetime, timezone
+    raw = raw.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    dt = datetime.fromisoformat(raw)
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _commitment_events_from_payload(events: list):
+    """[{uid,title,start,end?,attendees?,body?,cancelled?}] -> [CalendarEvent].
+
+    `body` may be passed but the ledger DROPS it at ingest and it is never persisted
+    (receipt-not-recording) — accepted only so a caller can hand a raw event through
+    without pre-stripping. Raises ValueError on a malformed row."""
+    from .commitments.commitment_ledger import CalendarEvent
+    out = []
+    for i, ev in enumerate(events):
+        if not isinstance(ev, dict):
+            raise ValueError(f"event[{i}] is not an object")
+        uid = str(ev.get("uid") or "").strip()
+        start = ev.get("start")
+        if not uid or not start:
+            raise ValueError(f"event[{i}] requires 'uid' and 'start'")
+        out.append(CalendarEvent(
+            uid=uid,
+            title=str(ev.get("title") or "").strip(),
+            start=_commitment_parse_dt(str(start)),
+            end=_commitment_parse_dt(str(ev["end"])) if ev.get("end") else None,
+            attendees=tuple(str(a) for a in (ev.get("attendees") or [])),
+            body=str(ev.get("body") or ""),
+            cancelled=bool(ev.get("cancelled", False)),
+        ))
+    return out
+
+
+def _commitment_fact(c) -> dict:
+    """A commitment as FACTS only — never a field that could hold the event body."""
+    return {
+        "uid": c.uid,
+        "title": c.title,
+        "when": c.when.isoformat(),
+        "end": c.end.isoformat() if c.end else None,
+        "who": list(c.who),
+        "state": c.state.name,
+        "acknowledged": c.acknowledged,
+        "history_len": len(c.history),
+    }
+
+
+@mcp.tool()
+@_guarded("commitment_ingest")
+def commitment_ingest(app_id: str, events: Optional[list] = None) -> dict:
+    """Ingest calendar events into the operator's commitment ledger and persist the
+    result (SOIL collection `willow/commitments`). Read-only reconcile: a new event
+    becomes an ACTIVE commitment, a cancellation a WITHDRAWN state, a moved event
+    keeps its old time in history — nothing is deleted (states-not-deletions). Only
+    the FACT is stored (title/when/who/state); the event body/notes/location are read
+    to derive the fact then DROPPED, never persisted (receipt-not-recording).
+
+    `events`: a list of {uid, title, start, end?, attendees?, body?, cancelled?} — the
+    operator/integration push path (start/end are ISO-8601). Omit it to pull from the
+    live calendar source; that transport (gcal OAuth) is a home-box step, so until then
+    an omitted `events` returns `transport_unwired` rather than inventing data.
+
+    This tool NEVER writes the calendar back — a cancel/reschedule is a proposal routed
+    through the SAFE gate, which is deliberately not exposed over MCP (no new authority)."""
+    from .commitments.commitment_ledger import CommitmentLedger, StubCalendarSource
+
+    if events is None:
+        return {"status": "transport_unwired",
+                "detail": ("no events supplied and the live calendar transport is not "
+                           "wired (gcal OAuth is a home-box step). Pass events=[...] to "
+                           "ingest now."),
+                "ingested": 0}
+    try:
+        parsed = _commitment_events_from_payload(events)
+    except ValueError as e:
+        return {"error": f"malformed events: {e}"}
+
+    ledger = CommitmentLedger(source=StubCalendarSource(parsed))
+    _commitment_persistence().restore_into(ledger)   # reconcile against what's stored
+    ledger.ingest()
+    _commitment_persistence().save_ledger(ledger)
+
+    # Summarize what changed on THIS ingest tick, by receipt kind (facts only).
+    tick = ledger._tick
+    changes: dict = {}
+    for r in ledger.receipts:
+        if r.get("tick") == tick and r.get("event") in ("ingest", "withdraw", "move"):
+            changes[r["event"]] = changes.get(r["event"], 0) + 1
+    return {"status": "ok", "ingested": len(parsed), "changes": changes,
+            "total_commitments": len(ledger.commitments)}
+
+
+@mcp.tool()
+@_guarded("commitment_acknowledge")
+def commitment_acknowledge(app_id: str, uid: str) -> dict:
+    """Mark a commitment change as seen by the operator — the split-stick halves match
+    again. Recorded as an 'acknowledged' history entry (never erased) and it stops
+    surfacing as a 'mismatch'. Returns unknown_uid if there is no such commitment."""
+    ledger = _commitment_ledger_restored()
+    if uid not in ledger.commitments:
+        return {"error": "unknown_uid", "uid": uid}
+    ledger.acknowledge(uid)
+    _commitment_persistence().save(ledger.commitments[uid])
+    return {"status": "ok", "uid": uid, "acknowledged": True}
+
+
+@mcp.tool()
+@_guarded("commitment_surface")
+def commitment_surface(app_id: str, now: str = "", lead_minutes: int = 15) -> dict:
+    """The dew-rule view: what — if anything — deserves the operator's attention right
+    now. Silent by default; it speaks only when the split-stick halves disagree — a
+    commitment imminent (starting within `lead_minutes`), two active commitments in
+    conflict, or a change not yet acknowledged (a 'mismatch'). Each surfacing carries
+    title + time only, never the event body. Read-only.
+
+    `now`: ISO-8601 instant to evaluate against (default: current UTC)."""
+    from datetime import datetime, timedelta
+    from .commitments.commitment_ledger import DewConfig
+    try:
+        at = _commitment_parse_dt(now) if now.strip() else datetime.utcnow()
+    except ValueError as e:
+        return {"error": f"malformed now: {e}"}
+    ledger = _commitment_ledger_restored()
+    ledger.cfg = DewConfig(lead=timedelta(minutes=max(0, int(lead_minutes))))
+    surfacings = ledger.dew_surface(at)
+    return {"status": "ok", "at": at.isoformat(), "count": len(surfacings),
+            "surfacings": [{"kind": s.kind, "uids": list(s.uids),
+                            "when": s.when.isoformat(), "fact": s.fact}
+                           for s in surfacings]}
+
+
+@mcp.tool()
+@_guarded("commitment_list")
+def commitment_list(app_id: str, state: str = "") -> dict:
+    """List the operator's persisted commitments as FACTS only (uid/title/when/who/
+    state/acknowledged/history length) — never the event body. Read-only. `state`
+    filters to ACTIVE or WITHDRAWN (case-insensitive); omit for all."""
+    want = state.strip().upper()
+    if want and want not in ("ACTIVE", "WITHDRAWN"):
+        return {"error": "state must be ACTIVE, WITHDRAWN, or omitted"}
+    ledger = _commitment_ledger_restored()
+    rows = [_commitment_fact(c) for c in ledger.commitments.values()
+            if not want or c.state.name == want]
+    rows.sort(key=lambda r: r["when"])
+    return {"status": "ok", "count": len(rows), "commitments": rows}
+
+
 # ── Entry points ───────────────────────────────────────────────────────────────
 
 def _cmd_setup(args) -> None:
