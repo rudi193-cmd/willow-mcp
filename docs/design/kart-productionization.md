@@ -185,6 +185,61 @@ Tier-1-hygiene fix (`load_sandbox_config`'s env fallback) that Tier 1's own chan
 made necessary. `tests/test_kart_*` + `tests/test_audit_verify.py` stay green
 throughout.
 
+### Tier 3 — reviewed, verdict: no delegation + one coherence fix (2026-07-20)
+
+All eight Tier-3 pieces witnessed. The tier splits cleanly in two, and neither half
+delegates:
+
+**Fleet-coupled — keep (delegating would strip fleet behaviour):**
+- **`run_shell_task`** — carries the same B-37 egress gate as the Tier-2 executor:
+  `allow_net` from the task text is only honoured when the caller-resolved
+  `net_authorized` fact agrees, and a denial is stamped as `net_denied`. kartikeya's
+  `run_shell_task` has none of this (it places network authorization one level up, in
+  `execute_task_row`'s optional `network_authorizer` seam). Same verdict as Tier-2.
+- **`check_hook_tamper` / `_hook_tamper_fragment`** — willow-2.0 hardcodes the fleet
+  guard list (`willow/fylgja/events/`, `.cursor/hooks.json`, `.claude/settings.json`,
+  …) and must "stay in sync with pre_tool.py". kartikeya's version is a generic seam
+  (`HOOK_GUARD_FRAGMENTS` / `$KART_HOOK_GUARD_PATHS`, empty by default) with a
+  product-neutral error message ("Protected source" vs "Fylgja hook source").
+  Delegating would move the security wording and still leave the fleet fragment list —
+  and its `pre_tool.py` sync coupling — in willow-2.0. No net simplification.
+- **`_kart_logs_root`** — one line, but it resolves through fylgja's private-config-
+  aware home; kartikeya's resolves through the generic one. See the coherence fix below.
+- **`willow_home` / `willow_home_alias` / `venv_bin_dirs`** — these live in
+  `willow/fylgja/` and are **fleet infrastructure**, not kart-specific: `willow_home`
+  feeds store-root, secrets, config-mode across the whole fleet. kartikeya deliberately
+  ships a *simplified standalone copy* (its own docstring says so), so canonicality runs
+  the other way — fylgja is canonical, kartikeya is the derivative. Delegating would
+  repoint the entire fleet's home/venv resolution at kartikeya's narrower version.
+
+**Already byte-identical pure helpers — keep (nothing to gain):**
+- **`trim_task_result`** and **`_parse_task_network_directives`** (which wraps
+  `parse_task_network`, verified byte-identical across the trees). There is no drift to
+  eliminate, and delegating stable ~8-line pure functions only adds a cross-package
+  dependency edge. The Jaccard signal on these was import-line noise, not divergence.
+
+**Coherence fix that fell out of the review** (parallel to Tier-2's): fylgja's
+`willow_home` and kartikeya's diverge when `$WILLOW_HOME` is unset (fylgja →
+`~/github/.willow` or the repo-local generated pack; kartikeya → `~/.willow`). Because
+Tier-1 delegated home-derived sandbox paths (mcp_apps trust overlays, the fleet env
+file, the nsswitch shim) to kartikeya while `_kart_logs_root`/`write_task_log` still use
+fylgja, an unset `WILLOW_HOME` would split the sandbox and its logs across two homes —
+Tier-1's proven equivalence had *quietly depended* on `WILLOW_HOME` being exported.
+Fixed by pinning `WILLOW_HOME` (via `setdefault`, next to the Tier-1 env seams) to
+fylgja's own resolved fleet home: idempotent for every fylgja caller, and it forces
+kartikeya to resolve the same home, so all home-derived kart paths are coherent
+unconditionally. Verified: with `WILLOW_HOME` unset, fylgja and kartikeya now resolve
+the identical home; `test_kart_*` + `test_audit_verify.py` stay green (143/6);
+audit-verify reports 0 gated regressions with `WILLOW_HOME` unset (the CI scenario).
+
+**Stage-5 status after Tier 3:** the drift-window worklist is closed. Tier 1 delegated
+the three isolation data-producers; Tiers 2–3 reviewed the remaining 21 pieces and found
+they are correctly *not* delegatable (fleet-coupled or already identical), landing two
+coherence fixes (`KART_SANDBOX_CONFIG`, `WILLOW_HOME`) that Tier 1's delegation had made
+latent. The deliberately-deferred behaviour-change swaps (`scan_bash` fork-bomb
+detection, `run_shell` resource caps) remain the only open kart items, each its own
+opt-in security decision.
+
 ## 6. Relationship to other work
 
 - `skills/kart-tasks.md` already documents the *current* (worker-required)
