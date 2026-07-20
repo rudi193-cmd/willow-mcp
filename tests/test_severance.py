@@ -17,7 +17,7 @@ import os
 
 import pytest
 
-from willow_mcp import paths, server
+from willow_mcp import egress_authorization, lease, paths, server
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -32,6 +32,20 @@ def _pg(dbname):
 
 def _lease(self_writable=()):
     return {"self_writable": [{"key": "lease_root", "path": p} for p in self_writable]}
+
+
+@pytest.fixture
+def egress_locked(monkeypatch, tmp_path):
+    """Put the egress surface (B-38) in its fully-severed state: strict mode on, a
+    present + non-writable verification key, nothing self-writable. A tmp path is
+    always writable by the test uid, so the OS-level checks must be pinned at the
+    seam — that separation is a deploy step (chown), not a unit-testable one."""
+    key = tmp_path / "egress.pub"
+    key.write_text("x")
+    monkeypatch.setenv("WILLOW_MCP_EGRESS_PUBLIC_KEY", str(key))
+    monkeypatch.setattr(lease, "strict_trust_root", lambda: True)
+    monkeypatch.setattr(lease, "path_is_self_writable_or_replaceable", lambda p: False)
+    return key
 
 
 @pytest.fixture
@@ -69,9 +83,12 @@ def test_not_asserted_adds_no_problems_and_keeps_verdict_ok(monkeypatch):
 
 # ── the end state: a correctly severed install ───────────────────────────────
 
-def test_severed_install_reports_ok(fleet, tmp_path, monkeypatch):
+def test_severed_install_reports_ok(fleet, tmp_path, monkeypatch, egress_locked):
     """Every path is under this install's own WILLOW_HOME — which is what
-    severance looks like, and why the work order's original assertion was wrong."""
+    severance looks like, and why the work order's original assertion was wrong.
+
+    Post-B-38 a fully-severed `ok` also requires the fourth surface: egress locked
+    (strict mode on, verification key protected), supplied by `egress_locked`."""
     own_home = tmp_path / "own" / ".willow-mcp"
     (own_home / "mcp_apps").mkdir(parents=True)
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(own_home / "mcp_apps"))
@@ -81,6 +98,76 @@ def test_severed_install_reports_ok(fleet, tmp_path, monkeypatch):
     assert out["status"] == "ok"
     assert out["violated"] == []
     assert all(s["severed"] for s in out["surfaces"].values())
+    assert "egress" in out["surfaces"] and out["surfaces"]["egress"]["severed"] is True
+
+
+def test_severed_but_strict_off_is_not_ok(fleet, tmp_path, monkeypatch):
+    """B-38's thesis: an install severed on store/postgres/trust_root but with strict
+    trust root OFF cannot prove network severance — it reports `partial`, not `ok`.
+    This is the exact state the 2026-07-09 install was in while reporting `ok`."""
+    own_home = tmp_path / "own" / ".willow-mcp"
+    (own_home / "mcp_apps").mkdir(parents=True)
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(own_home / "mcp_apps"))
+    monkeypatch.setattr(lease, "strict_trust_root", lambda: False)
+
+    out = server._diag_severance(
+        _store(tmp_path / "own" / "store"), _pg("willow_mcp"), _lease())
+    assert out["surfaces"]["egress"]["severed"] is None
+    assert "egress" in out["unknown"]
+    assert out["status"] == "partial"
+
+
+# ── egress: AUTHORITY. the fourth surface (B-38). ────────────────────────────
+
+def test_egress_forgeable_under_strict_is_violated(fleet, tmp_path, monkeypatch):
+    """Strict mode ON but a key still writable → the process can forge egress →
+    an authority violation that BREAKS, like trust_root."""
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "own" / "mcp_apps"))
+    monkeypatch.setattr(lease, "strict_trust_root", lambda: True)
+    monkeypatch.setattr(lease, "path_is_self_writable_or_replaceable", lambda p: True)
+    key = tmp_path / "egress.pub"; key.write_text("x")
+    monkeypatch.setenv("WILLOW_MCP_EGRESS_PUBLIC_KEY", str(key))
+
+    out = server._diag_severance(
+        _store(tmp_path / "own" / "store"), _pg("willow_mcp"),
+        _lease([str(tmp_path / "own" / "mcp_apps" / "_net_leases")]))
+    assert out["surfaces"]["egress"]["severed"] is False
+    assert "egress" in out["violated"]
+
+    problems = server._derive_problems(
+        _store(tmp_path / "own" / "store"), _pg("willow_mcp"), {"status": "ok"},
+        "stdio", severance=out)
+    egp = [p for p in problems if p["check"] == "severance" and "forge egress" in p["detail"]]
+    assert egp and egp[0]["severity"] == "error"
+    assert server._derive_verdict(problems) == "broken"
+
+
+def test_egress_unprotected_verification_key_is_violated(fleet, tmp_path, monkeypatch, egress_locked):
+    """Even with nothing else writable, an ABSENT or self-writable Ed25519 verifier
+    means a forged envelope would verify — B-37's key is the reason B-38 is checkable.
+    Point the verifier at a path the process can replace → violated."""
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "own" / "mcp_apps"))
+    # override egress_locked's non-writable stub for the key path only
+    monkeypatch.setattr(lease, "path_is_self_writable_or_replaceable", lambda p: True)
+
+    out = server._diag_severance(
+        _store(tmp_path / "own" / "store"), _pg("willow_mcp"), _lease())
+    assert out["surfaces"]["egress"]["severed"] is False
+    assert "egress" in out["violated"]
+
+
+def test_egress_strict_off_warns_not_breaks(fleet, tmp_path, monkeypatch):
+    """Strict OFF is unknown, not violated: degrades (warn), never breaks — B-18."""
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "own" / "mcp_apps"))
+    monkeypatch.setattr(lease, "strict_trust_root", lambda: False)
+    out = server._diag_severance(
+        _store(tmp_path / "own" / "store"), _pg("willow_mcp"), _lease())
+    problems = server._derive_problems(
+        _store(tmp_path / "own" / "store"), _pg("willow_mcp"), {"status": "ok"},
+        "stdio", severance=out)
+    egp = [p for p in problems if p["check"] == "severance" and "strict trust root is off" in p["detail"]]
+    assert egp and egp[0]["severity"] == "warn"
+    assert server._derive_verdict(problems) in ("degraded",)
 
 
 # ── data surfaces: degrade ───────────────────────────────────────────────────
