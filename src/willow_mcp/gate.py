@@ -213,6 +213,19 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "code_graph_write": frozenset({
         "code_graph_index",
     }),
+    # Human-in-the-loop (willow_mcp.human_loop) — an attention queue + durable
+    # attestations, over the SOIL store. Read is listing; write is enqueue/resolve/
+    # attest. Kept its own group pair (not folded into store_*) because these are
+    # human-loop trust records, not general store rows — an app grants access to
+    # the queue/attestations deliberately. The attester of an attestation is always
+    # the caller's own identity, so `human_attestation_create` cannot be used to
+    # forge a record in another's name regardless of who holds this group.
+    "human_loop_read": frozenset({
+        "human_required_list", "human_attestation_list",
+    }),
+    "human_loop_write": frozenset({
+        "human_required_enqueue", "human_required_resolve", "human_attestation_create",
+    }),
     "full_access": frozenset({
         # Core store
         "store_put", "store_get", "store_list", "store_update",
@@ -264,6 +277,9 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         # code_graph (index writes a local SQLite graph; the rest query it)
         "code_graph_index", "code_graph_search", "code_graph_explain",
         "code_graph_walk", "code_graph_suggest", "code_graph_impact",
+        # Human-in-the-loop queue + attestations
+        "human_required_list", "human_required_enqueue", "human_required_resolve",
+        "human_attestation_list", "human_attestation_create",
     }),
 }
 
