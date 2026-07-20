@@ -2,10 +2,13 @@
 
 The ``# allow_net`` directive is only a request.  Kartikeya calls
 ``ExecutorNetworkAuthorizer`` immediately before shell execution; this module
-then re-checks the host policy and verifies a signed envelope bound to the
-submitter, unique queue task id, agent, and exact normalized task text. Replay
-markers are deliberately unnecessary: the signed task id is the queue primary
-key, so the authority cannot be attached to a second row.
+then re-checks the host policy, verifies a signed envelope bound to the
+submitter, unique queue task id, agent, and exact normalized task text, and
+confirms the adopted Postgres row has not already consumed net authority.
+Replay markers are deliberately unnecessary: the signed task id is the queue
+primary key, so the authority cannot be attached to a second row; single-use
+per row is enforced by terminal status, ``completed_at``, and an atomic
+result-json marker written only on allow.
 
 Signing is intentionally not an MCP surface.  ``sign_envelope`` is used only by
 the local ``willow-mcp sign-net-task`` command and reads a private key path that
@@ -30,6 +33,15 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 from . import consent, gate, lease
+
+# Reserved result-json marker: set atomically by the execution authorizer when
+# net authority is consumed for a row. Workers may write `result`, but the
+# authorizer only flips this key via a conditional UPDATE on `status=running`,
+# so a reclaimed row cannot replay the same envelope. Cleared when mark_done
+# stores a fresh terminal result (retry path overwrites result).
+_NET_AUTHORITY_CONSUMED_KEY = "_net_authority_consumed"
+_TERMINAL_STATUSES = frozenset({"completed", "failed"})
+_ROW_GATE_FIELDS = ("task_id", "status", "completed_at", "result")
 
 ENVELOPE_FORMAT = "willow-net-auth-v2"
 NETWORK_SCOPE = "network"
@@ -226,8 +238,118 @@ def public_key_path() -> Path | None:
     return Path(value).expanduser() if value else None
 
 
+def _task_table_columns():
+    """Resolve adopted `tasks` column names once; None when Postgres is absent."""
+    from .db import get_pg
+    from . import schema_profile as sp
+
+    pg = get_pg()
+    if pg is None:
+        return None
+    app_id = os.environ.get("WILLOW_APP_ID", "willow").strip() or "willow"
+    mapping = sp.resolve(pg, app_id, "tasks", list(_ROW_GATE_FIELDS))
+    if "error" in mapping or not mapping.get("confirmed"):
+        return None
+    fields = mapping["fields"]
+    cols = {name: fields[name]["column"] for name in _ROW_GATE_FIELDS}
+    if not cols.get("task_id") or not cols.get("status"):
+        return None
+    return cols
+
+
+def _result_json_has_net_consumed(result) -> bool:
+    if result is None:
+        return False
+    if isinstance(result, dict):
+        return bool(result.get(_NET_AUTHORITY_CONSUMED_KEY))
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+        except (TypeError, json.JSONDecodeError):
+            return False
+        return isinstance(parsed, dict) and bool(parsed.get(_NET_AUTHORITY_CONSUMED_KEY))
+    return False
+
+
+def _row_blocks_net_authorization(task_id: str) -> str | None:
+    """Return a denial reason when Postgres says this row may not consume net."""
+    cols = _task_table_columns()
+    if cols is None:
+        return "queue state unavailable"
+    from .db import get_pg
+
+    pg = get_pg()
+    if pg is None:
+        return "queue state unavailable"
+    present = [name for name in _ROW_GATE_FIELDS if cols.get(name)]
+    if "task_id" not in present or "status" not in present:
+        return "queue state unavailable"
+    select = ", ".join(f'"{cols[name]}"' for name in present)
+    cur = pg.cursor()
+    cur.execute(
+        f'SELECT {select} FROM tasks WHERE "{cols["task_id"]}" = %s',
+        (task_id,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    if row is None:
+        return "task row not found"
+    values = dict(zip(present, row))
+    status = (values.get("status") or "").strip().lower()
+    if status in _TERMINAL_STATUSES:
+        return "task row is terminal"
+    if "completed_at" in values and values.get("completed_at") is not None:
+        return "task row already completed"
+    if "result" in values and _result_json_has_net_consumed(values.get("result")):
+        return "network authorization already consumed for row"
+    return None
+
+
+def _consume_row_net_authorization(task_id: str) -> bool:
+    """Atomically mark net authority consumed for a running row."""
+    cols = _task_table_columns()
+    from .db import get_pg
+
+    pg = get_pg()
+    if cols is None or pg is None:
+        return False
+    result_col = cols.get("result")
+    status_col = cols.get("status")
+    id_col = cols.get("task_id")
+    if not result_col or not status_col or not id_col:
+        return False
+    completed_guard = ""
+    if cols.get("completed_at"):
+        completed_guard = f'AND "{cols["completed_at"]}" IS NULL '
+    cur = pg.cursor()
+    cur.execute(
+        f'UPDATE tasks SET "{result_col}" = jsonb_set('
+        f"COALESCE(\"{result_col}\", '{{}}'::jsonb), "
+        f"'{{{_NET_AUTHORITY_CONSUMED_KEY}}}', 'true'::jsonb, true) "
+        f'WHERE "{id_col}" = %s '
+        f'AND "{status_col}" = \'running\' '
+        f"{completed_guard}"
+        f"AND NOT COALESCE(\"{result_col}\", '{{}}'::jsonb) "
+        f"? %s "
+        f'RETURNING "{id_col}"',
+        (task_id, _NET_AUTHORITY_CONSUMED_KEY),
+    )
+    claimed = cur.fetchone() is not None
+    cur.close()
+    pg.commit()
+    return claimed
+
+
 class ExecutorNetworkAuthorizer:
-    """Concrete execution-time policy passed into Kartikeya's host seam."""
+    """Concrete execution-time policy passed into Kartikeya's host seam.
+
+    Trust boundary: cryptographic envelope checks prove the operator signed
+    this exact row's work, but they do not prove the row has never executed
+    before. The queue's adopted Postgres row is authoritative for that:
+    terminal status, ``completed_at``, and a conditional result-json marker
+    are read and updated via ``get_pg()`` — not from the in-memory
+    ``TaskRow``, which the worker could otherwise misrepresent.
+    """
 
     def __init__(self) -> None:
         self.last_error = ""
@@ -273,5 +395,10 @@ class ExecutorNetworkAuthorizer:
         )
         if not ok or payload is None:
             return self._deny(reason)
+        blocked = _row_blocks_net_authorization(row.task_id)
+        if blocked:
+            return self._deny(blocked)
+        if not _consume_row_net_authorization(row.task_id):
+            return self._deny("network authorization already consumed for row")
         self.last_error = ""
         return True
