@@ -3158,17 +3158,98 @@ def _under(child: Path, parent: Path) -> bool:
     return c == p or p in c.parents
 
 
-def _diag_severance(store: dict, postgres: dict, net_lease: dict | None) -> dict:
-    """Can this install still see the fleet it claims to be cut off from?
+def _egress_severance(net_lease: dict | None) -> dict:
+    """The fourth surface (B-38): can this process reach the network without a key
+    it does not hold?
 
-    Three properties, each independently checkable from inside the process:
+    store/postgres/trust_root can all be severed and the process still reach the
+    internet, because egress is a THREE-key gate — `task_net` (manifest), the
+    `consent.internet` switch (settings file), and a signed egress lease — and
+    severance from a fleet's STATE is not severance from its NETWORK. This asserts
+    the process cannot FORGE those keys. It was undefinable until B-37 moved the
+    egress signing key beyond write reach; the executor authorizer
+    (`egress_authorization.ExecutorNetworkAuthorizer`) now demands a non-writable
+    Ed25519 verification key, so the property is finally checkable.
+
+    Reuses the manifest + lease-root paths `net_lease` already measured, and adds
+    the two the `trust_root` check names in its message but never actually measures:
+    the consent switch, and the egress verification key.
+
+    Verdict, respecting strict mode (and B-18's no-false-positive rule):
+      - strict ON, nothing forgeable, key present & protected → severed True
+      - strict ON, but a key is forgeable or the verifier is unprotected → False (error)
+      - strict OFF → None (unknown): the executor denies egress by default, so
+        key-separation is not being enforced and severance cannot be *proven* — a
+        warn, never a break. This is the state the 2026-07-09 install was in while
+        reporting `ok`.
+    """
+    from . import consent as _consent
+    from . import egress_authorization as _ea
+    from . import lease as _lease
+
+    # manifest + lease_root, already measured for the third key
+    forgeable = [f["path"] for f in ((net_lease or {}).get("self_writable") or [])]
+
+    # the consent switch — the second key, named by trust_root but never measured
+    consent_writable: list[str] = []
+    for p in {_consent.settings_path(), _consent.legacy_path()}:
+        try:
+            if _lease.path_is_self_writable_or_replaceable(p):
+                consent_writable.append(str(p))
+        except OSError:
+            consent_writable.append(str(p))  # unverifiable ⇒ cannot claim protection
+
+    # the Ed25519 verification key — B-37's key, the reason this is now definable
+    pubkey = _ea.public_key_path()
+    if pubkey is None:
+        key_status: dict = {"configured": False}
+        key_protected = False
+    else:
+        try:
+            present = pubkey.is_file()
+            writable = _lease.path_is_self_writable_or_replaceable(pubkey)
+        except OSError:
+            present, writable = False, True
+        key_status = {"configured": True, "path": str(pubkey),
+                      "present": present, "self_writable": writable}
+        key_protected = present and not writable
+
+    strict = _lease.strict_trust_root()
+    forgeable_keys = sorted(set(forgeable) | set(consent_writable))
+    can_forge = bool(forgeable_keys) or not key_protected
+
+    if not strict:
+        severed: bool | None = None
+        reason: str | None = ("strict trust root is off — the executor denies egress by "
+                              "default, so egress key-separation is not enforced and "
+                              "severance cannot be proven (set WILLOW_MCP_STRICT_TRUST_ROOT=1)")
+    elif can_forge:
+        severed = False
+        reason = "this process can forge the three-key egress gate"
+    else:
+        severed = True
+        reason = None
+
+    return {"severed": severed, "reason": reason,
+            "strict_trust_root": strict,
+            "forgeable_keys": forgeable_keys,
+            "consent_writable": consent_writable,
+            "verification_key": key_status}
+
+
+def _diag_severance(store: dict, postgres: dict, net_lease: dict | None) -> dict:
+    """Can this install still see — or reach out through — the fleet it claims to
+    be cut off from?
+
+    Four properties, each independently checkable from inside the process:
 
       store      — the SOIL store is not the fleet's store
       postgres   — the database is not the fleet's database
       trust_root — this process cannot rewrite the ACLs that gate it
+      egress     — this process cannot forge the three-key network gate (B-38)
 
-    The first two are DATA: someone who writes them corrupts records. The third
-    is AUTHORITY: someone who writes it grants themselves egress. Only the third
+    The first two are DATA: someone who writes them corrupts records. The last two
+    are AUTHORITY: someone who writes them grants themselves egress. Only authority
     can turn a severed install into a compromised one, so only it is an `error`.
 
     Reports `not_asserted` when the operator has named no fleet. That is not a
@@ -3221,6 +3302,9 @@ def _diag_severance(store: dict, postgres: dict, net_lease: dict | None) -> dict
         "inside_fleet_home": inside_fleet,
         "severed": not forgeable and not inside_fleet,
     }
+
+    # ── authority: egress (B-38, the fourth surface) ──────────────────────────
+    surfaces["egress"] = _egress_severance(net_lease)
 
     violated = [k for k, v in surfaces.items() if v.get("severed") is False]
     unknown = [k for k, v in surfaces.items() if v.get("severed") is None]
@@ -3421,6 +3505,27 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                     "fix": ("move the trust root outside every path this process and the Kart "
                             "sandbox can write (WILLOW_MCP_APPS_ROOT), and chown it to a uid "
                             "the agent does not run as")})
+            elif name == "egress":
+                # AUTHORITY, like trust_root, but the NETWORK key specifically. Under
+                # enforcement the process can still forge the three-key egress gate:
+                # a writable consent switch, manifest, or lease root, or an
+                # absent/self-writable verification key. B-38.
+                keys = ", ".join(surf.get("forgeable_keys", [])) or "the egress trust root"
+                vk = surf.get("verification_key", {})
+                vk_note = ("" if vk.get("configured") and vk.get("present") and not vk.get("self_writable")
+                           else " the Ed25519 egress verification key is absent, self-writable, "
+                                "or unconfigured, so a forged envelope would verify;")
+                problems.append({
+                    "severity": "error", "check": "severance",
+                    "detail": ("this install claims severance but can forge egress:" + vk_note +
+                               " within write reach: " + keys + ". The three-key network gate "
+                               "(task_net + consent.internet + a signed lease) can be "
+                               "self-granted, so severance from the fleet's STATE is not "
+                               "severance from its NETWORK."),
+                    "fix": ("move the consent file, manifest, lease root, and egress "
+                            "verification key outside every path this process can write "
+                            "(chown to a uid the agent does not run as), and keep "
+                            "WILLOW_MCP_STRICT_TRUST_ROOT=1")})
             else:
                 # DATA. Corruptible, not authority-bearing. Degrades; does not break.
                 problems.append({
@@ -3433,6 +3538,19 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                             else f"set WILLOW_PG_DB to a database other than "
                                  f"'{severance.get('fleet_pg_db')}'")})
         for name in severance.get("unknown", []):
+            if name == "egress":
+                # Not half a claim — a claim the OS is not being asked to enforce.
+                # strict trust root is off, so the executor denies egress by default
+                # but nothing separates the keys; severance cannot be *proven*.
+                # Warns (degrades), never breaks — the 2026-07-09 install's true state.
+                problems.append({
+                    "severity": "warn", "check": "severance",
+                    "detail": (surfaces.get("egress", {}).get("reason")
+                               or "egress severance cannot be proven"),
+                    "fix": ("chown the consent file, manifest, lease root, and egress "
+                            "verification key to a uid the agent does not run as, then set "
+                            "WILLOW_MCP_STRICT_TRUST_ROOT=1 so the executor enforces the split")})
+                continue
             # Half a claim. The operator asserted severance from *something* but
             # left the other coordinate unnamed, so this surface cannot be checked
             # either way. Fail closed: an unverifiable claim is not a passing one.
