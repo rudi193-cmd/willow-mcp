@@ -1,16 +1,29 @@
 # The guardian-consent seam: representing a subject who isn't the owner
 
-Status: **core shipped, binding pending.** The stdlib-only engine this doc maps
-now exists at [`src/willow_mcp/subject_consent/core.py`](../../src/willow_mcp/subject_consent/core.py)
-(tests: [`tests/test_subject_consent.py`](../../tests/test_subject_consent.py),
-25 passing, incl. a static no-network/stdlib-only import boundary). It converges
-*owner ≠ subject* consent — the one gap corpus-lens named and refused to ship,
-the Nest ran straight into, and UTETY already solved in miniature for a child
-learner — into one shared primitive all three can depend on. **Built next slice:**
-the willow-mcp *binding* (gate wiring + ReceiptLog + the operator-only mutation
-seat) that this core deliberately does not contain. The core answers "did this
-subject consent to this scope?"; the binding decides who is allowed to ask and
-records that they did.
+Status: **core + binding shipped; call-site subject_ids pending.** Both halves
+this doc maps now exist:
+
+- **Core** — [`src/willow_mcp/subject_consent/core.py`](../../src/willow_mcp/subject_consent/core.py)
+  (tests: [`tests/test_subject_consent.py`](../../tests/test_subject_consent.py),
+  25 passing, incl. a static no-network/stdlib-only import boundary). Stdlib-only,
+  egress-free, owner-agnostic. Answers "did this subject consent to this scope?"
+- **Binding** — [`src/willow_mcp/subject_consent_binding.py`](../../src/willow_mcp/subject_consent_binding.py)
+  (tests: [`tests/test_subject_consent_binding.py`](../../tests/test_subject_consent_binding.py),
+  19 passing). The willow-mcp side the core deferred to: owner-exemption, the
+  AND-composed `subject_gate`, and the operator-only `grant`/`revoke` seat
+  (refuses off an operator terminal; writes both a ReceiptLog line and the
+  subject's disclosure chain). Wired into `server._guarded` as the third gate
+  check after `gate.permitted`.
+
+It converges *owner ≠ subject* consent — the one gap corpus-lens named and
+refused to ship, the Nest ran straight into, and UTETY already solved in
+miniature for a child learner — into one shared primitive all three can depend
+on. **The gate is live but dormant:** it fires only for a call carrying a
+`subject_id`, and no tool exposes that parameter yet. The remaining slice is
+threading a `subject_id` through the subject-touching tools named in
+`TOOL_SUBJECT_SCOPE` (`nest_promote`, `kb_ingest`, `knowledge_ingest`,
+`lineage_record`) so the gate has something to check — a per-tool change, not a
+seam change.
 
 What the shipped core provides (and what it pointedly leaves out):
 

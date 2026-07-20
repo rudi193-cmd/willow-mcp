@@ -677,6 +677,28 @@ def _guarded(tool_name: str, *, list_error: bool = False):
             # Phase 2 (observe-only): log the identity binding; does not gate.
             _observe_binding(effective_app_id, tool_name)
 
+            # Third gate check (guardian-consent seam): after capability consent
+            # (gate.permitted) comes SUBJECT consent — did this non-owner person
+            # agree to this scope? Composed by AND, never around. Inert for every
+            # tool that carries no `subject_id` (all of them today); it activates
+            # the instant a subject-touching tool grows that parameter. A denial
+            # is fail-closed, and even an *error* inside the check denies rather
+            # than passes — a gate that crashes open is not a gate.
+            subject_id = call_kwargs.get("subject_id")
+            if subject_id:
+                try:
+                    from . import subject_consent_binding
+                    subj_err = subject_consent_binding.subject_gate(
+                        effective_app_id, tool_name, subject_id
+                    )
+                except Exception as e:  # deny on failure, never fall through open
+                    subj_err = {"error": f"subject_consent_check_failed: {e}"}
+                if subj_err:
+                    _receipt_log.record(
+                        effective_app_id, tool_name, "denied", subj_err.get("error")
+                    )
+                    return _shape(subj_err)
+
             collection = call_kwargs.get("collection")
             if (
                 isinstance(collection, str)
