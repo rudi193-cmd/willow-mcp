@@ -119,6 +119,18 @@ def exposure_config_path() -> Path:
     return config_dir() / "exposure.json"
 
 
+def subject_consent_store() -> Path:
+    """Directory the guardian-consent core reads and writes.
+
+    A directory, not a file: it holds the append-only consent chain
+    (`consent.jsonl`) and the per-subject disclosure chains
+    (`disclosures/<hash>.jsonl`). Kept OUTSIDE config/ — config/ is
+    operator-authored policy files; this is a machine-appended, hash-chained
+    ledger the operator CLI mutates, never hand-edits.
+    """
+    return willow_home() / "subject_consent"
+
+
 # ── dispatch / sessions / handoffs ────────────────────────────────────────────
 
 def dispatch_root() -> Path:

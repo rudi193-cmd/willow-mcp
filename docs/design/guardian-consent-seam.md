@@ -1,10 +1,58 @@
 # The guardian-consent seam: representing a subject who isn't the owner
 
-Status: **proposal / mapping only** (no code yet). This pins the model for
-*owner ≠ subject* consent — the one gap corpus-lens named and refused to ship,
-the Nest ran straight into, and UTETY already solved in miniature for a child
-learner — before any wiring is written, so we can prototype one slice at a time
-without guessing the shape.
+Status: **core + binding shipped; call-site subject_ids pending.** Both halves
+this doc maps now exist:
+
+- **Core** — [`src/willow_mcp/subject_consent/core.py`](../../src/willow_mcp/subject_consent/core.py)
+  (tests: [`tests/test_subject_consent.py`](../../tests/test_subject_consent.py),
+  25 passing, incl. a static no-network/stdlib-only import boundary). Stdlib-only,
+  egress-free, owner-agnostic. Answers "did this subject consent to this scope?"
+- **Binding** — [`src/willow_mcp/subject_consent_binding.py`](../../src/willow_mcp/subject_consent_binding.py)
+  (tests: [`tests/test_subject_consent_binding.py`](../../tests/test_subject_consent_binding.py),
+  19 passing). The willow-mcp side the core deferred to: owner-exemption, the
+  AND-composed `subject_gate`, and the operator-only `grant`/`revoke` seat
+  (refuses off an operator terminal; writes both a ReceiptLog line and the
+  subject's disclosure chain). Wired into `server._guarded` as the third gate
+  check after `gate.permitted`.
+
+It converges *owner ≠ subject* consent — the one gap corpus-lens named and
+refused to ship, the Nest ran straight into, and UTETY already solved in
+miniature for a child learner — into one shared primitive all three can depend
+on. **The gate is live.** The four subject-touching tools in `TOOL_SUBJECT_SCOPE`
+each expose an optional `subject_id` (tests:
+[`tests/test_subject_consent_gate_wiring.py`](../../tests/test_subject_consent_gate_wiring.py),
+9 passing, driven end-to-end through `_guarded`):
+
+- `knowledge_ingest`, `kb_ingest`, `nest_promote` → require a `kb_promotion` grant
+  for a named non-owner subject; a committed write is logged to that subject's
+  disclosure chain.
+- `lineage_record` → requires the higher `person_inference` grant (corpus-lens's
+  quarantined `PERSON_CLAIM_TYPES` bar); a `kb_promotion` grant does **not** open it.
+
+`subject_id` stays empty for the owner's own data (every call today), so the gate
+is a no-op there and nothing existing changed. The remaining convergence is
+external: **corpus-lens and UTETY consuming this shared core** instead of each
+carrying their own — the reason it was built stdlib-only. That is their import to
+make, not a willow-mcp change.
+
+What the shipped core provides (and what it pointedly leaves out):
+
+- `grant`/`revoke`/`permitted(store, subject_id, scope)` over a hash-chained,
+  append-only consent log — fail-closed on every path that isn't a *verified*
+  `granted` (absent store, broken chain, no record, `pending`, `revoked` → `False`).
+- `deidentify(text, identifiers)` — de-identify-or-refuse; proves the scrub or
+  raises **without ever echoing the surviving value**.
+- `record_disclosure`/`read_disclosures` — the per-subject, tamper-evident record
+  a guardian can read.
+- Scopes are **independent permissions, not a ladder**
+  (`local_only`, `process_analysis`, `kb_promotion`, `person_inference` — the
+  last name matching corpus-lens's capability); each is granted and checked on
+  its own.
+- **Not in the core, on purpose:** owner==subject is *not* special-cased (the
+  core doesn't know who the owner is); capacity/self-consent judgments are
+  deferred; and mutation is a library primitive an operator CLI calls — an app
+  can never grant consent on a subject's behalf. Enforcing all three is the
+  binding's job.
 
 Home: willow-mcp, beside [`consent.py`](../../src/willow_mcp/consent.py) and
 [`gate.py`](../../src/willow_mcp/gate.py). Reference implementation to generalize
