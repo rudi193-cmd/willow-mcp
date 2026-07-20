@@ -62,6 +62,9 @@ TOOL_CLASS: dict[str, str] = {
     "nest_intake_queue": READ, "nest_intake_flags": READ,
     # Commitment membrane: surface (dew rule) + facts-only list are read-only views.
     "commitment_surface": READ, "commitment_list": READ,
+    # code_graph: querying the symbol graph is read-only (no store/KB, no network).
+    "code_graph_search": READ, "code_graph_explain": READ, "code_graph_walk": READ,
+    "code_graph_suggest": READ, "code_graph_impact": READ,
     # ── write ───────────────────────────────────────────────────────────────
     "store_put": WRITE, "store_update": WRITE, "store_delete": WRITE,
     "store_purge_collection": WRITE,          # reversible + confirm-guarded — stays write (D1)
@@ -86,6 +89,9 @@ TOOL_CLASS: dict[str, str] = {
     # are ordinary WRITEs, not EXECUTE (their own permission group handles egress-free
     # hygiene, not the tier ceiling).
     "commitment_ingest": WRITE, "commitment_acknowledge": WRITE,
+    # code_graph_index builds a local SQLite graph of a repo on disk — a local write,
+    # like nest_scan; no network, so WRITE not EXECUTE.
+    "code_graph_index": WRITE,
     # ── execute ─────────────────────────────────────────────────────────────
     "task_submit": EXECUTE, "task_status": EXECUTE, "task_list": EXECUTE,
     "agent_route": EXECUTE, "agent_dispatch_result": EXECUTE,
