@@ -189,11 +189,22 @@ def test_disclosure_absent_is_empty(tmp_path):
 
 def test_disclosure_tamper_raises(tmp_path):
     record_disclosure(tmp_path, "subj-1", "lesson", "A")
-    # find the per-subject file and corrupt it
+    # corrupt the CHAIN file (there is also a sibling .anchor.json now)
     ddir = tmp_path / "disclosures"
-    f = next(ddir.iterdir())
+    f = next(p for p in ddir.iterdir() if p.suffix == ".jsonl")
     row = f.read_text(encoding="utf-8").splitlines()[0]
     f.write_text(row.replace("lesson", "surveillance") + "\n", encoding="utf-8")
+    with pytest.raises(ChainTamperError):
+        read_disclosures(tmp_path, "subj-1")
+
+
+def test_disclosure_truncation_is_detected(tmp_path):
+    # the anchor guard (UTETY audit B4): a truncated chain still links cleanly
+    for d in ("A", "B", "C"):
+        record_disclosure(tmp_path, "subj-1", "lesson", d)
+    f = next(p for p in (tmp_path / "disclosures").iterdir() if p.suffix == ".jsonl")
+    lines = f.read_text(encoding="utf-8").splitlines()
+    f.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
     with pytest.raises(ChainTamperError):
         read_disclosures(tmp_path, "subj-1")
 
