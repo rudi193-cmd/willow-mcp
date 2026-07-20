@@ -238,7 +238,81 @@ they are correctly *not* delegatable (fleet-coupled or already identical), landi
 coherence fixes (`KART_SANDBOX_CONFIG`, `WILLOW_HOME`) that Tier 1's delegation had made
 latent. The deliberately-deferred behaviour-change swaps (`scan_bash` fork-bomb
 detection, `run_shell` resource caps) remain the only open kart items, each its own
-opt-in security decision.
+opt-in security decision — specced below.
+
+### 5.x — Deferred behaviour-change swaps (NOT equivalence migrations)
+
+Tier 1 kept `scan_bash` and `run_shell` on willow-2.0's own implementations because
+kartikeya's versions are strict **behaviour changes**, not byte-equivalent swaps —
+each a security *upgrade* that would start rejecting/limiting task workloads that run
+today. They are opt-in, and each wants its own reviewed PR with the delta below
+witnessed. This is the pick-up-able worklist.
+
+#### A. `scan_bash` — add fork-bomb / resource-exhaustion detection
+
+**Delta (measured):** kartikeya's `scan_bash` runs one extra category willow-2.0's
+lacks — `_RESOURCE_EXHAUSTION` (willow-2.0's `willow/fylgja/safety/security_scan.py`
+has **zero** such patterns). All `SEV_HIGH`:
+- Fork bomb, self-referential: `(?P<fn>[\w:]+)\s*\(\)\s*\{[^{}]*(?P=fn)[^{}]*\|[^{}]*&`
+  (the backref keeps a normal `deploy() { build | log & }` from matching).
+- Fork-bomb body: `:\s*\|\s*:\s*&` (i.e. `:(){ :|:& };:`).
+- Infinite CPU spin: `while\s+(true|:)\s*;?\s*do\s*(:|true)?\s*;?\s*done`.
+
+**Behaviour change:** a task/`script_body` containing any of these runs fine today
+(willow-2.0's `check_kart_task` → `scan_bash` returns no issue), but would be
+**blocked** after the swap (`SEV_HIGH` ⇒ `check_kart_task` returns an error and the
+task never executes). Pure hardening — nothing that legitimately runs *should* match,
+but that has to be witnessed, not assumed.
+
+**Mechanism — two options, pick with review:**
+1. *Delegate kart's scan* — point `core/kart_task_scan.py`'s `scan_bash` import at
+   `kartikeya.security_scan.scan_bash`. Narrow: only kart task-scanning gains the
+   patterns.
+2. *Upgrade fylgja (preferred)* — add the three `_RESOURCE_EXHAUSTION` patterns to
+   willow-2.0's own `willow/fylgja/safety/security_scan.py`. `scan_bash` is
+   **fleet infrastructure** (also the IDE-native `PreToolUse` guard via `pre_tool.py`,
+   same canonicality direction as `willow_home` in Tier 3), so the fleet-canonical
+   home for the upgrade is fylgja — kart then inherits it, and the IDE hook gets the
+   fork-bomb block too. Keeps the fleet the single source of truth.
+
+**Verification gate:** `test_kart_*` + `test_audit_verify.py` green; add a positive
+test (a fork-bomb string is blocked) and a negative control (`deploy() { build | log & }`
+and similar legitimate `()`-functions still pass); grep the corpus / recent task history
+for any real task that would newly trip it before enabling.
+
+#### B. `run_shell` — resource caps (memory + PID ceilings)
+
+**Delta (measured):** kartikeya's `run_shell` applies resource limits by default —
+`resource_caps_enabled()` is True unless `WILLOW_KART_NO_RLIMIT ∈ {1,true,yes}`. It caps
+memory (`KART_MEM_MAX`, default **2G**) and process count (`KART_PIDS_MAX`, default
+**512**), preferring a cgroup-v2 leaf under an operator-delegated `KART_CGROUP_PARENT`
+and falling back to POSIX rlimits (`RLIMIT_AS` / `RLIMIT_NPROC`) via `preexec_fn`. On
+success it adds a `resource_limit` key to the result dict naming the mode used.
+willow-2.0's `run_shell` has none of this.
+
+**Behaviour change:** every sandboxed command gains a 2G memory ceiling and a 512-PID
+ceiling by default; a task exceeding either is killed by the kernel; the result dict
+grows a `resource_limit` key. A legitimate heavy build/test task could newly fail.
+
+**Mechanism — delegate with an explicit caps decision:** swap `core/kart_sandbox.py`'s
+`run_shell` to `kartikeya.sandbox.run_shell`, then choose one:
+- *Caps-on (recommended, the point of the swap):* leave `WILLOW_KART_NO_RLIMIT` unset;
+  tune `KART_MEM_MAX` / `KART_PIDS_MAX` to the fleet's real ceilings first; optionally
+  delegate a `KART_CGROUP_PARENT` so caps use cgroups (cleaner kills) instead of rlimits.
+- *Staged:* pin `WILLOW_KART_NO_RLIMIT=1` via `setdefault` at first (delegating the code
+  but preserving today's no-cap behaviour byte-for-byte), then flip it on in a follow-up
+  once the ceilings are validated — mirrors how Tier 1 injected its env seams.
+
+**Verification gate:** `test_kart_*` must handle the new `resource_limit` output key
+(check no test asserts an exact result-dict shape that the key would break); exercise a
+task near each ceiling to confirm the kill path and the failure surfaces cleanly; confirm
+the rlimit fallback works where no delegated cgroup parent exists. `test_kart_*` +
+`audit-verify` stay green.
+
+**Order note:** these two are independent of each other and of the closed Tiers 1–3;
+either can land first. Both are security *tightenings*, so the safe sequence is
+*measure the blast radius (corpus/history grep for `scan_bash`; ceiling probe for
+`run_shell`) → land behind the opt-in → then enable*.
 
 ## 6. Relationship to other work
 
