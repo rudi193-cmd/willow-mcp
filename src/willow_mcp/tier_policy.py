@@ -60,6 +60,8 @@ TOOL_CLASS: dict[str, str] = {
     "context_get": READ, "context_list": READ,
     "nest_status": READ, "nest_digest": READ,   # digest is the walled view
     "nest_intake_queue": READ, "nest_intake_flags": READ,
+    # Commitment membrane: surface (dew rule) + facts-only list are read-only views.
+    "commitment_surface": READ, "commitment_list": READ,
     # ── write ───────────────────────────────────────────────────────────────
     "store_put": WRITE, "store_update": WRITE, "store_delete": WRITE,
     "store_purge_collection": WRITE,          # reversible + confirm-guarded — stays write (D1)
@@ -79,6 +81,11 @@ TOOL_CLASS: dict[str, str] = {
     "nest_scan": WRITE, "nest_promote": WRITE,
     # router: scan stages the queue, file moves the host file, skip records it
     "nest_intake_scan": WRITE, "nest_intake_file": WRITE, "nest_intake_skip": WRITE,
+    # Commitment membrane: ingest writes the ledger (facts only), acknowledge appends
+    # a history entry. Neither writes the calendar back — no new authority — so they
+    # are ordinary WRITEs, not EXECUTE (their own permission group handles egress-free
+    # hygiene, not the tier ceiling).
+    "commitment_ingest": WRITE, "commitment_acknowledge": WRITE,
     # ── execute ─────────────────────────────────────────────────────────────
     "task_submit": EXECUTE, "task_status": EXECUTE, "task_list": EXECUTE,
     "agent_route": EXECUTE, "agent_dispatch_result": EXECUTE,
