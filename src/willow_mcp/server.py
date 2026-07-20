@@ -4020,6 +4020,95 @@ def code_graph_impact(app_id: str, file_paths: list, db_path: str = "") -> dict:
     return analyze_impact(db, file_paths)
 
 
+# ── human-in-the-loop: an attention queue + durable attestations ────────────────
+#
+# Ported from willow-2.0 core/human_required.py + core/human_attestation.py
+# (migration shortlist §6). Homed on the SOIL store, not the fleet Postgres (no
+# unilateral schema migration — B-28), via willow_mcp.human_loop. The attester of
+# a human_attestation is ALWAYS the calling identity, never a free parameter, and
+# a non-forgeable by_human flag records whether that identity is the
+# human-orchestrator seat — so an agent can never write a record claiming the
+# operator signed something (the sudo invariant, applied to attestation).
+
+@mcp.tool()
+@_guarded("human_required_enqueue")
+def human_required_enqueue(app_id: str, kind: str, title: str, summary: str = "",
+                           priority: str = "normal", source_ref: str = "",
+                           assignee: str = "") -> dict:
+    """Enqueue work that must pause automation until a human acts. `kind`:
+    consent | attestation | review | overload | onboarding. `priority`:
+    low|normal|high|urgent. Records the calling app as source_agent."""
+    from . import human_loop
+    try:
+        return human_loop.enqueue(_store, kind=kind, title=title, summary=summary,
+                                  priority=priority, source_agent=app_id,
+                                  source_ref=source_ref, assignee=assignee)
+    except human_loop.HumanLoopError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@_guarded("human_required_resolve")
+def human_required_resolve(app_id: str, item_id: str, status: str = "resolved",
+                           note: str = "") -> dict:
+    """Resolve / dismiss / acknowledge a human-required queue item. `status`:
+    resolved | dismissed | acknowledged. The row is updated in place (who/when/
+    note), never deleted. Returns unknown_item if there is no such id."""
+    from . import human_loop
+    try:
+        return human_loop.resolve(_store, item_id, resolved_by=app_id,
+                                  status=status, note=note)
+    except human_loop.HumanLoopError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@_guarded("human_required_list")
+def human_required_list(app_id: str, status: str = "open", kind: str = "",
+                        limit: int = 20) -> dict:
+    """List human-required queue items (newest first) with a by-status tally.
+    `status` defaults to 'open'; pass '' for all. Read-only."""
+    from . import human_loop
+    items = human_loop.list_queue(_store, status=status, kind=kind, limit=limit)
+    return {"items": items, "count": len(items), "stats": human_loop.queue_stats(_store)}
+
+
+@mcp.tool()
+@_guarded("human_attestation_create")
+def human_attestation_create(app_id: str, subject_id: str,
+                             subject_type: str = "knowledge_atom", statement: str = "",
+                             status: str = "attested", evidence_ref: str = "") -> dict:
+    """Create a durable attestation/rejection/change-request record for a subject
+    (knowledge_atom | edge | queue_item | external_review | other; status
+    attested | rejected | needs_changes).
+
+    The attester is the CALLING identity — there is deliberately no `attested_by`
+    parameter, so no caller can forge a record in another's name. `by_human` is
+    set from whether the caller is the human-orchestrator seat; only a by_human
+    record satisfies `has_attestation(require_human=True)`."""
+    from . import human_loop
+    from .human_session import is_orchestrator_app
+    try:
+        return human_loop.create_attestation(
+            _store, subject_id=subject_id, subject_type=subject_type,
+            statement=statement, status=status, evidence_ref=evidence_ref,
+            attested_by=app_id, by_human=is_orchestrator_app(app_id))
+    except human_loop.HumanLoopError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@_guarded("human_attestation_list")
+def human_attestation_list(app_id: str, subject_id: str = "", subject_type: str = "",
+                           status: str = "", limit: int = 20) -> dict:
+    """List durable attestation records (newest first), optionally filtered by
+    subject_id / subject_type / status. Read-only."""
+    from . import human_loop
+    items = human_loop.list_attestations(_store, subject_id=subject_id,
+                                         subject_type=subject_type, status=status, limit=limit)
+    return {"items": items, "count": len(items)}
+
+
 # ── Entry points ───────────────────────────────────────────────────────────────
 
 def _cmd_setup(args) -> None:

@@ -147,11 +147,15 @@ Not "get everything over" — get the **used** gaps over:
 ```
 🟢 PORT (genuine gap + was core/standard + self-contained)
   [ ] willow_web_search / willow_web_fetch   the only open-web path; product has none
-  [x] code_graph_*                            PORTED 2026-07-20 (willow-mcp#TBD) — src/willow_mcp/code_graph/
+  [x] code_graph_*                            PORTED 2026-07-20 (willow-mcp#115) — src/willow_mcp/code_graph/
                                               + 6 tools (index/search/explain/walk/suggest/impact),
                                               code_graph_read/write gate groups, 13 tests
   [ ] fork_* + env_check                      bounded work-units over existing store
-  [ ] human_attestation_* / human_required_*  human-in-loop trust queue
+  [x] human_attestation_* / human_required_*  PORTED 2026-07-20 — src/willow_mcp/human_loop.py (SOIL-backed,
+                                              NOT the fleet Postgres) + 5 tools (queue enqueue/resolve/list,
+                                              attestation create/list), human_loop_read/write groups, 12 tests.
+                                              Closed a forgery hole: attester = caller identity, non-forgeable
+                                              by_human flag (an agent can't sign as the operator).
 
 🟡 EARN-FIRST (wire only when a willow-mcp consumer needs it)
   [ ] workflow_*        rides existing Kart queue

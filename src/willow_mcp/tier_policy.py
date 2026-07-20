@@ -65,6 +65,8 @@ TOOL_CLASS: dict[str, str] = {
     # code_graph: querying the symbol graph is read-only (no store/KB, no network).
     "code_graph_search": READ, "code_graph_explain": READ, "code_graph_walk": READ,
     "code_graph_suggest": READ, "code_graph_impact": READ,
+    # Human-loop: listing the queue and attestations are read-only views.
+    "human_required_list": READ, "human_attestation_list": READ,
     # ── write ───────────────────────────────────────────────────────────────
     "store_put": WRITE, "store_update": WRITE, "store_delete": WRITE,
     "store_purge_collection": WRITE,          # reversible + confirm-guarded — stays write (D1)
@@ -92,6 +94,10 @@ TOOL_CLASS: dict[str, str] = {
     # code_graph_index builds a local SQLite graph of a repo on disk — a local write,
     # like nest_scan; no network, so WRITE not EXECUTE.
     "code_graph_index": WRITE,
+    # Human-loop writes: enqueue/resolve queue items, create an attestation. Store
+    # writes, no egress — WRITE.
+    "human_required_enqueue": WRITE, "human_required_resolve": WRITE,
+    "human_attestation_create": WRITE,
     # ── execute ─────────────────────────────────────────────────────────────
     "task_submit": EXECUTE, "task_status": EXECUTE, "task_list": EXECUTE,
     "agent_route": EXECUTE, "agent_dispatch_result": EXECUTE,

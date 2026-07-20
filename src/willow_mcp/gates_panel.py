@@ -136,6 +136,8 @@ FRIENDLY_LABELS: dict[str, str] = {
     "commitment_write": "Record calendar commitments and acknowledge changes",
     "code_graph_read": "Search and trace the code symbol graph",
     "code_graph_write": "Index a repository into the code symbol graph",
+    "human_loop_read": "See what needs a human and what's been signed off",
+    "human_loop_write": "Flag work for a human and record sign-offs",
     "lineage_read": "Trace where things came from",
     "lineage_write": "Record where things came from",
     "friction_read": "See relationship-friction flags",
