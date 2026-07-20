@@ -138,6 +138,108 @@ piece must be shown to preserve the guarantee it replaced (especially
 the review *worklist*, not the review itself; witness each piece at merge time.
 Provenance: `willow_compose` store record `kart_migration/f9cdc57f`.
 
+### Tier 1 — SHIPPED (2026-07-20)
+
+willow-2.0 PR #817 delegated `collect_bind_mounts`, `collect_mcp_trust_ro_overlays`,
+and `kart_env` to `kartikeya`; equivalence proven byte-identical, gated on
+`test_kart_*` staying green. `build_bwrap_argv` was deliberately kept as willow-2.0's
+own thin assembly over the delegated producers (per-root config + test monkeypatch
+seams depend on it) — see the PR for the full account. `scan_bash` / `run_shell` stay
+un-delegated (kartikeya's versions are real behaviour changes: fork-bomb detection,
+default-on resource caps).
+
+### Tier 2 — reviewed, verdict: no delegation (2026-07-20)
+
+Each piece witnessed individually, per the plan. None delegate — for four distinct,
+concrete reasons, not one blanket "too risky":
+
+- **`load_sandbox_config`** — kartikeya's resolver is env/`$WILLOW_HOME`-global, not
+  per-root; willow-2.0's callers (worktree scenarios, and the test suite's synthetic
+  repos in `test_kart_symlink_binds.py`) depend on an explicit `root` overriding
+  everything else. Delegating would silently break per-root resolution exactly the
+  way `build_bwrap_argv` would have in Tier 1. **Action taken instead:** closed the
+  config split-brain Tier 1 introduced — `KART_SANDBOX_CONFIG` was being set (for
+  kartikeya's benefit) but willow-2.0's own `load_sandbox_config` never consulted it,
+  so an operator override would silently apply to the three delegated functions and
+  *not* to `run_shell`/`build_bwrap_argv`'s own config reads. Root-less callers now
+  fall back to `$KART_SANDBOX_CONFIG`; an explicit `root` still always wins.
+- **`execute_task_row` / `drain_claimed_tasks`** — willow-2.0's version is fleet
+  business logic, not sandbox isolation: it dispatches `workflow_phase` and
+  goal-based agent tasks, and gates network access through
+  `core.egress_authority.net_authorized` (B-37, the fleet's credential/consent
+  control). kartikeya's version is deliberately generic — non-shell task types need
+  a caller-registered `handlers` dict, and network authorization is an optional
+  `network_authorizer` callback seam it doesn't wire up itself. Adopting it would
+  mean threading willow-2.0's egress-authority check through that seam and
+  registering handlers for `workflow_phase`/`goal` — a real architectural change
+  touching a security control, not an equivalence swap. Left as willow-2.0's own
+  implementation; a future migration is possible but needs its own dedicated,
+  security-reviewed PR.
+- **`reaper_alignment_warning`** — kartikeya's version only checks the daemon-lane
+  timeout; willow-2.0's covers both the daemon *and* fast-lane timeouts (`max()` of
+  the two). kartikeya has no fast-lane concept at all yet, so delegating here would
+  be a straight regression, not a lateral move. Left as-is.
+
+Net effect: Tier 2 is closed as **reviewed, not delegated**, plus one small
+Tier-1-hygiene fix (`load_sandbox_config`'s env fallback) that Tier 1's own change
+made necessary. `tests/test_kart_*` + `tests/test_audit_verify.py` stay green
+throughout.
+
+### Tier 3 — reviewed, verdict: no delegation + one coherence fix (2026-07-20)
+
+All eight Tier-3 pieces witnessed. The tier splits cleanly in two, and neither half
+delegates:
+
+**Fleet-coupled — keep (delegating would strip fleet behaviour):**
+- **`run_shell_task`** — carries the same B-37 egress gate as the Tier-2 executor:
+  `allow_net` from the task text is only honoured when the caller-resolved
+  `net_authorized` fact agrees, and a denial is stamped as `net_denied`. kartikeya's
+  `run_shell_task` has none of this (it places network authorization one level up, in
+  `execute_task_row`'s optional `network_authorizer` seam). Same verdict as Tier-2.
+- **`check_hook_tamper` / `_hook_tamper_fragment`** — willow-2.0 hardcodes the fleet
+  guard list (`willow/fylgja/events/`, `.cursor/hooks.json`, `.claude/settings.json`,
+  …) and must "stay in sync with pre_tool.py". kartikeya's version is a generic seam
+  (`HOOK_GUARD_FRAGMENTS` / `$KART_HOOK_GUARD_PATHS`, empty by default) with a
+  product-neutral error message ("Protected source" vs "Fylgja hook source").
+  Delegating would move the security wording and still leave the fleet fragment list —
+  and its `pre_tool.py` sync coupling — in willow-2.0. No net simplification.
+- **`_kart_logs_root`** — one line, but it resolves through fylgja's private-config-
+  aware home; kartikeya's resolves through the generic one. See the coherence fix below.
+- **`willow_home` / `willow_home_alias` / `venv_bin_dirs`** — these live in
+  `willow/fylgja/` and are **fleet infrastructure**, not kart-specific: `willow_home`
+  feeds store-root, secrets, config-mode across the whole fleet. kartikeya deliberately
+  ships a *simplified standalone copy* (its own docstring says so), so canonicality runs
+  the other way — fylgja is canonical, kartikeya is the derivative. Delegating would
+  repoint the entire fleet's home/venv resolution at kartikeya's narrower version.
+
+**Already byte-identical pure helpers — keep (nothing to gain):**
+- **`trim_task_result`** and **`_parse_task_network_directives`** (which wraps
+  `parse_task_network`, verified byte-identical across the trees). There is no drift to
+  eliminate, and delegating stable ~8-line pure functions only adds a cross-package
+  dependency edge. The Jaccard signal on these was import-line noise, not divergence.
+
+**Coherence fix that fell out of the review** (parallel to Tier-2's): fylgja's
+`willow_home` and kartikeya's diverge when `$WILLOW_HOME` is unset (fylgja →
+`~/github/.willow` or the repo-local generated pack; kartikeya → `~/.willow`). Because
+Tier-1 delegated home-derived sandbox paths (mcp_apps trust overlays, the fleet env
+file, the nsswitch shim) to kartikeya while `_kart_logs_root`/`write_task_log` still use
+fylgja, an unset `WILLOW_HOME` would split the sandbox and its logs across two homes —
+Tier-1's proven equivalence had *quietly depended* on `WILLOW_HOME` being exported.
+Fixed by pinning `WILLOW_HOME` (via `setdefault`, next to the Tier-1 env seams) to
+fylgja's own resolved fleet home: idempotent for every fylgja caller, and it forces
+kartikeya to resolve the same home, so all home-derived kart paths are coherent
+unconditionally. Verified: with `WILLOW_HOME` unset, fylgja and kartikeya now resolve
+the identical home; `test_kart_*` + `test_audit_verify.py` stay green (143/6);
+audit-verify reports 0 gated regressions with `WILLOW_HOME` unset (the CI scenario).
+
+**Stage-5 status after Tier 3:** the drift-window worklist is closed. Tier 1 delegated
+the three isolation data-producers; Tiers 2–3 reviewed the remaining 21 pieces and found
+they are correctly *not* delegatable (fleet-coupled or already identical), landing two
+coherence fixes (`KART_SANDBOX_CONFIG`, `WILLOW_HOME`) that Tier 1's delegation had made
+latent. The deliberately-deferred behaviour-change swaps (`scan_bash` fork-bomb
+detection, `run_shell` resource caps) remain the only open kart items, each its own
+opt-in security decision.
+
 ## 6. Relationship to other work
 
 - `skills/kart-tasks.md` already documents the *current* (worker-required)
