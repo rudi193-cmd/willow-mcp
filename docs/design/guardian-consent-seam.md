@@ -1,10 +1,35 @@
 # The guardian-consent seam: representing a subject who isn't the owner
 
-Status: **proposal / mapping only** (no code yet). This pins the model for
+Status: **core shipped, binding pending.** The stdlib-only engine this doc maps
+now exists at [`src/willow_mcp/subject_consent/core.py`](../../src/willow_mcp/subject_consent/core.py)
+(tests: [`tests/test_subject_consent.py`](../../tests/test_subject_consent.py),
+25 passing, incl. a static no-network/stdlib-only import boundary). It converges
 *owner ≠ subject* consent — the one gap corpus-lens named and refused to ship,
 the Nest ran straight into, and UTETY already solved in miniature for a child
-learner — before any wiring is written, so we can prototype one slice at a time
-without guessing the shape.
+learner — into one shared primitive all three can depend on. **Built next slice:**
+the willow-mcp *binding* (gate wiring + ReceiptLog + the operator-only mutation
+seat) that this core deliberately does not contain. The core answers "did this
+subject consent to this scope?"; the binding decides who is allowed to ask and
+records that they did.
+
+What the shipped core provides (and what it pointedly leaves out):
+
+- `grant`/`revoke`/`permitted(store, subject_id, scope)` over a hash-chained,
+  append-only consent log — fail-closed on every path that isn't a *verified*
+  `granted` (absent store, broken chain, no record, `pending`, `revoked` → `False`).
+- `deidentify(text, identifiers)` — de-identify-or-refuse; proves the scrub or
+  raises **without ever echoing the surviving value**.
+- `record_disclosure`/`read_disclosures` — the per-subject, tamper-evident record
+  a guardian can read.
+- Scopes are **independent permissions, not a ladder**
+  (`local_only`, `process_analysis`, `kb_promotion`, `person_inference` — the
+  last name matching corpus-lens's capability); each is granted and checked on
+  its own.
+- **Not in the core, on purpose:** owner==subject is *not* special-cased (the
+  core doesn't know who the owner is); capacity/self-consent judgments are
+  deferred; and mutation is a library primitive an operator CLI calls — an app
+  can never grant consent on a subject's behalf. Enforcing all three is the
+  binding's job.
 
 Home: willow-mcp, beside [`consent.py`](../../src/willow_mcp/consent.py) and
 [`gate.py`](../../src/willow_mcp/gate.py). Reference implementation to generalize
