@@ -138,6 +138,53 @@ piece must be shown to preserve the guarantee it replaced (especially
 the review *worklist*, not the review itself; witness each piece at merge time.
 Provenance: `willow_compose` store record `kart_migration/f9cdc57f`.
 
+### Tier 1 — SHIPPED (2026-07-20)
+
+willow-2.0 PR #817 delegated `collect_bind_mounts`, `collect_mcp_trust_ro_overlays`,
+and `kart_env` to `kartikeya`; equivalence proven byte-identical, gated on
+`test_kart_*` staying green. `build_bwrap_argv` was deliberately kept as willow-2.0's
+own thin assembly over the delegated producers (per-root config + test monkeypatch
+seams depend on it) — see the PR for the full account. `scan_bash` / `run_shell` stay
+un-delegated (kartikeya's versions are real behaviour changes: fork-bomb detection,
+default-on resource caps).
+
+### Tier 2 — reviewed, verdict: no delegation (2026-07-20)
+
+Each piece witnessed individually, per the plan. None delegate — for four distinct,
+concrete reasons, not one blanket "too risky":
+
+- **`load_sandbox_config`** — kartikeya's resolver is env/`$WILLOW_HOME`-global, not
+  per-root; willow-2.0's callers (worktree scenarios, and the test suite's synthetic
+  repos in `test_kart_symlink_binds.py`) depend on an explicit `root` overriding
+  everything else. Delegating would silently break per-root resolution exactly the
+  way `build_bwrap_argv` would have in Tier 1. **Action taken instead:** closed the
+  config split-brain Tier 1 introduced — `KART_SANDBOX_CONFIG` was being set (for
+  kartikeya's benefit) but willow-2.0's own `load_sandbox_config` never consulted it,
+  so an operator override would silently apply to the three delegated functions and
+  *not* to `run_shell`/`build_bwrap_argv`'s own config reads. Root-less callers now
+  fall back to `$KART_SANDBOX_CONFIG`; an explicit `root` still always wins.
+- **`execute_task_row` / `drain_claimed_tasks`** — willow-2.0's version is fleet
+  business logic, not sandbox isolation: it dispatches `workflow_phase` and
+  goal-based agent tasks, and gates network access through
+  `core.egress_authority.net_authorized` (B-37, the fleet's credential/consent
+  control). kartikeya's version is deliberately generic — non-shell task types need
+  a caller-registered `handlers` dict, and network authorization is an optional
+  `network_authorizer` callback seam it doesn't wire up itself. Adopting it would
+  mean threading willow-2.0's egress-authority check through that seam and
+  registering handlers for `workflow_phase`/`goal` — a real architectural change
+  touching a security control, not an equivalence swap. Left as willow-2.0's own
+  implementation; a future migration is possible but needs its own dedicated,
+  security-reviewed PR.
+- **`reaper_alignment_warning`** — kartikeya's version only checks the daemon-lane
+  timeout; willow-2.0's covers both the daemon *and* fast-lane timeouts (`max()` of
+  the two). kartikeya has no fast-lane concept at all yet, so delegating here would
+  be a straight regression, not a lateral move. Left as-is.
+
+Net effect: Tier 2 is closed as **reviewed, not delegated**, plus one small
+Tier-1-hygiene fix (`load_sandbox_config`'s env fallback) that Tier 1's own change
+made necessary. `tests/test_kart_*` + `tests/test_audit_verify.py` stay green
+throughout.
+
 ## 6. Relationship to other work
 
 - `skills/kart-tasks.md` already documents the *current* (worker-required)
