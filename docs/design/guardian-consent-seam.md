@@ -18,12 +18,22 @@ this doc maps now exist:
 It converges *owner ≠ subject* consent — the one gap corpus-lens named and
 refused to ship, the Nest ran straight into, and UTETY already solved in
 miniature for a child learner — into one shared primitive all three can depend
-on. **The gate is live but dormant:** it fires only for a call carrying a
-`subject_id`, and no tool exposes that parameter yet. The remaining slice is
-threading a `subject_id` through the subject-touching tools named in
-`TOOL_SUBJECT_SCOPE` (`nest_promote`, `kb_ingest`, `knowledge_ingest`,
-`lineage_record`) so the gate has something to check — a per-tool change, not a
-seam change.
+on. **The gate is live.** The four subject-touching tools in `TOOL_SUBJECT_SCOPE`
+each expose an optional `subject_id` (tests:
+[`tests/test_subject_consent_gate_wiring.py`](../../tests/test_subject_consent_gate_wiring.py),
+9 passing, driven end-to-end through `_guarded`):
+
+- `knowledge_ingest`, `kb_ingest`, `nest_promote` → require a `kb_promotion` grant
+  for a named non-owner subject; a committed write is logged to that subject's
+  disclosure chain.
+- `lineage_record` → requires the higher `person_inference` grant (corpus-lens's
+  quarantined `PERSON_CLAIM_TYPES` bar); a `kb_promotion` grant does **not** open it.
+
+`subject_id` stays empty for the owner's own data (every call today), so the gate
+is a no-op there and nothing existing changed. The remaining convergence is
+external: **corpus-lens and UTETY consuming this shared core** instead of each
+carrying their own — the reason it was built stdlib-only. That is their import to
+make, not a willow-mcp change.
 
 What the shipped core provides (and what it pointedly leaves out):
 

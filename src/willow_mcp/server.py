@@ -963,6 +963,7 @@ def lineage_record(
     supersedes: Optional[list] = None,
     derived_from: Optional[list] = None,
     motivated_by: Optional[list] = None,
+    subject_id: str = "",
 ) -> dict:
     """Record a provenance atom — the "story of this willow" as memory an agent
     can query later. Answers the questions agents keep asking: where did this
@@ -978,14 +979,23 @@ def lineage_record(
       - `motivated_by` — the friction/decision behind it (may be a gap id or an
                          external node, not only another atom)
     Corrections re-record the same `id` in place; edges persist independently.
-    Confined to your store_scope like every store write."""
+    Confined to your store_scope like every store write.
+
+    `subject_id` (guardian-consent seam): a provenance atom that makes a
+    person-shaped claim about a *non-owner* names that subject here. This is the
+    highest bar in the seam — `person_inference` — corpus-lens's quarantined
+    PERSON_CLAIM_TYPES: making the claim at all requires a verified grant. Opaque,
+    never stored on the atom. Leave empty for the owner or for non-person lineage."""
     denied = _lineage_denied(app_id)
     if denied:
         return denied
-    return _lineage.record(id=id, title=title, rationale=rationale, origin=origin,
-                           authority=authority, evidence=evidence, tags=tags,
-                           supersedes=supersedes, derived_from=derived_from,
-                           motivated_by=motivated_by)
+    result = _lineage.record(id=id, title=title, rationale=rationale, origin=origin,
+                             authority=authority, evidence=evidence, tags=tags,
+                             supersedes=supersedes, derived_from=derived_from,
+                             motivated_by=motivated_by)
+    if isinstance(result, dict) and not result.get("error"):
+        _subject_disclose(subject_id, "lineage_record", f"atom={id}")
+    return result
 
 
 @mcp.tool()
@@ -1137,6 +1147,24 @@ def session_reconcile(app_id: str, session_id: str, exit_declaration: dict) -> d
 
 # ── Knowledge tools ────────────────────────────────────────────────────────────
 
+def _subject_disclose(subject_id: str, tool_name: str, detail: str = "") -> None:
+    """Best-effort: after a subject-bearing tool completes, append what was done
+    to that subject's disclosure chain (the guardian-readable record). Never
+    raises into the tool — the write already landed; a failed audit line must not
+    turn a success into an error. The gate that *authorized* the call is
+    enforcement; this is the record of it, and only the gate is load-bearing."""
+    if not subject_id:
+        return
+    try:
+        from . import subject_consent_binding
+        subject_consent_binding.record_disclosure(subject_id, tool_name, detail)
+    except Exception as e:
+        import logging
+        logging.getLogger("willow_mcp.server").warning(
+            "subject_consent: disclosure record failed for %s: %s", tool_name, e
+        )
+
+
 def _knowledge_ingest_core(
     app_id: str,
     content: str,
@@ -1195,9 +1223,19 @@ def knowledge_ingest(
     domain: str = "general",
     source: str = "",
     tags: Optional[list] = None,
+    subject_id: str = "",
 ) -> dict:
-    """Add a knowledge atom to the Postgres knowledge base. Check for duplicates first."""
-    return _knowledge_ingest_core(app_id, content, domain=domain, source=source, tags=tags)
+    """Add a knowledge atom to the Postgres knowledge base. Check for duplicates first.
+
+    `subject_id` (guardian-consent seam): name the person this atom is *about* when
+    it is not the owner. Opaque and local — never written to the KB, only checked.
+    Naming a non-owner subject requires a verified `kb_promotion` consent grant
+    (see docs/design/guardian-consent-seam.md); leave it empty for the owner's own
+    data. The successful write is logged to that subject's disclosure chain."""
+    result = _knowledge_ingest_core(app_id, content, domain=domain, source=source, tags=tags)
+    if isinstance(result, dict) and not result.get("error"):
+        _subject_disclose(subject_id, "knowledge_ingest", f"domain={domain}")
+    return result
 
 
 # ── The Nest — personal-file content pipeline ───────────────────────────────────
@@ -1340,14 +1378,21 @@ def nest_digest(app_id: str, db_path: str = "") -> dict:
 
 @mcp.tool()
 @_guarded("nest_promote")
-def nest_promote(app_id: str, db_path: str = "", dry_run: bool = False) -> dict:
+def nest_promote(app_id: str, db_path: str = "", dry_run: bool = False, subject_id: str = "") -> dict:
     """Promote a Nest's STRUCTURE into the knowledge base. Reads structure-only
     atoms from bridge.build_bridge — counts, curated category names, and redacted
     secret kinds, never fragment content, filenames, or person names — and
     ingests each through the same core write knowledge_ingest uses.
 
     dry_run=True: return the atoms that WOULD be promoted (safe to inspect —
-    they are structure only) without writing. dry_run=False ingests them."""
+    they are structure only) without writing. dry_run=False ingests them.
+
+    `subject_id` (guardian-consent seam): when the Nest is a *non-owner's* life-dump
+    (a co-parent, a child, an ex-partner — the case the seam exists for), name that
+    subject. Even the structure-only bridge crossing into the shared KB then
+    requires a verified `kb_promotion` grant for them; leave empty for the owner's
+    own dump. Opaque, never written to the KB. A committed promotion is logged to
+    the subject's disclosure chain."""
     from .nest import bridge as _bridge
 
     db = _nest_db_path(db_path)
@@ -1381,6 +1426,8 @@ def nest_promote(app_id: str, db_path: str = "", dry_run: bool = False) -> dict:
         else:
             promoted.append(atom.get("source_id"))
 
+    if promoted:
+        _subject_disclose(subject_id, "nest_promote", f"promoted={len(promoted)}")
     return {"status": "ok", "dry_run": False, "promoted": len(promoted),
             "owner": built.get("owner"), "source_ids": promoted, "errors": errors}
 
@@ -1990,13 +2037,19 @@ def kb_ingest(
     sensitivity: str = "sensitive",
     tier: str = "canonical",
     supersede: bool = True,
+    subject_id: str = "",
 ) -> dict:
     """Promote a ratified agent_seed slice to Postgres KB (source_type: agent_seed).
 
     Requires ratified + trusted seed at $WILLOW_HOME/seeds/{agent_id}.json.
     slice: voice_only | work_context | full (omit to use exposure.json default for kb_ingest).
     Never promotes persona.cast or context.personal_note.
-    """
+
+    `subject_id` (guardian-consent seam): if a seed slice carries a *non-owner*
+    subject's data across into the shared KB, name them — the crossing then needs a
+    verified `kb_promotion` grant. Opaque, never written. Empty for the owner's own
+    agent seed (the usual case). A committed promotion is logged to the subject's
+    disclosure chain."""
     from . import seed_kb as skb
 
     pg = get_pg()
@@ -2011,7 +2064,7 @@ def kb_ingest(
         return unconfirmed
 
     kid = str(uuid.uuid4())[:8].upper()
-    return skb.promote_seed_to_kb(
+    result = skb.promote_seed_to_kb(
         pg,
         mapping["fields"],
         agent_id=agent_id,
@@ -2021,6 +2074,9 @@ def kb_ingest(
         supersede=supersede,
         new_id=kid,
     )
+    if isinstance(result, dict) and not result.get("error"):
+        _subject_disclose(subject_id, "kb_ingest", f"agent={agent_id} slice={slice}")
+    return result
 
 
 @mcp.tool()
