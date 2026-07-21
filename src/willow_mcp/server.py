@@ -4608,6 +4608,7 @@ def _cmd_doctor(args) -> None:
     """`willow-mcp doctor` — human-readable install health + copy/paste fixes."""
     app_id = args.app_id or os.environ.get("WILLOW_APP_ID", "willow")
     from . import egress_setup
+    from . import trust_root_setup
 
     summary = diagnostic_summary(app_id)
     print(f"verdict: {summary.get('verdict', 'unknown')}\n")
@@ -4632,6 +4633,18 @@ def _cmd_doctor(args) -> None:
     if lease.get("status") != "active":
         cli = shutil.which("wmc") or shutil.which("willow-mcp") or "willow-mcp"
         print(f"net lease: {lease.get('status', 'absent')} — run: {cli} grant-net {app_id} --ttl 30m\n")
+
+    audit = trust_root_setup.audit_trust_root(app_id)
+    if audit.get("forgeable") and not audit.get("hardened"):
+        cli = shutil.which("wmc") or shutil.which("willow-mcp") or "willow-mcp"
+        print("[warn] trust_root: this process can forge egress authority keys")
+        for item in audit["forgeable"]:
+            print(f"  {item.get('key')}: {item.get('path')}")
+        hint = f"{cli} harden-trust-root"
+        if args.project_root:
+            hint += f" --project-root {args.project_root}"
+        print(f"  fix: {hint}")
+        print()
 
 
 def _cmd_run_net(args) -> None:
@@ -4778,6 +4791,30 @@ def _cmd_rotate_agent(args) -> None:
     print(f"  {out['secret_hex']}")
 
 
+def _cmd_harden_trust_root(args) -> None:
+    """`willow-mcp harden-trust-root` — chown trust roots; wire strict mode (B-32)."""
+    from . import trust_root_setup
+    from .human_session import require_operator_terminal
+
+    if not args.dry_run:
+        require_operator_terminal()
+    project = Path(args.project_root).expanduser() if args.project_root else None
+    try:
+        result = trust_root_setup.harden_trust_root(
+            owner=args.owner,
+            project_root=project,
+            dry_run=args.dry_run,
+        )
+    except (ValueError, PermissionError, OSError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps(result, indent=2))
+    if not args.dry_run:
+        print("\n── Operator commands (confirm authority) ─────────────────")
+        for line in result.get("operator_commands") or []:
+            print(f"  {line}")
+
+
 def _cmd_grant_net(args) -> None:
     """`willow-mcp grant-net` — issue a time-boxed egress lease (B-32).
 
@@ -4801,7 +4838,14 @@ def _cmd_grant_net(args) -> None:
         print("\n  NOTE: this host has no uid separation — the agent's own process can write\n"
               "  " + ", ".join(f["path"] for f in forgeable) + "\n"
               "  so this lease constrains time and leaves a record, but does not prevent a\n"
-              "  self-grant. See B-32.", file=sys.stderr)
+              "  self-grant. Run: willow-mcp harden-trust-root (B-32).", file=sys.stderr)
+    elif forgeable and lease.strict_trust_root():
+        from . import trust_root_setup
+
+        owner = trust_root_setup.default_trust_owner()
+        print(f"\n  NOTE: strict trust root is on but this process can still write trust paths.\n"
+              f"  Re-run harden-trust-root or use: sudo -u {owner} willow-mcp grant-net …",
+              file=sys.stderr)
 
 
 def _cmd_revoke_net(args) -> None:
@@ -5144,6 +5188,26 @@ def _main():
         "net-status", help="Show egress leases and which trust-root keys this process can forge")
     status_p.add_argument("app_id", nargs="?", default="")
 
+    harden_p = subparsers.add_parser(
+        "harden-trust-root",
+        help="Separate egress confirm authority from the agent (B-32): chown trust roots + strict mode",
+    )
+    harden_p.add_argument(
+        "--owner",
+        default="",
+        help="unix user that owns trust roots (default: willow-operator)",
+    )
+    harden_p.add_argument(
+        "--project-root",
+        default="",
+        help="merge WILLOW_MCP_STRICT_TRUST_ROOT=1 into this repo's MCP configs",
+    )
+    harden_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show planned chown/chmod actions without applying",
+    )
+
     gates_p = subparsers.add_parser(
         "gates",
         help="Show every authorization gate (consent, manifest permissions, egress "
@@ -5267,6 +5331,9 @@ def _main():
         return
     if args.command == "net-status":
         _cmd_net_status(args)
+        return
+    if args.command == "harden-trust-root":
+        _cmd_harden_trust_root(args)
         return
     if args.command == "gates":
         _cmd_gates(args)

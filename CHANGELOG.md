@@ -10,6 +10,10 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **B-32 trust-root hardening** — `willow-mcp harden-trust-root` chowns `mcp_apps/`
+  and `config/` to a dedicated unix user, sets world-readable modes, and wires
+  `WILLOW_MCP_STRICT_TRUST_ROOT=1` into project MCP configs. `doctor` surfaces
+  forgeable trust paths when separation is missing.
 - **S6 persona overlays** — `persona-overlays` skill with slim voice + boundary
   snippets for all six specialists; `session-start` specialist section updated
   with open table and overlay pointers.
