@@ -61,7 +61,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 
 | Field | Value |
 |-------|-------|
-| permissions | orchestrator |
+| permissions | orchestrator, commitment_read, store_read, knowledge_read |
 | deny_tools | — |
 | store_scope | willow_*, projects_* |
 | human_only | true |
