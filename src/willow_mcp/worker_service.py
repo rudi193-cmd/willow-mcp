@@ -32,7 +32,7 @@ def default_config() -> WorkerServiceConfig:
     home = Path(os.environ.get("WILLOW_HOME", Path.home() / ".willow")).expanduser()
     store = Path(os.environ.get("WILLOW_STORE_ROOT", home)).expanduser()
     return WorkerServiceConfig(
-        python=Path(sys.executable).resolve(),
+        python=Path(sys.executable),
         workdir=Path.cwd().resolve(),
         willow_home=home.resolve(),
         store_root=store.resolve(),
@@ -101,7 +101,12 @@ def render_unit(
     }
     rendered = source
     for key, value in values.items():
-        rendered = rendered.replace(f"@{key}@", _safe(value, key))
+        safe = _safe(value, key)
+        if key == "PYTHON":
+            # Keep the venv entrypoint path — resolving symlinks lands on a bare
+            # system interpreter that does not see this venv's site-packages.
+            safe = str(value)
+        rendered = rendered.replace(f"@{key}@", safe)
     if "@" in rendered:
         raise ValueError("worker service template contains unresolved placeholders")
     if "willow-2.0" in rendered:

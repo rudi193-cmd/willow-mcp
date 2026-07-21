@@ -234,8 +234,9 @@ def verify_envelope(
 
 
 def public_key_path() -> Path | None:
-    value = os.environ.get("WILLOW_MCP_EGRESS_PUBLIC_KEY", "").strip()
-    return Path(value).expanduser() if value else None
+    from . import egress_setup
+
+    return egress_setup.resolve_public_key_path()
 
 
 def _task_table_columns():

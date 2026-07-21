@@ -171,6 +171,8 @@ Not "get everything over" — get the **used** gaps over:
       mem_jeles_* / infer_* / outcome_* / routine_* / app_* / dreams / fleet ops
 
 ── also, still willow-mcp's own roadmap (from Draft 0.1, unrelated to 2.0 tools) ──
+  [x] egress onboarding UX (setup-egress/onboard/doctor/run-net)  PORTED 2026-07-21 —
+                                              closes half-deployed B-37 bootstrap pain
   [ ] G-2  role-envelope enforcement in gate.py   (blocked on permissions matrix)
   [ ] G-1  SOIL DAG + dag_next/dag_status          (S6 design exists)
   [ ] SEV  own $WILLOW_HOME state root             (dissolves B-36, advances B-38)

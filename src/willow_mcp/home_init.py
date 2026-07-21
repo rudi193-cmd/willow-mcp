@@ -159,6 +159,15 @@ def ensure_home_layout(home: Path | None = None) -> dict[str, Any]:
         config_created.append(str(review_q.relative_to(willow_home())))
 
     registry_result = _materialize_registry()
+
+    egress_result: dict[str, Any] = {"action": "skipped"}
+    try:
+        from . import egress_setup
+
+        egress_result = egress_setup.ensure_keypair()
+    except ValueError as exc:
+        egress_result = {"action": "error", "error": str(exc)}
+
     # orchestrator manifest may also be created by registry pass; dedupe in output
     for path in registry_result.get("registry_config_created") or []:
         if path not in config_created:
@@ -179,6 +188,7 @@ def ensure_home_layout(home: Path | None = None) -> dict[str, Any]:
         "config_created": config_created,
         "seeds_copied": seeds,
         "registry": registry_result,
+        "egress": egress_result,
     }
 
 

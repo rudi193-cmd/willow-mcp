@@ -43,6 +43,7 @@ web = [
 
 [project.scripts]
 willow-mcp = "willow_mcp.server:main"
+wmc = "willow_mcp.server:main"
 willow-mcp-init = "willow_mcp.home_init:main"
 willow-mcp-compile = "willow_mcp.registry:compile_cli_main"
 willow-mcp-sign-seed = "willow_mcp.seed_sign:main"

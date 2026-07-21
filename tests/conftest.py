@@ -32,3 +32,17 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("WILLOW_STORE_ROOT", str(tmp_path / "store"))
     monkeypatch.delenv("WILLOW_HUMAN_ORCHESTRATOR", raising=False)
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def _stub_egress_public_key_for_diagnostics(request, monkeypatch, tmp_path):
+    """CI has no ~/.config/willow-mcp/egress keys; most tests call _derive_problems."""
+    mod = getattr(request.module, "__name__", "")
+    if "test_egress" in mod:
+        return
+    pub = tmp_path / "egress-stub.pub"
+    pub.write_text("stub", encoding="utf-8")
+    monkeypatch.setattr(
+        "willow_mcp.egress_setup.resolve_public_key_path",
+        lambda: pub,
+    )
