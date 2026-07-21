@@ -21,6 +21,7 @@ from pathlib import Path
 
 from .gate import (
     INTEGRATION_NET_PERMISSION,
+    WEB_NET_PERMISSION,
     NET_PERMISSION,
     PERMISSION_GROUPS,
     _apps_root,
@@ -30,7 +31,7 @@ from .gate import (
 #: Same typo-guard reasoning as `gate.store_scope`'s malformed-field check
 #: (B-25): an operator toggling a misspelled permission name would otherwise
 #: believe they granted or revoked something, and nothing would happen.
-KNOWN_PERMISSIONS = frozenset(PERMISSION_GROUPS) | {NET_PERMISSION, INTEGRATION_NET_PERMISSION}
+KNOWN_PERMISSIONS = frozenset(PERMISSION_GROUPS) | {NET_PERMISSION, INTEGRATION_NET_PERMISSION, WEB_NET_PERMISSION}
 
 
 def manifest_path(app_id: str) -> Path:

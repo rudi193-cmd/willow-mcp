@@ -146,7 +146,9 @@ Not "get everything over" — get the **used** gaps over:
 
 ```
 🟢 PORT (genuine gap + was core/standard + self-contained)
-  [ ] willow_web_search / willow_web_fetch   the only open-web path; product has none
+  [x] willow_web_search / willow_web_fetch   PORTED 2026-07-21 — src/willow_mcp/web_search.py,
+                                              web_fetch.py, external_guard.py, web_egress gate
+                                              (web_read + web_net), native WebSearch/WebFetch hook
   [x] code_graph_*                            PORTED 2026-07-20 (willow-mcp#115) — src/willow_mcp/code_graph/
                                               + 6 tools (index/search/explain/walk/suggest/impact),
                                               code_graph_read/write gate groups, 13 tests

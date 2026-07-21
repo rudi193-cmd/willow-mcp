@@ -46,6 +46,7 @@ from typing import Optional
 from . import consent, gates_html, lease, paths
 from .gate import (
     INTEGRATION_NET_PERMISSION,
+    WEB_NET_PERMISSION,
     NET_PERMISSION,
     PERMISSION_GROUPS,
     _apps_root,
@@ -146,6 +147,8 @@ FRIENDLY_LABELS: dict[str, str] = {
     "full_access": "Full access to everything",
     "integration_read": "Check outside-service status",
     "integration_call": "Talk to outside services",
+    "web_read": "Search and fetch the open web (guarded)",
+    "web_net": "Allow open-web search/fetch for this app",
     "task_net": "Request internet access (for tasks)",
     "integration_net": "Request internet access (for outside services)",
     "consent.internet": "Allow internet access, fleet-wide",
@@ -183,7 +186,7 @@ def _category(row_id: str, label: str) -> str:
     if row_id.startswith("consent.") or row_id.startswith("lease."):
         return "egress"
     if row_id.startswith("perm."):
-        if label in (NET_PERMISSION, INTEGRATION_NET_PERMISSION):
+        if label in (NET_PERMISSION, INTEGRATION_NET_PERMISSION, WEB_NET_PERMISSION):
             return "egress"
         return "permissions"
     return "system"  # worker, strict_trust_root, severance, human_orchestrator
@@ -326,7 +329,7 @@ def _app_rows(app_id: str) -> list[GateRow]:
     manifest = _load_manifest(app_id)
     perms = set((manifest or {}).get("permissions") or [])
 
-    capability_flags = (NET_PERMISSION, INTEGRATION_NET_PERMISSION)
+    capability_flags = (NET_PERMISSION, INTEGRATION_NET_PERMISSION, WEB_NET_PERMISSION)
     for group in sorted(PERMISSION_GROUPS) + list(capability_flags):
         on = group in perms
         detail = ("capability flag — see also this app's egress lease below"

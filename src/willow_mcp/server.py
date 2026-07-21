@@ -4020,6 +4020,63 @@ def code_graph_impact(app_id: str, file_paths: list, db_path: str = "") -> dict:
     return analyze_impact(db, file_paths)
 
 
+# ── open web (ported from willow-2.0 core/web_search + core/web_fetch) ────────
+#
+# Server-process HTTP egress — gated by web_net + consent.internet + lease
+# (web_egress.py). Replaces native IDE WebSearch/WebFetch when the PreToolUse
+# hook is active. Fetch runs external-guard scan + sandwich wrap.
+
+@mcp.tool()
+@_guarded("willow_web_search")
+def willow_web_search(
+    app_id: str,
+    query: str,
+    max_results: int = 8,
+    trusted_only: bool = False,
+    include_handoffs: bool = False,
+) -> dict:
+    """Open web search via DuckDuckGo HTML (no API key). Returns title, url,
+    snippet, source, and hostname per result. Use for current events, tech news,
+    and queries that need the live open web.
+
+    `trusted_only`: keep verified institutional domain suffixes only.
+    `include_handoffs`: prepend OpenStreetMap/Google Maps links for navigational
+    queries. Requires web_net + consent.internet + a live egress lease."""
+    from . import web_egress, web_search
+
+    denial = web_egress.egress_denial(app_id)
+    if denial:
+        return denial
+    hits = web_search.search_web(
+        query,
+        max_results=max_results,
+        trusted_only=trusted_only,
+        include_handoffs=include_handoffs,
+    )
+    return {"query": query, "results": hits, "count": len(hits)}
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+@_guarded("willow_web_fetch")
+def willow_web_fetch(
+    app_id: str,
+    url: str,
+    wrap: bool = True,
+    max_bytes: int = 512_000,
+) -> dict:
+    """Fetch a URL through external-guard (not native WebFetch).
+
+    Returns text with sandwich defense when wrap=True. Blocks private/loopback
+    hosts. Use willow_web_search to discover URLs first. Requires web_net +
+    consent.internet + a live egress lease."""
+    from . import web_egress, web_fetch
+
+    denial = web_egress.egress_denial(app_id)
+    if denial:
+        return denial
+    return web_fetch.fetch_url(url, wrap=wrap, max_bytes=max_bytes)
+
+
 # ── human-in-the-loop: an attention queue + durable attestations ────────────────
 #
 # Ported from willow-2.0 core/human_required.py + core/human_attestation.py

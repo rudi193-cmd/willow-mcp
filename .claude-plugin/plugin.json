@@ -30,6 +30,15 @@
             "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pre_tool_use.py"
           }
         ]
+      },
+      {
+        "matcher": "WebSearch|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PLUGIN_ROOT}/hooks/pre_tool_use.py"
+          }
+        ]
       }
     ]
   },
@@ -38,6 +47,7 @@
     "skills/consent.md",
     "skills/worktree.md",
     "skills/handoff-write.md",
+    "skills/external-guard.md",
     "skills/schema-confirm.md",
     "skills/willow-serve.md",
     "skills/kart-tasks.md"
