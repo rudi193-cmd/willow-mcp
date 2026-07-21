@@ -20,7 +20,7 @@ dependencies = [
     # Kart task executor (the `willow-mcp worker` engine + task-queue backends).
     # Hard dependency as of B-22 close-out — kartikeya is published on PyPI, so a
     # base `pip install willow-mcp` now ships a working queue drainer.
-    "kartikeya>=0.0.3,<0.1.0",
+    "kartikeya>=0.0.5,<0.1.0",
     "requests>=2.31,<3.0",
 ]
 
