@@ -11,8 +11,9 @@ into the shared knowledge base.
 
 The engine (`willow_mcp.nest`) is vendored from
 [`rudi193-cmd/safe-app-store` `apps/nest-seed`](https://github.com/rudi193-cmd/safe-app-store)
-(MIT). This first cut ships the **content pipeline** only; the live drop-folder
-router (scan → human-gate → file-move) is a later step.
+(MIT). Both halves ship: the **content pipeline** (`nest_scan`/`status`/`digest`/`promote`,
+below) and the **live drop-folder router** (scan → human-gate → file-move, the
+`nest_intake_*` tools — see [The live drop-folder router](#the-live-drop-folder-router)).
 
 ## The tools
 

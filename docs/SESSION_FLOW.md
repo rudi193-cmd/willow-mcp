@@ -4,8 +4,8 @@
 
 ## Entry modes
 
-| Entry | Signal | Path |
-|-------|--------|------|
+| Entry | Signal | Path | Closeout |
+|-------|--------|------|----------|
 | **Human orchestrator** | `app_id=willow` only | `human_orchestrator` | `session_handoff_write` |
 | **Human specialist** | Normal prompt; no `dispatch_id` | `human` | `session_handoff_write` / `context_save` |
 | **Dispatch specialist** | `dispatch_id` / session / pending | `dispatch` | `handoff_write_v4` |
@@ -15,7 +15,7 @@ Call **`session_enter(app_id, session_id, dispatch_id="")`** at session start.
 ## States (dispatch path only)
 
 ```
-IDLE → WORKING → COMPLETE → VERIFIED → CLEARED → IDLE
+pending → working → complete → verified → cleared
 ```
 
 | State | Meaning |

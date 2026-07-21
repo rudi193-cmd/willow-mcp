@@ -441,11 +441,10 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
 _KNOWLEDGE_FIELDS = ["id", "content", "domain", "source", "tags"]
 
 # Canonical fields the `tasks` tools speak in (§9 step 5). The real production
-# table is named `tasks`, not `kart_task_queue` — confirmed via live
-# information_schema introspection 2026-07-08. It has no `steps` or
-# `completed_at` column; those stay unmapped (null on read) rather than
-# guessing at a substitute like `updated_at`, which fires on any update, not
-# just completion.
+# table is named `tasks`, not `kart_task_queue`. The worker-production migration
+# (docs/schema/tasks-worker-production.sql) added `steps` and `completed_at` as
+# real columns, so both now map directly — `completed_at` is stamped only on the
+# terminal transition, not on every update the way `updated_at` would be.
 _TASK_FIELDS = [
     "task_id",
     "task",

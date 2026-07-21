@@ -12,7 +12,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 1. **Allow** — manifest `permissions` expands via `PERMISSION_GROUPS` in `gate.py` (groups and literal tool names).
 2. **Deny** — manifest `deny_tools` is an overlay that wins over allows (defense in depth).
 3. **Scope** — manifest `store_scope` confines SOIL collections (`prefix*` wildcards).
-4. **Orchestrator writes** — `dispatch_send`, `verify_handoff`, `agent_clear` for `app_id=willow` additionally require `WILLOW_HUMAN_ORCHESTRATOR=1` (stdio) or OAuth binding (serve).
+4. **Orchestrator writes** — `dispatch_send`, `verify_handoff`, `agent_clear`, `frank_append`, `envelope_apply` for `app_id=willow` additionally require `WILLOW_HUMAN_ORCHESTRATOR=1` (stdio) or OAuth binding (serve). (See `ORCHESTRATOR_WRITE_TOOLS` in `human_session.py`.)
 5. **Egress** — `task_net` is never implied by `task_queue` or `full_access`; must be explicit on the manifest line.
 
 **Compile:** edit registry → `willow-mcp compile-agents` (or `willow-mcp-init` on first scaffold).
@@ -25,7 +25,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 |-------|-----------------|
 | `store_read` | store_get, store_search, store_list, store_search_all, store_collections, store_stats |
 | `store_write` | store_put, store_update, store_delete, store_purge_collection |
-| `knowledge_read` | knowledge_search, kb_search, kb_at, kb_startup_continuity |
+| `knowledge_read` | knowledge_search, kb_at, kb_startup_continuity |
 | `knowledge_write` | knowledge_ingest, kb_ingest, kb_journal, kb_promote |
 | `task_queue` | task_submit, task_status, task_list |
 | `dispatch_read` | dispatch_read, dispatch_list, handoff_read, session_read, session_enter |
@@ -38,7 +38,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 | `schema_admin` | schema_confirm_mapping |
 | `audit` | receipts_tail |
 | `whoami` | *(ungated — like `diagnostic_summary`, always answers about your own manifest)* |
-| `full_access` | All gated tools **except** the two egress lines (`task_net`, `integration_call`). Includes the store/gap/specialist reads and the purge tools |
+| `full_access` | Broad, but **not** everything. Excludes the own-line / egress groups — `integration_call`, `web_read` (`willow_web_search`/`willow_web_fetch`), and `fork_read`/`fork_write` — plus `frank_append`; the `task_net`/`integration_net`/`web_net` capability keys are never implied by any group. Includes the store/gap/specialist reads and the purge tools |
 
 `diagnostic_summary` is intentionally **ungated** (self-check must work when manifest is broken).
 
@@ -48,7 +48,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 
 | Name | permissions | deny_tools | store_scope | Rationale |
 |------|-------------|------------|-------------|-----------|
-| **hanuman** | dispatch_write, task_queue, store_read, knowledge_read | kb_promote, knowledge_ingest | hanuman_* | Builder runs Kart; reads KB; no ratification writes |
+| **hanuman** | dispatch_read, dispatch_write, task_queue, store_read, knowledge_read, fork_read, fork_write | kb_promote, knowledge_ingest | hanuman_* | Builder runs Kart; reads KB; tracks work units via fork_*; no ratification writes |
 | **loki** | dispatch_read, dispatch_write, knowledge_read | task_submit, store_put, store_update, store_delete, knowledge_ingest | loki_* | Auditor reviews and closes; never builds or mutates store/KB |
 | **jeles** | dispatch_read, dispatch_write, knowledge_read | task_submit, kb_promote, kb_journal, knowledge_ingest | jeles_* | Librarian retrieves; no shell, no KB writes |
 | **ada** | dispatch_read, dispatch_write, fleet_read, knowledge_read | task_submit, store_put, store_update, knowledge_ingest | ada_* | Operator monitors fleet; no execution or store mutation |

@@ -330,10 +330,11 @@ privileged lane than the network-namespaced sandbox, so `task_net` never implies
 it (and vice versa). `integration_call` itself is also excluded from
 `full_access` — even the attempt surface is opt-in.
 
-Adapters are **earned, not scaffolded**. Two are live (`github`,
-`huggingface`); six are *declared stubs* (`gmail`, `slack`, `notion`,
-`google-drive`, `datadog`, `jira`) that refuse fail-closed, each naming what it
-needs and what earns its implementation. `integration_list` is the ledger — see
+Adapters are **earned, not scaffolded**. Four are live (`github`,
+`huggingface`, `jeles`, `utety`); six are *declared stubs* (`gmail`, `slack`,
+`notion`, `google-drive`, `datadog`, `jira`) that refuse fail-closed, each
+naming what it needs and what earns its implementation. `integration_list` is
+the ledger (it reports each adapter's live/stub status) — see
 [`docs/design/integrations.md`](docs/design/integrations.md) for the earn rule.
 
 Credentials resolve environment-variable-first (e.g. `WILLOW_GITHUB_TOKEN`,
@@ -595,10 +596,14 @@ needs a manifest at `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json`:
 ```
 
 `permissions` is a list of group names and/or literal tool names —
-see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the full set
-(`store_read`, `store_write`, `knowledge_read`, `knowledge_write`,
-`schema_admin`, `task_queue`, `agent_dispatch`, `fleet_read`, `context`,
-`audit`, `gap_read`, `gap_write`, `gap_promote`, `full_access`). Fail-closed:
+see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the authoritative set
+(39 groups). Common ones: `store_read`, `store_write`, `knowledge_read`,
+`knowledge_write`, `schema_admin`, `task_queue`, `agent_dispatch`,
+`dispatch_read`, `dispatch_write`, `fleet_read`, `context`, `audit`,
+`gap_read`, `gap_write`, `gap_promote`, `fork_read`, `fork_write`, `nest_read`,
+`nest_write`, `integration_read`, `web_read`, `code_graph_read`,
+`code_graph_write`, `full_access` — plus per-subsystem read/write groups for
+lineage, friction, commitments, and the human-loop. Fail-closed:
 no manifest, or an empty `permissions` list, denies every call for that
 `app_id`. `gap_promote` is kept separate from `gap_write` — landing
 something as trusted knowledge is a more consequential act than logging or
@@ -694,19 +699,22 @@ export WILLOW_MCP_FLEET_HOME=/home/you/github/.willow
 export WILLOW_MCP_FLEET_PG_DB=willow_20
 ```
 
-`diagnostic_summary` then reports a `severance` check over three surfaces:
+`diagnostic_summary` then reports a `severance` check over four surfaces:
 
 | Surface | Kind | Violation |
 |---|---|---|
 | `store` | data | `WILLOW_STORE_ROOT` resolves inside the fleet home → `degraded` |
 | `postgres` | data | `WILLOW_PG_DB` is the fleet database → `degraded` |
 | `trust_root` | **authority** | `mcp_apps/` is inside the fleet home, or is writable by this process → `broken` |
+| `egress` | **authority** | this process can forge the three-key network gate (strict trust root off, or the consent switch / lease root / egress verification key is self-writable) → `unknown` degrades, a forgeable key `breaks` |
 
 The distinction is the whole design. Store and database hold **data**: someone
-who writes them corrupts records. `mcp_apps/` holds **authority** — the manifest
-that grants `task_net`, the lease root, the consent file. Someone who writes
-*those* grants themselves the egress the cut was supposed to deny. Only the third
-can turn a severed install into a compromised one, so only it breaks the verdict.
+who writes them corrupts records. The `trust_root` and `egress` surfaces hold
+**authority** — the manifest that grants `task_net`, the lease root, the consent
+file, the egress verification key. Someone who writes *those* grants themselves
+the egress the cut was supposed to deny. Only an authority surface can turn a
+severed install into a compromised one, so only those two break the verdict; the
+data surfaces merely degrade it.
 
 Consequently the trust root must live somewhere neither this process nor the Kart
 sandbox can write. A repo directory is the wrong place for it, however convenient:
@@ -724,9 +732,11 @@ unverifiable claim is not a passing one.
 
 ## Hooks and skills (Claude Code)
 
-`.claude-plugin/plugin.json` registers a `PreToolUse` hook and a skill for
-Claude Code users — install this package as a plugin to get both alongside
-the MCP server itself:
+`.claude-plugin/plugin.json` registers a `PreToolUse` hook and thirteen skills
+for Claude Code users — install this package as a plugin to get them alongside
+the MCP server itself. The hook is wired for four matchers (`Bash`,
+`task_submit`, `Write|Edit|MultiEdit|NotebookEdit`, and `WebSearch|WebFetch`),
+all routed through the same guard:
 
 - **`hooks/pre_tool_use.py`** blocks `Bash` commands that reach for raw
   `psql`/`psycopg2`/`sqlite3` against a database or store willow-mcp owns,
@@ -734,6 +744,10 @@ the MCP server itself:
   would write the keys authorizing the agent's *own* egress — minting a lease,
   running `grant-net`, or editing a manifest to add `task_net` — and warns on a
   `task_submit` that hand-embeds a `# allow_net` directive.
+- The full skill set (13): `session-start`, `consent`, `worktree`,
+  `handoff-write`, `external-guard`, `schema-confirm`, `willow-serve`,
+  `kart-tasks`, `debugging`, `review`, `tdd`, `brainstorming`,
+  `persona-overlays`. A few load-bearing ones:
 - **[`skills/schema-confirm.md`](skills/schema-confirm.md)** walks through
   reviewing and confirming a table's schema mapping before writing to it.
 - **[`skills/willow-serve.md`](skills/willow-serve.md)** turns OAuth serve mode

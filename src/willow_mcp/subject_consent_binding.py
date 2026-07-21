@@ -138,8 +138,10 @@ def subject_gate(
         "error": (
             f"subject_consent_denied: '{tool_name}' touches a non-owner subject "
             f"at scope '{scope}', and no verified consent grant exists for it. "
-            f"An operator must run `willow-mcp grant-consent <subject> {scope} "
-            f"--by <guardian>` before this call can proceed."
+            f"An operator must record a consent grant for this subject at scope "
+            f"'{scope}' from an operator terminal "
+            f"(subject_consent_binding.grant), which no MCP tool can do, before "
+            f"this call can proceed."
         ),
         "code": "subject_consent_denied",
         "scope": scope,
