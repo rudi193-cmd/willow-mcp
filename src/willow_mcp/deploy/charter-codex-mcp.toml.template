@@ -1,0 +1,17 @@
+# Codex CLI — charter Jarvis seat (willow-mcp product)
+[mcp_servers.willow-mcp]
+command = "{{WILLOW_MCP_PYTHON}}"
+args = ["-m", "willow_mcp"]
+
+[mcp_servers.willow-mcp.env]
+WILLOW_APP_ID = "{{AGENT_NAME}}"
+WILLOW_PG_DB = "willow_20"
+WILLOW_HOME = "{{WILLOW_HOME}}"
+WILLOW_STORE_ROOT = "{{WILLOW_STORE_ROOT}}"
+WILLOW_PROJECT_ROOT = "{{WILLOW_PROJECT_ROOT}}"
+WILLOW_HANDOFF_PROJECT = "{{WILLOW_HANDOFF_PROJECT}}"
+WILLOW_HUMAN_ORCHESTRATOR = "1"
+
+[mcp_servers.codebase-memory-mcp]
+command = "codebase-memory-mcp"
+args = []

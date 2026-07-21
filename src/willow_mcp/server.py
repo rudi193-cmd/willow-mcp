@@ -4672,7 +4672,7 @@ def _cmd_onboard(args) -> None:
         print(f"2. MCP public key wired into: {', '.join(merged)}")
     else:
         print("2. Re-run with --project-root <repo> to auto-wire .cursor/mcp.json")
-    print("3. From willow-2.0 (fleet installs): cd ~/github/willow-2.0 && ./willow.sh project sync <project>")
+    print("3. Sync IDE wiring: willow-mcp project sync willow")
     print(f"4. Network task: {cli} run-net {args.app_id} --task-file /path/to/script.sh --ttl 30m")
     print(f"5. Drain queue:  {cli} worker --lane fast --once")
     if consent.read_consent().get("internet") is not True:
@@ -5071,6 +5071,30 @@ def main():
         sys.exit(1)
 
 
+def _cmd_project(args) -> None:
+    """`willow-mcp project` — sync/audit agent-agnostic IDE wiring from the registry."""
+    from . import mcp_projects
+
+    if args.project_action == "list":
+        rows = mcp_projects.list_projects()
+        print(json.dumps(rows, indent=2))
+        return
+
+    project_ids = [args.project_id] if args.project_id else None
+    if args.project_action == "sync":
+        written = mcp_projects.sync_all(project_ids=project_ids, dry_run=args.dry_run)
+        print(json.dumps({"synced": written}, indent=2))
+        return
+    if args.project_action == "audit":
+        issues = mcp_projects.audit_all(project_ids=project_ids)
+        if issues:
+            for issue in issues:
+                print(issue, file=sys.stderr)
+            raise SystemExit(1)
+        print(json.dumps({"status": "ok", "projects": project_ids or "all"}, indent=2))
+        return
+
+
 def _main():
     import argparse
     parser = argparse.ArgumentParser(prog="willow-mcp")
@@ -5453,6 +5477,23 @@ def _main():
     persona_p.add_argument("--dry-run", action="store_true", help="preview markdown without writing")
     persona_p.add_argument("--out", default="", help="optional output path")
 
+    project_p = subparsers.add_parser(
+        "project",
+        help="Sync or audit agent-agnostic IDE wiring (MCP JSON, hooks, Claude settings)",
+    )
+    project_p.add_argument(
+        "project_action",
+        choices=["sync", "audit", "list"],
+        help="sync materializes configs; audit exits 1 on drift; list shows registry",
+    )
+    project_p.add_argument(
+        "project_id",
+        nargs="?",
+        default="",
+        help="registry project id (default: all projects)",
+    )
+    project_p.add_argument("--dry-run", action="store_true", help="preview writes only")
+
     args, _ = parser.parse_known_args()
 
     if args.command == "setup":
@@ -5548,6 +5589,9 @@ def _main():
 
         out = Path(args.out).expanduser() if args.out else None
         print(json.dumps(compile_persona(args.agent_id, dry_run=args.dry_run, force=args.force, out_path=out), indent=2))
+        return
+    if args.command == "project":
+        _cmd_project(args)
         return
 
     if args.serve or _SERVE_MODE:

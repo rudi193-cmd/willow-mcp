@@ -1,0 +1,53 @@
+{
+  "enableAllProjectMcpServers": true,
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{WILLOW_MCP_PYTHON}} -m willow_mcp.session_start_hook"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{WILLOW_MCP_PYTHON}} -m willow_mcp.pre_tool_hook"
+          }
+        ]
+      },
+      {
+        "matcher": "task_submit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{WILLOW_MCP_PYTHON}} -m willow_mcp.pre_tool_hook"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{WILLOW_MCP_PYTHON}} -m willow_mcp.pre_tool_hook"
+          }
+        ]
+      },
+      {
+        "matcher": "WebSearch|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "{{WILLOW_MCP_PYTHON}} -m willow_mcp.pre_tool_hook"
+          }
+        ]
+      }
+    ]
+  }
+}
