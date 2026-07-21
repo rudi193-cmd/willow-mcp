@@ -27,6 +27,7 @@ def test_audit_hardened_when_strict_and_nothing_forgeable(home, monkeypatch):
     monkeypatch.setenv("WILLOW_MCP_STRICT_TRUST_ROOT", "1")
     monkeypatch.setattr(trs.lease, "self_writable_trust_paths", lambda *_: [])
     monkeypatch.setattr(trs.lease, "path_is_self_writable_or_replaceable", lambda *_: False)
+    monkeypatch.setattr(trs.lease, "path_is_directly_writable_for_trust", lambda *_: False)
     audit = trs.audit_trust_root("hanuman")
     assert audit["hardened"] is True
 

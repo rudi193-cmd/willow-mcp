@@ -93,13 +93,16 @@ def runtime_writable_directories() -> list[Path]:
 
 
 def runtime_writable_home_children() -> list[Path]:
-    """Top-level $WILLOW_HOME entries (except trust dirs) when a prior chown swept too wide."""
+    """Top-level $WILLOW_HOME entries (except trust dirs/files) for runtime repair."""
     home = paths.willow_home()
     if not home.is_dir():
         return []
+    trust_files = {str(p) for p in trust_policy_files()}
     children: list[Path] = []
     for entry in sorted(home.iterdir()):
         if entry.name in _TRUST_DIR_NAMES:
+            continue
+        if str(entry) in trust_files:
             continue
         children.append(entry)
     return children
@@ -137,7 +140,7 @@ def audit_trust_root(app_id: str = "") -> dict[str, Any]:
     consent_writable: list[dict[str, str]] = []
     for path in consent_policy_paths():
         try:
-            if lease.path_is_self_writable_or_replaceable(path):
+            if lease.path_is_directly_writable_for_trust(path):
                 consent_writable.append({"key": "consent", "path": str(path)})
         except OSError:
             consent_writable.append({"key": "consent", "path": str(path)})
@@ -321,6 +324,19 @@ def repair_runtime_permissions(runtime_user: str = "", *, dry_run: bool = False)
     receipt = paths.willow_home() / "mcp_receipt.db"
     if receipt.exists() or dry_run:
         actions.extend(_chown_target(receipt, user, dry_run=dry_run))
+    trust_owner = default_trust_owner()
+    try:
+        resolve_trust_owner(trust_owner)
+    except ValueError:
+        trust_owner = ""
+    if trust_owner:
+        for policy_file in trust_policy_files():
+            if policy_file.is_file() or dry_run:
+                actions.extend(_chown_target(policy_file, trust_owner, dry_run=dry_run))
+                if policy_file.is_file():
+                    actions.extend(
+                        _chmod_tree(policy_file, dir_mode=0o755, file_mode=0o644, dry_run=dry_run)
+                    )
     return {"runtime_user": user, "targets": [str(p) for p in targets], "actions": actions, "dry_run": dry_run}
 
 

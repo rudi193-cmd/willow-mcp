@@ -241,6 +241,14 @@ def test_read_only_leaf_beneath_writable_parent_is_replaceable(home, monkeypatch
     assert [f["key"] for f in lease.self_writable_trust_paths()] == ["lease_root"]
 
 
+def test_self_writable_ignores_writable_home_ancestor(home, monkeypatch):
+    """Hardened mcp_apps owned by another uid is not forgeable via .willow parent."""
+    lease.grant("app", 600, issuer="op")
+    root = lease._leases_root()
+    monkeypatch.setattr(lease, "path_is_directly_writable_for_trust", lambda path: False)
+    assert lease.self_writable_trust_paths("app") == []
+
+
 def test_a_read_only_lease_root_is_still_readable(home):
     """The hardened deployment must still be able to *check* a lease. Reads deny or
     allow; they never blow up because the trust root refused a write."""
