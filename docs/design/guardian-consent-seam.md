@@ -205,12 +205,13 @@ A new module `subject_consent.py`, shaped exactly like `consent.py`:
 
 - **Read-only at runtime.** `permitted(subject_id, scope)` and a `disclosure`
   reader. Fail-closed on every path.
-- **Mutation isolated** to operator-terminal primitives
-  (`subject_consent_binding.grant()` / `revoke()`, each gated by
-  `require_operator_terminal()`), never an MCP tool — granting consent is an
-  owner-side act, like minting a manifest. *A `willow-mcp grant-consent`
-  argparse subcommand is not yet wired; the primitives exist but have no
-  shipped CLI entry point.*
+- **Mutation isolated** to an operator CLI, never an MCP tool — granting consent
+  is an owner-side act, like minting a manifest. The operator-terminal primitives
+  `subject_consent_binding.grant()` / `revoke()` (each gated by
+  `require_operator_terminal()`) are exposed as `willow-mcp grant-consent
+  <subject_id> <scope> --by <guardian>` and `willow-mcp revoke-consent …`;
+  `willow-mcp consent-status <subject_id>` is the read-only counterpart (like
+  `net-status` for `grant-net`).
 - **Composes into `_gate`**, not around it. A tool declares (in its manifest or a
   small registry, like `tier_policy.TOOL_CLASS`) whether it *touches a subject*
   and at what scope. `_guarded` → `_gate` gains a third check after `permitted`
