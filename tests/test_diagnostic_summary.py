@@ -142,6 +142,16 @@ def test_missing_app_id_warns_but_verdict_stays_ok():
     assert server._derive_verdict(problems) == "ok"
 
 
+def test_missing_egress_keys_is_warn_problem(monkeypatch):
+    monkeypatch.setattr("willow_mcp.egress_setup.resolve_public_key_path", lambda: None)
+    problems = server._derive_problems(_store_ok(), _pg_ok(), _manifest_ok(), "stdio")
+    egress = [p for p in problems if p["check"] == "egress_keys"]
+    assert len(egress) == 1
+    assert egress[0]["severity"] == "warn"
+    assert "setup-egress" in egress[0]["fix"]
+    assert server._derive_verdict(problems) == "degraded"
+
+
 def test_empty_permissions_warn_still_degrades():
     # a real manifest warn (empty permissions -> every call denied) is NOT
     # caller_input and must still degrade the verdict.
