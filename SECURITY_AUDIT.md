@@ -242,7 +242,7 @@ The gate never runs (it is keyed off the *argument*, not the *text*), the direct
 **Found:** 2026-07-08, demonstrated in-session while landing B-29
 **Mitigated:** 2026-07-09 (B-32: time-boxed leases, strict-trust-root mode, PreToolUse guard)
 
-B-14 made `$WILLOW_HOME/mcp_apps` a `bound_ro` mount *inside the Kart sandbox*, precisely so an untrusted runtime could not rewrite the ACL that gates it. But the agent driving the session does not run inside that sandbox. It holds ordinary file tools and can write `"task_net"` into its own manifest, then call `task_submit(allow_net=True)`. B-29's `consent.internet` is a second file in the same directory tree, writable by the same uid.
+B-14 made `$WILLOW_HOME/mcp_apps` a `bound_ro` mount *inside the Kart sandbox*, precisely so an untrusted runtime could not rewrite the ACL that gates it. But the agent driving the session does not run inside that sandbox. It holds ordinary file tools and can write `"task_net"` into its own manifest, then call `task_submit(allow_net=True)`. B-33 (fixed kartikeya 0.0.5) closed the **sandbox** lane for consent policy files the same way; the **host** lane can still edit `settings.global.json` on a shared-uid install (B-32 class).
 
 This inverts the **sudo invariant** (FRANK `90e52ab7`): *the model may REQUEST egress, never CONFIRM it; request and confirm are separate authorities.* Under §0.1 the witness may not be the actor; under §0.3 nothing may extend its own reach. The escalation was demonstrated in-session with operator approval in chat — but the *mechanism* never required that approval, and an approval the machine cannot check is not a control.
 

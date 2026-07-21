@@ -10,6 +10,11 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Security (willow-gate seam — hardening from adversarial review)
+- **B-33: consent policy files are read-only inside Kart sandboxes.** Requires
+  `kartikeya>=0.0.5` (`collect_mcp_trust_ro_overlays` overlays `settings.global.json`
+  and `consent.json` at home root and under `config/`). Regression-tested in
+  `tests/test_b33_consent_sandbox.py`. Host-side edits remain possible on shared-uid
+  installs (B-32 residual).
 - **`whoami` / `diagnostic_summary` can no longer enumerate another identity's
   config.** These tools are ungated (they must answer with a missing manifest), so in
   stdio a caller could pass any `app_id` and read that identity's permissions / role /
