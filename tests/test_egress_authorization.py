@@ -181,6 +181,8 @@ def _permit_execution_policy(monkeypatch, keys, tmp_path):
         auth.lease, "path_is_self_writable_or_replaceable", lambda *_: False
     )
     monkeypatch.setenv("WILLOW_MCP_EGRESS_PUBLIC_KEY", str(keys[1]))
+    monkeypatch.setattr(auth, "_row_blocks_net_authorization", lambda *_: None)
+    monkeypatch.setattr(auth, "_consume_row_net_authorization", lambda *_: True)
     real_access = os.access
     monkeypatch.setattr(
         auth.os,
@@ -349,6 +351,56 @@ def test_forged_direct_row_is_denied_before_shell_launch(monkeypatch, directive)
     assert status == "failed"
     assert "verifier refused" in result["error"]
     assert launched == []
+
+
+@pytest.mark.parametrize("directive", ["# allow_net", "# allow_localhost"])
+def test_reclaimed_terminal_row_is_denied_before_shell_launch(
+    keys, tmp_path, monkeypatch, directive
+):
+    from kartikeya import execute as kexec
+
+    _permit_execution_policy(monkeypatch, keys, tmp_path)
+    monkeypatch.setattr(
+        auth,
+        "_row_blocks_net_authorization",
+        lambda _task_id: "task row is terminal",
+    )
+    launched = []
+    monkeypatch.setattr(
+        kexec,
+        "run_shell_task",
+        lambda *_a, **_k: launched.append(True) or ("completed", {}),
+    )
+    row = TaskRow(
+        task_id="RECLAIM1",
+        task=f"curl https://example.com\n{directive}",
+        submitted_by="caller",
+        network_authorization=_signed(keys, task_id="RECLAIM1"),
+    )
+    status, result = kexec.execute_task_row(
+        row, network_authorizer=auth.ExecutorNetworkAuthorizer()
+    )
+    assert status == "failed"
+    assert "verifier refused" in result["error"]
+    assert launched == []
+
+
+def test_reclaimed_terminal_row_authorizer_sets_last_error(keys, tmp_path, monkeypatch):
+    _permit_execution_policy(monkeypatch, keys, tmp_path)
+    monkeypatch.setattr(
+        auth,
+        "_row_blocks_net_authorization",
+        lambda _task_id: "task row is terminal",
+    )
+    row = TaskRow(
+        task_id="RECLAIM1",
+        task="curl https://example.com\n# allow_net",
+        submitted_by="caller",
+        network_authorization=_signed(keys, task_id="RECLAIM1"),
+    )
+    authorizer = auth.ExecutorNetworkAuthorizer()
+    assert authorizer(row, row.network_authorization) is False
+    assert authorizer.last_error == "task row is terminal"
 
 
 def test_no_mcp_tool_exports_signing_authority():
