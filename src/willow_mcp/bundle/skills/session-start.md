@@ -76,16 +76,42 @@ When `WILLOW_HOME` is a data-vault box only (no charter mount), skip the charter
 
 ---
 
-## Specialists (`app_id` = hanuman, loki, jeles, ada, …)
+## Specialists (`app_id` = hanuman, loki, jeles, ada, skirnir, vishwakarma)
 
 | Signal | Mode | Closeout |
 |--------|------|----------|
 | Normal prompt, no `dispatch_id` | **human** | `session_handoff_write` or `context_save` |
 | `dispatch_id` / pending packet | **dispatch** | `handoff_write_v4` |
 
+No `WILLOW_HUMAN_ORCHESTRATOR` on specialist MCP configs.
+
+### Open (every specialist session)
+
+| Step | Action |
+|------|--------|
+| 1 | `session_enter(app_id, session_id, dispatch_id=…)` — read `entry_mode`, `assignment` (if dispatch), `persona`, `closeout_tools` |
+| 2 | Apply voice + boundaries from `persona-overlays.md` for your `app_id` |
+| 3 | `diagnostic_summary(app_id=…)` when the role monitors or builds — `broken` → report once and stop |
+| 4 | Work within manifest permissions only |
+| 5 | Close with the tool named in `closeout_tools` |
+
+`session_enter` embeds persona text in the `persona` field (source: `$WILLOW_HOME/personas/<agent>.md`).
+Overlays are voice and posture only — they do not change `app_id`, namespace, or grants.
+
+| `app_id` | Role | Overlay focus |
+|----------|------|---------------|
+| `hanuman` | Builder | worktree + PR, Kart, tests |
+| `loki` | Auditor | diff review, findings — no build |
+| `jeles` | Librarian | `knowledge_search`, sourced synthesis |
+| `ada` | Operator | `fleet_health`, monitor-first |
+| `skirnir` | Witness | gate/session state, no inference fill |
+| `vishwakarma` | Architect | manifests, trust chain, structure first |
+
+Full overlay text: `persona-overlays.md`.
+
 ### Dispatch path
 
-1. `session_enter` → read `assignment.md` from the response
+1. `session_enter` → read `assignment` from the response
 2. Work within manifest permissions
 3. `handoff_write_v4`
 
@@ -94,7 +120,3 @@ When `WILLOW_HOME` is a data-vault box only (no charter mount), skip the charter
 1. `session_enter` → `entry_mode: human`
 2. Work
 3. `session_handoff_write`
-
-No `WILLOW_HUMAN_ORCHESTRATOR` on specialist MCP configs.
-
-Persona voice: `$WILLOW_HOME/personas/<agent>.md` if present — overlay only; does not change `app_id` or permissions.
