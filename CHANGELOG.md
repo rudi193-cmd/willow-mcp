@@ -9,6 +9,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
+### Added
+- **S5 discipline skills** — `debugging`, `review`, `tdd`, and `brainstorming`
+  in the bundle and Claude plugin (`plugin.json`). Rewritten for willow-mcp verbs
+  (pytest, `knowledge_search`, egress/schema constraints) with no fleet paths.
+
 ### Security (willow-gate seam — hardening from adversarial review)
 - **B-33: consent policy files are read-only inside Kart sandboxes.** Requires
   `kartikeya>=0.0.5` (`collect_mcp_trust_ro_overlays` overlays `settings.global.json`
