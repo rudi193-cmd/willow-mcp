@@ -126,26 +126,34 @@ def resolve_trust_owner(owner: str) -> str:
     return name
 
 
-def _chmod_tree(root: Path, *, dir_mode: int, file_mode: int) -> list[str]:
+def _chmod_tree(
+    root: Path,
+    *,
+    dir_mode: int,
+    file_mode: int,
+    dry_run: bool = False,
+) -> list[str]:
+    """Set modes under ``root`` using the same privilege boundary as chown."""
     actions: list[str] = []
     if not root.exists():
         return actions
+    file_mode_s = format(file_mode, "o")
+    dir_mode_s = format(dir_mode, "o")
+    target = str(root)
     if root.is_file():
-        os.chmod(root, file_mode)
-        actions.append(f"chmod {file_mode:o} {root}")
+        actions.append(f"chmod {file_mode_s} {target}")
+        _run_privileged(["chmod", file_mode_s, target], dry_run=dry_run)
         return actions
-    for dirpath, dirnames, filenames in os.walk(root, topdown=False):
-        current = Path(dirpath)
-        for name in filenames:
-            path = current / name
-            os.chmod(path, file_mode)
-            actions.append(f"chmod {file_mode:o} {path}")
-        for name in dirnames:
-            path = current / name
-            os.chmod(path, dir_mode)
-            actions.append(f"chmod {dir_mode:o} {path}")
-    os.chmod(root, dir_mode)
-    actions.append(f"chmod {dir_mode:o} {root}")
+    actions.append(f"find {target} -type f -exec chmod {file_mode_s} {{}} +")
+    actions.append(f"find {target} -type d -exec chmod {dir_mode_s} {{}} +")
+    _run_privileged(
+        ["find", target, "-type", "f", "-exec", "chmod", file_mode_s, "{}", "+"],
+        dry_run=dry_run,
+    )
+    _run_privileged(
+        ["find", target, "-type", "d", "-exec", "chmod", dir_mode_s, "{}", "+"],
+        dry_run=dry_run,
+    )
     return actions
 
 
@@ -171,8 +179,10 @@ def apply_filesystem_hardening(owner: str, *, dry_run: bool = False) -> dict[str
         target = str(root)
         actions.append(f"chown -R {trust_owner}:{trust_owner} {target}")
         _run_privileged(["chown", "-R", f"{trust_owner}:{trust_owner}", target], dry_run=dry_run)
-        if not dry_run and root.exists():
-            actions.extend(_chmod_tree(root, dir_mode=0o755, file_mode=0o644))
+        if root.exists():
+            actions.extend(
+                _chmod_tree(root, dir_mode=0o755, file_mode=0o644, dry_run=dry_run)
+            )
     return {"owner": trust_owner, "actions": actions, "dry_run": dry_run}
 
 
