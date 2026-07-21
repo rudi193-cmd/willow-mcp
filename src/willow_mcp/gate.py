@@ -154,6 +154,11 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "integration_call": frozenset({
         "integration_call",
     }),
+    # Open web — DuckDuckGo search + guarded URL fetch (server-process egress).
+    # Requires web_net capability + consent.internet + lease (see web_egress.py).
+    "web_read": frozenset({
+        "willow_web_search", "willow_web_fetch",
+    }),
     # Landing a gap as trusted knowledge is a more consequential act than
     # logging or resolving one, so it's gated as its own group rather than
     # folded into gap_write — same reasoning as schema_admin below.
@@ -301,6 +306,10 @@ NET_PERMISSION = "task_net"
 # imply the other. Checked by integrations.egress_denial alongside
 # consent.internet and a live lease (the same three-key gate task_submit uses).
 INTEGRATION_NET_PERMISSION = "integration_net"
+# Server-process open-web HTTP (willow_web_search / willow_web_fetch). Same
+# three-key gate as integration_call but a separate manifest line so operators
+# can grant web without arbitrary integration adapters.
+WEB_NET_PERMISSION = "web_net"
 
 
 def _load_manifest(app_id: str) -> Optional[dict]:

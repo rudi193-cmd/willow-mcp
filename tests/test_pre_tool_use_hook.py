@@ -375,3 +375,15 @@ def test_main_warns_on_ls():
     assert decision["decision"] == "warn"
     assert "store_list" in decision["reason"]
 
+
+def test_main_blocks_native_web_search():
+    code, stdout = _run_hook({
+        "tool_name": "WebSearch",
+        "tool_input": {"search_term": "latest news"},
+        "session_id": "s1",
+    })
+    assert code == 0
+    decision = json.loads(stdout)
+    assert decision["decision"] == "block"
+    assert "willow_web_search" in decision["reason"]
+

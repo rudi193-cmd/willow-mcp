@@ -135,6 +135,25 @@ def check_bash_routing(command: str) -> Optional[tuple[str, str]]:
     return None
 
 
+_WEB_SEARCH_REDIRECT = (
+    "Use willow_web_search (MCP) for open-web search — not native WebSearch. "
+    "Requires web_net + consent.internet + operator egress lease."
+)
+_WEB_FETCH_REDIRECT = (
+    "WebFetch is blocked — use willow_web_fetch (MCP) for guarded URL fetch "
+    "with external-guard scan. Requires web_net + consent.internet + lease."
+)
+
+
+def check_native_web(tool_name: str) -> Optional[tuple[str, str]]:
+    """Block IDE-native web tools now that willow_web_* ships."""
+    if tool_name == "WebSearch":
+        return "block", f"willow-mcp: {_WEB_SEARCH_REDIRECT}"
+    if tool_name == "WebFetch":
+        return "block", f"willow-mcp: {_WEB_FETCH_REDIRECT}"
+    return None
+
+
 def check_bash(command: str) -> Optional[str]:
     """Return a block reason if `command` reaches for a willow-mcp-owned
     store via a raw shell client, else None (allow)."""
@@ -304,7 +323,11 @@ def main() -> None:
     tool_name = payload.get("tool_name", "")
     tool_input = payload.get("tool_input", {}) or {}
 
-    if tool_name == "Bash":
+    native = check_native_web(tool_name)
+    if native:
+        decision, route_reason = native
+        print(json.dumps({"decision": decision, "reason": route_reason}))
+    elif tool_name == "Bash":
         command = tool_input.get("command", "")
         reason = check_bash_self_grant(command) or check_bash(command)
         if reason:
