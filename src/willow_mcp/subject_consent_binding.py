@@ -72,8 +72,10 @@ def _is_owner(subject_id: str) -> bool:
 # subject-scoped — the gate is a no-op for it. Only tools whose whole purpose is
 # to move a subject's data across a boundary appear here. Kept minimal on purpose:
 # a scope is a promise to enforce, so an entry is added only when the call site
-# can actually supply a `subject_id`. (Wiring `_gate` to pass one through is the
-# next slice; until then this map is correct-but-dormant, never wrong.)
+# can actually supply a `subject_id`. `_gate` reads `subject_id` from the call
+# kwargs and runs `subject_gate` (server.py); each mapped tool declares a
+# `subject_id` parameter, so this map is live and enforcing — a non-owner subject
+# with no grant is denied `subject_consent_denied` (verified end-to-end).
 TOOL_SUBJECT_SCOPE: dict[str, str] = {
     # de-identified structure crossing into the shared KB
     "nest_promote": "kb_promotion",
