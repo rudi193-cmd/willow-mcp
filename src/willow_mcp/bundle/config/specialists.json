@@ -145,7 +145,12 @@
     "display_name": "Willow",
     "role": "orchestrator",
     "roles": ["orchestrator", "magistrate"],
-    "permissions": ["orchestrator"],
+    "permissions": [
+      "orchestrator",
+      "commitment_read",
+      "store_read",
+      "knowledge_read"
+    ],
     "deny_tools": [],
     "persona_path": "personas/willow.md",
     "persona_bundle": false,

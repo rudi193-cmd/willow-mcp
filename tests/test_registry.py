@@ -14,6 +14,21 @@ def test_load_registry_from_bundle():
     ids = [r["agent_id"] for r in data.get("specialists") or []]
     assert "hanuman" in ids
     assert data.get("orchestrator_seat", {}).get("agent_id") == "willow"
+    orch_perms = data["orchestrator_seat"]["permissions"]
+    assert "orchestrator" in orch_perms
+    assert "commitment_read" in orch_perms
+    assert "store_read" in orch_perms
+    assert "knowledge_read" in orch_perms
+
+
+def test_orchestrator_manifest_supports_session_start_tools(home):
+    """session-start open ritual needs tools outside the orchestrator group alone."""
+    from willow_mcp.gate import permitted
+
+    hi.ensure_home_layout()
+    reg.compile_manifests(reg.load_registry(), only_missing=False)
+    for tool in ("commitment_surface", "store_list", "kb_startup_continuity"):
+        assert permitted("willow", tool), f"willow manifest must permit {tool}"
 
 
 def test_manifest_from_row_includes_deny_tools():
