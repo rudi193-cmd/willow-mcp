@@ -37,7 +37,14 @@ When the charter project is mounted (`WILLOW_HANDOFF_PROJECT`, `WILLOW_PROJECT_R
 
 Collections follow `soil/manifest.json` under the project store (`WILLOW_STORE_ROOT`).
 
-**Step 1 — project context (tri-modal SOIL)**
+**Step 1 — law and startup docs (read files first)**
+
+Read at `WILLOW_PROJECT_ROOT` (default `~/github/willow`):
+
+- `CONSTITUTION.md`
+- Associated startup docs for this seat (e.g. `ORIENT.md`, `AGENTS.md` as needed)
+
+**Step 2 — project context (tri-modal SOIL)**
 
 | Intent | willow-mcp call |
 |--------|-----------------|
@@ -46,25 +53,22 @@ Collections follow `soil/manifest.json` under the project store (`WILLOW_STORE_R
 | Milestones / deadlines | `store_list(app_id="willow", collection="pm/milestones")` |
 | Commitments lane | `store_list(app_id="willow", collection="pa/commitments")` |
 
-**Step 2 — continuity**
+**Step 3 — continuity**
 
 | Intent | willow-mcp call |
 |--------|-----------------|
 | Startup continuity atoms | `kb_startup_continuity(app_id="willow")` |
-| Active packet bodies | `handoff_read(app_id="willow", dispatch_id=…)` for items from step 3 `dispatch_list` |
+| Active packet bodies | `handoff_read(app_id="willow", dispatch_id=…)` for items from `dispatch_list` |
 
 If a call is gate-denied, note it and continue (`degraded` is acceptable).
 
-**Step 3 — law and collection map (read files)**
+**Step 4 — grants and collection map (read files)**
 
-Read at `WILLOW_PROJECT_ROOT` (default `~/github/willow`):
-
-- `CONSTITUTION.md`
 - `envelopes/pre-approved.json` — active grants
 - `AGENT_SERVICES.md` — seat obligations
 - `soil/manifest.json` — collection map
 
-Charter depth (flags, fleet read, `next_bite` writeback): `ORIENT.md` in the governance repo.
+Charter depth (flags, fleet read, `next_bite` writeback): `ORIENT.md` steps 4–6 in the governance repo.
 
 ### Vault / greenfield home
 
