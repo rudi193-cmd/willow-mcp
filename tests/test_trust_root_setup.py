@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from willow_mcp import home_init as hi
+from willow_mcp import paths
 from willow_mcp import trust_root_setup as trs
 
 
@@ -48,6 +49,20 @@ def test_harden_dry_run_lists_actions(home, monkeypatch):
     result = trs.harden_trust_root(owner="operator", dry_run=True)
     assert result["filesystem"]["dry_run"] is True
     assert any("chown -R operator:operator" in action for action in result["filesystem"]["actions"])
+    assert any("find " in action and "chmod 644" in action for action in result["filesystem"]["actions"])
+
+
+def test_chmod_tree_uses_privileged_find(home, monkeypatch):
+    hi.ensure_home_layout()
+    calls: list[list[str]] = []
+
+    def _capture(argv, *, dry_run):
+        calls.append(list(argv))
+
+    monkeypatch.setattr(trs, "_run_privileged", _capture)
+    trs._chmod_tree(paths.mcp_apps_root(), dir_mode=0o755, file_mode=0o644)
+    assert any(cmd[:4] == ["find", str(paths.mcp_apps_root()), "-type", "f"] for cmd in calls)
+    assert any(cmd[:4] == ["find", str(paths.mcp_apps_root()), "-type", "d"] for cmd in calls)
 
 
 def test_resolve_trust_owner_requires_existing_user(monkeypatch):
