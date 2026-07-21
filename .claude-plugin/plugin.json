@@ -50,6 +50,10 @@
     "skills/external-guard.md",
     "skills/schema-confirm.md",
     "skills/willow-serve.md",
-    "skills/kart-tasks.md"
+    "skills/kart-tasks.md",
+    "skills/debugging.md",
+    "skills/review.md",
+    "skills/tdd.md",
+    "skills/brainstorming.md"
   ]
 }
