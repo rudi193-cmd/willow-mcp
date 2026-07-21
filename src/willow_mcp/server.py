@@ -4367,11 +4367,22 @@ def _cmd_worker(args) -> None:
         print(f"willow-mcp worker: {e}", file=sys.stderr)
         raise SystemExit(1)
 
+    from .commitments.proactive import CommitmentProactiveHook, chain_heartbeat
     from .heartbeat import WorkerHeartbeat, reap
     from .egress_authorization import ExecutorNetworkAuthorizer
 
     reap()  # clear files left by workers that were killed rather than stopped
     beat = WorkerHeartbeat(agent="kart", lane=args.lane, interval=args.interval)
+
+    def _worker_commitment_surface():
+        from datetime import datetime
+
+        return _commitment_ledger_restored().dew_surface(datetime.utcnow())
+
+    beat = chain_heartbeat(
+        beat,
+        CommitmentProactiveHook(surface_fn=_worker_commitment_surface),
+    )
     network_authorizer = ExecutorNetworkAuthorizer()
     try:
         kartikeya.run_worker(

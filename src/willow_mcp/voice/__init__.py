@@ -34,3 +34,8 @@ __all__ = [
     "VoiceController",
     "WakeGate",
 ]
+
+# Stage adapters (lazy heavy deps — import submodules directly when wiring live audio):
+#   willow_mcp.voice.silero_vad.SileroVadFn
+#   willow_mcp.voice.transcribe.FasterWhisperTranscriber
+#   willow_mcp.voice.capture.MicCapture
