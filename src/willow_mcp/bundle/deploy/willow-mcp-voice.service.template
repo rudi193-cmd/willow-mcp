@@ -1,0 +1,21 @@
+# systemd --user unit for the willow-mcp voice ingress daemon.
+[Unit]
+Description=willow-mcp voice ingress membrane
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@WORKDIR@
+Environment="WILLOW_HOME=@WILLOW_HOME@"
+Environment="WILLOW_APP_ID=@APP_ID@"
+Environment="WILLOW_VOICE_WAKE_MODELS=@WAKE_MODELS@"
+Environment="WILLOW_KOKORO_URL=@KOKORO_URL@"
+Environment="WILLOW_KOKORO_VOICE=@KOKORO_VOICE@"
+Environment="WILLOW_VOICE_HANDLER=@HANDLER@"
+ExecStart=@PYTHON@ -m willow_mcp voice --app-id @APP_ID@ @VOICE_EXTRA@
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

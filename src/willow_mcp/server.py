@@ -4344,6 +4344,69 @@ def _cmd_confirm_binding(args) -> None:
               f"before confirming.")
 
 
+def _cmd_voice(args) -> None:
+    """Run the voice ingress daemon (CLI: `willow-mcp voice`)."""
+    from .voice.daemon import VoiceDaemon, VoiceDaemonConfig, load_handler
+    from .voice.daemon import _echo_handler
+
+    handler = None
+    if getattr(args, "echo", False):
+        handler = _echo_handler
+    elif getattr(args, "handler", ""):
+        handler = load_handler(args.handler)
+    else:
+        env_handler = os.environ.get("WILLOW_VOICE_HANDLER", "").strip()
+        if env_handler:
+            handler = load_handler(env_handler)
+
+    if handler is None:
+        print(
+            "Error: voice dispatch handler required — pass --handler module:callable, "
+            "--echo for smoke test, or set WILLOW_VOICE_HANDLER",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    config = VoiceDaemonConfig(
+        app_id=(args.app_id or os.environ.get("WILLOW_APP_ID") or "willow").strip(),
+        wake_models=tuple(args.wake_model or []),
+        wake_threshold=args.wake_threshold,
+        whisper_model=args.whisper_model,
+        enable_frank=not args.no_frank,
+        enable_kokoro=not args.no_speak,
+        command_handler=handler,
+        kokoro_url=args.kokoro_url or None,
+        kokoro_voice=args.kokoro_voice or None,
+        mic_device=args.mic_device,
+    )
+    VoiceDaemon(config).run()
+
+
+def _cmd_voice_service(args) -> None:
+    from . import voice_service
+
+    cfg = voice_service.VoiceServiceConfig(
+        python=Path(args.python),
+        workdir=Path(args.workdir),
+        willow_home=Path(args.willow_home),
+        app_id=args.app_id,
+        wake_models=args.wake_models,
+        kokoro_url=args.kokoro_url,
+        kokoro_voice=args.kokoro_voice,
+        handler=args.handler,
+    )
+    if args.action == "install":
+        result = voice_service.install(cfg)
+    elif args.action == "status":
+        result = voice_service.status()
+    else:
+        result = voice_service.uninstall()
+    if result.get("error"):
+        print(f"willow-mcp voice-service: {result['error']}", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps(result, indent=2))
+
+
 def _cmd_worker(args) -> None:
     """Drain the Kart queue via the kartikeya worker (CLI: `willow-mcp worker`)."""
     try:
@@ -5048,6 +5111,27 @@ def _main():
     worker_p.add_argument("--app-id", dest="app_id", default=os.environ.get("WILLOW_APP_ID", ""),
                           help="app_id whose confirmed 'tasks' mapping to use (default $WILLOW_APP_ID)")
 
+    voice_p = subparsers.add_parser(
+        "voice",
+        help="Run the voice ingress daemon (mic → wake → VAD → whisper → SAFE gate → Kokoro)",
+    )
+    voice_p.add_argument(
+        "--app-id", dest="app_id", default=os.environ.get("WILLOW_APP_ID", "willow"),
+    )
+    voice_p.add_argument(
+        "--wake-model", dest="wake_model", action="append", default=[],
+        help="openWakeWord model path (repeatable; or WILLOW_VOICE_WAKE_MODELS)",
+    )
+    voice_p.add_argument("--wake-threshold", type=float, default=0.6)
+    voice_p.add_argument("--whisper-model", default="base")
+    voice_p.add_argument("--handler", default="", help="dispatch handler as module:callable")
+    voice_p.add_argument("--echo", action="store_true", help="smoke-test handler (no utterance echo)")
+    voice_p.add_argument("--no-frank", action="store_true", help="disable FRANK transition mirror")
+    voice_p.add_argument("--no-speak", action="store_true", help="disable Kokoro TTS output")
+    voice_p.add_argument("--kokoro-url", default="")
+    voice_p.add_argument("--kokoro-voice", default="")
+    voice_p.add_argument("--mic-device", type=int, default=None)
+
     consent_p = subparsers.add_parser(
         "consent",
         help="Read or atomically reconcile operator consent (mutation is interactive CLI-only)",
@@ -5112,6 +5196,31 @@ def _main():
             "WILLOW_WORKER_HEARTBEAT_ROOT",
             str(Path(_service_home) / "worker_heartbeat"),
         ),
+    )
+
+    voice_service_p = subparsers.add_parser(
+        "voice-service",
+        help="Install/status/uninstall the voice ingress systemd user unit",
+    )
+    voice_service_p.add_argument("action", choices=["install", "status", "uninstall"])
+    voice_service_p.add_argument("--python", default=sys.executable)
+    voice_service_p.add_argument("--workdir", default=str(Path.cwd()))
+    voice_service_p.add_argument("--willow-home", default=_service_home)
+    voice_service_p.add_argument(
+        "--app-id", default=os.environ.get("WILLOW_APP_ID", "willow"),
+    )
+    voice_service_p.add_argument(
+        "--wake-models", default=os.environ.get("WILLOW_VOICE_WAKE_MODELS", ""),
+    )
+    voice_service_p.add_argument(
+        "--kokoro-url",
+        default=os.environ.get("WILLOW_KOKORO_URL", "http://localhost:5000/v1/audio/speech"),
+    )
+    voice_service_p.add_argument(
+        "--kokoro-voice", default=os.environ.get("WILLOW_KOKORO_VOICE", "am_michael"),
+    )
+    voice_service_p.add_argument(
+        "--handler", default=os.environ.get("WILLOW_VOICE_HANDLER", ""),
     )
 
     sign_net_p = subparsers.add_parser(
@@ -5354,6 +5463,12 @@ def _main():
         return
     if args.command == "worker":
         _cmd_worker(args)
+        return
+    if args.command == "voice":
+        _cmd_voice(args)
+        return
+    if args.command == "voice-service":
+        _cmd_voice_service(args)
         return
     if args.command == "consent":
         _cmd_consent(args)

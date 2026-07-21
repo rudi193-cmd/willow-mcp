@@ -43,3 +43,4 @@ __all__ = [
 #   willow_mcp.voice.frank_bridge.VoiceDriver + VoiceFrankBridge
 #   willow_mcp.voice.kokoro_speak.KokoroSpeaker + BargeCoordinator
 #   willow_mcp.voice.barge.BargeDetector
+#   willow_mcp.voice.daemon.VoiceDaemon + VoiceDaemonConfig
