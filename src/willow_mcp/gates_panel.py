@@ -139,6 +139,8 @@ FRIENDLY_LABELS: dict[str, str] = {
     "code_graph_write": "Index a repository into the code symbol graph",
     "human_loop_read": "See what needs a human and what's been signed off",
     "human_loop_write": "Flag work for a human and record sign-offs",
+    "fork_read": "List and inspect branch/PR work units",
+    "fork_write": "Create, log, merge, and delete work units",
     "lineage_read": "Trace where things came from",
     "lineage_write": "Record where things came from",
     "friction_read": "See relationship-friction flags",

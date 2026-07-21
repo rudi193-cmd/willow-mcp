@@ -61,6 +61,8 @@ def test_compile_manifests_only_missing(home):
         "task_queue",
         "store_read",
         "knowledge_read",
+        "fork_read",
+        "fork_write",
     ]
     assert "kb_promote" in manifest["deny_tools"]
 
