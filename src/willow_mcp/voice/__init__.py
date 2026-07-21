@@ -39,3 +39,5 @@ __all__ = [
 #   willow_mcp.voice.silero_vad.SileroVadFn
 #   willow_mcp.voice.transcribe.FasterWhisperTranscriber
 #   willow_mcp.voice.capture.MicCapture
+#   willow_mcp.voice.dispatch_gate.SafeDispatchGate
+#   willow_mcp.voice.frank_bridge.VoiceDriver + VoiceFrankBridge
