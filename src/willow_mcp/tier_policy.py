@@ -67,6 +67,7 @@ TOOL_CLASS: dict[str, str] = {
     "code_graph_suggest": READ, "code_graph_impact": READ,
     # Human-loop: listing the queue and attestations are read-only views.
     "human_required_list": READ, "human_attestation_list": READ,
+    "fork_list": READ, "fork_status": READ, "env_check": READ,
     # ── write ───────────────────────────────────────────────────────────────
     "store_put": WRITE, "store_update": WRITE, "store_delete": WRITE,
     "store_purge_collection": WRITE,          # reversible + confirm-guarded — stays write (D1)
@@ -103,6 +104,8 @@ TOOL_CLASS: dict[str, str] = {
     "agent_route": EXECUTE, "agent_dispatch_result": EXECUTE,
     "integration_call": EXECUTE,              # export-gated (see EGRESS_TOOLS)
     "willow_web_search": EXECUTE, "willow_web_fetch": EXECUTE,
+    "fork_create": WRITE, "fork_join": WRITE, "fork_log": WRITE,
+    "fork_merge": WRITE, "fork_delete": WRITE,
     "envelope_apply": EXECUTE,
     # ── admin (never sudo) ────────────────────────────────────────────────────
     "schema_confirm_mapping": ADMIN, "gap_purge_topic": ADMIN, "gap_promote": ADMIN,

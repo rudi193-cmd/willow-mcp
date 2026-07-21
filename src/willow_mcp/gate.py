@@ -159,6 +159,13 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "web_read": frozenset({
         "willow_web_search", "willow_web_fetch",
     }),
+    # Bounded work-units (branch + PR tracking) — SOIL-backed port of willow-2.0 forks.
+    "fork_read": frozenset({
+        "fork_list", "fork_status", "env_check",
+    }),
+    "fork_write": frozenset({
+        "fork_create", "fork_join", "fork_log", "fork_merge", "fork_delete",
+    }),
     # Landing a gap as trusted knowledge is a more consequential act than
     # logging or resolving one, so it's gated as its own group rather than
     # folded into gap_write — same reasoning as schema_admin below.

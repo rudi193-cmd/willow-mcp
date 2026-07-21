@@ -98,7 +98,7 @@ Code-verified equivalences (docstrings/tables match):
 |---|---|---|---|---|
 | `willow_web_search`, `willow_web_fetch` (2) | core | partial | 🟢 **PORT** | **Only** open-web / guarded-fetch path; willow-mcp has none. Highest-value gap. |
 | `code_graph_*` (6) | standard | ✗ | 🟢 **PORT** | Python symbol graph — callers/callees, blast radius. Self-contained (repo path + SQLite). |
-| `fork_*` + `env_check` (8) | standard | ✗ | 🟢 **PORT** | Bounded work-units over existing store/KB; merge promotes atoms. Mostly bookkeeping. |
+| `fork_*` + `env_check` (8) | standard | ✓ | ✅ **PORTED** | SOIL-backed work-units (not fleet Postgres). Branch + PR tracking; merge/delete bookkeeping. |
 | `human_attestation_*`, `human_required_queue_*` (5) | standard | ✗ | 🟢 **PORT** | Human-in-loop pause/attest queue. Pure DB state — pairs with the trust story. |
 | `skill_{put,load,list,mastery}` (4) | core/std | partial | 🟡 EARN-FIRST | Skill registry + Bayesian mastery. `list/load` are core; `mastery/put` full-ish. |
 | `cbm_*` (7) | full | ✗ | 🟡 EARN-FIRST | Codebase-memory CLI wrappers; pairs with `code_graph_*`, needs external CLI. |
@@ -152,7 +152,10 @@ Not "get everything over" — get the **used** gaps over:
   [x] code_graph_*                            PORTED 2026-07-20 (willow-mcp#115) — src/willow_mcp/code_graph/
                                               + 6 tools (index/search/explain/walk/suggest/impact),
                                               code_graph_read/write gate groups, 13 tests
-  [ ] fork_* + env_check                      bounded work-units over existing store
+  [x] fork_* + env_check                      PORTED 2026-07-21 — src/willow_mcp/forks.py (SOIL-backed,
+                                              NOT fleet Postgres) + 8 tools (create/join/log/merge/delete/
+                                              status/list/env_check), fork_read/write gate groups, worktree
+                                              skill wired. KB fork_id promotion deferred to fleet schema.
   [x] human_attestation_* / human_required_*  PORTED 2026-07-20 — src/willow_mcp/human_loop.py (SOIL-backed,
                                               NOT the fleet Postgres) + 5 tools (queue enqueue/resolve/list,
                                               attestation create/list), human_loop_read/write groups, 12 tests.
@@ -216,9 +219,11 @@ Postgres and no network; `code_graph_search "active_profile"` returned exact
 FQN + kind + file:line + signature (`() -> str`). Instantly useful, zero external
 deps, genuinely absent from willow-mcp. Strongest port candidate — elevate.
 
-**Downgrade — `fork_*` is Postgres-backed, not "bookkeeping."** `fork_create`/
+**Downgrade — `fork_*` is Postgres-backed in 2.0, not "bookkeeping."** `fork_create`/
 `fork_list` failed with `relation "forks" does not exist`: forks need their own
 Postgres table, so porting drags schema + migration, more weight than §3 credited.
+**willow-mcp port (2026-07-21):** SOIL-backed `forks` collection — same API shape,
+no fleet Postgres migration; `knowledge.fork_id` promotion deferred.
 
 **Mixed — the `willow_*` facade.** `willow_status` genuinely delights: one call
 returned local store + Postgres table counts + host hardware + ollama + kart +

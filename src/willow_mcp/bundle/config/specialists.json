@@ -18,7 +18,7 @@
       "display_name": "Hanuman",
       "role": "builder",
       "roles": ["builder", "coordinator"],
-      "permissions": ["dispatch_read", "dispatch_write", "task_queue", "store_read", "knowledge_read"],
+      "permissions": ["dispatch_read", "dispatch_write", "task_queue", "store_read", "knowledge_read", "fork_read", "fork_write"],
       "deny_tools": ["kb_promote", "knowledge_ingest"],
       "persona_path": "personas/hanuman.md",
       "persona_bundle": true,

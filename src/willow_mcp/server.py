@@ -4077,6 +4077,107 @@ def willow_web_fetch(
     return web_fetch.fetch_url(url, wrap=wrap, max_bytes=max_bytes)
 
 
+# ── forks — bounded work-unit tracking (SOIL-backed) ─────────────────────────
+
+@mcp.tool()
+@_guarded("fork_create")
+def fork_create(
+    app_id: str,
+    title: str,
+    created_by: str,
+    topic: str = "",
+    fork_id: str = "",
+) -> dict:
+    """Create a named, bounded unit of work (branch + PR tracking). Snapshots
+    selected env vars for later `env_check`."""
+    from . import forks
+    try:
+        return forks.create(
+            _store, app_id=app_id, title=title, created_by=created_by,
+            topic=topic, fork_id=fork_id,
+        )
+    except forks.ForkError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@_guarded("fork_join")
+def fork_join(app_id: str, fork_id: str, component: str) -> dict:
+    """Join an existing open fork as a participant component."""
+    from . import forks
+    try:
+        return forks.join(_store, fork_id=fork_id, component=component)
+    except forks.ForkError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@_guarded("fork_log")
+def fork_log(
+    app_id: str,
+    fork_id: str,
+    component: str,
+    type: str,
+    ref: str,
+    description: str = "",
+) -> dict:
+    """Append a change to an open fork (branch, atom, task, thread, …)."""
+    from . import forks
+    try:
+        return forks.log_change(
+            _store, fork_id=fork_id, component=component, type_=type,
+            ref=ref, description=description,
+        )
+    except forks.ForkError as e:
+        return {"error": str(e)}
+
+
+@mcp.tool(annotations={"destructiveHint": True})
+@_guarded("fork_merge")
+def fork_merge(app_id: str, fork_id: str, outcome_note: str = "") -> dict:
+    """Close an open fork as merged. Counts atom/kb change-log refs as promoted."""
+    from . import forks
+    return forks.merge(_store, fork_id=fork_id, outcome_note=outcome_note)
+
+
+@mcp.tool(annotations={"destructiveHint": True})
+@_guarded("fork_delete")
+def fork_delete(app_id: str, fork_id: str, reason: str = "") -> dict:
+    """Close an open fork as deleted. Counts atom/kb change-log refs as archived."""
+    from . import forks
+    return forks.delete(_store, fork_id=fork_id, reason=reason)
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+@_guarded("fork_status", list_error=False)
+def fork_status(app_id: str, fork_id: str) -> dict:
+    """Full status for one fork."""
+    from . import forks
+    rec = forks.status(_store, fork_id=fork_id)
+    if not rec:
+        return {"error": f"fork {fork_id} not found"}
+    return rec
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+@_guarded("fork_list", list_error=True)
+def fork_list(app_id: str, status: str = "open") -> list:
+    """List forks by status: open | merged | deleted."""
+    from . import forks
+    try:
+        return forks.list_forks(_store, status=status)
+    except forks.ForkError as e:
+        return [{"error": str(e)}]
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+@_guarded("env_check", list_error=False)
+def env_check(app_id: str, fork_id: str) -> dict:
+    """Compare current env to the snapshot taken at fork_create."""
+    from . import forks
+    return forks.env_check(_store, fork_id=fork_id)
+
+
 # ── human-in-the-loop: an attention queue + durable attestations ────────────────
 #
 # Ported from willow-2.0 core/human_required.py + core/human_attestation.py
