@@ -39,6 +39,7 @@ import json
 import math
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -3444,14 +3445,23 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                     "terminal: `willow-mcp consent reconcile`. To change one key, "
                     "run `willow-mcp consent set <key> <true|false>`."
                 )})
+    from . import egress_setup as _egress_setup
+    if _egress_setup.resolve_public_key_path() is None:
+        problems.append({
+            "severity": "warn",
+            "check": "egress_keys",
+            "detail": (
+                "signed network tasks need an Ed25519 verification key; none is configured"
+            ),
+            "fix": (
+                "run `willow-mcp setup-egress` once from an operator terminal, reload the IDE, "
+                "then `willow-mcp run-net <app_id> --task-file <script>`"
+            ),
+        })
     if net_lease:
         lease_state = net_lease.get("lease", {})
         status = lease_state.get("status")
         if status in ("malformed", "mismatch"):
-            # Denies egress either way (fail-closed), so the install is not broken —
-            # but a lease file that does not parse, or one whose record names a
-            # different app than the file it sits in, is a hand-edit or a forgery
-            # attempt. Neither should pass silently.
             problems.append({
                 "severity": "warn", "check": "net_lease",
                 "detail": (f"egress lease at {lease_state.get('path')} is {status}"
@@ -4407,7 +4417,7 @@ def _cmd_worker_service(args) -> None:
     config = worker_service.default_config()
     config = replace(
         config,
-        python=Path(args.python).expanduser().resolve(),
+        python=Path(args.python).expanduser(),
         workdir=Path(args.workdir).expanduser().resolve(),
         willow_home=Path(args.willow_home).expanduser().resolve(),
         store_root=Path(args.store_root).expanduser().resolve(),
@@ -4456,7 +4466,7 @@ def _cmd_sign_net_task(args) -> None:
     import secrets
     import stat
 
-    from . import egress_authorization, lease
+    from . import egress_authorization, egress_setup, lease
 
     if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
         print(
@@ -4465,38 +4475,17 @@ def _cmd_sign_net_task(args) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
-    key_path = Path(args.key).expanduser() if args.key else None
+    key_path = Path(args.key).expanduser() if args.key else egress_setup.resolve_private_key_path()
     if key_path is None:
         print(
-            "Error: pass --key or set WILLOW_MCP_EGRESS_SIGNING_KEY. "
+            "Error: no egress signing key found. Run `willow-mcp setup-egress` once, "
+            "or pass --key / set WILLOW_MCP_EGRESS_SIGNING_KEY.\n"
             "The private key is never read by the MCP server or worker.",
             file=sys.stderr,
         )
         raise SystemExit(1)
     try:
-        mode = stat.S_IMODE(key_path.stat().st_mode)
-    except OSError as e:
-        print(f"Error: cannot read signing key metadata: {e}", file=sys.stderr)
-        raise SystemExit(1)
-    if mode & 0o077:
-        print("Error: signing key must not be group/world accessible", file=sys.stderr)
-        raise SystemExit(1)
-    protected_roots = {
-        Path(os.environ.get("WILLOW_HOME", Path.home() / ".willow")).expanduser(),
-        Path(os.environ.get("WILLOW_STORE_ROOT", Path.home() / ".willow")).expanduser(),
-    }
-    resolved_key = key_path.resolve()
-    if any(
-        resolved_key == root.resolve() or root.resolve() in resolved_key.parents
-        for root in protected_roots
-    ):
-        print(
-            "Error: signing key must live outside WILLOW_HOME/WILLOW_STORE_ROOT, "
-            "which are mounted into worker sandboxes.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-    try:
+        egress_setup.validate_key_path(key_path)
         raw_task = (
             Path(args.task_file).read_text(encoding="utf-8")
             if args.task_file
@@ -4521,6 +4510,221 @@ def _cmd_sign_net_task(args) -> None:
         print(f"Error: {e}", file=sys.stderr)
         raise SystemExit(1)
     print(envelope)
+
+
+def _cmd_setup_egress(args) -> None:
+    """`willow-mcp setup-egress` — one-time Ed25519 keypair bootstrap (local CLI only)."""
+    from . import egress_setup
+
+    try:
+        if args.private_key and args.public_key:
+            result = egress_setup.ensure_keypair(
+                force=args.force,
+                private_key=Path(args.private_key),
+                public_key=Path(args.public_key),
+            )
+        elif args.private_key or args.public_key:
+            print("Error: pass both --private-key and --public-key to register existing keys.",
+                  file=sys.stderr)
+            raise SystemExit(1)
+        else:
+            result = egress_setup.ensure_keypair(force=args.force)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    print(json.dumps(result, indent=2))
+    env = egress_setup.mcp_env_snippet()
+    if env:
+        print("\nAdd to willow-mcp MCP env, then reload the IDE:")
+        print(json.dumps(env, indent=2))
+    if args.write_mcp_json:
+        path = Path(args.write_mcp_json).expanduser()
+        if egress_setup.merge_mcp_env(path, env):
+            print(f"\nMerged public key env into {path}")
+        else:
+            print(f"\nCould not merge into {path} — paste the env block above manually.",
+                  file=sys.stderr)
+    elif args.project_root:
+        for path in egress_setup.project_mcp_json_paths(Path(args.project_root)):
+            if egress_setup.merge_mcp_env(path, env):
+                print(f"\nMerged public key env into {path}")
+
+
+def _cmd_onboard(args) -> None:
+    """`willow-mcp onboard` — first-run operator setup (local CLI only)."""
+    from . import consent, consent_admin, egress_setup
+    from .home_init import ensure_home_layout
+
+    if os.environ.get("WILLOW_IN_KART", "").strip():
+        print("Error: onboard cannot run inside Kart.", file=sys.stderr)
+        raise SystemExit(1)
+
+    home_result = ensure_home_layout()
+    try:
+        egress = egress_setup.ensure_keypair()
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    env = egress_setup.mcp_env_snippet()
+    merged: list[str] = []
+    if args.project_root:
+        for path in egress_setup.project_mcp_json_paths(Path(args.project_root)):
+            if egress_setup.merge_mcp_env(path, env):
+                merged.append(str(path))
+
+    consent_result = None
+    if args.enable_internet:
+        if not sys.stdin.isatty():
+            print("Error: --enable-internet requires an interactive terminal.", file=sys.stderr)
+            raise SystemExit(1)
+        try:
+            consent_result = consent_admin.set_key("internet", True)
+        except (OSError, PermissionError, ValueError) as e:
+            print(f"Error: consent: {e}", file=sys.stderr)
+            raise SystemExit(1)
+
+    cli = shutil.which("wmc") or shutil.which("willow-mcp")
+    if not cli:
+        cli = str(Path(sys.executable).parent / "willow-mcp")
+
+    print("Willow MCP operator onboard — complete.\n")
+    print(json.dumps({"home": home_result.get("home"), "egress": egress, "consent": consent_result}, indent=2))
+    print("\n── Next (copy/paste) ─────────────────────────────────────")
+    print("1. Reload your IDE window (Cursor: Developer → Reload Window).")
+    if merged:
+        print(f"2. MCP public key wired into: {', '.join(merged)}")
+    else:
+        print("2. Re-run with --project-root <repo> to auto-wire .cursor/mcp.json")
+    print("3. From willow-2.0 (fleet installs): cd ~/github/willow-2.0 && ./willow.sh project sync <project>")
+    print(f"4. Network task: {cli} run-net {args.app_id} --task-file /path/to/script.sh --ttl 30m")
+    print(f"5. Drain queue:  {cli} worker --lane fast --once")
+    if consent.read_consent().get("internet") is not True:
+        print(f"6. Enable egress: {cli} consent set internet true")
+
+
+def _cmd_doctor(args) -> None:
+    """`willow-mcp doctor` — human-readable install health + copy/paste fixes."""
+    app_id = args.app_id or os.environ.get("WILLOW_APP_ID", "willow")
+    from . import egress_setup
+
+    summary = diagnostic_summary(app_id)
+    print(f"verdict: {summary.get('verdict', 'unknown')}\n")
+    for problem in summary.get("problems") or []:
+        print(f"[{problem.get('severity', '?')}] {problem.get('check')}: {problem.get('detail')}")
+        if problem.get("fix"):
+            print(f"  fix: {problem['fix']}")
+        print()
+
+    pub = egress_setup.resolve_public_key_path()
+    if pub is None:
+        cli = shutil.which("wmc") or shutil.which("willow-mcp") or "willow-mcp"
+        print("[warn] egress_keys: no verification key configured")
+        print(f"  fix: {cli} setup-egress")
+        if args.project_root:
+            print(f"       {cli} onboard --project-root {args.project_root} --enable-internet")
+        print()
+    else:
+        print(f"egress public key: {pub}\n")
+
+    lease = (summary.get("checks") or {}).get("net_lease", {}).get("lease", {})
+    if lease.get("status") != "active":
+        cli = shutil.which("wmc") or shutil.which("willow-mcp") or "willow-mcp"
+        print(f"net lease: {lease.get('status', 'absent')} — run: {cli} grant-net {app_id} --ttl 30m\n")
+
+
+def _cmd_run_net(args) -> None:
+    """`willow-mcp run-net` — operator one-shot: lease (if needed) + sign + queue."""
+    import secrets
+
+    from . import egress_authorization, egress_setup, lease
+
+    if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
+        print(
+            "Error: run-net requires an interactive operator terminal outside Kart.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    key_path = egress_setup.resolve_private_key_path()
+    if key_path is None:
+        print(
+            "Error: no egress signing key — run `willow-mcp setup-egress` first.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if egress_setup.resolve_public_key_path() is None:
+        print(
+            "Error: no egress public key — run `willow-mcp setup-egress` and reload MCP.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    try:
+        egress_setup.validate_key_path(key_path)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    if not args.skip_grant:
+        lease_state = lease.read_lease(args.app_id)
+        if lease_state["status"] != "active":
+            try:
+                lease.grant(
+                    args.app_id,
+                    lease.parse_ttl(args.ttl),
+                    issuer=args.issuer or os.environ.get("USER", "operator"),
+                    reason=args.reason or "run-net",
+                )
+            except ValueError as e:
+                print(f"Error: {e}", file=sys.stderr)
+                raise SystemExit(1)
+
+    try:
+        raw_task = (
+            Path(args.task_file).read_text(encoding="utf-8")
+            if args.task_file
+            else args.task
+        )
+        canonical_task = egress_authorization.canonical_network_task(
+            raw_task, localhost=args.localhost
+        )
+        task_id = "".join(
+            secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789") for _ in range(8)
+        )
+        envelope = egress_authorization.sign_envelope(
+            private_key_path=key_path,
+            submitted_by=args.app_id,
+            task_id=task_id,
+            agent=args.agent,
+            task=canonical_task,
+            ttl_seconds=lease.parse_ttl(args.ttl),
+            nonce=secrets.token_urlsafe(24),
+        )
+    except (OSError, ValueError, PermissionError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    submit_task = "\n".join(
+        line
+        for line in egress_authorization.normalize_task(raw_task).splitlines()
+        if line.strip() not in {"# allow_net", "# allow_localhost"}
+    )
+    result = task_submit(
+        args.app_id,
+        submit_task,
+        agent=args.agent,
+        lane=args.lane,
+        allow_net=not args.localhost,
+        allow_localhost=args.localhost,
+        network_authorization=envelope,
+    )
+    print(json.dumps(result, indent=2))
+    if result.get("status") == "pending":
+        print(
+            f"\nQueued {result.get('task_id')}. Drain with:\n"
+            f"  willow-mcp worker --lane {args.lane} --once",
+            file=sys.stderr,
+        )
 
 
 def _cmd_register_agent(args) -> None:
@@ -4845,8 +5049,81 @@ def _main():
     sign_net_p.add_argument("--ttl", default="30m", help="envelope lifetime (ceiling 3h)")
     sign_net_p.add_argument(
         "--key",
-        default=os.environ.get("WILLOW_MCP_EGRESS_SIGNING_KEY", ""),
-        help="operator Ed25519 private PEM (or $WILLOW_MCP_EGRESS_SIGNING_KEY)",
+        default="",
+        help="operator Ed25519 private PEM (default: setup-egress manifest or $WILLOW_MCP_EGRESS_SIGNING_KEY)",
+    )
+
+    setup_egress_p = subparsers.add_parser(
+        "setup-egress",
+        help="Create or register egress signing keys outside WILLOW_HOME (local CLI only)",
+    )
+    setup_egress_p.add_argument("--force", action="store_true", help="regenerate default keypair")
+    setup_egress_p.add_argument("--private-key", default="", help="register an existing private PEM")
+    setup_egress_p.add_argument("--public-key", default="", help="register an existing public PEM")
+    setup_egress_p.add_argument(
+        "--write-mcp-json",
+        default="",
+        help="merge WILLOW_MCP_EGRESS_PUBLIC_KEY into this project's .cursor/mcp.json",
+    )
+    setup_egress_p.add_argument(
+        "--project-root",
+        default="",
+        help="merge public key env into .cursor/mcp.json and .mcp.json under this repo",
+    )
+
+    onboard_p = subparsers.add_parser(
+        "onboard",
+        help="First-run operator setup: home layout, egress keys, MCP env, optional consent",
+    )
+    onboard_p.add_argument(
+        "--app-id",
+        default=os.environ.get("WILLOW_APP_ID", "willow"),
+        dest="app_id",
+    )
+    onboard_p.add_argument(
+        "--project-root",
+        default="",
+        help="auto-wire WILLOW_MCP_EGRESS_PUBLIC_KEY into this repo's MCP configs",
+    )
+    onboard_p.add_argument(
+        "--enable-internet",
+        action="store_true",
+        help="set consent.internet=true (interactive terminal only)",
+    )
+
+    doctor_p = subparsers.add_parser(
+        "doctor",
+        help="Human-readable health check with copy/paste fixes",
+    )
+    doctor_p.add_argument(
+        "--app-id",
+        default=os.environ.get("WILLOW_APP_ID", "willow"),
+        dest="app_id",
+    )
+    doctor_p.add_argument(
+        "--project-root",
+        default="",
+        help="include onboard hint with this project path when keys are missing",
+    )
+
+    run_net_p = subparsers.add_parser(
+        "run-net",
+        help="Operator one-shot: grant lease (if needed), sign, and queue a network task",
+    )
+    run_net_p.add_argument("app_id", help="submitted_by identity bound into the envelope")
+    run_net_input = run_net_p.add_mutually_exclusive_group(required=True)
+    run_net_input.add_argument("--task", default="", help="exact task text to authorize")
+    run_net_input.add_argument("--task-file", default="", help="UTF-8 file containing the task")
+    run_net_p.add_argument("--agent", default="kart")
+    run_net_p.add_argument("--lane", default="fast", choices=["fast", "batch"])
+    run_net_p.add_argument("--ttl", default="30m")
+    run_net_p.add_argument("--issuer", default=os.environ.get("USER", "operator"))
+    run_net_p.add_argument("--reason", default="")
+    run_net_p.add_argument("--skip-grant", action="store_true", help="do not auto-issue a lease")
+    run_net_p.add_argument(
+        "--localhost",
+        action="store_true",
+        help="authorize # allow_localhost instead of full # allow_net",
     )
 
     grant_p = subparsers.add_parser(
@@ -4957,6 +5234,18 @@ def _main():
         return
     if args.command == "sign-net-task":
         _cmd_sign_net_task(args)
+        return
+    if args.command == "setup-egress":
+        _cmd_setup_egress(args)
+        return
+    if args.command == "onboard":
+        _cmd_onboard(args)
+        return
+    if args.command == "doctor":
+        _cmd_doctor(args)
+        return
+    if args.command == "run-net":
+        _cmd_run_net(args)
         return
     if args.command == "register-agent":
         _cmd_register_agent(args)

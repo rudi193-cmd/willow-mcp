@@ -128,6 +128,10 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 
 ### Egress needs three keys
 
+**First run:** `willow-mcp-init` then `willow-mcp onboard --project-root <repo> --enable-internet`.
+See [docs/OPERATOR-ONBOARD.md](docs/OPERATOR-ONBOARD.md). Use `wmc` or the product venv
+binary — not bare `willow-mcp` on PATH when the legacy `sap_mcp.py` server is installed.
+
 A task that reaches the network requires **all three standing keys** plus a
 one-use signed task envelope. Any missing element denies before shell launch:
 
@@ -144,10 +148,14 @@ one-use signed task envelope. Any missing element denies before shell launch:
 ```
 
 ```console
+$ willow-mcp onboard --project-root ~/github/willow --enable-internet
+$ willow-mcp run-net myapp --task-file task.sh --ttl 30m   # grant + sign + queue
+$ willow-mcp worker --lane fast --once                   # drain the queue
+$ willow-mcp doctor --app-id myapp                         # copy/paste fixes
 $ willow-mcp grant-net myapp --ttl 30m --reason "publish the release"
-$ willow-mcp sign-net-task myapp --task-file task.sh --key /operator/egress-key.pem
-$ willow-mcp net-status          # what is live, and for how much longer
-$ willow-mcp revoke-net myapp    # or just wait; the ceiling is 3h
+$ willow-mcp sign-net-task myapp --task-file task.sh       # keys: setup-egress / ~/.config/willow-mcp/egress/
+$ willow-mcp net-status
+$ willow-mcp revoke-net myapp
 ```
 
 Setting `consent.internet` to `false` stops network tasks submitted through
