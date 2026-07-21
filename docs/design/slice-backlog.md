@@ -24,13 +24,23 @@ tick it and note the mechanism — a stale tracker is its own small drift.
 
 ## Ready now (unblocked, self-contained)
 
-- [ ] **PG `dispatch_tasks` dual-write** when a host Postgres is present —
-  filesystem stays canonical for standalone; mirror packets to PG when a fleet
-  DB is configured. *(session-lifecycle §11.)* Needs a host DB to verify; design
-  the mirror as best-effort, never blocking the filesystem write.
-- [ ] **G-1 / S6 — SOIL DAG + `dag_next` / `dag_status`** — route dispatch by
-  `function` → default `agent_id`. Design exists (S6); the two tools are absent
-  from the live surface (verified). *(session-lifecycle §10 S6; gap-inventory §6.)*
+- [x] **PG `dispatch_tasks` dual-write** — `dispatch.dispatch_send` /
+  `dispatch_set_status` best-effort mirror packet routing + status into shared
+  Postgres `dispatch_tasks` when the operator opts in
+  (`WILLOW_MCP_DISPATCH_MIRROR`) and a host DB is reachable. Filesystem packet
+  stays canonical; the mirror is off by default, silent without a DB, and
+  swallows every DB fault. Closes the asymmetry where dispatch was the one
+  subsystem the fleet couldn't see (store/knowledge/tasks/agents already mirror).
+  `docs/schema/dispatch_tasks.postgres.sql` + 4 tests. *(session-lifecycle §11.)*
+
+*(No other slice in this tier survived scoping — see the note below.)*
+
+> **Scoping correction.** When this board was first written, two items sat here.
+> The **SOIL DAG (`dag_next`/`dag_status`, S6/G-1)** turned out to have **no
+> consumer anywhere** — nothing routes by `function`, and the orchestrator
+> dispatches explicitly today — so building it would be speculative surface
+> ahead of a need. Moved to earn-first per the "surface is earned" rule. The PG
+> mirror survived because the operator's own willow-2.0 fleet is a real reader.
 
 ## Cleanup (this sweep)
 
@@ -59,6 +69,10 @@ in willow-2.0. Order is rough tractability.
   second provider. DDG is the working default today.
 - [ ] **Calendar gcal OAuth transport** — the calendar source + tests exist;
   the live gcal transport is a home-box OAuth step, deferred (`server.py:3829`).
+- [ ] **G-1 / S6 — SOIL DAG + `dag_next` / `dag_status`** — route dispatch by
+  `function` → default `agent_id`, and walk a multi-step plan. Design exists
+  (S6), tools absent (verified). Earn-first: no consumer today — the orchestrator
+  dispatches explicitly. Build when a multi-step orchestration flow needs it.
 - [ ] **`intake_*`** (4) — KB-tier routing; needs jeles/binder/opus targets first.
 - [ ] **`skill_*`, `index_*` / `cmb_*`, `cbm_*`, `mem_binder_*` / `mem_ratify_*`**
   — registries and extra KB sub-stores mirroring existing store patterns.
