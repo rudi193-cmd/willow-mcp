@@ -7,7 +7,7 @@
 
 | Function | Name | Roles | Tool use | Persona file |
 |----------|------|-------|----------|--------------|
-| BUILD | Hanuman | builder, coordinator | dispatch_write, task_queue, store_read, knowledge_read | `personas/hanuman.md` |
+| BUILD | Hanuman | builder, coordinator | dispatch_read, dispatch_write, task_queue, store_read, knowledge_read, fork_read, fork_write | `personas/hanuman.md` |
 | AUDIT | Loki | auditor | dispatch_read, dispatch_write, knowledge_read | `personas/loki.md` |
 | RESEARCH | Jeles | librarian, retrieval | dispatch_read, dispatch_write, knowledge_read | `personas/jeles.md` |
 | OPERATE | Ada | operator, monitor | dispatch_read, dispatch_write, fleet_read, knowledge_read | `personas/ada.md` |
@@ -27,7 +27,7 @@
 
 | Function | Name | Roles | Tool use (intended) | Persona |
 |----------|------|-------|---------------------|---------|
-| ORCHESTRATE | Willow | orchestrator, magistrate | orchestrator (human + PGP gated) | Charter picker only |
+| ORCHESTRATE | Willow | orchestrator, magistrate | orchestrator (human host-attested via `WILLOW_HUMAN_ORCHESTRATOR=1`, or OAuth-bound in serve mode) | Charter picker only |
 
 See `human-orchestrator.md` — agents cannot run this seat.
 
