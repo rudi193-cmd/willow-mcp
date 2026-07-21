@@ -17,8 +17,10 @@ See also: `kart-tasks.md` (submit path), `session-start.md` (boot).
 
 | Key | Question | Where | Who sets it |
 |-----|----------|-------|-------------|
-| `task_net` | May this app ever request egress? | `mcp_apps/<app>/manifest.json` | operator |
-| `consent.internet` | Is egress permitted *right now*? | `$WILLOW_HOME/config/settings.global.json` | operator |
+| `task_net` | May this app ever request Kart egress? | manifest | operator |
+| `integration_net` | May this app call `integration_call`? | manifest | operator |
+| `web_net` | May this app use `willow_web_search` / `willow_web_fetch`? | manifest | operator |
+| `consent.internet` | Is egress permitted *right now*? | `settings.global.json` | operator |
 | **egress lease** | This app, until when? | `mcp_apps/_net_leases/<app>.json` | operator CLI only |
 | **signed envelope** | This exact Kart task, scope, expiry? | `tasks.network_authorization` | `willow-mcp sign-net-task` |
 

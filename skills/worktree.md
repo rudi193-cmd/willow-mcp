@@ -21,8 +21,14 @@ If either answer is no:
 git checkout -b feat/<slug>    # or fix/ chore/ hotfix/
 ```
 
-Then proceed. (`fork_*` SOIL tracking is fleet-only — not in the greenfield product yet.
-Use git branch name + PR title as the work unit record.)
+Then proceed.
+
+```text
+fork_create(app_id="hanuman", title="<title>", created_by="hanuman", topic="<slug>")
+fork_log(app_id="hanuman", fork_id="<id>", component="git", type="branch", ref="feat/<slug>")
+```
+
+Check open forks before starting: `fork_list(app_id="hanuman", status="open")`
 
 ---
 
@@ -62,6 +68,10 @@ CI must pass. Operator approves. Then merge.
 ---
 
 ## Teardown after merge
+
+```text
+fork_merge(app_id="hanuman", fork_id="<id>", outcome_note="merged to master")
+```
 
 ```bash
 git checkout master && git pull --ff-only
