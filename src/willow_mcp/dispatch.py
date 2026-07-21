@@ -425,6 +425,11 @@ def session_handoff_write(
     if findings:
         lines.extend(["## Findings", ""])
         for f in findings:
+            if isinstance(f, str):
+                lines.append(f"- {f}")
+                continue
+            if not isinstance(f, dict):
+                continue
             lines.append(f"- **{f.get('id', 'finding')}** ({f.get('severity', '')}): {f.get('text', '')}")
         lines.append("")
     if next_bite:

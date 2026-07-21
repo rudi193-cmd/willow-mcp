@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "projects": {
+    "willow": {
+      "path": "{{HOME}}/github/willow",
+      "agent": "willow",
+      "servers": [
+        "willow-mcp",
+        "codebase-memory-mcp"
+      ],
+      "ides": [
+        "cursor",
+        "claude",
+        "codex"
+      ],
+      "env": {
+        "WILLOW_HANDOFF_PROJECT": "willow",
+        "WILLOW_PROJECT_ROOT": "{{HOME}}/github/willow"
+      },
+      "wiring": {
+        "hooks": true,
+        "active_agent": true,
+        "claude_settings": "project"
+      },
+      "note": "Charter repo — willow-mcp product hooks (not fylgja). Fleet SOIL at $WILLOW_HOME/store."
+    },
+    "github": {
+      "path": "{{HOME}}/github",
+      "agent": "willow",
+      "servers": [
+        "willow-mcp",
+        "codebase-memory-mcp"
+      ],
+      "ides": [
+        "cursor",
+        "claude"
+      ],
+      "wiring": {
+        "hooks": false,
+        "active_agent": false
+      },
+      "note": "Cursor workspace root — MCP only, no hooks."
+    }
+  }
+}

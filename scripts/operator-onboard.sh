@@ -12,5 +12,5 @@ APP_ID="${2:-willow}"
 
 echo ""
 echo "Reload your IDE window, then run:"
-echo "  cd $HOME/github/willow-2.0 && ./willow.sh project sync willow"
+echo "  $VENV_BIN/willow-mcp project sync willow"
 echo "  $VENV_BIN/willow-mcp doctor --app-id $APP_ID --project-root $PROJECT_ROOT"

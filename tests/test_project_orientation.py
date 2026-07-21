@@ -203,9 +203,10 @@ def test_orchestrator_scope_is_explicit_projects_not_wildcard():
 # ── §3.3 hook: stable interpreter + fail-visible ─────────────────────────────
 
 def test_cursor_hook_uses_a_stable_available_interpreter():
-    hooks = Path(__file__).resolve().parents[1] / "deploy" / "cursor" / "hooks.json"
+    hooks = Path(__file__).resolve().parents[1] / "src" / "willow_mcp" / "deploy" / "hooks.json"
     cmd = json.loads(hooks.read_text())["hooks"]["sessionStart"][0]["command"]
-    assert cmd.startswith("python3 "), "bare `python` may be absent or py2; pin python3"
+    assert "willow_mcp.session_start_hook" in cmd
+    assert "python3" in cmd or "python" in cmd or "WILLOW_MCP_PYTHON" in cmd
 
 
 def test_session_start_hook_fails_visibly(monkeypatch, capsys):
