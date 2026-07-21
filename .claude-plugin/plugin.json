@@ -35,6 +35,9 @@
   },
   "skills": [
     "skills/session-start.md",
+    "skills/consent.md",
+    "skills/worktree.md",
+    "skills/handoff-write.md",
     "skills/schema-confirm.md",
     "skills/willow-serve.md",
     "skills/kart-tasks.md"

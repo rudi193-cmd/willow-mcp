@@ -338,3 +338,40 @@ def test_main_handles_empty_and_malformed_stdin_without_crashing():
         )
         assert proc.returncode == 0
         assert proc.stdout.strip() == ""
+
+
+# ── check_bash_routing: MCP redirect table ─────────────────────────────
+
+@pytest.mark.parametrize("command", [
+    "git status",
+    "git log -3 --oneline",
+    "gh pr view 120",
+])
+def test_check_bash_routing_allows_git_gh_inspect(command):
+    assert pre_tool_use.check_bash_routing(command) is None
+
+
+@pytest.mark.parametrize("command, decision", [
+    ("ls -la src/", "warn"),
+    ("git commit -m 'x'", "block"),
+    ("gh pr create --title t", "block"),
+    ("psql mydb -c 'select 1'", "block"),
+])
+def test_check_bash_routing_redirects(command, decision):
+    routed = pre_tool_use.check_bash_routing(command)
+    assert routed is not None
+    assert routed[0] == decision
+    assert "willow-mcp" in routed[1]
+
+
+def test_main_warns_on_ls():
+    code, stdout = _run_hook({
+        "tool_name": "Bash",
+        "tool_input": {"command": "ls -la"},
+        "session_id": "s1",
+    })
+    assert code == 0
+    decision = json.loads(stdout)
+    assert decision["decision"] == "warn"
+    assert "store_list" in decision["reason"]
+

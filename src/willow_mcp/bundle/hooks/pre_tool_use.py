@@ -1,8 +1,10 @@
 """willow-mcp Claude Code hook — PreToolUse.
 
-Three guards:
+Four guards:
 - Bash reaching for raw psql/psycopg2/sqlite3 against a database or store
   willow-mcp owns, instead of going through the MCP tools (blocks).
+- Bash habits that duplicate MCP tools (ls/grep/git-mutation/python-heredoc) —
+  warn or block with redirect hints (trimmed from fleet mcp_routing).
 - task_submit calls that hand-embed a Kart network directive (`# allow_net`
   / `# allow_localhost`) in the task text — the server strips these (B-21),
   so it does nothing; the correct path is allow_net=True + the task_net
@@ -58,6 +60,79 @@ _TOOL_REDIRECTS = {
     "records": "store_get / store_list / store_search / store_search_all (read) or "
                "store_put / store_update / store_delete (write)",
 }
+
+_TASK_SUBMIT = "task_submit(app_id=..., task='…')"
+_TASK_SUBMIT_NET = "task_submit(app_id=..., task='…', allow_net=True)"
+
+# Read-only git/gh — allowed on the operator desk (no Kart round-trip).
+_GIT_INSPECT_RE = re.compile(
+    r"(?:^|&&\s*)git(?:\s+-C\s+\S+)?\s+"
+    r"(status|log|diff|show|branch|rev-parse|describe|shortlog|remote|fetch)\b",
+    re.IGNORECASE,
+)
+_GH_INSPECT_RE = re.compile(
+    r"(?:^|&&\s*)gh\s+"
+    r"(pr\s+(view|list|checks|status|diff)|issue\s+(view|list)|run\s+list|repo\s+view)\b",
+    re.IGNORECASE,
+)
+_GIT_MUTATION_RE = re.compile(
+    r"\bgit(?:\s+-C\s+\S+)?\s+"
+    r"(add|commit|push|pull|merge|rebase|checkout|switch|restore|reset|clean|"
+    r"clone|cherry-pick|revert|stash|tag|worktree\s+(add|remove)|am)\b",
+    re.IGNORECASE,
+)
+_GH_MUTATION_RE = re.compile(
+    r"\bgh\s+"
+    r"(pr\s+(create|merge|close|ready|review|edit)|issue\s+create|"
+    r"repo\s+create|release\s+create)\b",
+    re.IGNORECASE,
+)
+
+# Shell habits → (decision, hint). Trimmed product port of fleet mcp_routing.BASH_TO_MCP.
+_BASH_ROUTING: list[tuple[re.Pattern[str], str, str]] = [
+    (re.compile(r"^\s*ls(\s|$)"), "warn",
+     f"store_list / store_search for Willow data · filesystem → {_TASK_SUBMIT}"),
+    (re.compile(r"^\s*(cat|head|tail)\s"), "warn",
+     "Use the IDE Read tool for repo files · shell-only paths → task_submit"),
+    (re.compile(r"^\s*psql\s"), "block",
+     "knowledge_search / store_search — Postgres via MCP, not shell"),
+    (re.compile(r"\bsqlite3\b"), "block",
+     "store_get / store_list / store_search — SQLite store via MCP"),
+    (re.compile(r"^\s*pwd\s*$"), "warn", "cwd is in context; fleet_status for roots"),
+    (re.compile(r"^\s*tree(\s|$)"), "warn", f"directory tree → {_TASK_SUBMIT}"),
+    (re.compile(r"\bgit\s+(push|pull)\b"), "block", f"git network → {_TASK_SUBMIT_NET}"),
+    (re.compile(
+        r"\bgit\s+(add|commit|checkout|merge|rebase|worktree|clone|stash|reset|"
+        r"restore|switch|clean|cherry-pick|revert|tag)\b"),
+     "block", f"git mutation → {_TASK_SUBMIT}"),
+    (re.compile(r"\bgh\s"), "block", f"gh (mutations / net) → {_TASK_SUBMIT_NET}"),
+    (re.compile(r"(?i)python3?\s+.*<<"), "block", f"Python heredoc → {_TASK_SUBMIT}"),
+    (re.compile(r"(?i)\bgrep\b|\brg\b"), "warn",
+     f"knowledge_search / store_search · symbols → code_graph_search · {_TASK_SUBMIT}"),
+    (re.compile(r"(?i)\bfind\s"), "warn",
+     f"code_graph_search / knowledge_search · {_TASK_SUBMIT}"),
+]
+
+
+def _git_gh_inspect_allowed(command: str) -> bool:
+    c = (command or "").strip()
+    if not c:
+        return False
+    if _GIT_MUTATION_RE.search(c) or _GH_MUTATION_RE.search(c):
+        return False
+    return bool(_GIT_INSPECT_RE.search(c) or _GH_INSPECT_RE.search(c))
+
+
+def check_bash_routing(command: str) -> Optional[tuple[str, str]]:
+    """Return (decision, reason) when a Bash habit should redirect to MCP, else None."""
+    if not command or _git_gh_inspect_allowed(command):
+        return None
+    for pattern, decision, hint in _BASH_ROUTING:
+        if pattern.search(command):
+            return decision, f"willow-mcp: prefer MCP tools — {hint}"
+    if _GIT_MUTATION_RE.search(command) or _GH_MUTATION_RE.search(command):
+        return "block", f"willow-mcp: prefer MCP tools — git/gh mutation → {_TASK_SUBMIT}"
+    return None
 
 
 def check_bash(command: str) -> Optional[str]:
@@ -234,6 +309,11 @@ def main() -> None:
         reason = check_bash_self_grant(command) or check_bash(command)
         if reason:
             print(json.dumps({"decision": "block", "reason": reason}))
+        else:
+            routed = check_bash_routing(command)
+            if routed:
+                decision, route_reason = routed
+                print(json.dumps({"decision": decision, "reason": route_reason}))
     elif _is_file_write(tool_name):
         reason = check_trust_root_write(tool_input)
         if reason:
