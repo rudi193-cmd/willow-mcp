@@ -10,6 +10,9 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **`repair-runtime-perms`** — restore MCP write paths (`store/`, `dispatch/`, …)
+  after trust-root hardening; fixes over-broad `chown` when legacy policy files
+  lived at `$WILLOW_HOME` root
 - **B-32 trust-root hardening** — `willow-mcp harden-trust-root` chowns `mcp_apps/`
   and `config/` to a dedicated unix user, sets world-readable modes, and wires
   `WILLOW_MCP_STRICT_TRUST_ROOT=1` into project MCP configs. `doctor` surfaces

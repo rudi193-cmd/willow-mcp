@@ -1,8 +1,9 @@
 """B-32: operator tooling to separate confirm authority from the agent process.
 
 The agent may REQUEST egress; only the operator (via a uid the agent does not
-share write access with) may CONFIRM it. ``harden-trust-root`` chowns the trust
-roots and wires ``WILLOW_MCP_STRICT_TRUST_ROOT=1`` into MCP configs.
+share write access with) may CONFIRM it. ``harden-trust-root`` chowns policy
+roots to ``willow-operator`` and restores MCP runtime write paths (``store/``,
+``dispatch/``, …) to the runtime user.
 """
 
 from __future__ import annotations
@@ -22,22 +23,38 @@ from . import paths
 
 STRICT_ENV_KEY = "WILLOW_MCP_STRICT_TRUST_ROOT"
 DEFAULT_TRUST_OWNER = "willow-operator"
+_TRUST_DIR_NAMES = frozenset({"config", "mcp_apps"})
 
 
 def default_trust_owner() -> str:
     return os.environ.get("WILLOW_MCP_TRUST_OWNER", "").strip() or DEFAULT_TRUST_OWNER
 
 
-def trust_root_directories() -> list[Path]:
-    """Top-level directories whose contents authorize egress or policy."""
-    roots = [paths.mcp_apps_root(), paths.config_dir()]
+def default_runtime_user() -> str:
+    explicit = os.environ.get("WILLOW_MCP_RUNTIME_USER", "").strip()
+    if explicit:
+        return explicit
+    sudo_user = os.environ.get("SUDO_USER", "").strip()
+    if sudo_user:
+        return sudo_user
+    return pwd.getpwuid(os.getuid()).pw_name
+
+
+def trust_policy_files() -> list[Path]:
+    """Legacy policy files that may live directly under $WILLOW_HOME (not whole-home chown)."""
+    files: list[Path] = []
     for candidate in (
         paths.settings_global_legacy_path(),
         paths.consent_legacy_path(),
     ):
         if candidate.is_file():
-            roots.append(candidate.parent)
-    # De-dupe while preserving order (home root may appear twice).
+            files.append(candidate)
+    return files
+
+
+def trust_root_directories() -> list[Path]:
+    """Directories whose contents authorize egress or standing policy."""
+    roots = [paths.mcp_apps_root(), paths.config_dir()]
     seen: set[str] = set()
     out: list[Path] = []
     for root in roots:
@@ -46,6 +63,46 @@ def trust_root_directories() -> list[Path]:
             seen.add(key)
             out.append(root)
     return out
+
+
+def runtime_writable_directories() -> list[Path]:
+    """Paths the MCP server must write during normal operation."""
+    home = paths.willow_home()
+    blocked = {str(paths.config_dir().resolve(strict=False)),
+               str(paths.mcp_apps_root().resolve(strict=False))}
+    out: list[Path] = []
+    seen: set[str] = set()
+    for directory in paths.all_layout_dirs():
+        try:
+            rel = directory.resolve(strict=False).relative_to(home.resolve(strict=False))
+        except ValueError:
+            rel = None
+        if rel is not None and rel.parts and rel.parts[0] in _TRUST_DIR_NAMES:
+            continue
+        key = str(directory.resolve(strict=False))
+        if key in seen or key in blocked:
+            continue
+        seen.add(key)
+        out.append(directory)
+    store = paths.store_root()
+    store_key = str(store.resolve(strict=False))
+    if store_key not in seen and store_key not in blocked:
+        seen.add(store_key)
+        out.append(store)
+    return out
+
+
+def runtime_writable_home_children() -> list[Path]:
+    """Top-level $WILLOW_HOME entries (except trust dirs) when a prior chown swept too wide."""
+    home = paths.willow_home()
+    if not home.is_dir():
+        return []
+    children: list[Path] = []
+    for entry in sorted(home.iterdir()):
+        if entry.name in _TRUST_DIR_NAMES:
+            continue
+        children.append(entry)
+    return children
 
 
 def consent_policy_paths() -> list[Path]:
@@ -58,6 +115,20 @@ def consent_policy_paths() -> list[Path]:
             seen.add(key)
             unique.append(path)
     return unique
+
+
+def audit_store_writable() -> dict[str, Any]:
+    root = paths.store_root()
+    check: dict[str, Any] = {"root": str(root), "writable": False, "error": None}
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        probe = root / ".diag_write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        check["writable"] = True
+    except OSError as e:
+        check["error"] = str(e)
+    return check
 
 
 def audit_trust_root(app_id: str = "") -> dict[str, Any]:
@@ -73,12 +144,17 @@ def audit_trust_root(app_id: str = "") -> dict[str, Any]:
 
     strict = lease.strict_trust_root()
     all_forgeable = forgeable + consent_writable
+    store = audit_store_writable()
     return {
         "strict_trust_root": strict,
         "forgeable": all_forgeable,
         "hardened": strict and not all_forgeable,
         "trust_roots": [str(p) for p in trust_root_directories()],
+        "trust_policy_files": [str(p) for p in trust_policy_files()],
+        "runtime_paths": [str(p) for p in runtime_writable_directories()],
+        "store": store,
         "trust_owner_hint": default_trust_owner(),
+        "runtime_user_hint": default_runtime_user(),
     }
 
 
@@ -126,6 +202,17 @@ def resolve_trust_owner(owner: str) -> str:
     return name
 
 
+def resolve_runtime_user(runtime_user: str) -> str:
+    name = (runtime_user or default_runtime_user()).strip()
+    if not name:
+        raise ValueError("runtime user name is required")
+    try:
+        pwd.getpwnam(name)
+    except KeyError as e:
+        raise ValueError(f"unix user {name!r} does not exist") from e
+    return name
+
+
 def _chmod_tree(
     root: Path,
     *,
@@ -168,33 +255,110 @@ def _run_privileged(argv: list[str], *, dry_run: bool) -> None:
         raise PermissionError(detail or f"command failed: {' '.join(argv)}")
 
 
-def apply_filesystem_hardening(owner: str, *, dry_run: bool = False) -> dict[str, Any]:
-    """chown trust roots to ``owner`` and set world-readable, owner-writable modes."""
+def _chown_target(target: Path, owner: str, *, dry_run: bool) -> list[str]:
+    actions: list[str] = []
+    path = str(target)
+    if target.is_file():
+        actions.append(f"chown {owner}:{owner} {path}")
+        _run_privileged(["chown", f"{owner}:{owner}", path], dry_run=dry_run)
+        return actions
+    actions.append(f"chown -R {owner}:{owner} {path}")
+    _run_privileged(["chown", "-R", f"{owner}:{owner}", path], dry_run=dry_run)
+    return actions
+
+
+def apply_trust_root_hardening(owner: str, *, dry_run: bool = False) -> dict[str, Any]:
+    """chown policy roots to ``owner`` with world-readable modes."""
     trust_owner = resolve_trust_owner(owner)
     actions: list[str] = []
     for root in trust_root_directories():
         root = root.expanduser()
         if not root.exists() and not dry_run:
             root.mkdir(parents=True, exist_ok=True)
-        target = str(root)
-        actions.append(f"chown -R {trust_owner}:{trust_owner} {target}")
-        _run_privileged(["chown", "-R", f"{trust_owner}:{trust_owner}", target], dry_run=dry_run)
+        actions.extend(_chown_target(root, trust_owner, dry_run=dry_run))
         if root.exists():
             actions.extend(
                 _chmod_tree(root, dir_mode=0o755, file_mode=0o644, dry_run=dry_run)
             )
+    for policy_file in trust_policy_files():
+        if policy_file.is_file() or dry_run:
+            actions.extend(_chown_target(policy_file, trust_owner, dry_run=dry_run))
+            if policy_file.is_file():
+                actions.extend(
+                    _chmod_tree(policy_file, dir_mode=0o755, file_mode=0o644, dry_run=dry_run)
+                )
     return {"owner": trust_owner, "actions": actions, "dry_run": dry_run}
+
+
+def repair_runtime_permissions(runtime_user: str = "", *, dry_run: bool = False) -> dict[str, Any]:
+    """Restore MCP runtime write paths to the server user (store, dispatch, …)."""
+    user = resolve_runtime_user(runtime_user)
+    actions: list[str] = []
+    targets: list[Path] = []
+    seen: set[str] = set()
+    for path in [*runtime_writable_directories(), *runtime_writable_home_children()]:
+        key = str(path.resolve(strict=False))
+        if key in seen:
+            continue
+        seen.add(key)
+        targets.append(path)
+    for target in targets:
+        if not target.exists() and not dry_run:
+            if target.suffix:
+                target.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                target.mkdir(parents=True, exist_ok=True)
+        if target.exists() or dry_run:
+            actions.extend(_chown_target(target, user, dry_run=dry_run))
+            if target.exists() and target.is_dir():
+                actions.extend(
+                    _chmod_tree(target, dir_mode=0o755, file_mode=0o644, dry_run=dry_run)
+                )
+            elif target.exists() and target.is_file():
+                actions.extend(
+                    _chmod_tree(target, dir_mode=0o755, file_mode=0o644, dry_run=dry_run)
+                )
+    receipt = paths.willow_home() / "mcp_receipt.db"
+    if receipt.exists() or dry_run:
+        actions.extend(_chown_target(receipt, user, dry_run=dry_run))
+    return {"runtime_user": user, "targets": [str(p) for p in targets], "actions": actions, "dry_run": dry_run}
+
+
+def apply_filesystem_hardening(owner: str, *, dry_run: bool = False) -> dict[str, Any]:
+    """Trust-root hardening plus runtime repair (backward-compatible name)."""
+    trust = apply_trust_root_hardening(owner, dry_run=dry_run)
+    runtime = repair_runtime_permissions(dry_run=dry_run)
+    return {
+        "owner": trust["owner"],
+        "runtime_user": runtime["runtime_user"],
+        "actions": trust["actions"] + runtime["actions"],
+        "dry_run": dry_run,
+        "trust": trust,
+        "runtime": runtime,
+    }
 
 
 def harden_trust_root(
     *,
     owner: str = "",
+    runtime_user: str = "",
     project_root: Path | None = None,
     dry_run: bool = False,
+    repair_runtime: bool = True,
 ) -> dict[str, Any]:
     """Apply filesystem separation and wire strict trust root into MCP env."""
     before = audit_trust_root()
-    fs = apply_filesystem_hardening(owner or default_trust_owner(), dry_run=dry_run)
+    trust = apply_trust_root_hardening(owner or default_trust_owner(), dry_run=dry_run)
+    runtime = (
+        repair_runtime_permissions(runtime_user, dry_run=dry_run)
+        if repair_runtime
+        else {
+            "runtime_user": default_runtime_user(),
+            "actions": [],
+            "dry_run": dry_run,
+            "targets": [],
+        }
+    )
     merged: list[str] = []
     if project_root is not None:
         for path in project_mcp_json_paths(project_root):
@@ -207,9 +371,16 @@ def harden_trust_root(
     return {
         "before": before,
         "after": after,
-        "filesystem": fs,
+        "filesystem": {
+            "owner": trust["owner"],
+            "runtime_user": runtime["runtime_user"],
+            "actions": trust["actions"] + runtime["actions"],
+            "dry_run": dry_run,
+            "trust": trust,
+            "runtime": runtime,
+        },
         "mcp_json_updated": merged,
-        "operator_commands": operator_command_hints(fs["owner"]),
+        "operator_commands": operator_command_hints(trust["owner"]),
     }
 
 
