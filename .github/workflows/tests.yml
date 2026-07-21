@@ -92,6 +92,11 @@ jobs:
 
           willow-mcp tree smoketest --json > "${RUNNER_TEMP}/tree.json"
           python -c "import json; d=json.load(open('${RUNNER_TEMP}/tree.json')); assert set(d) >= {'trunk','sap','canopy','roots','rings','leaves','litter','stomata'}, d.keys()"
+
+          # Subject-consent read path (grant/revoke need an operator tty, so only
+          # the read-only status is smokeable here). Captured, not piped.
+          CONSENT_STATUS="$(willow-mcp consent-status ci-smoke-subject)"
+          echo "${CONSENT_STATUS}" | python -c "import json,sys; d=json.load(sys.stdin); assert d['granted_scopes']==[] and d['subject_id']=='ci-smoke-subject', d"
         env:
           PGHOST: localhost
           PGPORT: 5432

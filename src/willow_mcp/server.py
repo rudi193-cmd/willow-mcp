@@ -4482,6 +4482,80 @@ def _cmd_consent(args) -> None:
     print(json.dumps(result, indent=2))
 
 
+def _cmd_grant_consent(args) -> None:
+    """`willow-mcp grant-consent <subject_id> <scope> --by <guardian>` —
+    operator-only. Records a GRANTED transition on the subject's consent chain,
+    receipts it, and logs it on the subject's disclosure chain. Like grant-net
+    and register-agent, no MCP tool can reach this (the sudo invariant): an app
+    may *request* a subject grant, never mint one."""
+    from . import subject_consent_binding as scb
+    from .subject_consent.core import SubjectConsentError
+
+    try:
+        consent = scb.grant(args.subject_id, args.scope, args.by)
+    except PermissionError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    except SubjectConsentError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps({
+        "subject_id": consent.subject_id,
+        "scope": consent.scope,
+        "status": consent.status,
+        "granted_by": consent.granted_by,
+        "at": consent.at,
+    }, indent=2))
+
+
+def _cmd_revoke_consent(args) -> None:
+    """`willow-mcp revoke-consent <subject_id> <scope> --by <guardian>` —
+    operator-only. Records a REVOKED transition (the gate then fails closed for
+    that subject + scope until re-granted). Operator terminal only."""
+    from . import subject_consent_binding as scb
+    from .subject_consent.core import SubjectConsentError
+
+    try:
+        consent = scb.revoke(args.subject_id, args.scope, args.by)
+    except PermissionError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    except SubjectConsentError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps({
+        "subject_id": consent.subject_id,
+        "scope": consent.scope,
+        "status": consent.status,
+        "revoked_by": consent.granted_by,
+        "at": consent.at,
+    }, indent=2))
+
+
+def _cmd_consent_status(args) -> None:
+    """`willow-mcp consent-status <subject_id>` — read-only. Reports which scopes
+    are currently GRANTED on the subject's chain (raw recorded state, before the
+    binding's owner-exemption) plus the subject's disclosure chain. A read, so it
+    needs no operator terminal — the counterpart to net-status for grant-net."""
+    from . import subject_consent_binding as scb
+    from .subject_consent import core
+
+    store = scb.store()
+    scopes = {scope: core.permitted(store, args.subject_id, scope) for scope in core.SCOPES}
+    try:
+        disclosures = core.read_disclosures(store, args.subject_id)
+    except core.SubjectConsentError:
+        disclosures = []
+    owner = scb.owner_subject_id()
+    print(json.dumps({
+        "subject_id": args.subject_id,
+        "is_owner": bool(owner) and args.subject_id == owner,
+        "granted_scopes": [scope for scope, ok in scopes.items() if ok],
+        "scopes": scopes,
+        "disclosures": disclosures,
+    }, indent=2))
+
+
 def _cmd_worker_service(args) -> None:
     """Install, inspect, or uninstall worker units without changing live state."""
     from dataclasses import replace
@@ -5168,6 +5242,31 @@ def _main():
     )
     roster_p.add_argument("action", choices=["status", "sync"])
 
+    from .subject_consent.core import SCOPES as _SUBJECT_SCOPES
+    grant_consent_p = subparsers.add_parser(
+        "grant-consent",
+        help="Record a subject-consent GRANT for one subject + scope (operator "
+             "terminal only — never an MCP tool)",
+    )
+    grant_consent_p.add_argument("subject_id")
+    grant_consent_p.add_argument("scope", choices=list(_SUBJECT_SCOPES))
+    grant_consent_p.add_argument("--by", required=True,
+                                 help="the guardian/owner recording the grant (audited)")
+    revoke_consent_p = subparsers.add_parser(
+        "revoke-consent",
+        help="Record a subject-consent REVOKE for one subject + scope (operator "
+             "terminal only — never an MCP tool)",
+    )
+    revoke_consent_p.add_argument("subject_id")
+    revoke_consent_p.add_argument("scope", choices=list(_SUBJECT_SCOPES))
+    revoke_consent_p.add_argument("--by", required=True,
+                                  help="the guardian/owner recording the revoke (audited)")
+    consent_status_p = subparsers.add_parser(
+        "consent-status",
+        help="Read a subject's recorded consent scopes and disclosure chain (read-only)",
+    )
+    consent_status_p.add_argument("subject_id")
+
     regagent_p = subparsers.add_parser(
         "register-agent",
         help="Bind an agent identity to an HMAC secret + trust ceiling (operator-only; "
@@ -5513,8 +5612,18 @@ def _main():
     if args.command == "consent":
         _cmd_consent(args)
         return
+    if args.command == "grant-consent":
+        _cmd_grant_consent(args)
+        return
+    if args.command == "revoke-consent":
+        _cmd_revoke_consent(args)
+        return
+    if args.command == "consent-status":
+        _cmd_consent_status(args)
+        return
     if args.command == "roster":
         _cmd_roster(args)
+        return
     if args.command == "worker-service":
         _cmd_worker_service(args)
         return
