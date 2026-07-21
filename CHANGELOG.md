@@ -9,6 +9,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
+### Fixed
+- **Strict trust root on hardened installs** — `self_writable_trust_paths` checks
+  direct writability (path + parent), not a writable `$WILLOW_HOME` ancestor
+- **`repair-runtime-perms`** leaves legacy consent policy files with
+  `willow-operator` instead of reclaiming them for the runtime user
+
 ### Added
 - **`repair-runtime-perms`** — restore MCP write paths (`store/`, `dispatch/`, …)
   after trust-root hardening; fixes over-broad `chown` when legacy policy files

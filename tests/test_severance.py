@@ -45,6 +45,7 @@ def egress_locked(monkeypatch, tmp_path):
     monkeypatch.setenv("WILLOW_MCP_EGRESS_PUBLIC_KEY", str(key))
     monkeypatch.setattr(lease, "strict_trust_root", lambda: True)
     monkeypatch.setattr(lease, "path_is_self_writable_or_replaceable", lambda p: False)
+    monkeypatch.setattr(lease, "path_is_directly_writable_for_trust", lambda p: False)
     return key
 
 

@@ -3195,7 +3195,7 @@ def _egress_severance(net_lease: dict | None) -> dict:
     consent_writable: list[str] = []
     for p in {_consent.settings_path(), _consent.legacy_path()}:
         try:
-            if _lease.path_is_self_writable_or_replaceable(p):
+            if _lease.path_is_directly_writable_for_trust(p):
                 consent_writable.append(str(p))
         except OSError:
             consent_writable.append(str(p))  # unverifiable ⇒ cannot claim protection

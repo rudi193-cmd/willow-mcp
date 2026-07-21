@@ -139,6 +139,38 @@ def path_is_self_writable_or_replaceable(path: Path) -> bool:
     return False
 
 
+def path_is_directly_writable_for_trust(path: Path) -> bool:
+    """Whether this process can write ``path`` or create/replace it in its parent.
+
+    Unlike ``path_is_self_writable_or_replaceable``, does **not** walk ancestors
+    above the immediate parent. A trust root owned by another uid inside a
+    writable ``$WILLOW_HOME`` is not forgeable merely because the home directory
+  is writable — B-32 hardening is the file's own uid/mode, not rename-the-whole-
+    subtree via a distant parent.
+    """
+    try:
+        target = path.expanduser().resolve(strict=False)
+    except OSError:
+        target = path.expanduser().absolute()
+    if target.exists():
+        try:
+            if os.access(target, os.W_OK):
+                return True
+        except OSError:
+            return True
+    parent = target.parent
+    if not parent.exists():
+        nearest = _nearest_existing(target)
+        parent = nearest if nearest is not None else parent
+    if parent.exists():
+        try:
+            if os.access(parent, os.W_OK):
+                return True
+        except OSError:
+            return True
+    return False
+
+
 def parse_ttl(value: str) -> int:
     """`90s` / `30m` / `2h` / bare seconds -> int seconds. Raises on anything else."""
     m = _TTL_RE.match(str(value).strip())
@@ -316,7 +348,7 @@ def self_writable_trust_paths(app_id: str = "") -> list[dict]:
     # *create* it — so the question is really about the nearest ancestor that does
     # exist. Reporting "not writable" for an absent directory would be a lie that
     # reads as hardening.
-    if path_is_self_writable_or_replaceable(lease_root):
+    if path_is_directly_writable_for_trust(lease_root):
         found.append({"key": "lease_root", "path": str(lease_root)})
 
     if app_id:
@@ -325,7 +357,7 @@ def self_writable_trust_paths(app_id: str = "") -> list[dict]:
         manifest = root / app_id / "manifest.json"
         # A manifest that does not exist grants nothing, so it is not a key that
         # could be forged into one — the gate denies an unmanifested app outright.
-        if manifest.exists() and path_is_self_writable_or_replaceable(manifest):
+        if manifest.exists() and path_is_directly_writable_for_trust(manifest):
             found.append({"key": "manifest", "path": str(manifest)})
     return found
 
