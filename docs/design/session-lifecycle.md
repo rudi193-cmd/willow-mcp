@@ -347,7 +347,7 @@ Same operator may run both; designs must not require fylgja for willow-mcp to wo
 ## 11. Open questions
 
 - [x] `handoff.json` + `closeout.md` — **both** (implemented S4)
-- [ ] Postgres `dispatch_tasks` dual-write when host DB present (filesystem is canonical for standalone)
+- [x] Postgres `dispatch_tasks` dual-write when host DB present (filesystem is canonical for standalone) — opt-in via `WILLOW_MCP_DISPATCH_MIRROR`, best-effort mirror in `dispatch.py`; `docs/schema/dispatch_tasks.postgres.sql`
 - [x] **Jeles = librarian** (canon). Nest/DeepSeek "Designer" role rejected for `docs/ROLES.md`.
 - [x] Dispatch tools: `dispatch_send`, `dispatch_read`, … shipped in `src/willow_mcp/dispatch.py` + `handoff.py`
 - [ ] Where Nest `docs/ZERO_COST_DEPLOYMENT.md` lives — willow-mcp vs separate docs site

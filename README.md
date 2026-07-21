@@ -575,6 +575,7 @@ timestamps terminal rows.
 | `WILLOW_STORE_ROOT` | `~/.willow/store` | SQLite store directory — set to willow-2.0's store root to share data |
 | `WILLOW_MCP_FLEET_HOME` | *(unset)* | The fleet home this install claims to be **severed** from. Unset = no claim. See [Severance](#severance) |
 | `WILLOW_MCP_FLEET_PG_DB` | *(unset)* | The fleet database this install claims to be severed from |
+| `WILLOW_MCP_DISPATCH_MIRROR` | *(unset)* | Truthy on a **fleet host** to best-effort mirror dispatch packets into shared Postgres `dispatch_tasks` (so the fleet sees dispatches, like it already sees store/knowledge/tasks/agents). Off = filesystem-only; the filesystem packet is always canonical. See `docs/schema/dispatch_tasks.postgres.sql` |
 | `WILLOW_APP_ID` | `willow-mcp` | Default app_id if not passed per-call |
 | `WILLOW_HOME` | `~/.willow` | Root for manifests, vault, and identity bindings |
 | `WILLOW_WORKER_LANE` | set by worker unit | Worker lane (`fast` or `batch`) |

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -25,6 +26,98 @@ from .roles import VALID_STATUSES
 
 _AGENT_DOC = "docs/AGENTS.md"
 _PROJECT_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+
+logger = logging.getLogger("willow_mcp.dispatch")
+
+
+# ── best-effort Postgres mirror (fleet visibility) ─────────────────────────────
+# Dispatch packets are filesystem-canonical (a standalone install has no
+# Postgres). But the fleet reads the *other* willow-mcp state — store, knowledge,
+# tasks, agents — from a shared Postgres; dispatch is the one subsystem it can't
+# see. When an operator runs willow-mcp as a fleet host (WILLOW_MCP_DISPATCH_MIRROR
+# truthy) *and* a host DB is reachable, mirror each packet's routing/status into a
+# `dispatch_tasks` table so the fleet sees dispatches too. This is NEVER load-
+# bearing: the filesystem packet is the source of truth, the mirror is opt-in and
+# off by default, and every failure here is swallowed — a broken or absent DB must
+# not affect a dispatch that already wrote to disk. See docs/schema/
+# dispatch_tasks.postgres.sql.
+
+_DISPATCH_TASKS_DDL = """
+CREATE TABLE IF NOT EXISTS dispatch_tasks (
+    dispatch_id text PRIMARY KEY,
+    from_app    text        NOT NULL DEFAULT '',
+    to_app      text        NOT NULL DEFAULT '',
+    role        text        NOT NULL DEFAULT '',
+    phase       text        NOT NULL DEFAULT '',
+    priority    text        NOT NULL DEFAULT 'normal',
+    reply_to    text        NOT NULL DEFAULT '',
+    summary     text        NOT NULL DEFAULT '',
+    status      text        NOT NULL DEFAULT 'pending',
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    updated_at  timestamptz NOT NULL DEFAULT now()
+);
+"""
+
+
+def dispatch_mirror_enabled() -> bool:
+    """True when the operator has opted this install into mirroring dispatch
+    packets to a shared Postgres (fleet-host duty). Off by default — a standalone
+    install stays filesystem-only and never reaches for a DB."""
+    return bool(os.environ.get("WILLOW_MCP_DISPATCH_MIRROR", "").strip())
+
+
+def _pg_mirror_upsert(meta: dict) -> None:
+    """Best-effort: mirror a packet's routing + status into `dispatch_tasks`.
+    Silent no-op when mirroring is off or no host DB is reachable; never raises —
+    the filesystem packet has already been written and is canonical."""
+    if not dispatch_mirror_enabled():
+        return
+    try:
+        from . import db
+        conn = db.get_pg()
+        if conn is None:
+            return
+        cur = conn.cursor()
+        cur.execute(_DISPATCH_TASKS_DDL)
+        cur.execute(
+            "INSERT INTO dispatch_tasks (dispatch_id, from_app, to_app, role, "
+            "phase, priority, reply_to, summary, status, created_at, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now()) "
+            "ON CONFLICT (dispatch_id) DO UPDATE SET "
+            "status = EXCLUDED.status, summary = EXCLUDED.summary, updated_at = now()",
+            (
+                meta.get("dispatch_id", ""), meta.get("from_app", ""),
+                meta.get("to_app", ""), meta.get("role", ""), meta.get("phase", ""),
+                meta.get("priority", "normal"), meta.get("reply_to", ""),
+                meta.get("summary", ""), meta.get("status", "pending"),
+            ),
+        )
+        cur.close()
+    except Exception:  # best-effort: a DB fault must never break a written packet
+        logger.debug("dispatch: PG mirror upsert skipped", exc_info=True)
+
+
+def _pg_mirror_status(dispatch_id: str, status: str) -> None:
+    """Best-effort: reflect a status transition into `dispatch_tasks`. A row that
+    doesn't exist (mirror enabled after the packet was created) is a no-op UPDATE,
+    which is acceptable — the next transition or a re-send upserts it."""
+    if not dispatch_mirror_enabled():
+        return
+    try:
+        from . import db
+        conn = db.get_pg()
+        if conn is None:
+            return
+        cur = conn.cursor()
+        cur.execute(_DISPATCH_TASKS_DDL)
+        cur.execute(
+            "UPDATE dispatch_tasks SET status = %s, updated_at = now() "
+            "WHERE dispatch_id = %s",
+            (status, (dispatch_id or "").upper()),
+        )
+        cur.close()
+    except Exception:
+        logger.debug("dispatch: PG mirror status skipped", exc_info=True)
 
 
 def _utc_now() -> str:
@@ -125,6 +218,7 @@ def dispatch_send(
     _write_json(root / "meta.json", meta)
     (root / "assignment.md").write_text(assignment_md.strip() + "\n", encoding="utf-8")
     _write_json(root / "status.json", status)
+    _pg_mirror_upsert(meta)  # best-effort fleet mirror; filesystem is canonical
 
     return {
         "dispatch_id": did,
@@ -222,6 +316,7 @@ def dispatch_set_status(dispatch_id: str, status: str, **extra: Any) -> dict:
     if meta:
         meta["status"] = status
         _write_json(meta_path, meta)
+    _pg_mirror_status(dispatch_id, status)  # best-effort fleet mirror
     return {"dispatch_id": dispatch_id, "status": status}
 
 
