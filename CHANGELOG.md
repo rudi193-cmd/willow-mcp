@@ -10,6 +10,9 @@ The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 
 ### Added
+- **S6 persona overlays** — `persona-overlays` skill with slim voice + boundary
+  snippets for all six specialists; `session-start` specialist section updated
+  with open table and overlay pointers.
 - **S5 discipline skills** — `debugging`, `review`, `tdd`, and `brainstorming`
   in the bundle and Claude plugin (`plugin.json`). Rewritten for willow-mcp verbs
   (pytest, `knowledge_search`, egress/schema constraints) with no fleet paths.
