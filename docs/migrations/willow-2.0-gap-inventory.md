@@ -47,7 +47,7 @@ willow-mcp, then scored on **production-fitness** using willow-2.0's own
 | Metric | Value | Source |
 |---|---|---|
 | willow-2.0 `sap_mcp.py` tools | **169** | `@mcp.tool` count |
-| willow-mcp `server.py` tools | **73** | `@mcp.tool()` count (incl. Nest pipeline, PR #104) |
+| willow-mcp `server.py` tools | **97** | `@mcp.tool()` count (103 live incl. group expansions; was 73 at Draft 0.2, grown by the web/code_graph/fork/human-loop ports since) |
 | Exact-name overlap | **15** | `comm` of both name lists |
 | Already ported incl. renames (bucket A) | **~42** | §3, code-verified |
 | Genuine capability gaps (bucket B) | **~108** | §4 |

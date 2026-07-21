@@ -69,11 +69,11 @@ fleet's.
 4. **Honesty in metadata** — until step 3 lands, `pyproject`/README must not
    imply execution ships; after it lands, README gets a real quickstart
    (submit → worker runs → poll).
-5. **Skill worker-run section** — fill in the deferred worker-run instructions
-   in `skills/kart-tasks.md` §0 once the console script exists.
-6. **Liveness** — surface worker last-heartbeat in `fleet_health` /
-   `diagnostic_summary` so "queued, unattended" is distinguishable from
-   "queued, about to run" (the external review's §1).
+5. **Skill worker-run section** — **DONE.** `skills/kart-tasks.md` §0 documents
+   `willow-mcp worker --lane/--once` and reads worker liveness off `fleet_health`.
+6. **Liveness** — **DONE (B-26).** `fleet_health` reports `workers`/`stranded`
+   and `diagnostic_summary` gains a `worker` check, so "queued, unattended" is
+   distinguishable from "queued, about to run" (the external review's §1).
 
 ## 5. The drift window — measured worklist (2026-07-18)
 
