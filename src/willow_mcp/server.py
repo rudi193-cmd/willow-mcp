@@ -3335,7 +3335,8 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
     if store.get("status") == "fail":
         problems.append({"severity": "error", "check": "store",
                          "detail": store.get("write_error") or store.get("error") or "SOIL store not writable",
-                         "fix": f"ensure {store.get('root')} exists and is writable (WILLOW_STORE_ROOT)"})
+                         "fix": (f"run `willow-mcp repair-runtime-perms` to restore write access to "
+                                 f"{store.get('root')} for the MCP runtime user (WILLOW_STORE_ROOT)")})
     if postgres.get("status") == "fail":
         problems.append({"severity": "warn", "check": "postgres",
                          "detail": "Postgres unreachable — knowledge_*, task_*, fleet_* will return postgres_unavailable",
@@ -4635,6 +4636,14 @@ def _cmd_doctor(args) -> None:
         print(f"net lease: {lease.get('status', 'absent')} — run: {cli} grant-net {app_id} --ttl 30m\n")
 
     audit = trust_root_setup.audit_trust_root(app_id)
+    store_audit = audit.get("store") or {}
+    if store_audit.get("writable") is False:
+        cli = shutil.which("wmc") or shutil.which("willow-mcp") or "willow-mcp"
+        print("[error] store: SOIL store is not writable by this process")
+        if store_audit.get("error"):
+            print(f"  detail: {store_audit['error']}")
+        print(f"  fix: {cli} repair-runtime-perms")
+        print()
     if audit.get("forgeable") and not audit.get("hardened"):
         cli = shutil.which("wmc") or shutil.which("willow-mcp") or "willow-mcp"
         print("[warn] trust_root: this process can forge egress authority keys")
@@ -4791,6 +4800,26 @@ def _cmd_rotate_agent(args) -> None:
     print(f"  {out['secret_hex']}")
 
 
+def _cmd_repair_runtime_perms(args) -> None:
+    """`willow-mcp repair-runtime-perms` — restore MCP write paths (store, dispatch, …)."""
+    from . import trust_root_setup
+    from .human_session import require_operator_terminal
+
+    if not args.dry_run:
+        require_operator_terminal()
+    try:
+        result = trust_root_setup.repair_runtime_permissions(
+            args.runtime_user,
+            dry_run=args.dry_run,
+        )
+    except (ValueError, PermissionError, OSError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps(result, indent=2))
+    if not args.dry_run and result.get("runtime_user"):
+        print(f"\nRuntime paths restored for {result['runtime_user']!r}. Reload the IDE if MCP was broken.")
+
+
 def _cmd_harden_trust_root(args) -> None:
     """`willow-mcp harden-trust-root` — chown trust roots; wire strict mode (B-32)."""
     from . import trust_root_setup
@@ -4802,8 +4831,10 @@ def _cmd_harden_trust_root(args) -> None:
     try:
         result = trust_root_setup.harden_trust_root(
             owner=args.owner,
+            runtime_user=args.runtime_user,
             project_root=project,
             dry_run=args.dry_run,
+            repair_runtime=not args.skip_runtime_repair,
         )
     except (ValueError, PermissionError, OSError) as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -5207,6 +5238,31 @@ def _main():
         action="store_true",
         help="show planned chown/chmod actions without applying",
     )
+    harden_p.add_argument(
+        "--runtime-user",
+        default="",
+        help="unix user that owns store/dispatch runtime paths (default: $USER / $SUDO_USER)",
+    )
+    harden_p.add_argument(
+        "--skip-runtime-repair",
+        action="store_true",
+        help="only harden trust roots; do not chown store/dispatch back to the runtime user",
+    )
+
+    repair_runtime_p = subparsers.add_parser(
+        "repair-runtime-perms",
+        help="Restore MCP runtime write paths (store, dispatch, …) after trust-root hardening",
+    )
+    repair_runtime_p.add_argument(
+        "--runtime-user",
+        default="",
+        help="unix user that should own runtime paths (default: $USER / $SUDO_USER)",
+    )
+    repair_runtime_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show planned chown/chmod actions without applying",
+    )
 
     gates_p = subparsers.add_parser(
         "gates",
@@ -5334,6 +5390,9 @@ def _main():
         return
     if args.command == "harden-trust-root":
         _cmd_harden_trust_root(args)
+        return
+    if args.command == "repair-runtime-perms":
+        _cmd_repair_runtime_perms(args)
         return
     if args.command == "gates":
         _cmd_gates(args)

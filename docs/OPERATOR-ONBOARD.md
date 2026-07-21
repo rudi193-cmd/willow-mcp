@@ -76,3 +76,13 @@ sudo -u willow-operator willow-mcp consent set internet true
 ```
 
 Dry-run first: `willow-mcp harden-trust-root --dry-run`
+
+If `doctor` reports the SOIL store is not writable after hardening, restore runtime
+paths (store, dispatch, sessions, …) for the MCP server user:
+
+```bash
+willow-mcp repair-runtime-perms
+```
+
+This keeps `mcp_apps/` and `config/` owned by `willow-operator` while giving the
+runtime user write access to `store/` and other MCP working directories.

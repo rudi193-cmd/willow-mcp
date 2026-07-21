@@ -84,3 +84,31 @@ def test_trust_root_directories_include_mcp_apps_and_config(home):
     roots = {p.name for p in trs.trust_root_directories()}
     assert "mcp_apps" in roots
     assert "config" in roots
+    assert paths.willow_home().name not in {p.name for p in trs.trust_root_directories() if p == paths.willow_home()}
+
+
+def test_trust_root_directories_skip_home_root_when_legacy_policy_files_exist(home):
+    hi.ensure_home_layout()
+    legacy = paths.consent_legacy_path()
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text('{"consent": {"internet": false, "cloud_llm": false, "lan": false}}\n', encoding="utf-8")
+    roots = trs.trust_root_directories()
+    assert paths.willow_home() not in roots
+    assert legacy in trs.trust_policy_files()
+
+
+def test_runtime_writable_includes_store_not_config(home):
+    hi.ensure_home_layout()
+    names = {p.name for p in trs.runtime_writable_directories()}
+    assert "store" in names
+    assert "config" not in names
+    assert "mcp_apps" not in names
+
+
+def test_repair_runtime_dry_run_targets_store(home, monkeypatch):
+    hi.ensure_home_layout()
+    monkeypatch.setattr(trs, "resolve_runtime_user", lambda _user: "runtime")
+    result = trs.repair_runtime_permissions(dry_run=True)
+    assert result["runtime_user"] == "runtime"
+    assert any("store" in target for target in result["targets"])
+    assert any("chown -R runtime:runtime" in action for action in result["actions"])
