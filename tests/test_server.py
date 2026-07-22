@@ -992,6 +992,56 @@ def test_task_submit_strips_caller_supplied_localhost_directive(tmp_path, monkey
     assert params[1] == "echo hi"
 
 
+def test_task_submit_allow_db_denied_without_task_db_permission(tmp_path, monkeypatch):
+    app = _app_with_perms(tmp_path, monkeypatch, "dbless", ["full_access"])
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+
+    result = server.task_submit(app_id=app, task="pytest tests/ -q", allow_db=True)
+
+    assert "db_denied" in result["error"]
+    assert not any("INSERT" in sql for sql, _ in fake.executed)
+
+
+def test_task_submit_allow_db_appends_directive_with_permission(tmp_path, monkeypatch):
+    app = _app_with_perms(tmp_path, monkeypatch, "dbapp", ["full_access", "task_db"])
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+
+    result = server.task_submit(app_id=app, task="pytest tests/ -q", allow_db=True)
+
+    assert result["status"] == "pending"
+    insert_sql, params = fake.executed[-1]
+    assert params[1] == "pytest tests/ -q\n# allow_db"
+
+
+def test_task_submit_strips_caller_supplied_db_directive(tmp_path, monkeypatch):
+    app = _app_with_perms(tmp_path, monkeypatch, "sneakydb", ["full_access"])
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="tasks")
+
+    result = server.task_submit(app_id=app, task="pytest tests/ -q\n# allow_db")
+
+    assert result["status"] == "pending"
+    insert_sql, params = fake.executed[-1]
+    assert "# allow_db" not in params[1]
+    assert params[1] == "pytest tests/ -q"
+
+
+def test_default_kart_task_env_has_no_pg_access(monkeypatch):
+    from kartikeya import sandbox as ks
+
+    monkeypatch.setenv("PGHOST", "/run/postgresql")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "secret")
+    env = ks.kart_env(allow_db=False)
+    assert "PGHOST" not in env
+    assert "POSTGRES_PASSWORD" not in env
+    argv = ks.build_bwrap_argv(allow_db=False)
+    assert not any("postgresql" in part for part in argv)
+
+
 def test_task_submit_permitted_net_survives_caller_directive_dedup(tmp_path, monkeypatch):
     # B-21: even when the caller also embeds the directive, a task_net-permitted
     # allow_net=True submit stores exactly one canonical `# allow_net` line.

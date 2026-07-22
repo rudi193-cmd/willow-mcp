@@ -48,6 +48,7 @@ NETWORK_SCOPE = "network"
 _NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{22,128}$")
 _TASK_ID_RE = re.compile(r"^[A-Z0-9]{8}$")
 _AGENT_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_KART_TASK_DIRECTIVES = {"# allow_net", "# allow_localhost", "# allow_db"}
 _NET_DIRECTIVES = {"# allow_net", "# allow_localhost"}
 
 
@@ -65,10 +66,20 @@ def canonical_network_task(task: str, *, localhost: bool = False) -> str:
     clean = "\n".join(
         line
         for line in normalize_task(task).splitlines()
-        if line.strip() not in _NET_DIRECTIVES
+        if line.strip() not in _KART_TASK_DIRECTIVES
     )
     directive = "# allow_localhost" if localhost else "# allow_net"
     return clean.rstrip("\n") + f"\n{directive}"
+
+
+def canonical_db_task(task: str) -> str:
+    """Produce task text with a single gated ``# allow_db`` directive."""
+    clean = "\n".join(
+        line
+        for line in normalize_task(task).splitlines()
+        if line.strip() not in _KART_TASK_DIRECTIVES
+    )
+    return clean.rstrip("\n") + "\n# allow_db"
 
 
 def normalized_task_hash(task: str) -> str:

@@ -1703,6 +1703,7 @@ def task_submit(
     lane: str = "fast",
     allow_net: bool = False,
     allow_localhost: bool = False,
+    allow_db: bool = False,
     network_authorization: str = "",
 ) -> dict:
     """Submit a task to the Kart sandboxed execution queue. Returns task_id for polling.
@@ -1714,6 +1715,10 @@ def task_submit(
     nonce. The signed task id is the queue primary key, preventing the envelope
     from authorizing a second row. `# allow_net` and `# allow_localhost` remain
     requests, never authority.
+
+    Local Postgres access (socket mount + PG/POSTGRES env) requires `allow_db=True`
+    and the separate `task_db` manifest capability — not granted by task_queue or
+    full_access. `# allow_db` in task text is a request, never authority.
 
     The Kartikeya executor verifies all host gates and the signed envelope again
     immediately before shell launch. Missing attribution or envelope, an invalid
@@ -1791,6 +1796,15 @@ def task_submit(
                     + ". A confirm authority inside the actor's write reach is not an "
                     "authority. Chown these to a uid the agent does not run as.")}
 
+    if allow_db:
+        from . import gate
+
+        if not gate.permitted(app_id, gate.DB_PERMISSION):
+            return {"error": (
+                f"db_denied: local Postgres access requires the '{gate.DB_PERMISSION}' permission in "
+                f"this app's manifest ($WILLOW_HOME/mcp_apps/{app_id or '<app_id>'}/manifest.json). "
+                "It is not granted by task_queue or full_access — add it explicitly.")}
+
     mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
     if "error" in mapping:
         return mapping
@@ -1806,7 +1820,7 @@ def task_submit(
     task = "\n".join(
         line
         for line in egress_authorization.normalize_task(task).splitlines()
-        if line.strip() not in {"# allow_net", "# allow_localhost"}
+        if line.strip() not in {"# allow_net", "# allow_localhost", "# allow_db"}
     )
     task_id = ""
     if network_requested:
@@ -1850,6 +1864,9 @@ def task_submit(
                     "and reconfirm the mapping before submitting network work"
                 )
             }
+
+    if allow_db:
+        task = egress_authorization.canonical_db_task(task)
 
     if not task_id:
         import random
@@ -4897,7 +4914,7 @@ def _cmd_run_net(args) -> None:
     submit_task = "\n".join(
         line
         for line in egress_authorization.normalize_task(raw_task).splitlines()
-        if line.strip() not in {"# allow_net", "# allow_localhost"}
+        if line.strip() not in {"# allow_net", "# allow_localhost", "# allow_db"}
     )
     result = task_submit(
         args.app_id,
