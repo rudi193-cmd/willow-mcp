@@ -1,0 +1,24 @@
+# systemd --user unit — Kart fast-lane worker (willow-mcp successor).
+#
+# Operator cutover: see deploy/kart-worker.md
+[Unit]
+Description=Kart — Willow task queue daemon (willow-mcp / kartikeya, caps on)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+Environment=WILLOW_AGENT_NAME=kart
+Environment=KART_WORKER_LANE=fast
+Environment=KART_FAST_WORKERS=3
+EnvironmentFile=-%h/github/.willow/env
+ExecStart=%h/github/willow-mcp/.venv/bin/python -m willow_mcp.worker --lane fast --require-postgres
+WorkingDirectory=%h/github/willow-mcp
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kart-worker
+
+[Install]
+WantedBy=default.target

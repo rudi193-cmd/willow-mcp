@@ -14,7 +14,7 @@ Environment="WILLOW_PG_USER=@WILLOW_PG_USER@"
 Environment="WILLOW_APP_ID=@APP_ID@"
 Environment="WILLOW_WORKER_LANE=@LANE@"
 Environment="WILLOW_WORKER_HEARTBEAT_ROOT=@HEARTBEAT_ROOT@"
-ExecStart=@PYTHON@ -m willow_mcp worker --lane @LANE@ --app-id @APP_ID@ --require-postgres
+ExecStart=@PYTHON@ -m willow_mcp.worker --lane @LANE@ --app-id @APP_ID@ --require-postgres
 Restart=on-failure
 RestartSec=2
 

@@ -1,0 +1,144 @@
+"""Production Kart worker — drains willow_20 via PgTaskQueue + kartikeya.
+
+Entry points:
+  - ``python -m willow_mcp.worker`` (systemd / operator cutover)
+  - ``willow-mcp worker`` (console script — delegates here)
+
+Caps-on execution only: tasks run through kartikeya ``sandbox.run_shell`` with
+cgroup/rlimit limits. No willow-2.0 ``run_shell`` import.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+
+def _default_app_id() -> str:
+    return os.environ.get("WILLOW_APP_ID", "").strip()
+
+
+def _lane_from_env(default: str = "fast") -> str:
+    return (
+        os.environ.get("WILLOW_WORKER_LANE")
+        or os.environ.get("KART_WORKER_LANE")
+        or default
+    ).strip().lower()
+
+
+def run_worker_daemon(
+    *,
+    app_id: str,
+    lane: str | None = None,
+    slots: int | None = None,
+    interval: float = 5.0,
+    once: bool = False,
+    require_postgres: bool = False,
+) -> None:
+    """Drain the adopted Postgres queue until stopped (or once=True, until empty)."""
+    try:
+        import kartikeya
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "willow-mcp worker requires the 'kartikeya' package — "
+            "reinstall with `pip install willow-mcp` or `pip install -e .`"
+        ) from exc
+
+    from .commitments.proactive import CommitmentProactiveHook, chain_heartbeat
+    from .egress_authorization import ExecutorNetworkAuthorizer
+    from .heartbeat import WorkerHeartbeat, reap
+    from .soil_heartbeat import SoilWatchmenHeartbeat
+    from .task_queue import build_task_queue
+
+    lane = (lane or _lane_from_env()).strip().lower()
+    if lane not in ("fast", "batch"):
+        raise ValueError(f"lane must be fast|batch, got {lane!r}")
+
+    queue = build_task_queue(app_id, require_postgres=require_postgres or lane == "batch")
+    reap()
+
+    file_beat = WorkerHeartbeat(agent="kart", lane=lane, interval=interval)
+    beat = chain_heartbeat(file_beat, SoilWatchmenHeartbeat(lane))
+
+    def _worker_commitment_surface():
+        from datetime import datetime
+
+        from .server import _commitment_ledger_restored
+
+        return _commitment_ledger_restored().dew_surface(datetime.utcnow())
+
+    beat = chain_heartbeat(
+        beat,
+        CommitmentProactiveHook(surface_fn=_worker_commitment_surface),
+    )
+    network_authorizer = ExecutorNetworkAuthorizer()
+    try:
+        kartikeya.run_worker(
+            queue,
+            lane=lane,
+            slots=slots,
+            interval=interval,
+            once=once,
+            on_heartbeat=beat,
+            network_authorizer=network_authorizer,
+        )
+    finally:
+        file_beat.close()
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="willow_mcp.worker",
+        description="Drain the Kart task queue via PgTaskQueue + kartikeya (caps on).",
+    )
+    parser.add_argument("--lane", default=None, choices=["fast", "batch"],
+                        help="worker lane (default: WILLOW_WORKER_LANE or KART_WORKER_LANE or fast)")
+    parser.add_argument("--slots", type=int, default=None,
+                        help="fast-lane concurrency (default: KART_FAST_WORKERS or 3)")
+    parser.add_argument("--interval", type=float, default=5.0,
+                        help="idle poll interval in seconds")
+    parser.add_argument("--once", action="store_true",
+                        help="drain pending tasks and exit")
+    parser.add_argument(
+        "--require-postgres",
+        action="store_true",
+        help="refuse the SQLite fallback (required for production lane workers)",
+    )
+    parser.add_argument(
+        "--app-id",
+        dest="app_id",
+        default=None,
+        help="schema-profile app id (default: WILLOW_APP_ID)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    app_id = (args.app_id or _default_app_id()).strip()
+    if not app_id:
+        print(
+            "willow-mcp worker: WILLOW_APP_ID (or --app-id) is required",
+            file=sys.stderr,
+        )
+        return 1
+    lane = args.lane or _lane_from_env()
+    try:
+        run_worker_daemon(
+            app_id=app_id,
+            lane=lane,
+            slots=args.slots,
+            interval=args.interval,
+            once=args.once,
+            require_postgres=args.require_postgres,
+        )
+    except (RuntimeError, ValueError) as exc:
+        print(f"willow-mcp worker: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
