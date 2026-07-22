@@ -74,7 +74,7 @@ willow-mcp-integrations = "willow_mcp.integrations:main"
 Homepage = "https://github.com/rudi193-cmd/willow-mcp"
 Repository = "https://github.com/rudi193-cmd/willow-mcp"
 Issues = "https://github.com/rudi193-cmd/willow-mcp/issues"
-Changelog = "https://github.com/rudi193-cmd/willow-mcp/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/rudi193-cmd/willow-mcp/blob/master/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/willow_mcp"]
