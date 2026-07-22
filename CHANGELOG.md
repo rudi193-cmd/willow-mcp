@@ -4,7 +4,24 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.0] — Unreleased
+## [2.0.1] — 2026-07-22
+
+Docs and packaging only — no behavior changes.
+
+### Changed
+- **Enriched 44 thin MCP tool docstrings** (every tool description under ~130
+  chars) to state purpose, parameter semantics, return shape, side effects, and
+  sibling-tool pointers — the dimensions Glama's tool-definition quality score
+  reads. `store_put`'s stated deviation thresholds now match `db._action_for`
+  (>= 0.785 flags, >= 1.571 stops; the docstring previously claimed 0.6).
+
+### Added
+- **`glama.json`** maintainer manifest at the repo root, so the Glama listing
+  can be claimed.
+- **PyPI metadata** — trove classifiers (license, Python 3.11–3.13, dev status)
+  and Repository/Issues/Changelog project URLs in `pyproject.toml`.
+
+## [2.0.0] — 2026-07-21
 
 The v2 rebuild. Expands the server from a store/knowledge/task tool set into an
 authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.

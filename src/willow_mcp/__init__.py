@@ -9,4 +9,4 @@ Run (stdio):  python3 -m willow_mcp
 Run (HTTP):   python3 -m willow_mcp --serve --port 8765
 """
 
-__version__ = "2.0.0"
+__version__ = "2.0.1"
