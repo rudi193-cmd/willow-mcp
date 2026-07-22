@@ -1,4 +1,8 @@
 # Operator onboard — willow-mcp
+> **Scope (2026-07-22):** this is the appendix for operators who **already run a
+> fleet** — key ceremony, net leases, IDE wiring against existing state. A new
+> install starts from the charter seed instead: `Willow/seed/seed.py` walks the
+> six-movement onboarding and calls the same CLI underneath.
 
 One-time setup so network tasks work without OpenSSL, hand-edited `mcp.json`, or
 knowing which `willow-mcp` binary is which.
