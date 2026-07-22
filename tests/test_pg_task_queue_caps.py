@@ -58,6 +58,9 @@ def test_run_shell_places_task_in_kart_cgroup_leaf(delegated_parent):
 
 
 def test_run_shell_falls_back_to_rlimit_without_delegated_parent(monkeypatch):
+    # Plain sandbox path — CI runners lack bubblewrap; kartikeya uses the same
+    # env switch for rlimit integration tests (tests/test_sandbox.py).
+    monkeypatch.setenv("WILLOW_KART_NO_BWRAP", "1")
     monkeypatch.setattr(cgroup_setup, "resolve_cgroup_parent", lambda: None)
     monkeypatch.delenv("KART_CGROUP_PARENT", raising=False)
     result = sandbox.run_shell("echo rlimit-ok", timeout=30)

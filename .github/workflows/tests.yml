@@ -53,8 +53,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # Companion kartikeya PR (allow_db gate) — drop this git pin once 0.0.7 is on PyPI.
-          pip install "git+https://github.com/rudi193-cmd/kartikeya@fix/willow-mcp-db-gate"
+          # PyPI kartikeya lags merged master (allow_db, cgroup caps) — drop once 0.0.7 ships.
+          pip install "git+https://github.com/rudi193-cmd/kartikeya@master"
           pip install -e "." pytest
 
       - name: Run tests
