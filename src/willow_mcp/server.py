@@ -4446,52 +4446,22 @@ def _cmd_voice_service(args) -> None:
 
 def _cmd_worker(args) -> None:
     """Drain the Kart queue via the kartikeya worker (CLI: `willow-mcp worker`)."""
-    try:
-        import kartikeya
-    except ModuleNotFoundError:
-        print(
-            "willow-mcp worker requires the 'kartikeya' package, which willow-mcp "
-            "depends on — reinstall with `pip install willow-mcp`, or "
-            "`pip install -e .` from a source checkout.",
-            file=sys.stderr,
+    from . import worker as worker_mod
+
+    raise SystemExit(
+        worker_mod.main(
+            [
+                *(["--lane", args.lane] if args.lane else []),
+                *(["--slots", str(args.slots)] if args.slots is not None else []),
+                "--interval",
+                str(args.interval),
+                *(["--once"] if args.once else []),
+                *(["--require-postgres"] if args.require_postgres or args.lane == "batch" else []),
+                "--app-id",
+                args.app_id or _DEFAULT_APP_ID,
+            ]
         )
-        raise SystemExit(1)
-    from .task_queue import build_task_queue
-
-    try:
-        queue = build_task_queue(
-            args.app_id or _DEFAULT_APP_ID,
-            require_postgres=args.require_postgres or args.lane == "batch",
-        )
-    except RuntimeError as e:
-        print(f"willow-mcp worker: {e}", file=sys.stderr)
-        raise SystemExit(1)
-
-    from .commitments.proactive import CommitmentProactiveHook, chain_heartbeat
-    from .heartbeat import WorkerHeartbeat, reap
-    from .egress_authorization import ExecutorNetworkAuthorizer
-
-    reap()  # clear files left by workers that were killed rather than stopped
-    beat = WorkerHeartbeat(agent="kart", lane=args.lane, interval=args.interval)
-
-    def _worker_commitment_surface():
-        from datetime import datetime
-
-        return _commitment_ledger_restored().dew_surface(datetime.utcnow())
-
-    beat = chain_heartbeat(
-        beat,
-        CommitmentProactiveHook(surface_fn=_worker_commitment_surface),
     )
-    network_authorizer = ExecutorNetworkAuthorizer()
-    try:
-        kartikeya.run_worker(
-            queue, lane=args.lane, slots=args.slots, interval=args.interval,
-            once=args.once, on_heartbeat=beat,
-            network_authorizer=network_authorizer,
-        )
-    finally:
-        beat.close()
 
 
 def _cmd_consent(args) -> None:

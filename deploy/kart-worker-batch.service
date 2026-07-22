@@ -1,0 +1,23 @@
+# systemd --user unit — Kart batch-lane worker (willow-mcp successor).
+#
+# Operator cutover: see deploy/kart-worker.md
+[Unit]
+Description=Kart batch — Willow long-running task executor (willow-mcp / kartikeya)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+Environment=WILLOW_AGENT_NAME=kart
+Environment=KART_WORKER_LANE=batch
+EnvironmentFile=-%h/github/.willow/env
+ExecStart=%h/github/willow-mcp/.venv/bin/python -m willow_mcp.worker --lane batch --require-postgres
+WorkingDirectory=%h/github/willow-mcp
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kart-worker-batch
+
+[Install]
+WantedBy=default.target
