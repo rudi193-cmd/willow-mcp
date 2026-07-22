@@ -153,7 +153,7 @@ def test_envelope_bounds_signature_mismatch_denies(tmp_path, monkeypatch):
 
 
 def test_authority_check_matches_gate_permitted(tmp_path, monkeypatch):
-    """PDP manifest path must agree with gate.permitted for the same fixtures."""
+    """PDP manifest path must agree with gate.permitted for allow/deny parity."""
     cases = [
         ("allowed", ["full_access"], "store_get", True),
         ("readonly", ["store_read"], "store_put", False),
@@ -166,6 +166,36 @@ def test_authority_check_matches_gate_permitted(tmp_path, monkeypatch):
         )
         assert decision.allowed is expected
         assert gate.permitted(app_id, tool) is expected
+
+
+@pytest.mark.parametrize(
+    ("app_id", "permissions", "tool", "expected_missing"),
+    [
+        ("denied", ["full_access"], "store_put", "deny_tools:store_put"),
+        ("broken", "full_access", "store_get", "permissions"),
+        ("empty", [], "store_get", "permissions"),
+        ("ghost", None, "store_get", "manifest"),
+    ],
+)
+def test_authority_parity_matrix_special_cases(
+    tmp_path, monkeypatch, app_id, permissions, tool, expected_missing
+):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / app_id
+    if permissions is not None:
+        app_dir.mkdir(parents=True)
+        body = {"permissions": permissions}
+        if app_id == "denied":
+            body["deny_tools"] = ["store_put"]
+        (app_dir / "manifest.json").write_text(json.dumps(body))
+
+    decision = authority.authority_check(
+        app_id, authority.ACTION_MCP_TOOL, tool, {}
+    )
+    assert decision.allowed is False
+    assert decision.missing_authority == expected_missing
+    assert gate.permitted(app_id, tool) is False
 
 
 @pytest.fixture(autouse=True)

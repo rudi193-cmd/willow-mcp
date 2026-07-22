@@ -3,6 +3,19 @@
 Answers whether a principal may perform an act on a resource, with a citation
 on allow or the missing authority named on deny. Never a model call; reads only
 app manifests and the envelope registry. No mutable state.
+
+Feature flag ``WILLOW_MCP_AUTHORITY_CHECK`` (default off) wires this into
+``server._gate()`` instead of ``gate.permitted()``. When enabled:
+
+* Denials use the ``authority denied:`` prefix (legacy path: ``gate denied:``).
+* Malformed manifests fail closed with explicit reasons (e.g. ``permissions``
+  must be a list); legacy ``permitted()`` treats some malformed shapes as a
+  generic deny without naming the defect.
+* ``deny_tools`` and empty/missing manifests are denied with named
+  ``missing_authority`` — behavior aligned with fail-closed PDP semantics.
+
+Flipping the flag is an operator act; landing this module does not change live
+gate behavior until the flag is set.
 """
 from __future__ import annotations
 
