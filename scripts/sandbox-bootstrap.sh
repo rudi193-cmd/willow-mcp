@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # sandbox-bootstrap.sh — stand up willow-mcp in a local sandbox, idempotently.
 #
+# DEV-ONLY. This is the contributor sandbox, not the install. New users
+# start from the charter seed (Willow/seed/seed.py — the six-movement
+# onboarding); fleet operators use docs/OPERATOR-ONBOARD.md.
+#
 # One command to take a fresh clone to a working stdio MCP server:
 #   scripts/sandbox-bootstrap.sh
 #
