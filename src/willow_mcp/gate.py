@@ -305,6 +305,9 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
 # silently carries net access with it (B-19; same spirit as B-14's trust-root
 # separation).
 NET_PERMISSION = "task_net"
+# Local Postgres socket + PG/POSTGRES env inside Kart — separate from task_queue
+# and full_access so default sandboxed tasks cannot reach the production DB lane.
+DB_PERMISSION = "task_db"
 
 # Same shape, different lane: NET_PERMISSION authorizes egress from inside the
 # network-namespaced Kart sandbox; INTEGRATION_NET_PERMISSION authorizes the

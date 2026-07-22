@@ -89,7 +89,7 @@ No `WILLOW_HUMAN_ORCHESTRATOR` on specialist MCP configs.
 
 | Step | Action |
 |------|--------|
-| 1 | `session_enter(app_id, session_id, dispatch_id=…)` — read `entry_mode`, `assignment` (if dispatch), `persona`, `closeout_tools` |
+| 1 | `session_enter(app_id, session_id, dispatch_id=…)` — read `entry_mode`, `assignment` (if dispatch), `persona`, `closeout` / `closeout_tools` |
 | 2 | Apply voice + boundaries from `persona-overlays.md` for your `app_id` |
 | 3 | `diagnostic_summary(app_id=…)` when the role monitors or builds — `broken` → report once and stop |
 | 4 | Work within manifest permissions only |
@@ -111,9 +111,9 @@ Full overlay text: `persona-overlays.md`.
 
 ### Dispatch path
 
-1. `session_enter` → read `assignment` from the response
+1. `session_enter` → read `assignment` and `closeout` from the response (`closeout.format` is the on-disk handoff JSON schema; the tool name `handoff_write_v4` is intentional)
 2. Work within manifest permissions
-3. `handoff_write_v4`
+3. Call `closeout.tool` (today: `handoff_write_v4`) — output will be `format: handoff_v1`
 
 ### Human path
 

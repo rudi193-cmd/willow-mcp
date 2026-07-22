@@ -33,8 +33,24 @@ def test_dispatch_send_and_read(home):
     pkt = ds.dispatch_read(did)
     assert pkt["meta"]["to_app"] == "loki"
     assert pkt["meta"]["role"] == "loki"
+    assert pkt["meta"]["closeout"] == ds.DISPATCH_CLOSEOUT
+    assert "reply_contract" not in pkt["meta"]
     assert "Audit PR #786" in pkt["assignment"]
     assert pkt["status"]["status"] == "pending"
+
+
+def test_closeout_from_meta_reads_legacy_reply_contract():
+    legacy = {"reply_contract": "handoff_v4", "to_app": "loki"}
+    assert ds.closeout_from_meta(legacy) == ds.DISPATCH_CLOSEOUT
+
+
+def test_handoff_write_v4_emits_handoff_v1_format_intentional(home):
+    # BC504427: tool name reflects call-signature generation; on-disk format is v1.
+    sent = ds.dispatch_send("willow", "loki", "# Task\n", summary="task")
+    did = sent["dispatch_id"]
+    ho.handoff_write_v4("loki", did, narrative="Done.")
+    handoff = json.loads((home / "dispatch" / did / "handoff.json").read_text())
+    assert handoff["format"] == "handoff_v1"
 
 
 def test_full_lifecycle(home):
@@ -109,6 +125,7 @@ def test_session_enter_dispatch_by_id(home):
     assert out["dispatch_id"] == did
     assert "Ship it" in out["assignment"]
     assert out["status"] == "working"
+    assert out["closeout"] == ds.DISPATCH_CLOSEOUT
     assert out["closeout_tools"] == ["handoff_write_v4"]
     assert out.get("persona")
     assert out.get("display_name") == "Loki"

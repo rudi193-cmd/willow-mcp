@@ -177,11 +177,12 @@ def check_bash(command: str) -> Optional[str]:
     )
 
 
-# Kart network directives the willow-2.0 worker honors — matched exactly as the
-# worker does (core/kart_sandbox.py: `line.strip() == <directive>`). task_submit
-# strips any caller-supplied occurrence unconditionally (B-21), so embedding one
-# is a no-op; this guard tells the caller that before the call is made.
+# Kart sandbox directives the worker honors — matched exactly as the worker does
+# (`line.strip() == <directive>`). task_submit strips caller-supplied occurrences
+# unconditionally (B-21), so embedding one is a no-op; this guard steers callers.
 _NET_DIRECTIVES = {"# allow_net", "# allow_localhost"}
+_DB_DIRECTIVES = {"# allow_db"}
+_KART_DIRECTIVES = _NET_DIRECTIVES | _DB_DIRECTIVES
 
 
 def check_task_submit_self_grant(tool_input: dict) -> Optional[str]:
@@ -202,17 +203,30 @@ def check_task_submit(tool_input: dict) -> Optional[str]:
     real path (allow_net=True + task_net permission)."""
     task = (tool_input or {}).get("task", "") or ""
     embedded = sorted({
-        line.strip() for line in task.splitlines() if line.strip() in _NET_DIRECTIVES
+        line.strip() for line in task.splitlines() if line.strip() in _KART_DIRECTIVES
     })
     if not embedded:
         return None
     directives = ", ".join(f"`{d}`" for d in embedded)
+    net_bits = [d for d in embedded if d in _NET_DIRECTIVES]
+    db_bits = [d for d in embedded if d in _DB_DIRECTIVES]
+    parts = []
+    if net_bits:
+        parts.append(
+            "run a task with network egress, pass allow_net=True and grant the "
+            "'task_net' permission in the app's manifest (not part of task_queue or "
+            "full_access). '# allow_localhost' cannot be self-granted at all"
+        )
+    if db_bits:
+        parts.append(
+            "run a task with local Postgres access, pass allow_db=True and grant the "
+            "'task_db' permission in the app's manifest (not part of task_queue or "
+            "full_access)"
+        )
     return (
         f"willow-mcp: {directives} embedded in task text is ignored — the server "
-        "strips Kart network directives from caller-supplied task text (B-21). To "
-        "run a task with network egress, pass allow_net=True and grant the "
-        "'task_net' permission in the app's manifest (not part of task_queue or "
-        "full_access). '# allow_localhost' cannot be self-granted at all."
+        "strips Kart sandbox directives from caller-supplied task text (B-21). To "
+        + "; ".join(parts) + "."
     )
 
 

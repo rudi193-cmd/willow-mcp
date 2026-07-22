@@ -27,7 +27,24 @@ from .roles import VALID_STATUSES
 _AGENT_DOC = "docs/AGENTS.md"
 _PROJECT_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
+# Dispatch closeout: tool name reflects the MCP call signature generation; on-disk
+# handoff.json format stays handoff_v1 (BC504427 — intentional, not a mismatch).
+DISPATCH_CLOSEOUT = {"tool": "handoff_write_v4", "format": "handoff_v1"}
+
 logger = logging.getLogger("willow_mcp.dispatch")
+
+
+def closeout_from_meta(meta: dict) -> dict:
+    """Resolve closeout tool + on-disk format from packet meta (new or legacy)."""
+    closeout = meta.get("closeout")
+    if isinstance(closeout, dict) and closeout.get("tool"):
+        return {
+            "tool": str(closeout["tool"]),
+            "format": str(closeout.get("format") or "handoff_v1"),
+        }
+    if meta.get("reply_contract") == "handoff_v4":
+        return dict(DISPATCH_CLOSEOUT)
+    return dict(DISPATCH_CLOSEOUT)
 
 
 # ── best-effort Postgres mirror (fleet visibility) ─────────────────────────────
@@ -199,7 +216,7 @@ def dispatch_send(
         "phase": phase,
         "reply_to": reply_to,
         "priority": priority,
-        "reply_contract": "handoff_v4",
+        "closeout": dict(DISPATCH_CLOSEOUT),
         "assignment_path": rel_assignment,
         "context_refs": list(context_refs or []),
         "summary": (summary or "").strip() or _first_line(assignment_md),
@@ -456,6 +473,7 @@ def session_enter(
     elif session_id:
         session_bind(app_id, session_id, did, cur)
 
+    closeout = closeout_from_meta(pkt.get("meta", {}))
     return {
         "entry_mode": "dispatch",
         "app_id": app_id,
@@ -466,7 +484,8 @@ def session_enter(
         "role": pkt.get("meta", {}).get("role"),
         "assignment": pkt.get("assignment", ""),
         "summary": pkt.get("meta", {}).get("summary", ""),
-        "closeout_tools": ["handoff_write_v4"],
+        "closeout": closeout,
+        "closeout_tools": [closeout["tool"]],
         "project": project_info,
         "status": pkt.get("status", {}).get("status"),
         **persona_context(app_id),

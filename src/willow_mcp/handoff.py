@@ -37,6 +37,7 @@ def handoff_write_v4(
 
     root = dispatch_dir(dispatch_id)
     handoff = {
+        # BC504427: format handoff_v1 is intentional — tool name reflects call-signature gen.
         "format": "handoff_v1",
         "dispatch_id": dispatch_id,
         "app_id": app_id,
