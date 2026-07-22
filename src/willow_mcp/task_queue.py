@@ -7,10 +7,8 @@ and, when no Postgres is configured, falls back to kartikeya's bundled
 `SqliteTaskQueue` — so `willow-mcp worker` runs tasks with or without a DB.
 
 `kartikeya` is a HARD dependency (B-22 close-out — see `pyproject.toml`), so a
-base `pip install willow-mcp` ships a working drainer. It is nonetheless imported
-lazily, and `WillowMcpTaskQueue` duck-types the seam rather than subclassing
-`kartikeya.TaskQueue`, so this module still imports cleanly in the one case that
-survives: a source checkout whose dependencies were never installed.
+base `pip install willow-mcp` ships a working drainer. The worker executes tasks
+via kartikeya's `sandbox.run_shell` (resource caps on by default).
 """
 from __future__ import annotations
 
@@ -20,6 +18,7 @@ import socket
 from pathlib import Path
 from uuid import uuid4
 
+from kartikeya.queue import QueueStats, TaskQueue, TaskRow
 from psycopg2.extras import Json
 
 from . import schema_profile as sp
@@ -78,12 +77,13 @@ def _require_kartikeya():
         ) from e
 
 
-class WillowMcpTaskQueue:
-    """kartikeya.TaskQueue seam over willow-mcp's adopted Postgres `tasks` table.
+class PgTaskQueue(TaskQueue):
+    """kartikeya.TaskQueue over willow-mcp's adopted Postgres `tasks` table.
 
     Resolves the confirmed column mapping once, then speaks the seam's methods in
     the host's real column names. Claim is atomic across concurrent workers via
-    `FOR UPDATE SKIP LOCKED`.
+    `FOR UPDATE SKIP LOCKED`. Drained by `willow-mcp worker` → kartikeya
+    `run_worker` → `sandbox.run_shell` (cgroup caps on by default).
     """
 
     def __init__(
@@ -143,8 +143,6 @@ class WillowMcpTaskQueue:
         return f'"{self._col[field]}"'
 
     def claim_pending(self, agent: str, limit: int, lane: str | None = None):
-        from kartikeya import TaskRow  # lazy — this backend is only used with kartikeya present
-
         lane = (lane or "fast").strip().lower()
         if lane not in ("fast", "batch"):
             raise ValueError(f"lane must be fast|batch, got {lane!r}")
@@ -321,8 +319,7 @@ class WillowMcpTaskQueue:
         self._pg.commit()
         return changed
 
-    def stats(self):
-        from kartikeya import QueueStats
+    def stats(self) -> QueueStats:
         cur = self._pg.cursor()
         cur.execute(f'SELECT {self._q("status")}, COUNT(*) FROM tasks GROUP BY {self._q("status")}')
         rows = cur.fetchall()
@@ -336,12 +333,16 @@ class WillowMcpTaskQueue:
         )
 
 
-def build_task_queue(app_id: str, *, require_postgres: bool = False):
+# Backward-compatible alias used across docs and older tests.
+WillowMcpTaskQueue = PgTaskQueue
+
+
+def build_task_queue(app_id: str, *, require_postgres: bool = False) -> TaskQueue:
     """Pick a backend: Postgres (adopted `tasks` table) if reachable, else
     kartikeya's bundled SqliteTaskQueue under WILLOW_STORE_ROOT."""
     pg = get_pg()
     if pg is not None:
-        return WillowMcpTaskQueue(pg, app_id)
+        return PgTaskQueue(pg, app_id)
     if require_postgres:
         raise RuntimeError(
             "Postgres is required for managed lane workers; refusing the "
