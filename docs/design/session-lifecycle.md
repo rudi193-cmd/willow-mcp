@@ -186,6 +186,8 @@ dag_next(project_id="...")          # optional: dispatch next node
 
 ### 5c. `handoff.json` (structured)
 
+The closeout MCP tool is named `handoff_write_v4` for its call-signature generation; the on-disk `handoff.json` format is **`handoff_v1`** — intentional, not a contract violation.
+
 ```json
 {
   "format": "handoff_v1",
