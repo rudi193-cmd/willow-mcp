@@ -11,6 +11,11 @@ Type=simple
 Environment=WILLOW_AGENT_NAME=kart
 Environment=KART_WORKER_LANE=fast
 Environment=KART_FAST_WORKERS=3
+# Kart sandbox seam — literal, not EnvironmentFile-only. Without it kartikeya
+# resolves its vendored product-neutral default and every task fails
+# `bwrap: Creating new namespace failed`, silently, for the life of the process.
+# Install the fleet policy at this path first (see deploy/kart-worker.md).
+Environment=KART_SANDBOX_CONFIG=%h/github/.willow/kart-sandbox.json
 EnvironmentFile=-%h/github/.willow/env
 ExecStart=%h/github/willow-mcp/.venv/bin/python -m willow_mcp.worker --lane fast --require-postgres
 WorkingDirectory=%h/github/willow-mcp

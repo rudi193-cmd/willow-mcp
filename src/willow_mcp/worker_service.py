@@ -26,6 +26,10 @@ class WorkerServiceConfig:
     pg_user: str
     app_id: str
     heartbeat_root: Path
+    # Kart mount policy, pinned into the unit as a literal Environment= line.
+    # A worker that cannot resolve a fleet policy falls back to kartikeya's
+    # vendored default and fails every task; see willow_mcp.worker.
+    sandbox_config: Path
 
 
 def default_config() -> WorkerServiceConfig:
@@ -50,6 +54,11 @@ def default_config() -> WorkerServiceConfig:
         heartbeat_root=Path(
             os.environ.get("WILLOW_WORKER_HEARTBEAT_ROOT", home / "worker_heartbeat")
         ).expanduser().resolve(),
+        # $WILLOW_HOME/kart-sandbox.json is kartikeya's own second candidate, so
+        # pinning it here needs no willow-2.0 path — which render_unit rejects.
+        sandbox_config=Path(
+            os.environ.get("KART_SANDBOX_CONFIG", home / "kart-sandbox.json")
+        ).expanduser(),
     )
 
 
@@ -98,6 +107,7 @@ def render_unit(
         "WILLOW_PG_USER": config.pg_user,
         "APP_ID": config.app_id,
         "HEARTBEAT_ROOT": config.heartbeat_root,
+        "KART_SANDBOX_CONFIG": config.sandbox_config,
     }
     rendered = source
     for key, value in values.items():

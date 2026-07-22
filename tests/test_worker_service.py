@@ -17,6 +17,7 @@ def config(tmp_path):
         pg_user="willow_role",
         app_id="worker-host",
         heartbeat_root=tmp_path / "heartbeats",
+        sandbox_config=tmp_path / "home" / "kart-sandbox.json",
     )
 
 
@@ -33,6 +34,15 @@ def test_clean_install_renders_standalone_worker_units(config, lane):
     assert "WILLOW_APP_ID=worker-host" in unit
     assert "WILLOW_WORKER_LANE=" in unit
     assert "WILLOW_WORKER_HEARTBEAT_ROOT=" in unit
+    # The seam that the 2026-07-20 units were missing. Rendered units carried no
+    # KART_SANDBOX_CONFIG and no EnvironmentFile, so kartikeya silently used its
+    # vendored policy and both lanes failed every task for 28 hours.
+    assert "KART_SANDBOX_CONFIG=" in unit
+    # ...as a literal Environment=, never an EnvironmentFile= directive: that
+    # file is read at exec time, so editing it cannot reach a running worker.
+    assert not any(
+        line.startswith("EnvironmentFile=") for line in unit.splitlines()
+    )
     assert "willow-2.0" not in unit
     assert "@" not in unit
 

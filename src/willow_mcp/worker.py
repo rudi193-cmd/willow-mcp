@@ -26,6 +26,50 @@ def _lane_from_env(default: str = "fast") -> str:
     ).strip().lower()
 
 
+def check_sandbox_config(*, require_fleet_config: bool) -> str:
+    """Resolve the mount policy this worker will execute under, and report it.
+
+    A production worker that cannot find the fleet policy falls back to
+    kartikeya's vendored product-neutral default. That fallback is silent and
+    total: every task it then runs gets a reduced bind set, and on this fleet
+    that manifests as ``bwrap: Creating new namespace failed`` on every single
+    task — for as long as the process stays up. A worker started on
+    2026-07-20 dead-lettered the whole batch lane for 28 hours that way,
+    because nothing in the task result distinguished "wrong policy" from
+    "policy says no".
+
+    So: name the policy at startup, and refuse to serve a production lane on
+    the generic one. A unit that fails to start is visible; a unit that runs
+    and fails every task is not.
+
+    Returns the resolved config source.
+    """
+    try:
+        from kartikeya.sandbox import is_vendored_default, resolve_sandbox_config
+    except ImportError as exc:
+        # Deliberately fatal rather than degrading to the old silent behaviour:
+        # an unobservable fallback is what caused the outage this guard exists
+        # to prevent.
+        raise RuntimeError(
+            "installed kartikeya is too old to report which sandbox policy it "
+            "resolved (needs sandbox.resolve_sandbox_config). Upgrade kartikeya."
+        ) from exc
+
+    _cfg, source = resolve_sandbox_config()
+    generic = is_vendored_default(source)
+    print(f"willow-mcp worker: sandbox policy {source}", file=sys.stderr)
+    if generic and require_fleet_config:
+        raise RuntimeError(
+            "refusing to start: resolved kartikeya's vendored default sandbox "
+            f"policy ({source}), not a fleet policy. Set KART_SANDBOX_CONFIG "
+            "in the unit's Environment= (an EnvironmentFile edit does NOT reach "
+            "an already-running process), or place the policy at "
+            "$WILLOW_HOME/kart-sandbox.json. Pass --allow-generic-sandbox to "
+            "serve on the generic policy deliberately."
+        )
+    return source
+
+
 def run_worker_daemon(
     *,
     app_id: str,
@@ -34,6 +78,7 @@ def run_worker_daemon(
     interval: float = 5.0,
     once: bool = False,
     require_postgres: bool = False,
+    allow_generic_sandbox: bool = False,
 ) -> None:
     """Drain the adopted Postgres queue until stopped (or once=True, until empty)."""
     try:
@@ -54,7 +99,10 @@ def run_worker_daemon(
     if lane not in ("fast", "batch"):
         raise ValueError(f"lane must be fast|batch, got {lane!r}")
 
-    queue = build_task_queue(app_id, require_postgres=require_postgres or lane == "batch")
+    production = require_postgres or lane == "batch"
+    check_sandbox_config(require_fleet_config=production and not allow_generic_sandbox)
+
+    queue = build_task_queue(app_id, require_postgres=production)
     reap()
 
     file_beat = WorkerHeartbeat(agent="kart", lane=lane, interval=interval)
@@ -105,6 +153,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="refuse the SQLite fallback (required for production lane workers)",
     )
     parser.add_argument(
+        "--allow-generic-sandbox",
+        action="store_true",
+        help="serve a production lane on kartikeya's vendored default mount policy "
+             "(default: refuse — see check_sandbox_config)",
+    )
+    parser.add_argument(
         "--app-id",
         dest="app_id",
         default=None,
@@ -131,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
             interval=args.interval,
             once=args.once,
             require_postgres=args.require_postgres,
+            allow_generic_sandbox=args.allow_generic_sandbox,
         )
     except (RuntimeError, ValueError) as exc:
         print(f"willow-mcp worker: {exc}", file=sys.stderr)

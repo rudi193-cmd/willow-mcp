@@ -14,6 +14,13 @@ Environment="WILLOW_PG_USER=@WILLOW_PG_USER@"
 Environment="WILLOW_APP_ID=@APP_ID@"
 Environment="WILLOW_WORKER_LANE=@LANE@"
 Environment="WILLOW_WORKER_HEARTBEAT_ROOT=@HEARTBEAT_ROOT@"
+# Kart sandbox seams. These MUST be literal Environment= lines, not an
+# EnvironmentFile: the seams were added to $WILLOW_HOME/env on 2026-07-22 and
+# did not cure the fault, because a running process's environment cannot be
+# changed by editing a file it read at exec time (or, here, never read at all).
+# Without KART_SANDBOX_CONFIG, kartikeya resolves its vendored product-neutral
+# default and every task fails `bwrap: Creating new namespace failed`.
+Environment="KART_SANDBOX_CONFIG=@KART_SANDBOX_CONFIG@"
 ExecStart=@PYTHON@ -m willow_mcp.worker --lane @LANE@ --app-id @APP_ID@ --require-postgres
 Restart=on-failure
 RestartSec=2
