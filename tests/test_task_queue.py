@@ -274,8 +274,11 @@ def test_managed_worker_refuses_lane_agnostic_sqlite_fallback(
 
 
 def test_factory_uses_postgres_when_available(monkeypatch):
+    from kartikeya.queue import TaskQueue
+
     fake = _FakePg()
     monkeypatch.setattr(tq, "get_pg", lambda: fake)
     monkeypatch.setattr(tq.sp, "resolve", lambda *a, **k: _mapping())
     q = tq.build_task_queue("app")
-    assert isinstance(q, tq.WillowMcpTaskQueue)
+    assert isinstance(q, tq.PgTaskQueue)
+    assert isinstance(q, TaskQueue)
