@@ -11,6 +11,18 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Sean Campbell" }]
 requires-python = ">=3.11"
 keywords = ["mcp", "knowledge-base", "task-queue", "willow", "oauth"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Database",
+]
 dependencies = [
     "mcp>=1.28.1,<2.0.0",
     "psycopg2-binary>=2.9,<3.0",
@@ -60,6 +72,9 @@ willow-mcp-integrations = "willow_mcp.integrations:main"
 
 [project.urls]
 Homepage = "https://github.com/rudi193-cmd/willow-mcp"
+Repository = "https://github.com/rudi193-cmd/willow-mcp"
+Issues = "https://github.com/rudi193-cmd/willow-mcp/issues"
+Changelog = "https://github.com/rudi193-cmd/willow-mcp/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/willow_mcp"]

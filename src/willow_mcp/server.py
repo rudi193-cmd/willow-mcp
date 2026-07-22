@@ -826,7 +826,12 @@ def store_put(
     record_id: Optional[str] = None,
     deviation: float = 0.0,
 ) -> dict:
-    """Write a record to a named collection. Returns {id, action}. High deviation (>0.6 rad) auto-flags."""
+    """Write a JSON record to a named SOIL collection (created on first write).
+    Pass `record_id` to pin a stable ID — re-putting the same ID overwrites the
+    record; omit it to auto-generate one. `deviation` (radians) declares how far
+    this write departs from established pattern: >= 0.785 is recorded as 'flag',
+    >= 1.571 as 'stop', otherwise 'work_quiet'. Returns {id, action}. Confined
+    to the collections in your manifest's store_scope."""
     from . import gate
     if not gate.collection_permitted(app_id, collection):
         return _collection_denied(app_id, collection)
@@ -837,7 +842,10 @@ def store_put(
 @mcp.tool()
 @_guarded("store_get")
 def store_get(app_id: str, collection: str, record_id: str) -> dict:
-    """Read a single record by ID. Returns the record or {error: not_found}."""
+    """Read one record from a SOIL collection by its exact ID. Returns the
+    stored record plus _id/_created/_updated/_deviation/_action metadata, or
+    {error: not_found} if the ID is absent or soft-deleted. Read-only; confined
+    to your store_scope."""
     from . import gate
     if not gate.collection_permitted(app_id, collection):
         return _collection_denied(app_id, collection)
@@ -848,7 +856,10 @@ def store_get(app_id: str, collection: str, record_id: str) -> dict:
 @mcp.tool()
 @_guarded("store_list", list_error=True)
 def store_list(app_id: str, collection: str) -> list:
-    """Return every record in a collection (unfiltered). Prefer store_search for large collections."""
+    """Return every live record in one SOIL collection, oldest first, each with
+    _id/_created/_updated metadata. Unfiltered and unpaginated — prefer
+    store_search once a collection grows large, and store_collections to
+    discover collection names. Read-only; confined to your store_scope."""
     from . import gate
     if not gate.collection_permitted(app_id, collection):
         return [_collection_denied(app_id, collection)]
@@ -864,7 +875,11 @@ def store_update(
     record: dict,
     deviation: float = 0.0,
 ) -> dict:
-    """Update an existing record in-place with audit trail. Use store_put to create."""
+    """Replace an existing record's data in-place — same ID, updated_at bumped,
+    audit metadata retained. Never creates: an unknown ID returns
+    {error: not_found} (use store_put to create). `deviation` declares
+    pattern-departure exactly as in store_put. Returns {id} on success.
+    Confined to your store_scope."""
     from . import gate
     if not gate.collection_permitted(app_id, collection):
         return _collection_denied(app_id, collection)
@@ -875,7 +890,10 @@ def store_update(
 @mcp.tool()
 @_guarded("store_search", list_error=True)
 def store_search(app_id: str, collection: str, query: str) -> list:
-    """Full-text search within a single collection (AND logic across tokens)."""
+    """Full-text search one SOIL collection: the query is split on whitespace
+    and EVERY token must appear somewhere in a record's JSON (AND logic,
+    substring match). Returns matching records with _id metadata; an empty
+    query returns []. Read-only; confined to your store_scope."""
     from . import gate
     if not gate.collection_permitted(app_id, collection):
         return [_collection_denied(app_id, collection)]
@@ -885,7 +903,10 @@ def store_search(app_id: str, collection: str, query: str) -> list:
 @mcp.tool()
 @_guarded("store_delete")
 def store_delete(app_id: str, collection: str, record_id: str) -> dict:
-    """Soft-delete a record — invisible to get/search but retained in audit trail."""
+    """Soft-delete one record by ID: it disappears from get/list/search but is
+    retained on disk for audit and recovery (hard removal is an operator act,
+    deliberately outside the tool surface). Returns {deleted: true|false} —
+    false means the ID wasn't found. Confined to your store_scope."""
     from . import gate
     if not gate.collection_permitted(app_id, collection):
         return _collection_denied(app_id, collection)
@@ -920,7 +941,10 @@ def store_purge_collection(app_id: str, collection: str, confirm: str = "") -> d
 @mcp.tool()
 @_guarded("store_search_all", list_error=True)
 def store_search_all(app_id: str, query: str) -> list:
-    """Search across ALL SOIL collections (or only this app's store_scope, if it has one). Use when the collection is unknown."""
+    """Token-AND search across every SOIL collection you can see — all of them,
+    or only your manifest's store_scope if one is set. Each hit carries a
+    _collection field naming where it was found. Use when you don't know which
+    collection holds the data; prefer store_search when you do. Read-only."""
     from . import gate
     return _store.search_all(query, scope=gate.store_scope(app_id))
 
@@ -1553,8 +1577,9 @@ def gap_list(
     status: Optional[str] = None,
     limit: int = 50,
 ) -> list:
-    """List gaps, most-asked first. Filter by topic and/or status
-    (open | resolved | promoted)."""
+    """List backlog gaps, most-asked first — the fleet's shared "what we don't
+    know yet" queue. Filter by `topic` and/or `status` (open | resolved |
+    promoted); asked_count shows demand for each answer. Read-only."""
     return gap_backlog.list_gaps(topic=topic, status=status, limit=limit)
 
 
@@ -1655,7 +1680,10 @@ def knowledge_search(
     domain: Optional[str] = None,
     limit: int = 10,
 ) -> dict:
-    """Search the Postgres knowledge base by content (AND logic). Filter by domain to narrow results."""
+    """Search the fleet Postgres knowledge base by content: the query is
+    whitespace-split and ALL tokens must appear in an atom (AND logic).
+    `domain` narrows to one domain (e.g. 'journal', 'continuity'). Returns up
+    to `limit` atoms. Read-only; use kb_at to fetch a known atom by ID."""
     tokens = query.split()
     if not tokens:
         return {"results": []}
@@ -1899,7 +1927,10 @@ def task_submit(
 @mcp.tool()
 @_guarded("task_status")
 def task_status(app_id: str, task_id: str) -> dict:
-    """Poll the status of a submitted Kart task. Returns status, result, and completion time."""
+    """Poll one task submitted via task_submit. Reads the fleet Postgres queue
+    and returns the task row — status, result, submitted_by, timestamps — or
+    {error: not_found} for an unknown task_id. Read-only; poll until the
+    worker marks the task complete."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -1929,7 +1960,10 @@ def task_status(app_id: str, task_id: str) -> dict:
 @mcp.tool()
 @_guarded("task_list")
 def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
-    """List pending tasks in the Kart queue."""
+    """List tasks still waiting in the Kart queue for one worker `agent`
+    (default 'kart'), oldest first, task text truncated to 80 chars. Answers
+    "what is queued to run" — use task_status for one task's full detail.
+    Requires the fleet Postgres. Read-only."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -1968,7 +2002,9 @@ def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
 @mcp.tool()
 @_guarded("kb_at")
 def kb_at(app_id: str, atom_id: str) -> dict:
-    """Fetch a single knowledge atom by ID. Returns the full atom or {error: not_found}."""
+    """Fetch one knowledge-base atom by its exact ID from the fleet Postgres —
+    content, domain, source, and tags. Returns {error: not_found} for an
+    unknown ID. Read-only; the direct-address companion to knowledge_search."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -1998,7 +2034,10 @@ def kb_at(app_id: str, atom_id: str) -> dict:
 @mcp.tool()
 @_guarded("kb_promote")
 def kb_promote(app_id: str, atom_id: str, domain: str) -> dict:
-    """Change the domain of an existing knowledge atom."""
+    """Move an existing knowledge atom to a different domain — e.g. lift a
+    'journal' entry into a topical domain once it proves durable. Updates the
+    atom in place; content and ID are unchanged. Returns {id, domain} or
+    {error: not_found}. Requires a confirmed 'knowledge' schema mapping."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -2029,7 +2068,11 @@ def kb_journal(
     source: str = "",
     tags: Optional[list] = None,
 ) -> dict:
-    """Add a journal entry to the knowledge base (domain='journal')."""
+    """Append a free-text journal entry to the knowledge base: a new atom in
+    domain 'journal', tagged 'journal' plus any `tags` you pass, with optional
+    `source` attribution. Lighter than knowledge_ingest — no domain choice or
+    sensitivity tiering. Returns {id, domain}. Requires a confirmed
+    'knowledge' schema mapping."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -2155,7 +2198,11 @@ def schema_confirm_mapping(app_id: str, table: str, overrides: Optional[dict] = 
 @mcp.tool()
 @_guarded("kb_startup_continuity")
 def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
-    """Fetch knowledge atoms tagged or domained for startup continuity."""
+    """Fetch the knowledge atoms marked for session-startup continuity —
+    domain 'continuity' or tagged "continuity" — newest first, up to `limit`.
+    Call early in a session to recover standing decisions and in-flight state.
+    The result always includes _continuity_filter showing exactly what was
+    searched, so an empty list is legible. Read-only."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -2250,7 +2297,11 @@ def agent_route(
     target_agent: str,
     context: Optional[dict] = None,
 ) -> dict:
-    """Route a task to a target agent. Records in routing_decisions and returns a routing_id."""
+    """Record a routing decision — "this task goes to that agent" — in the
+    fleet's routing_decisions ledger and return a routing_id for correlating
+    the eventual outcome. Does NOT start or notify the target agent: pair with
+    dispatch_send to actually deliver the work, and report completion via
+    agent_dispatch_result."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -2280,7 +2331,10 @@ def agent_dispatch_result(
     result: str,
     status: str = "done",
 ) -> dict:
-    """Record the result of a dispatched agent task."""
+    """Close the loop on an agent_route call: attach the outcome — `result`
+    text plus `status` (e.g. 'done', 'failed') — to the routing_decisions row
+    named by `routing_id`. Returns {routing_id, status}, or {error: not_found}
+    for an unknown routing_id."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -2314,7 +2368,13 @@ def dispatch_send(
     priority: str = "normal",
     context_refs: Optional[list] = None,
 ) -> dict:
-    """Create a dispatch packet: meta.json + assignment.md + status pending under $WILLOW_HOME/dispatch/."""
+    """Create a dispatch packet assigning work to another agent: writes
+    meta.json + assignment.md with status 'pending' under
+    $WILLOW_HOME/dispatch/. `assignment_md` is the full brief the specialist
+    will read; `reply_to` names who verifies the handoff. The packet advances
+    pending → working → complete via dispatch_accept and handoff_write_v4.
+    Filesystem-backed — no Postgres required. Returns the new packet's
+    metadata including its dispatch_id."""
     return dispatch_stack.dispatch_send(
         from_app=app_id,
         to_app=to_app,
@@ -2331,7 +2391,10 @@ def dispatch_send(
 @mcp.tool()
 @_guarded("dispatch_read")
 def dispatch_read(app_id: str, dispatch_id: str) -> dict:
-    """Read dispatch meta, status, and assignment.md body."""
+    """Read one dispatch packet by ID: its meta (from/to app, role, phase,
+    priority), current status, and the full assignment.md body. Read-only —
+    how a specialist sees its brief before calling dispatch_accept. Returns
+    {error: not_found} for an unknown dispatch_id."""
     return dispatch_stack.dispatch_read(dispatch_id)
 
 
@@ -2344,7 +2407,10 @@ def dispatch_list(
     status: str = "",
     limit: int = 20,
 ) -> dict:
-    """List dispatch packets, newest first."""
+    """List dispatch packets newest-first, filtered by any combination of
+    to_app / from_app / status ('' = no filter). Returns packet metadata only,
+    no assignment bodies — use dispatch_read for one packet's brief.
+    Read-only. Returns {dispatches, total}."""
     return dispatch_stack.dispatch_list(
         to_app=to_app, from_app=from_app, status=status, limit=limit
     )
@@ -2357,7 +2423,11 @@ def dispatch_accept(
     dispatch_id: str,
     session_id: str = "",
 ) -> dict:
-    """Specialist accepts packet: pending → working."""
+    """Accept a dispatch packet addressed to you: flips its status pending →
+    working and records your session_id against it. Refuses if the packet is
+    addressed to a different app (wrong_recipient) or is not currently pending
+    (invalid_transition). Read the brief with dispatch_read first; close out
+    with handoff_write_v4 when the work is done."""
     return dispatch_stack.dispatch_accept(dispatch_id, app_id, session_id)
 
 
@@ -2371,7 +2441,12 @@ def handoff_write_v4(
     checklist_resolved: bool = True,
     envelope_clean: bool = True,
 ) -> dict:
-    """Complete dispatch work — writes handoff.json + closeout.md, status → complete."""
+    """Close out a dispatch you accepted: writes handoff.json (the structured
+    `findings` list) plus closeout.md (the `narrative`) into the packet and
+    flips its status to complete. `checklist_resolved` and `envelope_clean`
+    are your declarations that the assignment checklist is finished and no
+    authority envelope was left open — the orchestrator checks both in
+    verify_handoff before releasing you via agent_clear."""
     return handoff_stack.handoff_write_v4(
         app_id,
         dispatch_id,
@@ -2385,14 +2460,20 @@ def handoff_write_v4(
 @mcp.tool()
 @_guarded("handoff_read")
 def handoff_read(app_id: str, dispatch_id: str) -> dict:
-    """Read structured handoff and closeout markdown for a dispatch."""
+    """Read the closeout of a completed dispatch: the structured handoff.json
+    findings plus the closeout.md narrative. What the orchestrator reads
+    before verify_handoff, and what a successor agent reads to pick up the
+    thread. Read-only."""
     return handoff_stack.handoff_read(dispatch_id)
 
 
 @mcp.tool()
 @_guarded("verify_handoff")
 def verify_handoff(app_id: str, dispatch_id: str) -> dict:
-    """Orchestrator verifies complete handoff — checklist, envelope, findings."""
+    """Orchestrator-side check of a completed dispatch's handoff: confirms the
+    closeout exists and its declarations hold — checklist resolved, envelope
+    clean, findings present. Run this before agent_clear releases the
+    specialist for its next packet. Read-only."""
     return handoff_stack.verify_handoff(dispatch_id)
 
 
@@ -2404,14 +2485,19 @@ def agent_clear(
     dispatch_id: str,
     session_id: str = "",
 ) -> dict:
-    """Clear specialist after verified handoff — ready for next packet."""
+    """Release a specialist after its handoff has been verified: clears
+    `target_app`'s live assignment state for `dispatch_id`, leaving the agent
+    ready for the next packet. The final step of the dispatch lifecycle
+    (send → accept → handoff → verify → clear); orchestrator-side."""
     return dispatch_stack.agent_clear(target_app, dispatch_id, session_id)
 
 
 @mcp.tool()
 @_guarded("session_read")
 def session_read(app_id: str, session_id: str) -> dict:
-    """Read thin session state file for an app/session pair."""
+    """Read the thin per-session state file for an app/session pair — entry
+    mode, bound dispatch, project/workspace — as written by session_enter.
+    Returns {error: not_found} for an unknown session. Read-only."""
     return dispatch_stack.session_read(app_id, session_id)
 
 
@@ -2424,7 +2510,13 @@ def session_enter(
     project: str = "",
     workspace: str = "",
 ) -> dict:
-    """Enter a human/dispatch session and return native project orientation."""
+    """FIRST CALL of any session. Registers the app/session pair, resolves the
+    entry mode (human seat vs dispatched specialist — pass `dispatch_id` when
+    entering to work an assigned packet), and returns orientation: project
+    info, ORIENT.md presence, standing records (stack, portfolio, milestones,
+    commitments, governance flags), the latest project handoff, collection
+    aliases, and FRANK ledger presence. Close the session later with
+    session_handoff_write (human path) or handoff_write_v4 (dispatch path)."""
     result = dispatch_stack.session_enter(
         app_id,
         session_id,
@@ -2492,7 +2584,11 @@ def session_handoff_write(
     project: str = "",
     workspace: str = "",
 ) -> dict:
-    """Human-entry project-scoped v3 closeout — markdown, no dispatch_id."""
+    """Close a human-entry session with a project-scoped markdown closeout:
+    `narrative` (what happened), `summary`, structured `findings`, and
+    `next_bite` — the suggested next step for whoever resumes. The human-path
+    sibling of handoff_write_v4, which closes dispatched work and requires a
+    dispatch_id; this one needs only the session."""
     return dispatch_stack.session_handoff_write(
         app_id,
         session_id,
@@ -2510,7 +2606,11 @@ def session_handoff_write(
 @mcp.tool()
 @_guarded("specialist_list")
 def specialist_list(app_id: str, include_permissions: bool = False) -> dict:
-    """List specialists from config/specialists.json (orchestrator desk / routing)."""
+    """List the specialist registry (config/specialists.json): every agent the
+    orchestrator can route work to, with role metadata and — when
+    include_permissions=true — each one's permission set. Returns {registry,
+    specialists, total}. Read-only; use specialist_get for one agent's full
+    row and persona."""
     from . import registry as reg
 
     return {
@@ -2523,7 +2623,10 @@ def specialist_list(app_id: str, include_permissions: bool = False) -> dict:
 @mcp.tool()
 @_guarded("specialist_get")
 def specialist_get(app_id: str, agent_id: str, include_permissions: bool = True) -> dict:
-    """Fetch one specialist registry row by agent_id."""
+    """Fetch one specialist's registry row by agent_id, including its compiled
+    persona text and persona file path when available. Returns {error:
+    not_found} for an unknown agent. Read-only — how an orchestrator inspects
+    a specialist before dispatching work to it."""
     from . import registry as reg
 
     row = reg.get_specialist(agent_id, include_permissions=include_permissions)
@@ -2540,7 +2643,11 @@ def specialist_get(app_id: str, agent_id: str, include_permissions: bool = True)
 @mcp.tool()
 @_guarded("exposure_config_get")
 def exposure_config_get(app_id: str) -> dict:
-    """Read standing exposure defaults ($WILLOW_HOME/config/exposure.json, AS-8)."""
+    """Read the standing exposure defaults from $WILLOW_HOME/config/
+    exposure.json — which preset governs each seed destination when
+    exposure_slice is called without an explicit one. Returns {format, path,
+    exists, config}; exists=false means no config file, so built-in defaults
+    apply. Read-only (AS-8)."""
     from . import exposure as exp
     from .paths import exposure_config_path, willow_home
 
@@ -2599,7 +2706,10 @@ def agent_seed_mirror(app_id: str, agent_id: str, slice: str = "") -> dict:
 @mcp.tool()
 @_guarded("fleet_status")
 def fleet_status(app_id: str) -> dict:
-    """Canonical fleet.json roster with additive Postgres drift diagnostics."""
+    """Read the canonical fleet roster (fleet.json) — every registered agent
+    and its declared state — annotated with drift diagnostics wherever the
+    fleet Postgres disagrees with the file. Read-only; requires Postgres. Use
+    fleet_health for liveness signals rather than roster membership."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -2614,7 +2724,11 @@ def fleet_status(app_id: str) -> dict:
 @mcp.tool()
 @_guarded("frank_read")
 def frank_read(app_id: str, project: str = "", limit: int = 50) -> dict:
-    """Read the existing FRANK chain without creating a parallel ledger."""
+    """Read recent entries from the FRANK governance ledger — the fleet's
+    hash-chained, Postgres-backed audit chain — newest first, optionally
+    filtered to one `project`. Each entry carries its prev_hash/hash links;
+    use frank_verify to check chain integrity rather than eyeballing them.
+    `limit` must be 1–500. Read-only."""
     if limit < 1 or limit > 500:
         return {"error": "limit must be between 1 and 500"}
     pg = get_pg()
@@ -2645,7 +2759,10 @@ def frank_read(app_id: str, project: str = "", limit: int = 50) -> dict:
 @mcp.tool()
 @_guarded("frank_verify")
 def frank_verify(app_id: str) -> dict:
-    """Verify every link in the existing FRANK chain."""
+    """Re-hash the entire FRANK governance chain and verify every prev_hash →
+    hash link, detecting tampering, edits, or gaps. Returns the verification
+    verdict, including where the chain breaks if it does. Read-only; may take
+    a moment on a long ledger."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -2662,7 +2779,10 @@ def frank_verify(app_id: str) -> dict:
 def frank_append(
     app_id: str, project: str, event_type: str, content: dict
 ) -> dict:
-    """Append one established-shape event to the shared FRANK chain."""
+    """Append one event to the shared FRANK governance ledger: `project` +
+    `event_type` + an object `content`, hash-chained onto the previous entry.
+    Append-only — entries can never be edited or deleted afterwards, so write
+    settled facts, not drafts. Returns {id, project, event_type}."""
     if not project or not event_type or not isinstance(content, dict):
         return {"error": "project, event_type, and object content are required"}
     pg = get_pg()
@@ -2687,7 +2807,11 @@ def envelope_apply(
     project: str,
     session: str,
 ) -> dict:
-    """Mechanically check an active grant and append its citation before acting."""
+    """Check an authority envelope — an operator-granted, scoped permission —
+    BEFORE acting under it: verifies `envelope_id` is active and covers `verb`
+    with the given `call_args`, then appends a citation to the FRANK ledger
+    recording the use against `project`/`session`. Refuses with the reason
+    when the grant is missing, expired, or out of scope."""
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
@@ -2853,7 +2977,9 @@ def context_list(app_id: str) -> dict:
 @mcp.tool()
 @_guarded("context_expire")
 def context_expire(app_id: str, key: str) -> dict:
-    """Delete a saved context now, before its TTL. Returns {expired: bool}."""
+    """Delete one of your saved contexts immediately, ahead of any TTL.
+    Returns {expired: true} if a record was removed, false if the key didn't
+    exist. Scoped to your app_id — you cannot expire another app's context."""
     return {"expired": _store.delete(_ctx_collection(app_id), key)}
 
 
@@ -4136,8 +4262,12 @@ def fork_create(
     topic: str = "",
     fork_id: str = "",
 ) -> dict:
-    """Create a named, bounded unit of work (branch + PR tracking). Snapshots
-    selected env vars for later `env_check`."""
+    """Open a fork — a named, bounded unit of work (feature branch + PR
+    tracking) recorded in the SOIL store. Snapshots selected environment
+    variables so env_check can later spot drift between where the fork was
+    opened and where it's being worked. `fork_id` pins an explicit ID; omit it
+    to auto-generate. Log changes with fork_log; close with fork_merge or
+    fork_delete."""
     from . import forks
     try:
         return forks.create(
@@ -4151,7 +4281,9 @@ def fork_create(
 @mcp.tool()
 @_guarded("fork_join")
 def fork_join(app_id: str, fork_id: str, component: str) -> dict:
-    """Join an existing open fork as a participant component."""
+    """Register `component` — an agent, repo, or subsystem name — as a
+    participant in an open fork, so its changes can then be logged against
+    the fork via fork_log. Errors if the fork is unknown or already closed."""
     from . import forks
     try:
         return forks.join(_store, fork_id=fork_id, component=component)
@@ -4169,7 +4301,11 @@ def fork_log(
     ref: str,
     description: str = "",
 ) -> dict:
-    """Append a change to an open fork (branch, atom, task, thread, …)."""
+    """Append one change entry to an open fork's log: `type` names what kind
+    of artifact changed (branch, atom, task, thread, …), `ref` points at it
+    (branch name, atom ID, URL), and `description` says what happened. These
+    entries are what fork_merge / fork_delete later tally as promoted or
+    archived."""
     from . import forks
     try:
         return forks.log_change(
@@ -4183,7 +4319,10 @@ def fork_log(
 @mcp.tool(annotations={"destructiveHint": True})
 @_guarded("fork_merge")
 def fork_merge(app_id: str, fork_id: str, outcome_note: str = "") -> dict:
-    """Close an open fork as merged. Counts atom/kb change-log refs as promoted."""
+    """Close an open fork as MERGED — the work landed. Tallies the fork's
+    atom/kb change-log entries as promoted and records `outcome_note` as the
+    close-out summary. Irreversible: a closed fork cannot be reopened, only
+    inspected via fork_status."""
     from . import forks
     return forks.merge(_store, fork_id=fork_id, outcome_note=outcome_note)
 
@@ -4191,7 +4330,10 @@ def fork_merge(app_id: str, fork_id: str, outcome_note: str = "") -> dict:
 @mcp.tool(annotations={"destructiveHint": True})
 @_guarded("fork_delete")
 def fork_delete(app_id: str, fork_id: str, reason: str = "") -> dict:
-    """Close an open fork as deleted. Counts atom/kb change-log refs as archived."""
+    """Close an open fork as DELETED — the work was abandoned. The fork record
+    is kept (this closes, it does not erase); its atom/kb change-log entries
+    are tallied as archived and `reason` records why. Irreversible, like
+    fork_merge."""
     from . import forks
     return forks.delete(_store, fork_id=fork_id, reason=reason)
 
@@ -4199,7 +4341,9 @@ def fork_delete(app_id: str, fork_id: str, reason: str = "") -> dict:
 @mcp.tool(annotations={"readOnlyHint": True})
 @_guarded("fork_status", list_error=False)
 def fork_status(app_id: str, fork_id: str) -> dict:
-    """Full status for one fork."""
+    """Full record for one fork: title, state (open/merged/deleted),
+    participant components, the complete change log, and its environment
+    snapshot. Returns {error} for an unknown fork_id. Read-only."""
     from . import forks
     rec = forks.status(_store, fork_id=fork_id)
     if not rec:
@@ -4210,7 +4354,9 @@ def fork_status(app_id: str, fork_id: str) -> dict:
 @mcp.tool(annotations={"readOnlyHint": True})
 @_guarded("fork_list", list_error=True)
 def fork_list(app_id: str, status: str = "open") -> list:
-    """List forks by status: open | merged | deleted."""
+    """List forks in one state — 'open' (default), 'merged', or 'deleted' —
+    as summary records, so you can find in-flight work units. Use fork_status
+    for one fork's full change log. Read-only."""
     from . import forks
     try:
         return forks.list_forks(_store, status=status)
@@ -4221,7 +4367,10 @@ def fork_list(app_id: str, status: str = "open") -> list:
 @mcp.tool(annotations={"readOnlyHint": True})
 @_guarded("env_check", list_error=False)
 def env_check(app_id: str, fork_id: str) -> dict:
-    """Compare current env to the snapshot taken at fork_create."""
+    """Diff the current process environment against the snapshot taken at
+    fork_create — catches "works on the machine that opened the fork" drift
+    before merging. Returns the variables that changed or went missing.
+    Read-only."""
     from . import forks
     return forks.env_check(_store, fork_id=fork_id)
 
