@@ -10,6 +10,8 @@ Wants=postgresql.service
 Type=simple
 Environment=WILLOW_AGENT_NAME=kart
 Environment=KART_WORKER_LANE=batch
+# See deploy/kart-worker.service — literal seam, not EnvironmentFile-only.
+Environment=KART_SANDBOX_CONFIG=%h/github/.willow/kart-sandbox.json
 EnvironmentFile=-%h/github/.willow/env
 ExecStart=%h/github/willow-mcp/.venv/bin/python -m willow_mcp.worker --lane batch --require-postgres
 WorkingDirectory=%h/github/willow-mcp
