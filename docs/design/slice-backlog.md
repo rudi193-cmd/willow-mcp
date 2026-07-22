@@ -85,11 +85,33 @@ in willow-2.0. Order is rough tractability.
   `google-drive`, `datadog`, `jira`; each declared with what earns it
   (`integrations.py`).
 
+### Promoted from LEAVE (operator call, 2026-07-21 — fresh willow-2.0 diff @ `6e82a38`)
+
+Operator elected to keep these on the radar rather than treat them as non-goals.
+Still earn-first (build when a consumer needs it), but no longer written off.
+
+- [ ] **`tension_scan`** — scans the KB's frontier/contested atoms for semantic
+  tensions or redundancies (contradictions between atoms). Strongest standalone
+  fit: sits next to `lineage_*` / `friction_scan` / the deviation store.
+- [ ] **`source_trail_verify`** — extract verifiable factual claims from text and
+  check each against a source trail (fact-checking). Pairs with the KB and Jeles.
+- [ ] **`infer_*`** (`infer_7b` / `infer_chat` / `infer_imagine` / `infer_speak`)
+  — local/provider-routed inference: structured `mistral:7b` tasks, persona chat
+  (Ollama/Gemini/Groq), image gen (OpenRouter flux-schnell), TTS. The local-first
+  AI story; heavy external surface is why it was LEAVE.
+- [ ] **`dream_*`** (`dream_check` / `dream_run` / `dream_schedule`) — the
+  AutoDream synthesis pipeline: check conditions, run, or queue it as a Kart task.
+- [ ] **`wce_*`** (`wce_check` / `wce_schedule`) — the weekly-witness ritual,
+  dream's scheduled sibling (queues `wce_witness.py` as a Kart task).
+- [ ] **`voice_keyterms`** — build STT keyterms for voice-input accuracy; feeds
+  the existing voice subsystem.
+
 ## Leave (non-goals — do not port into a clean product without a strong reason)
 
-`mem_jeles_*`, `infer_*` (local inference/TTS/image), `outcome_*`, `routine_*`,
-`app_*` (SAFE-app lifecycle), `dream_*` / `wce_*`, fleet-daemon ops
-(`fleet_reload/restart/persona/…`), `policy_*` (replaced by envelopes), and the
+`mem_jeles_*`, `outcome_*`, `routine_*`, `app_*` (SAFE-app lifecycle),
+fleet-daemon ops (`fleet_reload/restart/persona/…`), `policy_*` (replaced by
+envelopes), the fylgja `hook_*` / `loop_*` registries and `kart_task_run`
+(replaced by "packet is boot" + the `worker`/`task_submit` path), and the
 `product-layout.md` "future" shells (`packages/` loader, `ledgers/` writer).
 
 ## Cross-repo (fix lives in willow-2.0, tracked in `docs/BUGS.md`)
