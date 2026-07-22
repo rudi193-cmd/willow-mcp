@@ -135,6 +135,13 @@ def _enforce_binding() -> bool:
         "1", "true", "yes", "on")
 
 
+def _authority_check_enabled() -> bool:
+    """S1 PDP seam (dispatch E5F2D78B). OFF by default: landing the module must
+    not change live gate behavior until an operator flips this on."""
+    return os.environ.get("WILLOW_MCP_AUTHORITY_CHECK", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 def _enforce_binding_gate(app_id: str, tool_name: str) -> Optional[dict]:
     """Apply the willow-gate binding as a CONTROL (Phase 3, H2), inside _gate and
     only after permitted() has already allowed the tool per the manifest.
@@ -407,7 +414,21 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
             )
         }
 
-    if not permitted(effective, tool_name):
+    if _authority_check_enabled():
+        from . import authority as _authority
+
+        decision = _authority.authority_check(
+            principal=effective,
+            action=_authority.ACTION_MCP_TOOL,
+            resource=tool_name,
+            context={},
+        )
+        if not decision.allowed:
+            detail = decision.reason
+            if decision.missing_authority:
+                detail = f"{detail} (missing authority: {decision.missing_authority})"
+            return None, {"error": f"authority denied: {detail}"}
+    elif not permitted(effective, tool_name):
         return None, {
             "error": (
                 f"gate denied: '{effective}' not permitted for '{tool_name}'. "
