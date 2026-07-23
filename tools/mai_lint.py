@@ -95,34 +95,41 @@ def lint_file(path: Path, schema, quiet: bool) -> bool:
     fails: list[str] = []
     warns: list[str] = []
 
+    # Frontmatter is OPTIONAL per the spec: markdownai.schema.json has no
+    # `required`, and the parser strips frontmatter "if any" then treats the
+    # body as mai. A frontmatter-less doc is valid (the human-facing store docs
+    # use exactly this form) — so its absence is not a failure; we just skip the
+    # schema/frontmatter checks that have nothing to validate.
     m = FM_RE.match(text)
-    if not m:
-        fails.append("no `---` YAML frontmatter block at start of file")
-        _emit(path, fails, warns, quiet)
-        return False
-    fm_raw, body = m.group(1), m.group(2)
+    fm_raw, body = (m.group(1), m.group(2)) if m else ("", text)
 
-    # frontmatter parse + schema
-    try:
-        fm = yaml.safe_load(fm_raw)
+    if fm_raw:
         try:
-            jsonschema.validate(fm, schema)
-        except jsonschema.ValidationError as e:
-            fails.append(f"frontmatter fails schema: {e.message}")
-    except yaml.YAMLError as e:
-        fails.append(f"frontmatter YAML parse error: {e}")
-        fm = None
+            fm = yaml.safe_load(fm_raw)
+            try:
+                jsonschema.validate(fm, schema)
+            except jsonschema.ValidationError as e:
+                fails.append(f"frontmatter fails schema: {e.message}")
+        except yaml.YAMLError as e:
+            fails.append(f"frontmatter YAML parse error: {e}")
 
-    # #157: a @phase/@macro hiding in frontmatter — phase tools would see it,
-    # renderer would not.
-    for hidden in ("@phase", "@macro"):
-        if re.search(rf"^{hidden}\b", fm_raw, re.MULTILINE):
-            fails.append(f"{hidden} appears inside frontmatter (invisible to the "
-                         "renderer, but the phase/macro tools parse raw — #157)")
+        # #157: a @phase/@macro hiding in frontmatter — phase tools would see it,
+        # renderer would not.
+        for hidden in ("@phase", "@macro"):
+            if re.search(rf"^{hidden}\b", fm_raw, re.MULTILINE):
+                fails.append(f"{hidden} appears inside frontmatter (invisible to the "
+                             "renderer, but the phase/macro tools parse raw — #157)")
 
-    # header is first non-blank body line
+    # header is first non-blank body line. The parser accepts a bare
+    # `@markdownai` (it matches on the prefix), so a version-less header is
+    # tolerated — but the convention is `@markdownai vN` and the version carries
+    # the compat signal, so flag it as a warning, not a failure.
     first = next((ln.strip() for ln in body.splitlines() if ln.strip()), None)
-    if not (first and HEADER_RE.match(first)):
+    if first and HEADER_RE.match(first):
+        pass
+    elif first and first.startswith("@markdownai"):
+        warns.append(f"header has no version — use `@markdownai vN` (got {first!r})")
+    else:
         fails.append(f"first body line is not a @markdownai header: {first!r}")
 
     # #156: colon form silently dropped
