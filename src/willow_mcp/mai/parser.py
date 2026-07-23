@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-# ── Simple cache (directive results) ─────────────────────────────────
+# ── Simple cache (directive results) ─────────────────────────────────────────
 
 _cache: dict[str, Any] = {}
 
@@ -25,7 +25,7 @@ def invalidate(key: str | None = None) -> None:
         _cache.pop(key, None)
 
 
-# ── Attribute parsing ───────────────────────────────────────────────
+# ── Attribute parsing ─────────────────────────────────────────────────────────
 
 _ATTR_RE = re.compile(r'(\w[\w-]*)=(?:"([^"]*?)"|\'([^\']*?)\'|(\S+))')
 
@@ -38,7 +38,7 @@ def parse_attrs(text: str) -> dict[str, str]:
     }
 
 
-# ── Connection registry ──────────────────────────────────────────────
+# ── Connection registry ────────────────────────────────────────────────────────
 
 @dataclass
 class Connection:
@@ -65,7 +65,7 @@ def _register_connection(attrs: dict[str, str]) -> None:
     _connections[name] = Connection(name=name, conn_type=conn_type, uri=uri)
 
 
-# ── Fallback sentinel ────────────────────────────────────────────────
+# ── Fallback sentinel ─────────────────────────────────────────────────────────
 
 @dataclass
 class _FallbackResult:
@@ -73,9 +73,9 @@ class _FallbackResult:
     value: str
 
 
-# ── Directive handlers ───────────────────────────────────────────────
+# ── Directive handlers ────────────────────────────────────────────────────────
 
-# ── Directive safety (issue #161) ─────────────────────────────────────
+# ── Directive safety (issue #161) ─────────────────────────────────────────────
 _SECRET_ENV_RE = re.compile(
     r"PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|CREDENTIAL|SESSION_?KEY|_KEY$",
     re.I,
@@ -260,7 +260,7 @@ def _handle_http(attrs: dict[str, str], _content: str, app_id: str = "") -> Any:
         return {"error": str(e)}
 
 
-# ── Phase / Macro ───────────────────────────────────────────────────
+# ── Phase / Macro ─────────────────────────────────────────────────────────────
 
 @dataclass
 class Phase:
@@ -309,7 +309,7 @@ def call_macro(macros: dict[str, Macro], name: str, args: dict[str, str]) -> str
     return result
 
 
-# ── Constraint / Concept extraction ───────────────────────────────────────
+# ── Constraint / Concept extraction ───────────────────────────────────────────
 
 @dataclass
 class Constraint:
@@ -337,7 +337,7 @@ def extract_constraints(text: str) -> list[Constraint]:
     return constraints
 
 
-# ── Conditional blocks ────────────────────────────────────────────────
+# ── Conditional blocks ────────────────────────────────────────────────────────
 
 def apply_conditionals(text: str, consumer: str = "ai") -> str:
     """Strip or keep @if/@endif blocks based on consumer.
@@ -364,7 +364,7 @@ def apply_conditionals(text: str, consumer: str = "ai") -> str:
     return text
 
 
-# ── Main renderer ────────────────────────────────────────────────────
+# ── Main renderer ─────────────────────────────────────────────────────────────
 
 def render(
     text: str,
