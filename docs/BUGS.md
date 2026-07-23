@@ -33,7 +33,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-25 | P1 | Fixed | gate / store | `gate.store_scope()` **failed open**: an invalid `app_id`, a missing/unparseable manifest, or a malformed `store_scope` all returned `None` — *unrestricted* — with only a log warning. `"store_scope": "myapp_*"` (a string, the obvious typo for this field) silently granted full store access to an operator who believed the app was confined, inverting `gate.py`'s own header contract ("Fail-closed: missing app_id, missing manifest … → deny"). Fixed: all three paths return `[]` (deny-all); explicit `null` still means "no policy declared". Malformed scope logs at `ERROR` | follow-up to B-24; this session |
 | B-26 | P2 | Fixed | task interface / worker | Task queue had **no liveness signal** — `task_submit` returned `{"status":"pending"}` identically whether a worker was about to run it or none existed, so a stranded queue was indistinguishable from a busy one. Fixed: `willow-mcp worker` publishes a heartbeat via kartikeya's `on_heartbeat` seam; `fleet_health` gains `workers`/`stranded`, `diagnostic_summary` gains a `worker` check | Kart lift stage 4; this session |
 | B-27 | P3 | Fixed | packaging / docs | Three code paths told operators to `pip install willow-mcp[worker]` — an extra that **does not exist**; `kartikeya` has been a hard dependency since B-22, so the advice was unrunnable | found during B-26; this session |
-| B-28 | P3 | Repo-side Fixed — one operator command remains | schema / tasks | `completed_at` stayed null on **failed** tasks under B-17's original trigger (fires only on `'completed'`). **Repo DDL is correct and verified** (2026-07-22): `docs/schema/tasks.postgres.sql` fires on `('completed','failed')`; live test — INSERT-failed and pending→failed both stamp. All that remains is the one-time, operator-gated re-apply on the shared fleet DB: `psql -d willow_20 -f docs/schema/tasks.postgres.sql` (idempotent: CREATE OR REPLACE + DROP/CREATE TRIGGER; table/index guarded by IF NOT EXISTS) | observed live, probe `1T8G5WG5`; follow-up to B-17 |
+| B-28 | P3 | Repo-side Fixed — one operator command remains | schema / tasks | `completed_at` stayed null on **failed** tasks under B-17's original trigger (fires only on `'completed'`). **Repo DDL is correct and verified** (2026-07-22): `docs/schema/tasks.postgres.sql` fires on `('completed','failed')`; live test — INSERT-failed and pending->failed both stamp. All that remains is the one-time, operator-gated re-apply on the shared fleet DB: `psql -d willow_20 -f docs/schema/tasks.postgres.sql` (idempotent: CREATE OR REPLACE + DROP/CREATE TRIGGER; table/index guarded by IF NOT EXISTS) | observed live, probe `1T8G5WG5`; follow-up to B-17 |
 | B-29 | P0 | Fixed | gate / consent | `allow_net` egress was gated **only** by the `task_net` manifest capability — the operator's standing `consent.internet` gated nothing. The fleet flag `consent_internet_gates_allow_net` was declared `implemented: false, status: deferred`, so the switch existed and was wired to nothing. Fixed: two-key gate (`task_net` **and** `consent.internet`), read fail-closed | egress-membrane design; FRANK `cc553729`; this session |
 | B-30 | P1 | Fixed | consent / config | The two consent files **disagreed** and the one an operator would naturally edit appeared inert. `consent.json` said `internet: false, lan: false`; `settings.global.json` said `true, true`. **First diagnosis was wrong:** `consent.json` is not a legacy leftover but a **write-only mirror** — `save_global_settings(sync_legacy=True)` (the default) and Grove's consent toggle both rewrite it on every save, while it is *read* only when the canonical file is absent. So it drifts silently and a delete does not stick. Resolved by re-syncing the mirror from canonical; the misleading "delete the legacy file" advice is gone from `diagnostic_summary` and `consent.py` | observed live; corrected 2026-07-09 |
 | B-31 | P1 | Open | consent / willow-2.0 | `global_settings.py` **fails open**: `DEFAULT_CONSENT` is all-`True`, and `_normalize_consent()` returns those defaults for any non-dict — a missing, truncated, or malformed consent block resolves to *all permitted*. Same inversion as B-25. willow-mcp now reads fail-closed independently; the writer is unfixed and out of this repo | cross-repo (willow-2.0); this session |
@@ -45,6 +45,9 @@ log carries a one-line entry and points there rather than duplicating.
 | B-37 | P0 | Fixed | kart / egress | `# allow_net` is now a request only. Kartikeya 0.0.2 requires a host authorizer for every network row and denies missing attribution/envelope/verifier or callback failure before shell launch. willow-mcp supplies execution-time capability, consent, lease, strict trust-root, Ed25519 signature, exact normalized task hash, expiry, and atomic nonce-replay checks. The signed envelope travels through TaskRow and SQLite/Postgres without inventing legacy authority; signing is an interactive local CLI with no MCP surface. | work order `60CB6361`; FRANK `8683cd84`, `41c2375a`; follow-up to B-19/B-21/B-29/B-32 |
 | B-38 | P2 | Fixed | diagnostics / severance | The severance check shipped in PR #57 asserted **three** surfaces — `store`, `postgres`, `trust_root` — and egress was not one of them. An install could be perfectly severed (own store, own database, trust root beyond reach, verdict `ok`) and still reach the internet, because the shell tool its operator actually calls takes `allow_net` as a **parameter** (B-37). Severance from a fleet's *state* is not severance from a fleet's *network*. **Fixed:** `_diag_severance` now asserts a fourth surface, `egress` (`_egress_severance`), that this process cannot forge the three-key network gate — reusing the manifest + lease-root paths and adding the two the `trust_root` message named but never measured: the `consent.internet` switch and the Ed25519 verification key (checkable only once B-37 moved the signing key beyond write reach). Strict-on + a forgeable key or unprotected verifier → `error` (breaks, like trust_root); strict-off → `unknown`/`warn` (degrades, never breaks, B-18) — so the 2026-07-09 install now reports `partial`, not `ok`. | found 2026-07-09 (hanuman); FRANK `8683cd84`; PR #57; unblocked by B-37; fixed 2026-07-20 |
 | B-39 | P1 | Fixed | docs / tool schema | `task_submit` and consent documentation once overstated submit-time checks as a fleet-wide network gate. The text was corrected when found; B-37 now closes the underlying executor defect with signed per-task authorization and execution-time policy checks. | found 2026-07-09 (willow seat); supersedes B-33 doc clause; closed structurally by B-37 |
+| B-40 | P1 | Fixed | worker / packaging | `willow-mcp worker` unstartable with **every published kartikeya** — the f1e8c9b guard imports `sandbox.resolve_sandbox_config`, which no PyPI release (≤0.0.7) ships, and the ImportError was fatal on every lane (including dev fast lanes the guard itself would allow), re-breaking B-22's shipped-drainer guarantee; the error's remedy ("Upgrade kartikeya") was unrunnable, same class as B-27. Fixed: fallback names the policy source itself by mirroring `load_sandbox_config`'s search order; production lanes still refuse the vendored default with the same message | issue #165; branch `claude/sandbox-setup-cmayov` |
+| B-41 | P2 | Fixed | deploy / claude-code-web | MCP server spawned with **no `WILLOW_*` env** in Claude Code web — the SessionStart hook wrote env to `$CLAUDE_ENV_FILE`, which shells inherit but the client-spawned stdio server does not; it defaulted `WILLOW_HOME` to `~/.willow` (no manifests) and gate-denied `session_enter` for every seat. B-12's bug class in a new lane. Fixed: `session-start.sh` generates the gitignored `.mcp.json` with the resolved env embedded (B-12's "env-freeze" polish); hook invoked via `bash` so a mode-stripped clone still boots | issue #166; branch `claude/sandbox-setup-cmayov` |
+| B-42 | P3 | Open | tests / schema | `tests/test_egress_row_gate_postgres.py` hardcodes the adopted fleet's `id` column, so all 6 tests fail (`UndefinedColumn: "id"`) against a sandbox bootstrapped from the repo's own `docs/schema/tasks.postgres.sql` (`task_id`) — green only where the live DB happens to match `willow_20` | issue #167 |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -60,6 +63,17 @@ log carries a one-line entry and points there rather than duplicating.
 | B-09 | P2 | Stale | gate | Silent fallback on missing SAP gate — `openclaw_sap_gate` gone in rewritten `gate.py` | L-AUTH-01 |
 
 ## Open
+
+- **B-42 · P3** — **the egress row-gate tests assume the fleet's schema, not the
+  repo's.** `test_egress_row_gate_postgres.py` maps `task_id → id` and queries
+  `WHERE id = %s` — the adopted `willow_20` layout — while the repo's own
+  `docs/schema/tasks.postgres.sql` (what `sandbox-bootstrap.sh` and the
+  SessionStart hook apply) names the column `task_id`. On a clean sandbox all 6
+  tests fail at the INSERT fixture with `UndefinedColumn: "id"`; observed live
+  2026-07-23 (`6 failed, 1331 passed`). The schema-adaptation layer exists so
+  willow-mcp serves both layouts; the tests should too — either a fixture-owned
+  table in the layout under test, or parametrization over both column names.
+  Full detail: issue #167.
 
 - **B-31 · P1** — **willow-2.0's consent reader fails open.**
   ```python
@@ -171,6 +185,46 @@ log carries a one-line entry and points there rather than duplicating.
   failed rows have no recoverable completion time.
 
 ## Fixed
+
+- **B-40 · P1 (2026-07-23)** — **the worker could not start on a clean install.**
+  The f1e8c9b guard (refuse a production lane on an unobservable sandbox policy)
+  imports `kartikeya.sandbox.resolve_sandbox_config` and treats the ImportError
+  as deliberately fatal — but no published kartikeya ships that API (PyPI latest
+  0.0.7 exposes `load_sandbox_config` only), so the fatality fired on **every**
+  lane, including dev fast lanes the guard itself passes
+  `require_fleet_config=False`. This silently re-broke B-22's close-out claim
+  that a base install ships a working drainer, and the error's named remedy
+  ("Upgrade kartikeya") was unrunnable — the B-27 class again: an instruction
+  believed because it was written down. Found standing up the web sandbox:
+  worker exited at startup, `fleet_health` correctly reported `stranded: true`
+  (B-26's signal earning its keep). **Fix:** `check_sandbox_config` falls back to
+  naming the policy source itself by mirroring `load_sandbox_config`'s
+  documented search order (`$KART_SANDBOX_CONFIG` →
+  `$WILLOW_HOME/kart-sandbox.json` → vendored default); production lanes still
+  refuse the vendored default with the identical 3am-actionable message
+  (`test_worker_sandbox_seam` green both with and without the new API), dev
+  lanes proceed with a loud stderr warning. Remove the fallback once a kartikeya
+  release ships the reporting API and the pin is bumped. Also found: the sandbox
+  venv carried kartikeya 0.0.5 despite the `>=0.0.7` pin — stale editable env.
+  Issue #165.
+
+- **B-41 · P2 (2026-07-23)** — **the web-sandbox MCP server booted blind.** The
+  SessionStart hook persisted `WILLOW_*` env by appending to `$CLAUDE_ENV_FILE`,
+  asserting in its own comment that "the client-spawned MCP server (and any
+  shell you open) inherits it — this is why .mcp.json needs no env block."
+  Shells inherit it; the MCP server does not — the client spawns the stdio
+  server from `.mcp.json` alone. Observed live: `diagnostic_summary.checks.env`
+  all `null`, `WILLOW_HOME` defaulted to an empty `~/.willow`, and every seat's
+  `session_enter` gate-denied for want of a manifest. B-12's class in a new lane
+  (systemd unit there, Claude Code web here), and B-30's lesson again — the
+  write path was believed, the read path never verified. **Fix:**
+  `session-start.sh` now generates the gitignored `.mcp.json` **with the
+  resolved env embedded**, after the vault-restore block so vault-supplied
+  values land in it; `WILLOW_HUMAN_ORCHESTRATOR=1` rides along only when
+  `WILLOW_APP_ID=willow` per `skills/session-start.md` (operator call whether
+  the web lane should carry the attestation at all — see issue #166's review
+  note); `settings.json` invokes the hook via `bash` so the exec bit the
+  contents API cannot carry is no longer load-bearing. Issue #166.
 
 - **B-30 · P1 (2026-07-09)** — **the two consent files disagreed, and the first
   diagnosis of *why* was wrong.** On this host:
