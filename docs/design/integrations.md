@@ -1,7 +1,16 @@
+---
+kind: doc
+name: integrations-earned-surface-declared-stubs
+description: "Design rule for willow-mcp integrations: adapters stay declared stubs until fleet work needs them twice, plus the current ledger, the egress gate, and credential handling."
+---
+
+@markdownai v1.0
+
 # Integrations — earned surface, declared stubs
 
 *Status: **LOCKED** rule, living ledger — 2026-07-09*
 
+@phase 1-provenance
 ## 1. Provenance
 
 This design was mined from an over-scoped monorepo sketch ("enterprise-mcp-fabric"):
@@ -19,6 +28,7 @@ ideas survived the mining:
 Everything else in the sketch was surface declared in advance of need, which is
 the exact anti-pattern this repo's culture exists to prevent.
 
+@phase 2-the-earn-rule
 ## 2. The earn rule
 
 > **An adapter is implemented when work in this fleet needs it twice.**
@@ -41,6 +51,7 @@ A stub with an empty `needs` or `earned_by` fails the test suite
 (`test_every_stub_declares_needs_and_earned_by`). A stub that is never going to
 be earned should be deleted from the registry, not left to imply intent.
 
+@phase 3-current-ledger
 ## 3. Current ledger
 
 | Adapter | Status | Earned by |
@@ -57,6 +68,7 @@ be earned should be deleted from the registry, not left to imply intent.
 Anything from the original sketch not in this table (salesforce, snowflake,
 whatsapp, tuya, …) is not even a stub. The menu is not the ledger.
 
+@phase 4-egress-the-fourth-consumer-of-the-three-key-gate
 ## 4. Egress: the fourth consumer of the three-key gate
 
 `integration_call` makes the **server process** an egress actor — a different
@@ -80,6 +92,7 @@ the keys that authorize it and strict mode is on, integration egress is refused
 exactly as task egress is. The B-32 residual is shared by both lanes; it is not
 re-litigated here.
 
+@phase 5-credentials
 ## 5. Credentials
 
 Env var first (operator export beats stored state), then vault under
@@ -90,6 +103,7 @@ carries a credential; `credential_source()` reports where one came from
 (`env:VAR` / `vault` / none), and transport error bodies are scrubbed of the
 token before they leave the module.
 
+@phase 6-bringing-a-stub-live-checklist
 ## 6. Bringing a stub live — checklist
 
 1. The earn condition in the ledger has actually occurred, twice. Cite both.
@@ -103,3 +117,15 @@ token before they leave the module.
 5. Update the ledger table above and the stub counts in
    `tests/test_integrations.py::test_registry_lists_live_and_stub_adapters`.
 6. The three-key gate needs **no** per-adapter work — that is the point of it.
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+A declared stub:
+- is registered and listable (`integration_list` shows the ledger);
+- **fails closed** — calling it returns `not_implemented`, never a partial or
+  fake result, and never opens a socket;
+- names **`needs`** (what is technically missing — usually an auth flow or a
+  config decision) and **`earned_by`** (the concrete fleet event that justifies
+  building it).

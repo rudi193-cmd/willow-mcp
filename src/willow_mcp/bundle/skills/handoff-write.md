@@ -1,3 +1,10 @@
+---
+name: handoff-write
+description: Session closeout checklist — pick the right closeout tool, run the pre-close scan, and write the handoff correctly
+---
+
+@markdownai v1.0
+
 # Handoff write — willow-mcp
 
 Session closeout is **skill-driven**, not a Stop hook. Run this checklist before
@@ -82,3 +89,8 @@ Include: what was done, what is blocked, what the next session should do first.
 - Boot: `session-start.md`
 - Dispatch loop: `docs/SESSION_FLOW.md`
 - Orchestrator security: `docs/design/human-orchestrator.md`
+
+## Constraints
+
+@constraint severity=error
+Do not call `handoff_write_v4` without a `dispatch_id`.

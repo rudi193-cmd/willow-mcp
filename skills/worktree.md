@@ -3,6 +3,8 @@ name: worktree
 description: Every code change goes through a feature branch and PR — no direct master commits
 ---
 
+@markdownai v1.0
+
 # /worktree — Branch + PR (required)
 
 **Hard constraint.** Every change goes through a feature branch and a pull request.
@@ -110,3 +112,8 @@ willow-mcp-compile --force
 - Direct master commits bypass CI and review.
 - Rollback is messy; the ledger of what shipped becomes untrustworthy.
 - Urgent work gets a `hotfix/<slug>` branch — same rule, faster name.
+
+## Constraints
+
+@constraint severity=critical
+Every change goes through a feature branch and a pull request. Direct commits to `master` / `main` are banned — no exceptions, including "quick fixes."

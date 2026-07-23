@@ -1,3 +1,11 @@
+---
+kind: doc
+name: spec-kart-lift-extract-a-standalone-kart-package
+description: "Engineering spec for extracting `kart` (shipped as `kartikeya`) into a standalone package, decoupled from willow-mcp and willow-2.0 via a TaskQueue backend interface."
+---
+
+@markdownai v1.0
+
 # Spec: Kart Lift — extract a standalone `kart` package
 
 Status: **IMPLEMENTED** (2026-07-08). Stages 1–4 shipped; B-22 and B-26 Fixed.
@@ -31,6 +39,7 @@ into a small **backend interface** the host implements. Kart owns the sandbox,
 worker loop, lanes, and scan; the host owns "where tasks live" and "where files
 live."
 
+@phase 0-goal-acceptance
 ## 0. Goal & acceptance
 
 A clean `pip install willow-mcp` (which pulls in `kart`) can execute a submitted
@@ -44,6 +53,7 @@ plus the same for an `allow_net=True` task with `task_net` granted (sandbox +
 gate work standalone), and the `kart` suite green with neither willow-mcp nor
 willow-2.0 on `sys.path`.
 
+@phase 1-the-kartikeya-package
 ## 1. The `kartikeya` package
 
 New **standalone repo** (operator decision). Distribution + import name
@@ -88,6 +98,7 @@ backend and calls into the library (§3).
 
 No `core.*` / `willow.fylgja.*` import survives in `kart`.
 
+@phase 2-the-taskqueue-backend-interface
 ## 2. The `TaskQueue` backend interface
 
 The one seam that inverts host coupling. `kart` defines the ABC; the worker
@@ -119,6 +130,7 @@ Three implementations:
 This is also exactly what makes the **SQLite backend** (decision 3) fall out
 naturally rather than being bolted on.
 
+@phase 3-willow-mcp-integration
 ## 3. willow-mcp integration
 
 willow-mcp stays thin — it does **not** contain sandbox/worker code:
@@ -133,6 +145,7 @@ willow-mcp stays thin — it does **not** contain sandbox/worker code:
 - Ships the `CREATE TABLE tasks` DDL the review flagged missing
   (`docs/schema/`), for both SQLite and Postgres, matching `_TASK_FIELDS`.
 
+@phase 4-security-posture-preserve-test
 ## 4. Security posture (preserve + test)
 
 - **bwrap isolation** and **credential-prefix gating** carry over unchanged.
@@ -147,6 +160,7 @@ willow-mcp stays thin — it does **not** contain sandbox/worker code:
   `line.strip() == "# allow_net"` exactly (the contract willow-mcp's strip
   depends on).
 
+@phase 5-sandbox-config-product-neutral-default
 ## 5. Sandbox config — product-neutral default
 
 Vendored `kart/data/kart-sandbox.json`: keep `WILLOW_`, `PG`, `POSTGRES`,
@@ -156,6 +170,7 @@ Vendored `kart/data/kart-sandbox.json`: keep `WILLOW_`, `PG`, `POSTGRES`,
 Templating (`{{HOME}}`, `{{WILLOW_ROOT}}`) preserved. The fleet keeps its richer
 policy via the override file — parity without shipping fleet surface.
 
+@phase 6-test-migration
 ## 6. Test migration
 
 Carry `tests/test_kart_*.py` into `kart/tests/`, replacing fleet imports with a
@@ -163,6 +178,7 @@ fake `TaskQueue`, a tmp `kart-sandbox.json`, and no-op heartbeat/run callbacks.
 Add `SqliteTaskQueue` backend tests (concurrent claim, no double-execution).
 Gate bwrap tests on `bwrap_available()` so CI without bwrap skips, not fails.
 
+@phase 7-optional-llm-task-type
 ## 7. Optional LLM task type
 
 `kart[llm]` extra. Base worker runs shell tasks with zero LLM deps; an LLM task
@@ -170,6 +186,7 @@ submitted without the extra fails cleanly (`{"error": "llm task type requires
 kart[llm]"}`), never an import crash. (willow-2.0 supplies its own `llm_edge`
 adapter behind the extra's hook.)
 
+@phase 8-staged-prs-milestones
 ## 8. Staged PRs / milestones
 
 Spans two (maybe three) repos; sequence willow-mcp value first.
@@ -193,6 +210,7 @@ Spans two (maybe three) repos; sequence willow-mcp value first.
    package, delete its `core/kart_*`. Ends drift. Can trail well behind stage 3.
 6. **Optional:** `kart[llm]`, systemd templates, batch-lane polish.
 
+@phase 9-decisions-remaining-questions
 ## 9. Decisions & remaining questions
 
 **Locked:**

@@ -345,6 +345,18 @@ else:
     mcp = FastMCP("willow-mcp", **_common_kwargs)
 
 
+# ── MarkdownAI (mai) tools — vendored from willow-2.0 (sap/mai) ──────────────────
+# Ten mai_* tools that render/execute @markdownai documents (phases, macros,
+# constraints, @env/@db/@http directives). Opt-in: these are ungated filesystem
+# tools, so they stay off unless WILLOW_MCP_MARKDOWNAI is set — the same posture
+# willow-mcp takes for other non-default surfaces. @db resolves against the same
+# WILLOW_PG_* Postgres the knowledge base uses.
+if os.environ.get("WILLOW_MCP_MARKDOWNAI", "").strip().lower() in ("1", "true", "yes", "on"):
+    from willow_mcp.mai import tools as _mai_tools
+
+    _mai_tools.register(mcp)
+
+
 # ── Gate helper ────────────────────────────────────────────────────────────────
 
 def _resolve_serve_identity() -> tuple[Optional[str], Optional[dict]]:

@@ -1,3 +1,11 @@
+---
+kind: doc
+name: pgp-persona-locked-decisions
+description: "Locked decisions (draft 1.0, 2026-07-09) on PGP as willow-mcp's sole operator trust root and persona as a voice-only overlay that never touches app_id, Grove sender, or SOIL namespace."
+---
+
+@markdownai v1.0
+
 # PGP + persona (LOCKED decisions)
 
 *Status: **LOCKED** draft 1.0 — 2026-07-09*  
@@ -5,6 +13,7 @@
 
 ---
 
+@phase 1-pgp-operator-trust-root
 ## 1. PGP — operator trust root
 
 ### No product dev-bypass
@@ -60,6 +69,7 @@ Kart bwrap cannot reach gpg-agent (fleet lesson). Agents **request**; operator *
 
 ---
 
+@phase 2-persona-new-shape-stays-forks
 ## 2. Persona — new shape (stays, forks)
 
 Persona is **voice only** — never changes `app_id`, Grove sender, or SOIL namespace.
@@ -88,6 +98,7 @@ Injected on dispatch `session_enter` — no blocking, no menu.
 
 ---
 
+@phase 3-persona-roster-project-scoped-user-extensions-draft-discuss
 ## 3. Persona roster — project-scoped + user extensions (DRAFT — discuss)
 
 Two namespaces, merged at picker render time on **charter seat only**:
@@ -147,6 +158,7 @@ if project binding locked:
 
 ---
 
+@phase 4-file-map-additions
 ## 4. File map additions
 
 ```
@@ -164,6 +176,7 @@ $WILLOW_HOME/
 
 ---
 
+@phase 5-implementation-slices
 ## 5. Implementation slices
 
 | Slice | Deliverable |
@@ -178,6 +191,7 @@ $WILLOW_HOME/
 
 ---
 
+@phase 6-what-we-explicitly-reject
 ## 6. What we explicitly reject
 
 - Product `dev_bypass` / `pgp_enforced` mode switch
@@ -189,3 +203,9 @@ $WILLOW_HOME/
 ---
 
 *Operator decisions locked 2026-07-09: no dev bypass in product; one fingerprint; charter picker only; project roster + user extensions (details §3 open).*
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+- Operator creates custom personas (`+ Create new` in picker)

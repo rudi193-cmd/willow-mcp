@@ -1,3 +1,11 @@
+---
+kind: doc
+name: "human-only-orchestrator-gate-locked"
+description: "Status: LOCKED (2026-07-09). Spike doc that intentionally breaks the AGENTS* median."
+---
+
+@markdownai v1.0
+
 # Human-only orchestrator gate (LOCKED)
 
 *Status: **LOCKED** — 2026-07-09 · **Spike doc** (breaks `AGENTS*` median on purpose)*

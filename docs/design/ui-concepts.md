@@ -1,3 +1,11 @@
+---
+kind: "doc"
+name: "ui-concept-sketches-a-tree-two-audiences"
+description: "Two self-contained HTML mockups exploring what a client UI for willow-mcp could look like — unwired design sketches, not a build."
+---
+
+@markdownai v1.0
+
 # UI concept sketches — a tree, two audiences
 
 Two self-contained HTML mockups exploring what a client UI for willow-mcp

@@ -3,6 +3,8 @@ name: tdd
 description: Test-driven development for willow-mcp — pytest, real Postgres where needed, mock MCP at the Python boundary
 ---
 
+@markdownai v1.0
+
 # /tdd
 
 Strict red/green/refactor for changes where tests are the contract.
@@ -82,3 +84,8 @@ skills, hooks, or manifests materialized.
 ## Bug fixes
 
 Write a regression test that fails on the old behavior, then fix. See `debugging.md`.
+
+## Constraints
+
+@constraint severity=error
+Never mock the database when the behavior under test is SQL or schema-backed — use the real Postgres fixtures or the in-memory SQLite paths the suite already provides. Mock the MCP transport, not the code you own. Commit each green state; never batch test + implementation into one commit.

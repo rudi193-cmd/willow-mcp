@@ -3,6 +3,8 @@ name: debugging
 description: Systematic bug hunt — search prior context before reproducing, fix only what is broken, never ship a fix without a test
 ---
 
+@markdownai v1.0
+
 # /debugging
 
 Structured approach to finding and fixing bugs. Prevents guessing, scope creep,
@@ -16,6 +18,7 @@ and fixes-without-tests.
 
 ## Steps
 
+@if consumer="ai"
 1. **Search for prior context** — `knowledge_search` and/or grep the repo for the
    error message, tool name, or module. Check `docs/BUGS.md` for known issues.
 2. **State the bug** — exact error, `file:line` if known, expected vs actual.
@@ -26,6 +29,7 @@ and fixes-without-tests.
 7. **Run the relevant test** — confirm the fix holds. If no test exists, write one first
    (see `tdd.md`).
 8. **Commit** — message: `fix(<module>): <what was wrong> — <why it was wrong>`
+@endif
 
 ## Rules
 
@@ -50,3 +54,8 @@ and fixes-without-tests.
 - Two hypotheses is enough. Three is a sign you need more data, not more guesses.
 - The commit message format (`fix(<module>): what — why`) is the most useful part of
   the git log six months from now.
+
+## Constraints
+
+@constraint severity=error
+Never fix without a test — a fix without a test is just a guess. Never skip step 1 (search for prior context); it often contains the root cause.

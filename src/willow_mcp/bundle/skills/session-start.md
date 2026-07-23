@@ -1,3 +1,10 @@
+---
+name: session-start
+description: Session boot checklist — call session_enter, apply the persona overlay, and follow the Willow or specialist open sequence
+---
+
+@markdownai v1.0
+
 # Willow — session start
 
 Call **`session_enter(app_id, session_id, dispatch_id="")`** at session open.
@@ -120,3 +127,8 @@ Full overlay text: `persona-overlays.md`.
 1. `session_enter` → `entry_mode: human`
 2. Work
 3. `session_handoff_write`
+
+## Constraints
+
+@constraint severity=critical
+Agents must not use `app_id=willow` — that seat is the human operator only. Never pass `dispatch_id` to `session_enter` for willow; it is rejected (`orchestrator_human_only`).

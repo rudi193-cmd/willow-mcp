@@ -1,3 +1,11 @@
+---
+kind: doc
+name: "slice-backlog-the-one-ordered-board"
+description: "Status: LIVING (started 2026-07-21) — ordered backlog of every outstanding willow-mcp slice, consolidated from the roadmap docs and a code sweep."
+---
+
+@markdownai v1.0
+
 # Slice backlog — the one ordered board
 
 Status: **LIVING** — started 2026-07-21. One place to see every outstanding
@@ -138,3 +146,9 @@ envelopes), the fylgja `hook_*` / `loop_*` registries and `kart_task_run`
   verifies before `gap_promote` (operator / reviewer agent / quorum).
 - [ ] **`schema-adaptation.md §8`** — open questions for the next schema pass
   (not blocking current writes).
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+- [ ] **B-31** — consent writer fails open.

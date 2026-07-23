@@ -1,3 +1,11 @@
+---
+kind: doc
+name: design-productionize-kart-into-willow-mcp
+description: "Design/decision record for productionizing Kart — the willow-2.0 task-queue worker — into willow-mcp as the published `kartikeya` package; largely SHIPPED, with the stage-5 drift-window review closed and two opt-in security upgrades (scan_bash fork-bomb detection, run_shell resource caps) left as the only open items."
+---
+
+@markdownai v1.0
+
 # Design: Productionize Kart into willow-mcp
 
 Status: **SHIPPED** (superseded 2026-07-18) — the lift landed. Kart was extracted
@@ -12,6 +20,7 @@ window), which lives on the willow-2.0 side, not here. The drift window is now
 
 Original status (2026-07-08): DIRECTION SET — staged migration, not yet started.
 
+@phase 1-why
 ## 1. Why
 
 willow-mcp is the intended **production replacement** for the `willow` fleet
@@ -29,6 +38,7 @@ executed because an out-of-repo (and often stale) willow-2.0 Kart happened to be
 present on the operator's own machines. This is tracked as **B-22 (P1)** in
 `docs/BUGS.md` and is the finding that makes the product DOA out of the box.
 
+@phase 2-what-ships
 ## 2. What ships
 
 The Kart the operator hardened in willow-2.0 over many months — not a throwaway
@@ -42,6 +52,7 @@ reference worker. Core pieces, all currently under `willow-2.0/core/`:
 - `kart_lanes.py` — lane/worker-mode helpers.
 - Its test suite (`tests/test_kart_*.py`) travels with it.
 
+@phase 3-the-hard-part-decoupling-from-the-fleet
 ## 3. The hard part: decoupling from the fleet
 
 This is a **migration, not a copy**. The willow-2.0 Kart is wired into fleet
@@ -57,6 +68,7 @@ layer, a config file, bwrap). Where willow-mcp already has an equivalent (its
 own receipts, its own diagnostics), the worker should use that rather than the
 fleet's.
 
+@phase 4-staged-plan
 ## 4. Staged plan
 
 1. **Decouple** — fork the four core files into a branch, strip/guard the
@@ -75,6 +87,7 @@ fleet's.
    and `diagnostic_summary` gains a `worker` check, so "queued, unattended" is
    distinguishable from "queued, about to run" (the external review's §1).
 
+@phase 5-the-drift-window-measured-worklist-2026-07-18
 ## 5. The drift window — measured worklist (2026-07-18)
 
 Stage 5 is willow-2.0 retiring its own `core/kart_*` copy in favour of the
@@ -314,6 +327,7 @@ either can land first. Both are security *tightenings*, so the safe sequence is
 *measure the blast radius (corpus/history grep for `scan_bash`; ceiling probe for
 `run_shell`) → land behind the opt-in → then enable*.
 
+@phase 6-relationship-to-other-work
 ## 6. Relationship to other work
 
 - `skills/kart-tasks.md` already documents the *current* (worker-required)
@@ -321,3 +335,41 @@ either can land first. Both are security *tightenings*, so the safe sequence is
   command explicitly marked pending this lift.
 - Closes the product-DOA gap; complements the identity/security work already
   done (`SECURITY_AUDIT.md`) that motivates willow-mcp as the successor.
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+- **`load_sandbox_config`** — kartikeya's resolver is env/`$WILLOW_HOME`-global, not
+  per-root; willow-2.0's callers (worktree scenarios, and the test suite's synthetic
+  repos in `test_kart_symlink_binds.py`) depend on an explicit `root` overriding
+  everything else. Delegating would silently break per-root resolution exactly the
+  way `build_bwrap_argv` would have in Tier 1. **Action taken instead:** closed the
+  config split-brain Tier 1 introduced — `KART_SANDBOX_CONFIG` was being set (for
+  kartikeya's benefit) but willow-2.0's own `load_sandbox_config` never consulted it,
+  so an operator override would silently apply to the three delegated functions and
+  *not* to `run_shell`/`build_bwrap_argv`'s own config reads. Root-less callers now
+  fall back to `$KART_SANDBOX_CONFIG`; an explicit `root` still always wins.
+- **`execute_task_row` / `drain_claimed_tasks`** — willow-2.0's version is fleet
+  business logic, not sandbox isolation: it dispatches `workflow_phase` and
+  goal-based agent tasks, and gates network access through
+  `core.egress_authority.net_authorized` (B-37, the fleet's credential/consent
+  control). kartikeya's version is deliberately generic — non-shell task types need
+  a caller-registered `handlers` dict, and network authorization is an optional
+  `network_authorizer` callback seam it doesn't wire up itself. Adopting it would
+  mean threading willow-2.0's egress-authority check through that seam and
+  registering handlers for `workflow_phase`/`goal` — a real architectural change
+  touching a security control, not an equivalence swap. Left as willow-2.0's own
+  implementation; a future migration is possible but needs its own dedicated,
+  security-reviewed PR.
+- **`reaper_alignment_warning`** — kartikeya's version only checks the daemon-lane
+  timeout; willow-2.0's covers both the daemon *and* fast-lane timeouts (`max()` of
+  the two). kartikeya has no fast-lane concept at all yet, so delegating here would
+  be a straight regression, not a lateral move. Left as-is.
+
+@constraint severity="critical"
+**Behaviour change:** a task/`script_body` containing any of these runs fine today
+(willow-2.0's `check_kart_task` → `scan_bash` returns no issue), but would be
+**blocked** after the swap (`SEV_HIGH` ⇒ `check_kart_task` returns an error and the
+task never executes). Pure hardening — nothing that legitimately runs *should* match,
+but that has to be witnessed, not assumed.

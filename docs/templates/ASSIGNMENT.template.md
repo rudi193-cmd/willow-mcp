@@ -1,3 +1,16 @@
+---
+kind: assignment
+title: "{title}"
+from: "{orchestrator}"
+to: "{agent}"
+role: "{role}"
+priority: normal
+dispatch_id: "{id}"
+reply_to: "{reply_to}"
+---
+
+@markdownai v1.0
+
 # Assignment: {title}
 
 **From:** {orchestrator}
@@ -20,10 +33,11 @@ One sentence — the single outcome.
 
 - {link or reference}
 
-## Out of scope
-
-- {what you must not do}
-
 ## Success criteria
 
 - {what done looks like}
+
+@constraint severity=error
+Out of scope:
+
+- {what you must not do}

@@ -1,3 +1,11 @@
+---
+kind: doc
+name: willow-constitutional-orchestration-for-autonomous-agents
+description: "Complete WILLOW system packet (v1.0 draft, 2026-07-08): bundled README, AGENTS/ORIENT/SESSION_FLOW guides, glossary, roles, free-API and zero-cost deployment docs, examples, troubleshooting, and templates for constitutional fleet orchestration."
+---
+
+@markdownai v1.0
+
 <!--
 PROVENANCE: converted 2026-07-13 (session e2b2a0da, willow seat) from
 ~/Desktop/Nest/"WILLOW Complete System.txt" (nest intake, authored 2026-07-08,
@@ -590,6 +598,7 @@ The rotation layer:
 
 ## Steps
 
+@phase 1-clone-the-repo
 ### 1. Clone the repo
 
 ```bash
@@ -597,6 +606,7 @@ git clone https://github.com/your-username/willow
 cd willow
 ```
 
+@phase 2-install
 ### 2. Install
 
 ```bash
@@ -609,6 +619,7 @@ This installs:
 - Rotation layer
 - API keys manager
 
+@phase 3-get-api-keys
 ### 3. Get API keys
 
 Follow `docs/FREE_API_SETUP.md` to get:
@@ -617,6 +628,7 @@ Follow `docs/FREE_API_SETUP.md` to get:
 - Hugging Face key
 - DeepSeek key
 
+@phase 4-configure
 ### 4. Configure
 
 ```bash
@@ -629,12 +641,14 @@ Set:
 - Local model for Loki/Ada: `3b` (default)
 - Rotation layer: `enabled`
 
+@phase 5-start-the-orchestrator
 ### 5. Start the orchestrator
 
 ```bash
 willow orient
 ```
 
+@phase 6-start-agents
 ### 6. Start agents
 
 ```bash
@@ -644,6 +658,7 @@ willow agent start hanuman
 willow agent start jeles
 ```
 
+@phase 7-create-a-project
 ### 7. Create a project
 
 ```bash
@@ -1276,3 +1291,21 @@ This is the complete, unified packet. It incorporates everything we discussed:
 - **Complete documentation** — every user type has a guide
 
 Ready for your review.
+
+@phase constraints
+## Constraints
+
+@constraint severity="normal"
+**No credit card required. All free.**
+
+@constraint severity="critical"
+**Agents never see rate limits.**
+
+@constraint severity="normal"
+- No credit card required
+- No cloud infrastructure
+- No GPU needed
+- Everything runs on free APIs and local models
+
+@constraint severity="normal"
+No ceremony. Just state.

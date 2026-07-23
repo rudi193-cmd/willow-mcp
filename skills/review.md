@@ -3,6 +3,8 @@ name: review
 description: Code review the current branch — check tests, security, placeholders, and patterns before suggesting merge
 ---
 
+@markdownai v1.0
+
 # /review
 
 Branch review checklist. Run before merging any PR. Catches missing tests,
@@ -18,6 +20,7 @@ See also: `worktree.md` (PR-only flow), `tdd.md` (test expectations).
 
 ## Steps
 
+@if consumer="ai"
 1. **See the diff** — `git diff master...HEAD` for the full branch diff, or
    `git diff HEAD` for uncommitted changes.
 
@@ -43,6 +46,7 @@ See also: `worktree.md` (PR-only flow), `tdd.md` (test expectations).
 4. **Report the verdict:**
    - **Passed**: list what was checked, confirm green, suggest merge if appropriate
    - **Failed**: list specific files and lines that need fixing before merge
+@endif
 
 ## Rules
 
@@ -68,3 +72,8 @@ See also: `worktree.md` (PR-only flow), `tdd.md` (test expectations).
 - Test coverage gaps are worth flagging even if they don't block merge — at minimum,
   note them.
 - "Follows existing patterns" means look at adjacent code, not just the changed lines.
+
+## Constraints
+
+@constraint severity=error
+Never approve without running tests — "looks right" is not a review. Security issues block merge, always — especially egress, binding, and manifest edits. Placeholders (`TODO`, `TBD`, `raise NotImplementedError`) block merge.

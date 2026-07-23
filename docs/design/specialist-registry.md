@@ -1,3 +1,11 @@
+---
+kind: doc
+name: specialist-registry-schema-draft
+description: "DRAFT schema unifying specialist definition (Function/Name/Roles/persona) across willow-mcp's JSON registry, Postgres table, and compiled manifests; permissions are ratified in permissions-matrix.md but registry source-of-truth and fail-closed defaults remain open."
+---
+
+@markdownai v1.0
+
 # Specialist registry — schema (DRAFT)
 
 *Status: **DRAFT** — 2026-07-09*  
@@ -7,6 +15,7 @@ Companion: `agent-seed.md` · `pgp-and-persona.md` · `human-orchestrator.md` ·
 
 ---
 
+@phase 1-purpose
 ## 1. Purpose
 
 Unify specialist definition in **one registry** that serves:
@@ -23,6 +32,7 @@ Today this is scattered across `roles.py`, `agent_roster.json`, `persona_envelop
 
 ---
 
+@phase 2-column-schema-user-machine
 ## 2. Column schema (user + machine)
 
 | Column | JSON / PG field | User label | Notes |
@@ -56,6 +66,7 @@ Today this is scattered across `roles.py`, `agent_roster.json`, `persona_envelop
 
 ---
 
+@phase 3-function-vs-name-vs-roles
 ## 3. Function vs Name vs Roles
 
 ```
@@ -71,6 +82,7 @@ role       primary tag        one default per packet
 
 ---
 
+@phase 4-specialist-rows-identity-mandate
 ## 4. Specialist rows (identity + mandate)
 
 > Policy: `permissions-matrix.md`. Registry seed: `bundle/config/specialists.json`.
@@ -97,6 +109,7 @@ willow-mcp compile-agents --force  # overwrite all
 
 ---
 
+@phase 5-json-schema-standalone-seed
 ## 5. JSON schema (standalone / seed)
 
 **Path:** `$WILLOW_HOME/config/specialists.json` (materialized by `willow-mcp-init` from product bundle).
@@ -134,6 +147,7 @@ willow-mcp compile-agents --force  # overwrite all
 
 ---
 
+@phase 6-postgres-preloaded-when-db-wired
 ## 6. Postgres (preloaded — when DB wired)
 
 ```sql
@@ -164,6 +178,7 @@ Seed from bundle JSON on `willow-mcp-init` or migration. Bitemporal versioning o
 
 ---
 
+@phase 7-orchestrator-seat-not-a-specialist-row
 ## 7. Orchestrator seat (not a specialist row)
 
 | Function | Name | Seat | Entry | Picker | Permissions |
@@ -174,6 +189,7 @@ Stored separately: `config/orchestrator.json` or top-level flag `human_only: tru
 
 ---
 
+@phase 8-materialization-pipeline
 ## 8. Materialization pipeline
 
 ```
@@ -189,6 +205,7 @@ specialists.json (or PG specialists)
 
 ---
 
+@phase 9-session-behavior-specialists
 ## 9. Session behavior (specialists)
 
 ### Dispatch path (default)
@@ -217,6 +234,7 @@ session_enter(hanuman, session_id)
 
 ---
 
+@phase 10-user-created-extensions-tbd
 ## 10. User-created extensions (TBD)
 
 | Type | Allowed? | Notes |
@@ -227,6 +245,7 @@ session_enter(hanuman, session_id)
 
 ---
 
+@phase 11-implementation-slices
 ## 11. Implementation slices
 
 | Slice | Deliverable | Blocked on |
@@ -241,6 +260,7 @@ session_enter(hanuman, session_id)
 
 ---
 
+@phase 12-deprecations
 ## 12. Deprecations
 
 | Current | Future |
@@ -252,6 +272,7 @@ session_enter(hanuman, session_id)
 
 ---
 
+@phase 13-open-decisions-operator
 ## 13. Open decisions (operator)
 
 1. ~~**Permissions per role**~~ — ratified in `permissions-matrix.md` (2026-07-09).
@@ -263,3 +284,11 @@ session_enter(hanuman, session_id)
 ---
 
 *Written after session crash mid-design. Permissions explicitly undecided — update §4 table when policy is ratified.*
+
+---
+
+@phase constraints
+## Constraints
+
+@constraint severity="normal"
+**No interactive persona picker on specialist seats** — charter orchestrator only (`pgp-and-persona.md`).

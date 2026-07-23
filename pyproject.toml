@@ -52,6 +52,9 @@ nest = [
 web = [
     "requests>=2.31,<3.0",
 ]
+# Sentry telemetry for the Bug Smash observability experiment. Opt-in only:
+# inert unless WILLOW_SENTRY_DSN is set at runtime (see observability.py).
+observability = ["sentry-sdk>=2.0,<3.0"]
 voice = [
     "numpy>=1.26,<3.0",
     "openwakeword>=0.6,<1.0",
@@ -74,7 +77,7 @@ willow-mcp-integrations = "willow_mcp.integrations:main"
 Homepage = "https://github.com/rudi193-cmd/willow-mcp"
 Repository = "https://github.com/rudi193-cmd/willow-mcp"
 Issues = "https://github.com/rudi193-cmd/willow-mcp/issues"
-Changelog = "https://github.com/rudi193-cmd/willow-mcp/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/rudi193-cmd/willow-mcp/blob/master/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/willow_mcp"]
