@@ -1,3 +1,11 @@
+---
+kind: doc
+name: permissions-matrix-ratified-policy
+description: "Ratified policy for how manifest permissions, deny-tool overlays, and store scoping are enforced across Willow specialists."
+---
+
+@markdownai v1.0
+
 # Permissions matrix — ratified policy
 
 *Status: **RATIFIED** — 2026-07-09*  
@@ -7,6 +15,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 
 ---
 
+@phase 1-how-enforcement-works
 ## 1. How enforcement works
 
 1. **Allow** — manifest `permissions` expands via `PERMISSION_GROUPS` in `gate.py` (groups and literal tool names).
@@ -19,6 +28,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 
 ---
 
+@phase 2-permission-groups-reference
 ## 2. Permission groups (reference)
 
 | Group | Tools (summary) |
@@ -44,6 +54,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 
 ---
 
+@phase 3-specialist-matrix
 ## 3. Specialist matrix
 
 | Name | permissions | deny_tools | store_scope | Rationale |
@@ -57,6 +68,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 
 ---
 
+@phase 4-orchestrator-seat-willow
 ## 4. Orchestrator seat (willow)
 
 | Field | Value |
@@ -71,6 +83,7 @@ Agents cannot `session_enter(willow, dispatch_id=…)`. Write tools require huma
 
 ---
 
+@phase 5-change-control
 ## 5. Change control
 
 1. Edit `bundle/config/specialists.json` (wheel) or `$WILLOW_HOME/config/specialists.json` (operator overlay).

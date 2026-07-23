@@ -1,9 +1,18 @@
+---
+kind: doc
+name: design-fleet-wide-gap-backlog-gap-log-gap-list-gap-resolve-gap-promote
+description: "Design for the fleet-wide gap backlog (gap_log/gap_list/gap_resolve/gap_promote) — shipped in PR #54, first consumed by ask-jeles's verified corpus."
+---
+
+@markdownai v1.0
+
 # Design: Fleet-Wide Gap Backlog (`gap_log` / `gap_list` / `gap_resolve` / `gap_promote`)
 
 Status: **SHIPPED** — PR #54 (`claude/gap-backlog` → `master`).
 Companion: `ask-jeles`'s corpus design doc — `apps/ask-jeles/docs/design/verified-corpus.md`
 in `rudi193-cmd/safe-app-store` (companion PR #27) — the backlog's first consumer.
 
+@phase 1-problem-statement
 ## 1. Problem statement
 
 A verified-knowledge system needs to know what it doesn't know, not just
@@ -26,6 +35,7 @@ So a corpus that answers questions well still had no way to *notice its
 own edges* — no self-observed backlog for someone (human or agent) to
 work from.
 
+@phase 2-design-principles
 ## 2. Design principles
 
 1. **Generic, not corpus-specific.** `gap_log`/`gap_list`/`gap_resolve`
@@ -68,6 +78,7 @@ work from.
    dedup, not treated as a bug (see the equivalent note in ask-jeles's
    `corpus.py`).
 
+@phase 3-states-and-shape
 ## 3. States and shape
 
 A gap moves through exactly three states:
@@ -104,6 +115,7 @@ entry, and `confirmed_by` (non-empty) — the same "who's vouching for
 this" requirement ask-jeles's own nugget schema uses independently
 (`verified_by`), arrived at separately but landing on the same shape.
 
+@phase 4-permissions
 ## 4. Permissions
 
 ```
@@ -114,6 +126,7 @@ gap_promote  -> gap_promote            (separate group — see §2.4)
 
 All four are included in `full_access`, same as every other tool group.
 
+@phase 5-what-shipped-alongside-this-that-wasn-t-originally-scoped
 ## 5. What shipped alongside this that wasn't originally scoped
 
 Review surfaced one gap in the sanitizer while building this: `sources`
@@ -122,6 +135,7 @@ had no size bounds, unlike `content`/`tags`. Fixed in the same PR —
 `sources` gets the same list-length/item-length bounds as `tags`; `topic`
 gets the same string-size truncation as `content`/`question`/`answer`.
 
+@phase 6-open-questions-not-yet-decided
 ## 6. Open questions (not yet decided)
 
 - Should promotion candidates ever be **auto-drafted** — something reads
@@ -142,3 +156,16 @@ gets the same string-size truncation as `content`/`question`/`answer`.
   run happened only against ask-jeles's forwarder hitting a real stdio
   session (SOIL side confirmed working end-to-end); the Postgres
   promotion path itself is unit-tested, not live-verified.
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+A gap's state machine is exactly three states, one direction, no skipping:
+`open` — logged, nobody has acted on it. `resolved` — bookkeeping only
+(`gap_resolve`, optional `note`); never writes to the knowledge base, so
+"someone is working on this" is visible without pretending an answer is
+trusted yet. `promoted` — `gap_promote` succeeded; `promoted_to` names the
+resulting knowledge atom id; terminal — a promoted gap can't be logged into
+again (`gap_log` on an already-promoted key reports the existing promotion
+instead of reopening it) or resolved again.
