@@ -90,7 +90,18 @@ fi
 # seat). Generated after the vault restore so vault-supplied values land here.
 # WILLOW_HUMAN_ORCHESTRATOR rides along only for the willow operator seat, per
 # skills/session-start.md. Never clobber an existing file (you may have added
-# your own servers/env).
+# your own servers/env) — with one exception: a warm container can carry a
+# stale .mcp.json written before the env block existed (pre-B-41). That file
+# has no WILLOW_HOME, so the server it spawns defaults to ~/.willow and
+# gate-denies every seat, and never-clobber would preserve the breakage
+# forever. An env-less willow-mcp entry is exactly that stale form — set it
+# aside (kept as .mcp.json.stale.bak, never deleted) and regenerate.
+if [ -f "$REPO/.mcp.json" ] \
+     && grep -q '"willow-mcp"' "$REPO/.mcp.json" \
+     && ! grep -q '"WILLOW_HOME"' "$REPO/.mcp.json"; then
+  mv "$REPO/.mcp.json" "$REPO/.mcp.json.stale.bak"
+  echo "stale env-less .mcp.json set aside as .mcp.json.stale.bak — regenerating" >&2
+fi
 if [ ! -f "$REPO/.mcp.json" ]; then
   _orch_line=""
   if [ "$WILLOW_APP_ID" = "willow" ]; then

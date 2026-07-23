@@ -26,6 +26,15 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   keyed `@env` silently rendered `""`.
 
 ### Fixed
+- **B-41 follow-up: a warm container kept its pre-B-41 `.mcp.json` broken
+  forever.** The SessionStart hook's never-clobber rule preserved any existing
+  `.mcp.json` — including the stale env-less form written before B-41 embedded
+  the env block, so the server it spawned still defaulted to `~/.willow` and
+  gate-denied every seat on every reconnect (observed live on a container
+  cloned before e125c64). The hook now recognizes that one stale form — a
+  `willow-mcp` entry with no `WILLOW_HOME` — sets it aside as
+  `.mcp.json.stale.bak`, and regenerates; a file with an env block (or with
+  your own servers and no willow-mcp entry) is still never touched.
 - **B-41 (issue #166): the web-sandbox MCP server booted blind.** The
   SessionStart hook wrote env to `$CLAUDE_ENV_FILE`, which shells inherit but
   the client-spawned stdio server does not — it defaulted `WILLOW_HOME` to an

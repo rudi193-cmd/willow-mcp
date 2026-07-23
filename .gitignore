@@ -15,3 +15,4 @@ logs/
 # Local MCP client config — points at your own sandbox WILLOW_HOME / Postgres.
 # Host-specific (absolute paths, PG user); the committed template is .mcp.json.example.
 .mcp.json
+.mcp.json.stale.bak
