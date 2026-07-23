@@ -33,6 +33,10 @@ willow-mcp worker --lane fast      # daemon: polls until stopped
 willow-mcp worker --once           # drain whatever is queued, then exit
 ```
 
+(In the Claude Code web sandbox the SessionStart hook auto-starts a fast-lane
+worker after bootstrap — but heartbeats are the truth, not the hook: check
+`fleet_health` before trusting a submission, same as anywhere else.)
+
 **Before trusting a submission, ask whether anything is draining the queue.**
 You no longer have to guess. `fleet_health` reports live workers directly:
 

@@ -20,6 +20,13 @@ it (`schema_confirm_mapping`) — the write-path gate described in
   currently unmapped to become writable.
 - You're pointing willow-mcp at a new database for the first time.
 
+> **Sandbox note:** the dev bootstrap auto-confirms mappings for the tables it
+> itself just created from the repo's own DDL, behind three guards (existing
+> artifacts untouched; every field exact; live columns == repo DDL) — see
+> `src/willow_mcp/sandbox_confirm.py`. If you're seeing `unconfirmed_schema`
+> anyway, you're on an adopted/foreign schema the guards declined, which is
+> exactly this skill's territory. Do not edit the mapping artifact by hand.
+
 ## Steps
 
 @if consumer="ai"
