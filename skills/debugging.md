@@ -31,6 +31,12 @@ and fixes-without-tests.
 8. **Commit** — message: `fix(<module>): <what was wrong> — <why it was wrong>`
 @endif
 
+## Rules
+
+- Never skip step 1. Prior context often contains the root cause.
+- Never fix without a test. A fix without a test is just a guess.
+- Step 6 is a hard constraint: surgical only. Bug fixes don't get free refactors.
+
 ## willow-mcp tips
 
 - **Unit tests:** `pytest tests/test_<area>.py -q` — most tool logic is plain Python.
@@ -49,9 +55,7 @@ and fixes-without-tests.
 - The commit message format (`fix(<module>): what — why`) is the most useful part of
   the git log six months from now.
 
-## Rules
+## Constraints
 
-@constraint severity=critical
-- Never skip step 1. Prior context often contains the root cause.
-- Never fix without a test. A fix without a test is just a guess.
-- Step 6 is a hard constraint: surgical only. Bug fixes don't get free refactors.
+@constraint severity=error
+Never fix without a test — a fix without a test is just a guess. Never skip step 1 (search for prior context); it often contains the root cause.

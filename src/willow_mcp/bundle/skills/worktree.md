@@ -116,5 +116,4 @@ willow-mcp-compile --force
 ## Constraints
 
 @constraint severity=critical
-**Hard constraint.** Every change goes through a feature branch and a pull request.
-Direct commits to `master` / `main` are banned — no exceptions, including "quick fixes."
+Every change goes through a feature branch and a pull request. Direct commits to `master` / `main` are banned — no exceptions, including "quick fixes."

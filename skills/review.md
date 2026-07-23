@@ -48,6 +48,13 @@ See also: `worktree.md` (PR-only flow), `tdd.md` (test expectations).
    - **Failed**: list specific files and lines that need fixing before merge
 @endif
 
+## Rules
+
+- Never approve without running tests. "Looks right" is not a review.
+- Security issues block merge. Always — especially egress, binding, and manifest edits.
+- Placeholders block merge. A `TODO` in merged code is a future bug.
+- Patterns matter — code that works but doesn't fit the codebase creates drift.
+
 ## willow-mcp checklist (when relevant)
 
 | Area | What to verify |
@@ -66,10 +73,7 @@ See also: `worktree.md` (PR-only flow), `tdd.md` (test expectations).
   note them.
 - "Follows existing patterns" means look at adjacent code, not just the changed lines.
 
-## Rules
+## Constraints
 
-@constraint severity=critical
-- Never approve without running tests. "Looks right" is not a review.
-- Security issues block merge. Always — especially egress, binding, and manifest edits.
-- Placeholders block merge. A `TODO` in merged code is a future bug.
-- Patterns matter — code that works but doesn't fit the codebase creates drift.
+@constraint severity=error
+Never approve without running tests — "looks right" is not a review. Security issues block merge, always — especially egress, binding, and manifest edits. Placeholders (`TODO`, `TBD`, `raise NotImplementedError`) block merge.

@@ -108,5 +108,7 @@ Do not accept "good enough for now" when the artifact carries permanent load.
 
 Not a specialist overlay — human operator seat only. See `session-start.md` § Willow.
 
+## Constraints
+
 @constraint severity=critical
 Agents must never use `app_id=willow`.

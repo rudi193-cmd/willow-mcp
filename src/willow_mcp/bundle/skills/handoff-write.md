@@ -1,6 +1,6 @@
 ---
 name: handoff-write
-description: Session closeout checklist — pick the right handoff tool (session_handoff_write vs handoff_write_v4), run the pre-close scan, and write the closeout
+description: Session closeout checklist — pick the right closeout tool, run the pre-close scan, and write the handoff correctly
 ---
 
 @markdownai v1.0
@@ -19,6 +19,8 @@ ending a session.
 | Willow operator seat (`app_id=willow`) | `session_handoff_write` | Human orchestrator path |
 | Specialist, no dispatch packet | `session_handoff_write` or `context_save` | Human entry |
 | Specialist, dispatch packet active | `handoff_write_v4` | Requires `dispatch_id` |
+
+**Do not** call `handoff_write_v4` without a `dispatch_id`.
 
 ---
 
@@ -76,6 +78,7 @@ Include: what was done, what is blocked, what the next session should do first.
 
 ## 4. After write
 
+- Do not start a new `session_enter` in the same conversation without operator intent.
 - Operator merges PRs and runs `willow-mcp-compile --force` when registry permissions change.
 - Egress leases expire on their own — no need to revoke unless early lockdown is desired.
 
@@ -91,4 +94,3 @@ Include: what was done, what is blocked, what the next session should do first.
 
 @constraint severity=error
 Do not call `handoff_write_v4` without a `dispatch_id`.
-Do not start a new `session_enter` in the same conversation without operator intent.

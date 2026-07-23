@@ -74,10 +74,11 @@ Ceiling TTL is 3h. Default 30m. Lease must name the same `app_id` as its file.
 
 ## What agents should say
 
-@if consumer="ai"
 > This needs egress to push the branch. Please run:
 > `willow-mcp grant-net hanuman --ttl 15m --reason "git push feat/foo"`
-@endif
+
+Never: edit `settings.global.json`, run `grant-net`, or add `task_net` to a manifest
+so the agent's own next call succeeds.
 
 ---
 
@@ -102,5 +103,4 @@ is parallel. No agent-side shortcut.
 ## Constraints
 
 @constraint severity=critical
-Never: edit `settings.global.json`, run `grant-net`, or add `task_net` to a manifest
-so the agent's own next call succeeds.
+Never: edit `settings.global.json`, run `grant-net`, or add `task_net` to a manifest so the agent's own next call succeeds. No MCP tool mints a lease or changes consent — agents may only request; the operator confirms.

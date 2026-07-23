@@ -29,6 +29,13 @@ the wrong thing.
 6. **Stop** — do not implement until the user confirms the approach.
 @endif
 
+## Rules
+
+- Context search first. Never brainstorm blind.
+- Three approaches minimum. Two is lazy, four is stalling.
+- Constraints are hard gates, not suggestions.
+- Step 6 is not optional. "I'll just start" skips the whole point.
+
 ## willow-mcp constraints to flag
 
 | Area | Gotcha |
@@ -49,10 +56,7 @@ the wrong thing.
 - If the user rejects all three approaches, that's data — ask what's missing before
   generating more.
 
-## Rules
+## Constraints
 
-@constraint severity=critical
-- Context search first. Never brainstorm blind.
-- Three approaches minimum. Two is lazy, four is stalling.
-- Constraints are hard gates, not suggestions.
-- Step 6 is not optional. "I'll just start" skips the whole point.
+@constraint severity=error
+Never implement or start building until the user confirms the recommended approach (Step 6: "Stop — do not implement until the user confirms the approach."). Confirmation is not optional.

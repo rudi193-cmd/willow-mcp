@@ -20,6 +20,7 @@ for the `--serve` process and adds/removes the matching http entry in
 
 ## Steps
 
+@if consumer="ai"
 **1. Map the request to an action.**
 
 | User intent | Command |
@@ -50,10 +51,11 @@ on and off" note for details.
 changed, so the client must reconnect to pick it up. On `on`, if they already
 signed in once, the cached credential is reused — no OAuth screen reappears
 unless the credential was cleared (that is expected, not a failure).
+@endif
 
 ## What this skill will not do
 
-@constraint severity=error
+@constraint severity=critical
 - It does not hand-edit `.mcp.json` directly — the script owns that toggle so
   the entry and the running service never drift apart.
 - It does not disable OAuth or the identity-binding gate to make serve mode

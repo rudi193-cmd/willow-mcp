@@ -1,6 +1,6 @@
 ---
 name: session-start
-description: Mandatory session boot skill — call session_enter, then follow the Willow orchestrator or specialist open sequence
+description: Session boot checklist — call session_enter, apply the persona overlay, and follow the Willow or specialist open sequence
 ---
 
 @markdownai v1.0
@@ -15,9 +15,11 @@ Inference client (Cursor, Claude Code, local LLM host, …) is replaceable — t
 
 ## Willow (`app_id=willow`)
 
-Human operator seat only.
+Human operator seat only. Agents must not use `app_id=willow`.
 
 Host MCP env must include **`WILLOW_HUMAN_ORCHESTRATOR=1`**. Specialist configs must omit it.
+
+**Never** pass `dispatch_id` to `session_enter` for willow — rejected (`orchestrator_human_only`).
 
 ### Open (every Willow session)
 
@@ -88,6 +90,8 @@ When `WILLOW_HOME` is a data-vault box only (no charter mount), skip the charter
 | Normal prompt, no `dispatch_id` | **human** | `session_handoff_write` or `context_save` |
 | `dispatch_id` / pending packet | **dispatch** | `handoff_write_v4` |
 
+No `WILLOW_HUMAN_ORCHESTRATOR` on specialist MCP configs.
+
 ### Open (every specialist session)
 
 | Step | Action |
@@ -127,6 +131,4 @@ Full overlay text: `persona-overlays.md`.
 ## Constraints
 
 @constraint severity=critical
-Agents must not use `app_id=willow`.
-**Never** pass `dispatch_id` to `session_enter` for willow — rejected (`orchestrator_human_only`).
-No `WILLOW_HUMAN_ORCHESTRATOR` on specialist MCP configs.
+Agents must not use `app_id=willow` — that seat is the human operator only. Never pass `dispatch_id` to `session_enter` for willow; it is rejected (`orchestrator_human_only`).
