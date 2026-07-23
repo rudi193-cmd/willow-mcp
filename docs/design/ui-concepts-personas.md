@@ -1,3 +1,11 @@
+---
+kind: "doc"
+name: "ui-concept-sketches-eight-more-audiences"
+description: "Eight self-contained HTML persona mockups for willow-mcp, each rendering the same underlying facts through a different technical subculture's authentic visual language."
+---
+
+@markdownai v1.0
+
 # UI concept sketches — eight more audiences
 
 Companion to `ui-concepts.md` (dev-facing + general-audience tree mockups).
