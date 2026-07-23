@@ -12,3 +12,9 @@ As the copyright holder of both works, the author relicenses this adaptation
 under this project's Apache-2.0 license. The generic rules seed
 (src/willow_mcp/nest/rules.seed.json) is original to this project and contains
 none of the upstream seed's operator-specific content.
+
+The MarkdownAI (mai) tools (src/willow_mcp/mai/) — the @markdownai document
+engine and its ten mai_* MCP tools — are vendored from rudi193-cmd/willow-2.0
+(sap/mai/parser.py and sap/mai/tools.py), which is copyright Sean Campbell under
+the PolyForm Noncommercial License 1.0.0. As the copyright holder of both works,
+the author relicenses this vendored copy under this project's Apache-2.0 license.

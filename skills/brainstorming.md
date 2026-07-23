@@ -3,6 +3,8 @@ name: brainstorming
 description: Structured brainstorm before any plan or implementation — search existing context first, generate three approaches, recommend one, stop until confirmed
 ---
 
+@markdownai v1.0
+
 # /brainstorming
 
 Use **before** entering plan mode or starting any implementation. Prevents building
@@ -16,6 +18,7 @@ the wrong thing.
 
 ## Steps
 
+@if consumer="ai"
 1. **Search existing context** — `knowledge_search`, grep the repo, read
    `docs/design/` and `docs/BUGS.md` before forming opinions. Never brainstorm in a
    vacuum when prior context exists.
@@ -24,6 +27,7 @@ the wrong thing.
 4. **Recommend one** — which and why in 2 sentences.
 5. **Flag constraints** — does this touch areas with known gotchas? Note them (see below).
 6. **Stop** — do not implement until the user confirms the approach.
+@endif
 
 ## Rules
 
@@ -51,3 +55,8 @@ the wrong thing.
   recommendation.
 - If the user rejects all three approaches, that's data — ask what's missing before
   generating more.
+
+## Constraints
+
+@constraint severity=error
+Never implement or start building until the user confirms the recommended approach (Step 6: "Stop — do not implement until the user confirms the approach."). Confirmation is not optional.

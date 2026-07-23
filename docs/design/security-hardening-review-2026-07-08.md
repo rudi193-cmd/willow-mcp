@@ -1,3 +1,11 @@
+---
+kind: doc
+name: willow-mcp-security-hardening-review-2026-07-08
+description: "External review of willow-mcp covering security hardening, performance, architecture, testing/reliability, developer experience, and observability, with a prioritized action list and a 7.5/10 overall score."
+---
+
+@markdownai v1.0
+
 <!--
 PROVENANCE: converted 2026-07-13 (session e2b2a0da, willow seat) from
 ~/Desktop/Nest/"Security Hardening Deep.txt" (nest intake, mtime 2026-07-08
@@ -39,6 +47,7 @@ UNRATIFIED external review — adoption decisions are the operator's.
 
 ### Potential Hardening Opportunities
 
+@phase 1-shell-command-injection-in-task-queue
 #### 1. **Shell Command Injection in Task Queue**
 ```python
 # Risk: If task_submit takes free-form shell commands without sanitization
@@ -56,6 +65,7 @@ UNRATIFIED external review — adoption decisions are the operator's.
 - Consider adding `task_submit` parameter validation: `command` should be a whitelist of allowed binaries, not a free string
 - Document that `task_submit` is **disabled by default** (require explicit manifest permission)
 
+@phase 2-environment-variable-exposure-in-serve-mode
 #### 2. **Environment Variable Exposure in Serve Mode**
 Your README already warns about this, which is good. But you could go further:
 
@@ -74,6 +84,7 @@ def log_effective_config():
 - Add a `--debug-config` flag to `willow-mcp --serve` that prints all resolved config values
 - In systemd unit, explicitly set `EnvironmentFile=-/etc/willow-mcp.conf` so users have a clear place to put config
 
+@phase 3-api-rate-limiting
 #### 3. **API Rate Limiting**
 No indication of rate limiting in the current design. This matters because:
 - `store_search` and `knowledge_search` could be expensive
@@ -92,6 +103,7 @@ RATE_LIMITS = {
 }
 ```
 
+@phase 4-input-validation-depth
 #### 4. **Input Validation Depth**
 I can't see your internal validation, but ensure:
 - All `app_id` values are sanitized (no `../` path traversal in the filesystem lookup)
@@ -101,6 +113,7 @@ I can't see your internal validation, but ensure:
 
 **Check:** Scan your codebase for `f"SELECT ... WHERE {user_input}"` patterns.
 
+@phase 5-manifest-file-permissions
 #### 5. **Manifest File Permissions**
 ```bash
 # Who can create/modify manifests?
@@ -114,6 +127,7 @@ $WILLOW_HOME/mcp_apps/<app_id>/manifest.json
 
 **Action:** Document the expected filesystem permissions in the README.
 
+@phase 6-logging-audit-trail
 #### 6. **Logging & Audit Trail**
 Your `receipts_tail` tool is excellent. Enhance with:
 ```python
@@ -142,6 +156,7 @@ Your `receipts_tail` tool is excellent. Enhance with:
 
 ### Optimization Recommendations
 
+@phase 1-soil-sqlite-performance
 #### 1. **SOIL (SQLite) Performance**
 ```sql
 -- Ensure these indexes exist
@@ -155,6 +170,7 @@ CREATE INDEX IF NOT EXISTS idx_store_soft_delete ON store(soft_deleted_at);
 - Document that `store_list` with no filters should be paginated (or add a `limit` param)
 - Consider adding `ANALYZE;` after bulk operations to keep query planner fresh
 
+@phase 2-postgres-knowledge-base-performance
 #### 2. **Postgres Knowledge Base Performance**
 ```sql
 -- Recommended indexes
@@ -170,6 +186,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_kb_fts ON knowledge_base USING GIN(t
 - Mention required Postgres extensions (`pg_trgm` for fuzzy search, if you use it)
 - Document that `knowledge_search` performance is **index-dependent**
 
+@phase 3-task-queue-kart
 #### 3. **Task Queue (Kart)**
 ```python
 # Consider these queue management parameters
@@ -183,6 +200,7 @@ TASK_CLEANUP_AGE = 3600 * 24 * 7  # Keep completed tasks for 7 days
 - Expose these as env vars with sensible defaults
 - Document in the README under "Task Queue Configuration"
 
+@phase 4-http-serve-mode-performance
 #### 4. **HTTP Serve Mode Performance**
 ```python
 # Use an async HTTP server (you appear to be using something like uvicorn)
@@ -206,6 +224,7 @@ if __name__ == "__main__":
 
 **Action:** Document recommended `uvicorn` settings in the serve mode section.
 
+@phase 5-caching-strategy
 #### 5. **Caching Strategy**
 Consider adding optional caching for:
 - `schema_confirm_mapping` results (mapping is usually static)
@@ -238,6 +257,7 @@ CACHE_TTL = {
 
 ### Architectural Refinements
 
+@phase 1-database-connection-pooling
 #### 1. **Database Connection Pooling**
 ```python
 # Currently: likely creates a new connection per request
@@ -255,6 +275,7 @@ pool = AsyncConnectionPool(
 
 **Action:** Ensure both SOIL and Postgres use connection pooling in serve mode. Add `WILLOW_PG_POOL_SIZE` env var.
 
+@phase 2-health-check-endpoint
 #### 2. **Health Check Endpoint**
 Your `diagnostic_summary` is good, but for HTTP serve mode, add a dedicated health endpoint:
 ```python
@@ -272,6 +293,7 @@ Your `diagnostic_summary` is good, but for HTTP serve mode, add a dedicated heal
 
 **Action:** Add `GET /health` that checks all backends. Useful for Kubernetes liveness/readiness probes.
 
+@phase 3-graceful-shutdown
 #### 3. **Graceful Shutdown**
 ```python
 # In serve mode, handle SIGTERM/SIGINT
@@ -286,6 +308,7 @@ signal.signal(signal.SIGTERM, graceful_shutdown)
 
 **Action:** Add graceful shutdown handling to prevent connection leaks.
 
+@phase 4-configuration-validation-on-startup
 #### 4. **Configuration Validation on Startup**
 ```python
 # Validate all required config at startup, not lazily
@@ -301,6 +324,7 @@ def validate_config():
 
 **Action:** Add a `willow-mcp check` command that validates config without starting the server. Useful for operators.
 
+@phase 5-feature-flags
 #### 5. **Feature Flags**
 ```python
 # Allow enabling/disabling tools at build time or runtime
@@ -331,6 +355,7 @@ FEATURES = {
 
 ### Testing Recommendations
 
+@phase 1-unit-test-coverage-target
 #### 1. **Unit Test Coverage Target**
 ```bash
 # Aim for 80%+ coverage on critical paths:
@@ -345,6 +370,7 @@ pytest --cov=willow_mcp --cov-report=html
 
 **Action:** Add a GitHub Action that enforces coverage thresholds on PRs.
 
+@phase 2-integration-test-suite
 #### 2. **Integration Test Suite**
 ```python
 # test_integration.py
@@ -366,6 +392,7 @@ def test_schema_confirmation():
 
 **Action:** Add integration tests that run in CI. Use `docker-compose` for Postgres.
 
+@phase 3-security-regression-tests
 #### 3. **Security Regression Tests**
 ```python
 # test_security.py
@@ -384,6 +411,7 @@ def test_path_traversal_prevention():
 
 **Action:** Automate your security audit findings as regression tests.
 
+@phase 4-performance-benchmarking
 #### 4. **Performance Benchmarking**
 ```python
 # benchmark.py
@@ -400,6 +428,7 @@ def test_knowledge_search_1m_terms(benchmark):
 
 **Action:** Establish a baseline for each major tool. Track performance over time.
 
+@phase 5-chaos-engineering
 #### 5. **Chaos Engineering**
 ```python
 # test_chaos.py
@@ -418,6 +447,7 @@ def test_knowledge_search_1m_terms(benchmark):
 
 ### Based on the README and Tool List
 
+@phase 1-knowledge-ingest-and-schema-confirmation
 #### 1. **`knowledge_ingest` and Schema Confirmation**
 Your current workflow requires `schema_confirm_mapping` before writes. This is excellent. Ensure:
 
@@ -437,6 +467,7 @@ WILLOW_HOME/schemas/<table_name>_mapping.json
 
 **Action:** Document this persistent mapping store behavior.
 
+@phase 2-context-save-ttl-implementation
 #### 2. **`context_save` TTL Implementation**
 Ensure expired contexts are purged lazily (on read) AND by a background job:
 ```python
@@ -447,6 +478,7 @@ Ensure expired contexts are purged lazily (on read) AND by a background job:
 
 **Action:** Add `WILLOW_CONTEXT_CLEANUP_INTERVAL` env var (default 3600s).
 
+@phase 3-receipts-tail-audit-trail
 #### 3. **`receipts_tail` Audit Trail**
 Consider adding:
 ```python
@@ -462,6 +494,7 @@ receipts_tail(
 
 **Action:** Extend `receipts_tail` with filters for better auditability.
 
+@phase 4-fleet-status-and-agent-routing
 #### 4. **`fleet_status` and Agent Routing**
 This implies multi-agent support. Ensure:
 ```python
@@ -623,6 +656,7 @@ Based on this deep dive, here's what I recommend you tackle:
 
 ---
 
+@phase final-assessment
 ## Final Assessment
 
 | Category | Score (1-10) | Notes |

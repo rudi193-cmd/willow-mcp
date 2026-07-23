@@ -1,3 +1,11 @@
+---
+kind: doc
+name: willow-gate-willow-mcp-the-seam
+description: "Maps how willow-gate's agent-side HMAC binder composes with willow-mcp's existing authorization stack — identity, tier-vs-permission-groups, enforcement, session lifecycle, audit, and friction_floor — before the invasive wiring is built."
+---
+
+@markdownai v1.0
+
 # willow-gate ↔ willow-mcp: the seam
 
 Status: **proposal / mapping only** (no code yet). This pins how
@@ -35,6 +43,7 @@ resolution point.
 
 ## Layer-by-layer seam
 
+@phase 1-identity-two-binders-one-resolution-point
 ### 1. Identity — two binders, one resolution point
 - **Humans / serve mode:** unchanged — `identity_binding` maps OAuth `(issuer,
   subject) → app_id`, CLI-confirmed.
@@ -52,6 +61,7 @@ resolution point.
   app_ids fall back to today's manifest-only, trusted-host behavior. Same shape
   as `WILLOW_VAULT_RESTORE` being opt-in.
 
+@phase 2-trust-tier-vs-permission-groups-tier-is-a-ceiling-not-a-replacement
 ### 2. Trust tier vs permission groups — tier is a *ceiling*, not a replacement
 willow-gate's `allowed_tools` are **coarse classes** (`read, write, query,
 execute, admin`); willow-mcp's `PERMISSION_GROUPS` are **fine-grained**
@@ -81,6 +91,7 @@ egress lines (`integration_call` / `task_net`) that are *deliberately excluded
 from `full_access`* and granted on their own line. Export tools stay export-only
 at every tier below `write_export_allowed`.
 
+@phase 3-enforcement-seam-authorize-tool-inside-gate
 ### 3. Enforcement seam — `authorize_tool` inside `_gate`
 `_gate` is already the "authorize before dispatch, then receipt" point.
 willow-gate's `authorize_tool(session, tool, export=)` slots **inside** it: after
@@ -91,6 +102,7 @@ hook remains the *external* mirror of the same check (defense-in-depth).
 framework-dispatched, not a passed callable list — so the funnel is
 `authorize_tool`-in-`_gate`, never `bind_tools`.
 
+@phase 4-session-lifecycle-reconciliation-on-top-of-session-enter-handoff
 ### 4. Session lifecycle — reconciliation on top of session_enter/handoff
 - `check_in` ↔ `session_enter`: `session_enter` performs the willow-gate check-in
   (HMAC-verify, establish the bound tiered session subsequent `_gate` calls
@@ -102,6 +114,7 @@ framework-dispatched, not a passed callable list — so the funnel is
 - Defining willow-mcp's 13-field entry/exit declaration is its own schema task;
   can be a later phase.
 
+@phase 5-audit-receipts-gain-tier-announcement-policy
 ### 5. Audit — receipts gain tier + announcement policy
 Keep `ReceiptLog` as the record of every gated call; layer willow-gate's
 **graduated announcement volume** (louder for the *less* trusted) and
@@ -111,6 +124,7 @@ PGP-encrypted ledger for the announcement channel. Receipts already log every
 `announce.py`; the volume/`audit_level` policy is pure stdlib and the encrypted
 ledger is a pluggable `set_sink()`, so the base never imports python-gnupg (D5).**
 
+@phase 6-friction-floor-orthogonal-not-part-of-the-gate-seam
 ### 6. friction_floor — orthogonal, not part of the gate seam
 `friction_floor` watches the agent→**user relationship** (sycophantic mirroring
 during a user escalation), not access. It runs *outside* the model it watches,
@@ -454,3 +468,28 @@ visible next to `strict_trust_root`.
 Before any of this, upstream a fix (or a tracked issue) for willow-gate's
 unenforced `entry_allowed`, and write the read-universal policy call into the
 gate's docs so the seam's read semantics are chosen, not inherited.
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+- **H1 — session↔app_id binding is the whole ballgame (BLOCKER).** Every
+  willow-mcp tool takes `app_id` as a plaintext string. The HMAC binds a
+  *session*, but nothing ties a given MCP call to that session — a caller passing
+  `app_id=operator` rides operator's live session with no auth of its own. **The
+  full build must carry a per-call credential on every gated call; `app_id` alone
+  cannot bind.** Largest change; touches every tool signature. *Prototyped — see
+  "H1 prototype" below: a per-call HMAC signature (SIGNED) is the fix; a bearer
+  session token closes the ride but not replay.*
+
+@constraint severity="critical"
+**CLI, never a tool** (same constraint as `confirm-binding` — stdio-only, host
+that owns `$WILLOW_HOME`):
+- `willow-mcp register-agent <agent_id> --max-trust N [--generate | --secret-file P]`
+  — **requires an existing manifest** for `<agent_id>` (identity and ACL are
+  provisioned together; the seam ties `agent_id == app_id`), generates a 32-byte
+  secret when `--generate`, writes it `0600`, and prints it **once** for the
+  operator to install in the client.
+- `willow-mcp rotate-agent <agent_id>` / `revoke-agent <agent_id>` for lifecycle.
+- All are authority acts — excluded from every permission group and unreachable
+  from the MCP surface, upholding the sudo invariant.

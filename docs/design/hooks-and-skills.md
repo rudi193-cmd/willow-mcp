@@ -1,8 +1,17 @@
+---
+kind: doc
+name: design-hooks-and-skills-ship-alongside-tools-not-after
+description: "Design rule for willow-mcp: any new tool surface with a footgun or a multi-step human workflow ships its hook and/or skill in the same PR as the tool — covers the plugin packaging shape, the pre_tool_use.py contract, and the schema-confirm.md skill."
+---
+
+@markdownai v1.0
+
 # Design: Hooks and Skills Ship Alongside Tools, Not After
 
 Status: DRAFT — first hook + skill landing with this doc; not yet ratified as
 a hard process rule, but intended as one.
 
+@phase 1-problem-statement
 ## 1. Problem statement
 
 `willow-mcp` ships MCP tools with nothing that teaches an agent — or a human
@@ -22,6 +31,7 @@ a hard process rule, but intended as one.
 Both gaps share a root cause: hooks and skills were never part of "done" for
 a tool. This doc makes them part of "done" going forward.
 
+@phase 2-the-rule
 ## 2. The rule
 
 **Every new tool surface that has a footgun (a wrong-but-easy way to use it)
@@ -57,6 +67,7 @@ the crossing makes a mistake catchable and a deliberate crossing undeniable; it
 does not make the crossing impossible, and the docs must never let it read that
 way.
 
+@phase 3-packaging-shape
 ## 3. Packaging shape
 
 Bundled inside `willow-mcp` itself (not a separate plugin repo) — one
@@ -83,6 +94,7 @@ step; a user of a different MCP client (Cursor, a custom agent) is
 unaffected — they just don't get the Claude Code-specific hook/skill layer,
 same as they already don't get any client-specific integration today.
 
+@phase 4-pre-tool-use-py-contract
 ## 4. `pre_tool_use.py` contract
 
 Implements Claude Code's `PreToolUse` hook protocol: reads a JSON object
@@ -113,6 +125,7 @@ actually needs them:
   tool) — `Bash` covers the common case; broadening the match surface is
   cheap to add later if a real gap shows up, not worth guessing at now.
 
+@phase 5-schema-confirm-md-skill
 ## 5. `schema-confirm.md` skill
 
 A guided walkthrough for the human/agent workflow the design doc's §3.2
@@ -140,3 +153,20 @@ This intentionally does not let the skill silently call
 confirming a mapping is a human decision (design doc §3.4/§8: gated more
 strictly than a single write for exactly this reason), and the skill's job
 is to make that decision well-informed, not to skip it.
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+**Addendum (2026-07-09):** the rule held this time. B-32's egress leases
+(`willow-mcp grant-net`, `lease.py`) shipped in the same PR as their guardrail:
+a `Write|Edit|MultiEdit|NotebookEdit` matcher on `pre_tool_use.py`, plus a Bash
+matcher, that **blocks** any call writing a key which authorizes the agent's own
+egress — minting a lease under `mcp_apps/_net_leases/`, invoking `grant-net`, or
+editing a manifest to add `task_net`. `skills/kart-tasks.md` gained the three-key
+model in the same change. Note what the hook is and is not: it lives in the
+agent's own harness, so it is a **guardrail, not a control** — the control is
+`chown` plus `WILLOW_MCP_STRICT_TRUST_ROOT` (B-32 / L-NET-02). A hook that blocks
+the crossing makes a mistake catchable and a deliberate crossing undeniable; it
+does not make the crossing impossible, and the docs must never let it read that
+way.

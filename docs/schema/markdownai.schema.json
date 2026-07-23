@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rudi193-cmd/willow-mcp/docs/schema/markdownai.schema.json",
+  "title": "MarkdownAI (mai) document frontmatter",
+  "description": "Schema for the optional YAML frontmatter of a @markdownai v1.0 document. The frontmatter block, when present, MUST precede the `@markdownai v1.0` header (see docs/markdownai-schema.md). Field sets are grounded in the willow-mcp templates: skills (skills/*.md), ASSIGNMENT and CLOSEOUT (docs/templates/, bundle/templates/). The body grammar (directives) is specified in prose in docs/markdownai-schema.md, not here.",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "description": "Optional discriminator naming which template shape this document follows.",
+      "enum": ["skill", "command", "assignment", "closeout", "doc"]
+    }
+  },
+  "$defs": {
+    "priority": { "enum": ["high", "normal", "low"] },
+    "b17": {
+      "type": "string",
+      "description": "Five-char fleet handle stamped on many willow docs (e.g. SAPS1).",
+      "pattern": "^[A-Za-z0-9]{3,8}$"
+    },
+    "skill": {
+      "description": "A skill/command document — frontmatter matches willow-mcp skills/*.md.",
+      "type": "object",
+      "required": ["name", "description"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "argument-hint": { "type": "string" },
+        "b17": { "$ref": "#/$defs/b17" }
+      },
+      "additionalProperties": true
+    },
+    "assignment": {
+      "description": "A dispatch assignment — frontmatter formalizes the bold fields in ASSIGNMENT.template.md.",
+      "type": "object",
+      "required": ["title", "from", "to", "dispatch_id"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "from": { "type": "string", "description": "Orchestrator." },
+        "to": { "type": "string", "description": "Assigned agent." },
+        "role": { "type": "string", "description": "Persona / role for the agent." },
+        "priority": { "$ref": "#/$defs/priority" },
+        "dispatch_id": { "type": "string", "minLength": 1 },
+        "reply_to": { "type": "string" },
+        "b17": { "$ref": "#/$defs/b17" }
+      },
+      "additionalProperties": true
+    },
+    "closeout": {
+      "description": "A dispatch closeout — frontmatter formalizes the bold fields in CLOSEOUT.template.md.",
+      "type": "object",
+      "required": ["dispatch_id", "from", "to"],
+      "properties": {
+        "dispatch_id": { "type": "string", "minLength": 1 },
+        "date": { "type": "string", "description": "ISO date (YYYY-MM-DD)." },
+        "from": { "type": "string", "description": "Reporting agent." },
+        "to": { "type": "string", "description": "Orchestrator." },
+        "b17": { "$ref": "#/$defs/b17" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "skill" } }, "required": ["kind"] }, "then": { "$ref": "#/$defs/skill" } },
+    { "if": { "properties": { "kind": { "const": "command" } }, "required": ["kind"] }, "then": { "$ref": "#/$defs/skill" } },
+    { "if": { "properties": { "kind": { "const": "assignment" } }, "required": ["kind"] }, "then": { "$ref": "#/$defs/assignment" } },
+    { "if": { "properties": { "kind": { "const": "closeout" } }, "required": ["kind"] }, "then": { "$ref": "#/$defs/closeout" } }
+  ],
+  "additionalProperties": true
+}

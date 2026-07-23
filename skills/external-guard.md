@@ -3,6 +3,8 @@ name: external-guard
 description: Use willow_web_search and willow_web_fetch instead of native web tools — guarded egress with injection scan
 ---
 
+@markdownai v1.0
+
 # /external-guard — Open web via MCP
 
 Native IDE **WebSearch** and **WebFetch** are blocked when the willow-mcp
@@ -61,6 +63,7 @@ willow_web_fetch(app_id="willow", url="https://…", wrap=true)
 
 ## Rules
 
+@constraint severity=critical
 - Discover URLs with `willow_web_search` when you do not already have a canonical link.
 - Never use native WebSearch/WebFetch — the hook blocks them.
 - Do not bypass guard blocks by re-fetching through Bash/curl — use MCP or ask the operator.

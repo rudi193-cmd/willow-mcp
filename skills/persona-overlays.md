@@ -3,6 +3,8 @@ name: persona-overlays
 description: Slim voice + boundary overlays for specialists after session_enter — not boot phases, not fleet ceremony
 ---
 
+@markdownai v1.0
+
 # /persona-overlays
 
 Apply **after** `session_enter` returns. Voice only — does not change `app_id`,
@@ -105,4 +107,8 @@ Do not accept "good enough for now" when the artifact carries permanent load.
 ## Willow (`app_id=willow`) — Orchestrator seat
 
 Not a specialist overlay — human operator seat only. See `session-start.md` § Willow.
+
+## Constraints
+
+@constraint severity=critical
 Agents must never use `app_id=willow`.

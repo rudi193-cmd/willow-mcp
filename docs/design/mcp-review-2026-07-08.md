@@ -1,3 +1,11 @@
+---
+kind: doc
+name: willow-mcp-external-review-2026-07-08
+description: "External review of willow-mcp — client-side testing plus a source read surfacing a task_net authorization bypass, a SOIL store cross-app isolation gap, and further findings across execution, protocol hygiene, packaging, and missing tools."
+---
+
+@markdownai v1.0
+
 # willow-mcp — External Review (2026-07-08)
 
 Independent pass over willow-mcp done from the client side first (real tool
@@ -13,6 +21,7 @@ list: a live authorization bypass in `task_submit`, and a cross-app data
 isolation gap in the SOIL store. Both are demonstrated against current code,
 not theoretical.
 
+@phase 1-kart-task-execution-the-queue-accepts-work-nothing-may-ever-run
 ## 1. Kart / task execution — the queue accepts work nothing may ever run
 
 `task_submit` only inserts a row into `tasks` with `status='pending'`
@@ -32,6 +41,7 @@ failing on real task text, not sandbox failures.
 `diagnostic_summary` so "queued, unattended" is distinguishable from "queued,
 about to run" without shelling out to `ps aux`.
 
+@phase 2-security
 ## 2. Security
 
 ### 2a. `task_net` gate is bypassable via the task text itself (current code, not fixed by B-19)
@@ -114,6 +124,7 @@ live `information_schema` introspection, never raw caller strings), path
 traversal (collection/table names regex-validated before touching the
 filesystem).
 
+@phase 3-mcp-protocol-hygiene
 ## 3. MCP protocol hygiene
 
 - **No tool annotations** — all 25 tools are bare `@mcp.tool()`
@@ -141,6 +152,7 @@ filesystem).
   `fleet_status`) are exposed as Tools rather than MCP Resources, which
   would be a more idiomatic fit and let clients list them without a call.
 
+@phase 4-packaging-discoverability
 ## 4. Packaging / discoverability
 
 - Some docstrings are excellent — `task_submit`'s states the exact
@@ -160,6 +172,7 @@ filesystem).
 - `pip install willow-mcp` alone gets a working SOIL store and nothing
   else — no `willow-mcp init-db`, no manifest scaffold command.
 
+@phase 5-tools-that-look-obviously-missing
 ## 5. Tools that look obviously missing
 
 Confirmed against the actual registry (25 tools, `grep '@mcp.tool()' -A3
@@ -188,6 +201,7 @@ write-then-forget is well covered; look-back/undo/correct is not.
   editing the mapping file directly (which `schema_confirm_mapping`'s own
   docstring acknowledges as the fallback).
 
+@phase 6-stretch-nice-to-have
 ## 6. Stretch / nice-to-have
 
 Roughly ranked by leverage relative to effort:
@@ -220,3 +234,31 @@ Roughly ranked by leverage relative to effort:
 - MCP Prompts for canned workflows ("onboard a new app," "triage failed
   Kart tasks") — would turn some of this review's own tribal knowledge into
   something a client can discover directly instead of reverse-engineering.
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+**Not exploitable — checked and ruled out:** SQL injection (all values
+parameterized; table/column identifiers go through a fixed allowlist or
+live `information_schema` introspection, never raw caller strings), path
+traversal (collection/table names regex-validated before touching the
+filesystem).
+
+@constraint severity="normal"
+- **No tool annotations** — all 25 tools are bare `@mcp.tool()`
+  (`readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` unset
+  anywhere), so a client can't tell `store_delete` is destructive without
+  reading source.
+
+@constraint severity="critical"
+- Some docstrings are excellent — `task_submit`'s states the exact
+  `task_net` caveat inline, which is exactly what let us self-correct
+  without reading source. Others (`store_list`, `kb_promote`, `agent_route`)
+  don't mention their real preconditions (per-app scoping, required schema
+  confirmation) at the docstring level, only in README prose a client
+  calling the tool blind never sees.
+
+@constraint severity="critical"
+- **No task cancel/purge** — `task_queue` only grants submit/status/list;
+  nothing pulls a row back out of `pending`.

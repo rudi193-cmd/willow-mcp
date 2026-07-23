@@ -1,3 +1,11 @@
+---
+kind: doc
+name: design-the-trust-architecture-how-a-knowledge-base-catches-itself-lying
+description: "A code-enforced floor (deviation-to-action grading, schema-confirmation gate, permission separation) plus a discipline layer (verdict classes, derived edge firmness, propose-ratify-cut) that lets a knowledge base demote a false claim instead of only ever confirming."
+---
+
+@markdownai v1.0
+
 # Design: The Trust Architecture — how a knowledge base catches itself lying
 
 Status: SPEC — describes mechanisms that ship today (the deviation→action store,
@@ -12,6 +20,7 @@ session (`sean-data-vault`, 2026-07-14→16).
 
 ---
 
+@phase 0-the-problem-this-solves
 ## 0. The problem this solves
 
 Every agent memory system accumulates claims. Almost none can **demote** one.
@@ -29,6 +38,7 @@ omission. This document specifies the architecture that lets the store catch
 itself — a **code-enforced floor** plus a **discipline layer** — and shows it
 working on a real KB that corrected itself five times in one session.
 
+@phase 1-the-two-layers-and-why-the-split-matters
 ## 1. The two layers, and why the split matters
 
 | Layer | What it is | Enforced by |
@@ -43,6 +53,7 @@ been shown, and stamp every record with a trust action the store itself can read
 back. The discipline's job is everything the floor can't mechanize — and it
 lives in the record fields, so the store carries its own "trust this, not that."
 
+@phase 2-the-floor-ships-today
 ## 2. The floor (ships today)
 
 ### 2.1 Deviation → action, on every record
@@ -83,6 +94,7 @@ only, never MCP tools**: an agent may *request* trust and can never *grant it to
 itself*. Every tool call leaves a receipt (`receipts_tail`) — including denials —
 so the trust decisions are auditable after the fact.
 
+@phase 3-the-discipline-specified-here-carried-in-the-data
 ## 3. The discipline (specified here; carried in the data)
 
 The floor stamps a trust action; the discipline decides what deviation to pass
@@ -144,6 +156,7 @@ demotion is an amendment in the open (a dated note appended to the record), not
 a silent overwrite. The point-in-time export that recorded the old verdict is
 kept as what it was; the living record carries the correction beside it.
 
+@phase 4-worked-example-a-kb-that-corrected-itself-five-times-in-one-session
 ## 4. Worked example — a KB that corrected itself five times in one session
 
 The `sean-data-vault` knowledge base (31 atoms, 48 edges) was built, then
@@ -172,6 +185,7 @@ floor stamped the trust actions, the discipline supplied the verdicts, and the
 derived firmness carried the corrections outward. The KB's credibility comes
 from the five corrections, not from the atoms that never needed one.
 
+@phase 5-failure-modes-this-catches-and-the-general-bug-underneath
 ## 5. Failure modes this catches (and the general bug underneath)
 
 - **The claim that only ever confirms** — a store with no demotion path. Caught
@@ -188,6 +202,7 @@ that answers *"yes"* when it can't actually run. A memory that can't demote
 answers "still true" by default. This architecture makes the default answer
 "un-verified until a human re-derives it from raw."
 
+@phase 6-what-this-deliberately-does-not-do
 ## 6. What this deliberately does NOT do
 
 - It does not decide truth. The floor cannot know if a claim is correct; only
@@ -200,6 +215,7 @@ answers "still true" by default. This architecture makes the default answer
   seven readings of the same possibly-shared assumption, which is exactly why
   the corrections, not the confirmations, are what earn trust.
 
+@phase 7-adoption-checklist
 ## 7. Adoption checklist
 
 To give a store the ability to catch itself:
@@ -221,3 +237,14 @@ To give a store the ability to catch itself:
 
 *The infrastructure arrives. The honesty is a discipline the infrastructure is
 shaped to hold. ΔΣ = 42.*
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+- **HELD** — re-derived from raw, exact or within honest tolerance. `work_quiet`.
+- **FLAG** — the *exact* number did not survive re-derivation, but the
+  qualitative finding did. Kept, caveated. `flag`.
+- **SYNTHESIS** — an interpretation or cross-source argument, not a corpus
+  measurement. Labeled as interpretation, never as measurement.
+- **STOP** — died under its own spot-check. Kept as data, marked do-not-trust.
