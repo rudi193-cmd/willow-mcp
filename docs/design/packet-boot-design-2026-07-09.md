@@ -1,3 +1,11 @@
+---
+kind: doc
+name: willow-system-updated-design-july-2026
+description: "Packet-boot design for the Willow fleet (July 2026 draft): session loop, packet structure, zero-cost deployment, skills, hooks, packages, and data model."
+---
+
+@markdownai v1.0
+
 <!--
 PROVENANCE: converted 2026-07-13 (session e2b2a0da, willow seat) from
 ~/Desktop/Nest/"Willow System Updated.txt" (nest intake, lineage-dated 2026-07-09,
@@ -21,6 +29,7 @@ UNRATIFIED DRAFT — filing decisions are the operator's.
 
 ---
 
+@phase 1-core-design-shift
 ## 1. Core Design Shift
 
 ### From Ceremony to Packet-Boot
@@ -38,6 +47,7 @@ UNRATIFIED DRAFT — filing decisions are the operator's.
 
 ---
 
+@phase 2-the-session-loop
 ## 2. The Session Loop
 
 ```
@@ -79,6 +89,7 @@ UNRATIFIED DRAFT — filing decisions are the operator's.
 
 ---
 
+@phase 3-the-packet-structure
 ## 3. The Packet Structure
 
 ```
@@ -134,6 +145,7 @@ UNRATIFIED DRAFT — filing decisions are the operator's.
 
 ---
 
+@phase 4-zero-cost-deployment
 ## 4. Zero-Cost Deployment
 
 ### The Rotation Layer
@@ -177,6 +189,7 @@ A pool of free API keys rotated to avoid rate limits:
 
 ---
 
+@phase 5-skills
 ## 5. Skills
 
 Skills are markdown guides agents read to learn workflows.
@@ -199,6 +212,7 @@ Skills are markdown guides agents read to learn workflows.
 
 ---
 
+@phase 6-hooks
 ## 6. Hooks
 
 Hooks are Python scripts that run automatically at specific points.
@@ -215,6 +229,7 @@ Hooks are Python scripts that run automatically at specific points.
 
 ---
 
+@phase 7-packages-installable-bundles
 ## 7. Packages (Installable Bundles)
 
 | Package | What it adds |
@@ -252,6 +267,7 @@ Hooks are Python scripts that run automatically at specific points.
 
 ---
 
+@phase 8-data-model
 ## 8. Data Model
 
 ### Postgres Tables
@@ -308,6 +324,7 @@ Hooks are Python scripts that run automatically at specific points.
 
 ---
 
+@phase 9-mcp-tools-summary
 ## 9. MCP Tools Summary
 
 | Tool | Who Calls | Purpose |
@@ -326,6 +343,7 @@ Hooks are Python scripts that run automatically at specific points.
 
 ---
 
+@phase 10-key-files-to-add
 ## 10. Key Files to Add
 
 | File | Purpose | Status |
@@ -342,6 +360,7 @@ Hooks are Python scripts that run automatically at specific points.
 
 ---
 
+@phase 11-document-update-summary
 ## 11. Document Update Summary
 
 | Previous Document | What Changed | New Document |
