@@ -40,7 +40,7 @@ export WILLOW_PG_USER="${WILLOW_PG_USER:-${USER:-$(id -un)}}"
 
 say() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 
-# ── 1. venv + editable install ────────────────────────────────────────────────
+# ── 1. venv + editable install ────────────────────────────────────────
 say "venv + install"
 if [ ! -x "$PY" ]; then
   python3 -m venv "$VENV"
@@ -49,21 +49,28 @@ if ! "$PY" -c 'import willow_mcp' 2>/dev/null; then
   "$PY" -m pip install --upgrade pip -q
   "$PY" -m pip install -e . -q
   echo "installed willow-mcp (editable)"
+elif ! "$PY" -m pip check >/dev/null 2>&1; then
+  # #165: an already-importable venv can still be stale against pyproject's
+  # pins — kartikeya 0.0.5 sat under a >=0.0.7 pin and left the worker
+  # unstartable, and the fast path above never re-checked. `pip check` spots
+  # the unsatisfied pin; re-sync instead of skipping.
+  "$PY" -m pip install -e . -q
+  echo "willow_mcp importable but pins unsatisfied — re-synced editable install"
 else
   echo "willow_mcp already importable — skipping install"
 fi
 
-# ── 2. scaffold WILLOW_HOME ───────────────────────────────────────────────────
+# ── 2. scaffold WILLOW_HOME ───────────────────────────────────────────
 say "scaffold WILLOW_HOME ($WILLOW_HOME)"
 "$VENV/bin/willow-mcp-init" >/dev/null
 echo "home ready"
 
-# ── 3. compile manifests ──────────────────────────────────────────────────────
+# ── 3. compile manifests ──────────────────────────────────────────────
 say "compile manifests"
 "$VENV/bin/willow-mcp-compile" --force >/dev/null
 echo "manifests compiled"
 
-# ── 4. Postgres (best-effort) ─────────────────────────────────────────────────
+# ── 4. Postgres (best-effort) ─────────────────────────────────────────
 say "postgres (best-effort)"
 if [ "${WILLOW_SKIP_PG:-0}" = "1" ]; then
   echo "WILLOW_SKIP_PG=1 — skipping; SOIL store stands alone"
@@ -91,7 +98,7 @@ else
   fi
 fi
 
-# ── 5. live self-check ────────────────────────────────────────────────────────
+# ── 5. live self-check ────────────────────────────────────────────────
 say "diagnostic_summary (live stdio handshake)"
 WILLOW_APP_ID="${WILLOW_APP_ID:-willow}" "$PY" - <<'PY'
 import json, os, subprocess, sys
