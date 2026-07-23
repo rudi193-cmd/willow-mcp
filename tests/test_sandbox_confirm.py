@@ -93,8 +93,10 @@ def test_happy_path_confirms_repo_authored_schema(apps_root, pg_available):
     assert artifact["confirmed_by"] == "sandbox-bootstrap"
 
 
-def test_guard1_existing_artifact_untouched(apps_root, pg_available):
-    """A pre-existing artifact — even unconfirmed — is never overwritten."""
+def test_guard1_human_marked_artifact_untouched(apps_root, pg_available):
+    """A human-marked artifact — even unconfirmed — is never overwritten. The
+    operator_note is the fingerprint that says a person left it on purpose, so
+    guard 1 preserves it rather than re-deriving it."""
     from willow_mcp import schema_profile as sp
 
     fp = sp.db_fingerprint(pg_available)
@@ -107,6 +109,47 @@ def test_guard1_existing_artifact_untouched(apps_root, pg_available):
     assert sp.load_mapping("testapp", fp, "tasks")["operator_note"] == (
         "left unconfirmed on purpose"
     )
+
+
+def test_guard1_pristine_placeholder_is_reconfirmed_not_stranded(apps_root, pg_available):
+    """A pristine placeholder — exactly what schema_profile.resolve() scatters as
+    a discovery side effect — is re-derived and confirmed, not locked as
+    unconfirmed by guard 1. This is the warm-container bug: a prior run's
+    placeholder must not strand every later run on unconfirmed_schema."""
+    from willow_mcp import schema_profile as sp
+
+    fp = sp.db_fingerprint(pg_available)
+    placeholder = {
+        "schema_version": 1, "database": fp, "table": "tasks",
+        "discovered_at": "2026-01-01T00:00:00+00:00", "confirmed": False,
+        "fields": {"task_id": {"column": "wrong_guess", "tier": "fuzzy",
+                               "confidence": 0.4, "data_type": "text"}},
+    }
+    sp.save_mapping("testapp", fp, "tasks", placeholder)
+    results = sc.auto_confirm(_SCHEMA_DIR, ["testapp"])
+    tasks = _decisions_for(results, "tasks")[0]
+    assert tasks["confirmed"], tasks
+    artifact = sp.load_mapping("testapp", fp, "tasks")
+    assert artifact["confirmed"] is True
+    assert artifact["confirmed_by"] == "sandbox-bootstrap"
+
+
+def test_is_pristine_placeholder_discriminates_human_fingerprints():
+    """Pure unit contract for the guard-1 discriminator: resolve()'s shape is
+    pristine; a confirmation, an override tier, or any extra key is not."""
+    base = {"schema_version": 1, "database": "d", "table": "tasks",
+            "discovered_at": "t", "confirmed": False,
+            "fields": {"task_id": {"column": "task_id", "tier": "exact",
+                                   "confidence": 1.0}}}
+    assert sc._is_pristine_placeholder(base)
+    assert sc._is_pristine_placeholder({**base, "fields": {}})       # empty is fine
+    assert sc._is_pristine_placeholder({**base, "schema_drift": True})  # a resolve() key
+    assert not sc._is_pristine_placeholder({**base, "confirmed": True})
+    assert not sc._is_pristine_placeholder({**base, "operator_note": "mine"})
+    assert not sc._is_pristine_placeholder(
+        {**base, "fields": {"task_id": {"column": "task_id",
+                                        "tier": "confirmed_override"}}})
+    assert not sc._is_pristine_placeholder({})   # unrecognizable → fail safe
 
 
 def test_guard2_non_exact_field_declines(apps_root, pg_available, monkeypatch):

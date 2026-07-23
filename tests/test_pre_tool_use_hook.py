@@ -5,6 +5,7 @@ path rather than via the normal package import.
 """
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,18 @@ _HOOK_PATH = Path(__file__).resolve().parents[1] / "hooks" / "pre_tool_use.py"
 _spec = importlib.util.spec_from_file_location("pre_tool_use", _HOOK_PATH)
 pre_tool_use = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(pre_tool_use)
+
+
+@pytest.fixture(autouse=True)
+def _non_orchestrator_seat(monkeypatch):
+    """Default every in-process test to the ordinary (non-orchestrator) seat, so
+    routing assertions are deterministic regardless of the ambient environment —
+    the dev box both exports WILLOW_APP_ID=willow AND has a .mcp.json that
+    declares the willow seat. Clear the env and neutralize the file signal by
+    pointing _project_dir at nothing. Orchestrator tests opt back in explicitly."""
+    monkeypatch.delenv("WILLOW_APP_ID", raising=False)
+    monkeypatch.delenv("WILLOW_HUMAN_ORCHESTRATOR", raising=False)
+    monkeypatch.setattr(pre_tool_use, "_project_dir", lambda: None)
 
 
 # ── check_bash: blocked patterns ────────────────────────────────────────
@@ -57,12 +70,23 @@ def test_check_bash_allows_unrelated_commands(command):
 
 # ── main(): stdin/stdout contract ───────────────────────────────────────
 
-def _run_hook(payload: dict) -> tuple[int, str]:
+_SEAT_ENV_KEYS = ("WILLOW_APP_ID", "WILLOW_HUMAN_ORCHESTRATOR", "CLAUDE_PROJECT_DIR")
+
+
+def _run_hook(payload: dict, env: dict | None = None) -> tuple[int, str]:
+    """Run the hook as a subprocess. Strips the seat-determining vars from the
+    inherited env so the default is the ordinary seat regardless of where the
+    suite runs (the dev box sets CLAUDE_PROJECT_DIR at a repo whose .mcp.json
+    declares the willow seat); orchestrator tests pass `env` to opt in."""
+    base = {k: v for k, v in os.environ.items() if k not in _SEAT_ENV_KEYS}
+    if env:
+        base.update(env)
     proc = subprocess.run(
         [sys.executable, str(_HOOK_PATH)],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
+        env=base,
     )
     return proc.returncode, proc.stdout.strip()
 
@@ -374,6 +398,113 @@ def test_main_warns_on_ls():
     decision = json.loads(stdout)
     assert decision["decision"] == "warn"
     assert "store_list" in decision["reason"]
+
+
+# ── orchestrator seat: git/gh routing is lifted, the security guards are not ──
+
+def test_is_orchestrator_seat_reads_env(monkeypatch):
+    monkeypatch.setenv("WILLOW_APP_ID", "willow")
+    assert pre_tool_use._is_orchestrator_seat()
+    monkeypatch.setenv("WILLOW_APP_ID", "WILLOW")   # case-insensitive
+    assert pre_tool_use._is_orchestrator_seat()
+    monkeypatch.setenv("WILLOW_APP_ID", "ada")      # a specialist seat is not exempt
+    assert not pre_tool_use._is_orchestrator_seat()
+    monkeypatch.delenv("WILLOW_APP_ID", raising=False)
+    assert not pre_tool_use._is_orchestrator_seat()
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    assert pre_tool_use._is_orchestrator_seat()
+
+
+def _write_mcp_json(dir_path: Path, env: dict) -> None:
+    (dir_path / ".mcp.json").write_text(json.dumps(
+        {"mcpServers": {"willow-mcp": {"command": ".venv/bin/python3",
+                                       "args": ["-m", "willow_mcp"], "env": env}}}))
+
+
+def test_mcp_json_declares_orchestrator_from_file(tmp_path):
+    """The production signal: no WILLOW_* env, seat read from .mcp.json."""
+    _write_mcp_json(tmp_path, {"WILLOW_APP_ID": "willow", "WILLOW_HUMAN_ORCHESTRATOR": "1"})
+    assert pre_tool_use._mcp_json_declares_orchestrator(str(tmp_path))
+
+    _write_mcp_json(tmp_path, {"WILLOW_APP_ID": "ada"})   # a specialist project
+    assert not pre_tool_use._mcp_json_declares_orchestrator(str(tmp_path))
+
+    _write_mcp_json(tmp_path, {"WILLOW_HUMAN_ORCHESTRATOR": "1"})  # the flag alone
+    assert pre_tool_use._mcp_json_declares_orchestrator(str(tmp_path))
+
+
+def test_mcp_json_declares_orchestrator_fail_safe(tmp_path):
+    """A missing or malformed .mcp.json is not the orchestrator (git stays routed)."""
+    assert not pre_tool_use._mcp_json_declares_orchestrator(str(tmp_path))  # no file
+    (tmp_path / ".mcp.json").write_text("{ not json")
+    assert not pre_tool_use._mcp_json_declares_orchestrator(str(tmp_path))
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": "oops"}))
+    assert not pre_tool_use._mcp_json_declares_orchestrator(str(tmp_path))
+
+
+def test_is_orchestrator_seat_reads_mcp_json_when_env_absent(tmp_path, monkeypatch):
+    """With no WILLOW_* env (the real hook environment), the seat comes from the
+    project's .mcp.json via CLAUDE_PROJECT_DIR."""
+    _write_mcp_json(tmp_path, {"WILLOW_APP_ID": "willow", "WILLOW_HUMAN_ORCHESTRATOR": "1"})
+    monkeypatch.setattr(pre_tool_use, "_project_dir", lambda: str(tmp_path))
+    assert pre_tool_use._is_orchestrator_seat()
+    assert pre_tool_use.check_bash_routing("git commit -m x") is None
+
+
+@pytest.fixture
+def orchestrator_seat(monkeypatch):
+    monkeypatch.setenv("WILLOW_APP_ID", "willow")
+
+
+@pytest.mark.parametrize("command", [
+    "git commit -m 'x'",
+    "git add -A",
+    "git push -u origin my-branch",
+    "git pull origin main",
+    "gh pr create --title t",
+])
+def test_orchestrator_git_gh_mutations_allowed(orchestrator_seat, command):
+    assert pre_tool_use.check_bash_routing(command) is None
+
+
+@pytest.mark.parametrize("command, decision", [
+    ("ls -la src/", "warn"),
+    ("psql mydb -c 'select 1'", "block"),
+    ("sqlite3 /tmp/x.db 'select 1'", "block"),
+])
+def test_orchestrator_still_routed_off_non_git_habits(orchestrator_seat, command, decision):
+    """The exemption is git/gh only — every other routing nudge still fires."""
+    routed = pre_tool_use.check_bash_routing(command)
+    assert routed is not None and routed[0] == decision
+
+
+def test_orchestrator_self_grant_guard_not_lifted(orchestrator_seat):
+    """The seat exemption never touches the self-grant guard: an orchestrator
+    still may not mint its own egress."""
+    assert pre_tool_use.check_bash_self_grant(
+        "willow-mcp grant-net willow --ttl 3h") is not None
+
+
+def test_main_allows_orchestrator_commit():
+    code, stdout = _run_hook({
+        "tool_name": "Bash",
+        "tool_input": {"command": "git commit -m 'ship it' && git push"},
+        "session_id": "s1",
+    }, env={"WILLOW_APP_ID": "willow"})
+    assert code == 0
+    assert stdout == ""
+
+
+def test_main_blocks_orchestrator_grant_net():
+    """Even from the orchestrator seat, minting egress is blocked — the self-grant
+    guard runs before routing and is never lifted."""
+    code, stdout = _run_hook({
+        "tool_name": "Bash",
+        "tool_input": {"command": "willow-mcp grant-net willow --ttl 3h"},
+        "session_id": "s1",
+    }, env={"WILLOW_APP_ID": "willow"})
+    assert code == 0
+    assert json.loads(stdout)["decision"] == "block"
 
 
 def test_main_blocks_native_web_search():
