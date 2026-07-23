@@ -1,3 +1,11 @@
+---
+kind: doc
+name: "session-lifecycle-willow-mcp"
+description: "Draft 0.3 (2026-07-09, unratified) — session lifecycle design for willow-mcp: repo boundary, session modes, packet structure, closeout, envelopes/manifests, orchestrator flow, file map, and implementation slices."
+---
+
+@markdownai v1.0
+
 # Session lifecycle — willow-mcp
 
 *Draft 0.3 — 2026-07-09 — unratified.*
@@ -17,6 +25,7 @@
 
 ---
 
+@phase 1-repo-boundary
 ## 1. Repo boundary
 
 | Layer | Repo | What it owns |
@@ -31,6 +40,7 @@ willow-mcp ships with: `store_*`, `knowledge_*`, `task_*`, `agent_route`, `agent
 
 ---
 
+@phase 2-two-session-modes
 ## 2. Two session modes
 
 | Mode | Typical `app_id` | Job | Boot |
@@ -67,6 +77,7 @@ Agents cannot invoke these as willow.
 
 ---
 
+@constraint severity="normal"
 **No persona picker. No boot-done flags. No 4-phase boot.**
 
 ```
@@ -86,6 +97,7 @@ State lives in **`dispatch/{id}/status.json`** and mirrored in **`sessions/{app_
 
 ---
 
+@phase 4-packet-structure-startup
 ## 4. Packet structure (startup)
 
 **Directory:** `$WILLOW_HOME/dispatch/{dispatch_id}/`
@@ -156,6 +168,7 @@ Minimal. No anchor ceremony.
 
 ---
 
+@phase 5-closeout
 ## 5. Closeout
 
 ### 5a. Specialist completes
@@ -206,6 +219,7 @@ Narrative mirror optional in `closeout.md` for desk reading.
 
 ---
 
+@phase 6-envelopes-manifests
 ## 6. Envelopes & manifests
 
 **Manifest** (`mcp_apps/<app_id>/manifest.json`) — willow-mcp gate today:
@@ -246,6 +260,7 @@ DAG nodes for research, literature review, citation checks, and KB seeding dispa
 
 ---
 
+@phase 7-orchestrator-willow
 ## 7. Orchestrator (Willow)
 
 **User guide:** Nest packet `ORIENT.md` → ship as `docs/ORIENT.md` in willow-mcp or link to governance repo.
@@ -274,6 +289,7 @@ Plan (DAG) → dispatch_send → monitor → verify_handoff → agent_clear → 
 
 ---
 
+@phase 8-file-map-willow-mcp-product
 ## 8. File map (willow-mcp product)
 
 ### In repo (`willow-mcp/`)
@@ -317,6 +333,7 @@ Plan (DAG) → dispatch_send → monitor → verify_handoff → agent_clear → 
 
 ---
 
+@phase 9-what-willow-2-0-is-and-is-not
 ## 9. What willow-2.0 is (and is not)
 
 | willow-2.0 | willow-mcp |
@@ -330,6 +347,7 @@ Same operator may run both; designs must not require fylgja for willow-mcp to wo
 
 ---
 
+@phase 10-implementation-slices
 ## 10. Implementation slices
 
 | Slice | Repo | Deliverable |
@@ -346,6 +364,7 @@ Same operator may run both; designs must not require fylgja for willow-mcp to wo
 
 ---
 
+@phase 11-open-questions
 ## 11. Open questions
 
 - [x] `handoff.json` + `closeout.md` — **both** (implemented S4)
@@ -357,6 +376,7 @@ Same operator may run both; designs must not require fylgja for willow-mcp to wo
 
 ---
 
+@phase 12-conflicts-register-nest-packet-vs-fleet-canon
 ## 12. Conflicts register (Nest packet vs fleet canon)
 
 *Use this when lifting docs from `WILLOW Complete System.txt` into willow-mcp. **Fleet wins** unless marked "Nest UX only".*
@@ -423,3 +443,11 @@ Same operator may run both; designs must not require fylgja for willow-mcp to wo
 ---
 
 *Draft lineage: 0.3 (2026-07-09, conflicts register + dispatch stack shipped).*
+
+---
+
+@phase constraints
+## Constraints
+
+@constraint severity="normal"
+**No persona picker. No boot-done flags. No 4-phase boot.**
