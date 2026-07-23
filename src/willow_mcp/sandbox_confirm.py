@@ -13,9 +13,15 @@ by hand — the exact self-service the gate's spirit forbids.
 So the bootstrap confirms automatically, behind three guards that must ALL
 hold per (database, table, app):
 
-  1. **No existing mapping artifact** for this database fingerprint — an
-     operator's confirmed (or deliberately left unconfirmed) mapping is
-     never touched.
+  1. **No human-authored mapping artifact** for this database fingerprint —
+     an operator's confirmed mapping, or one they deliberately marked and
+     left unconfirmed, is never touched. The one artifact this guard lets
+     through is a *pristine placeholder*: the unconfirmed mapping
+     ``schema_profile.resolve()`` scatters as a discovery side effect, with
+     no sign a human touched it. Those are safe to re-derive, and treating
+     them as sacrosanct is what stranded a warm container — a prior run's
+     placeholder made every later run decline forever (see
+     ``_is_pristine_placeholder``).
   2. **Every canonical field resolved tier="exact" at confidence 1.0** —
      a single alias or fuzzy match means this is an adopted schema, and
      adopted schemas take the human path.
@@ -85,6 +91,40 @@ def _all_exact(mapping: dict) -> bool:
     )
 
 
+# The exact key set schema_profile.resolve() writes for a discovery placeholder
+# (plus the schema_drift flag it may add on a confirmed→unconfirmed downgrade).
+# An artifact carrying any key beyond these bears a human fingerprint.
+_PLACEHOLDER_KEYS = frozenset(
+    {"schema_version", "database", "table", "discovered_at", "confirmed",
+     "fields", "schema_drift"}
+)
+
+
+def _is_pristine_placeholder(artifact: dict) -> bool:
+    """True when ``artifact`` is exactly the unconfirmed mapping
+    ``schema_profile.resolve()`` persists as a side effect, with no sign a human
+    touched it — the one existing artifact guard 1 will re-derive.
+
+    ``resolve()`` writes an UNCONFIRMED placeholder every time it runs against a
+    table that has no artifact yet, so a warm container accumulates them; guard 1
+    treating one as a human's confirmed choice is what stranded the sandbox
+    worker on ``unconfirmed_schema``. A confirmed mapping, a human override tier,
+    or any extra key (an operator note, a hand-added field) all mean a person
+    acted — those stay protected. Anything unrecognizable fails safe toward
+    preservation (returns False)."""
+    if not isinstance(artifact, dict) or artifact.get("confirmed"):
+        return False
+    if set(artifact) - _PLACEHOLDER_KEYS:
+        return False
+    fields = artifact.get("fields")
+    if not isinstance(fields, dict):
+        return False
+    return all(
+        isinstance(f, dict) and f.get("tier") != "confirmed_override"
+        for f in fields.values()
+    )
+
+
 def auto_confirm(schema_dir: Path, app_ids: list[str]) -> list[dict]:
     """Apply the three guards and confirm what passes. Returns one decision
     dict per (table, app): {table, app_id, confirmed, reason}."""
@@ -104,9 +144,14 @@ def auto_confirm(schema_dir: Path, app_ids: list[str]) -> list[dict]:
         live_cols = {c.name for c in sp.introspect(pg, table)}
         for app_id in app_ids:
             decision = {"table": table, "app_id": app_id, "confirmed": False}
-            # Guard 1 — never touch an existing artifact, whatever it says.
-            if sp.load_mapping(app_id, fingerprint, table) is not None:
-                decision["reason"] = "guard 1: mapping artifact already exists"
+            # Guard 1 — never touch an artifact a human confirmed or marked. A
+            # pristine placeholder (resolve()'s untouched discovery side effect)
+            # is the one exception: safe to re-derive, and locking on it is what
+            # stranded a warm container's worker (a prior run's placeholder made
+            # every later run decline forever).
+            existing = sp.load_mapping(app_id, fingerprint, table)
+            if existing is not None and not _is_pristine_placeholder(existing):
+                decision["reason"] = "guard 1: human-authored or confirmed mapping exists"
                 results.append(decision)
                 continue
             if not live_cols:

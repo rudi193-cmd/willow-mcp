@@ -35,6 +35,29 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   `willow-mcp` entry with no `WILLOW_HOME` — sets it aside as
   `.mcp.json.stale.bak`, and regenerates; a file with an env block (or with
   your own servers and no willow-mcp entry) is still never touched.
+- **Sandbox auto-confirm stranded a warm container on `unconfirmed_schema`.**
+  `schema_profile.resolve()` persists an *unconfirmed* mapping as a discovery
+  side effect every time it runs against a table with no artifact yet, so a
+  re-provisioned container accumulates these placeholders. Guard 1 treated any
+  existing artifact as sacrosanct, so a prior run's placeholder made every later
+  `sandbox_confirm` decline forever — leaving the `tasks` mapping unconfirmed
+  and the Kart worker unstartable (observed live; only a manual delete + re-run
+  recovered it). Guard 1 now re-derives a *pristine placeholder* — exactly
+  resolve()'s untouched shape — while still never touching a confirmed mapping,
+  a human override tier, or one bearing any extra key (e.g. an operator note).
+  New `_is_pristine_placeholder` discriminator with a unit contract.
+- **The PreToolUse guard steered the human-orchestrator seat off its own job.**
+  The guard blocks `git`/`gh` mutations to route agents through `task_submit`,
+  but the willow orchestrator seat exists to do repo maintenance — commit, push,
+  PR — so every `git commit` was denied and had to detour through the GitHub API
+  (which then desynced the local ref). The guard now lifts *only* the git/gh
+  routing nudges for that seat; the self-grant guard (egress leases, keystore,
+  manifest `task_net`) runs first and is never lifted, and `psql`/`sqlite3`/`ls`
+  routing still applies. The seat is read from the project's `.mcp.json`
+  (`WILLOW_APP_ID` / `WILLOW_HUMAN_ORCHESTRATOR`) via `CLAUDE_PROJECT_DIR`,
+  because the harness spawns the hook without the session's `WILLOW_*` env — a
+  file signal, not a trust boundary, since a forged seat still hits the unlifted
+  self-grant guard. Both byte-identical hook copies updated.
 - **B-41 (issue #166): the web-sandbox MCP server booted blind.** The
   SessionStart hook wrote env to `$CLAUDE_ENV_FILE`, which shells inherit but
   the client-spawned stdio server does not — it defaulted `WILLOW_HOME` to an

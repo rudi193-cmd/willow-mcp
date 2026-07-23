@@ -31,6 +31,7 @@ prints a JSON decision to stdout ({"decision": "block"|"warn", "reason":
 code. No output means allow, no comment.
 """
 import json
+import os
 import re
 import sys
 from typing import Optional
@@ -88,6 +89,22 @@ _GH_MUTATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# The willow human-orchestrator seat. Repo maintenance — commit, push, PR — IS
+# that seat's job, so the git/gh routing nudges toward task_submit are pure
+# friction for it. The self-grant guard (egress keys, leases, manifest task_net)
+# runs BEFORE routing and is NEVER lifted, for this or any seat, so exempting the
+# routing steering surrenders no authority. The signal is the server env the
+# SessionStart hook exports into the session (.mcp.json / CLAUDE_ENV_FILE).
+_ORCHESTRATOR_APP_ID = "willow"
+
+# The git/gh routing entries, named so the loop can lift exactly these for the
+# orchestrator seat (and nothing else) without matching on hint text.
+_ROUTE_GIT_NET_RE = re.compile(r"\bgit\s+(push|pull)\b")
+_ROUTE_GIT_MUT_RE = re.compile(
+    r"\bgit\s+(add|commit|checkout|merge|rebase|worktree|clone|stash|reset|"
+    r"restore|switch|clean|cherry-pick|revert|tag)\b")
+_ROUTE_GH_RE = re.compile(r"\bgh\s")
+
 # Shell habits → (decision, hint). Trimmed product port of fleet mcp_routing.BASH_TO_MCP.
 _BASH_ROUTING: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"^\s*ls(\s|$)"), "warn",
@@ -100,18 +117,67 @@ _BASH_ROUTING: list[tuple[re.Pattern[str], str, str]] = [
      "store_get / store_list / store_search — SQLite store via MCP"),
     (re.compile(r"^\s*pwd\s*$"), "warn", "cwd is in context; fleet_status for roots"),
     (re.compile(r"^\s*tree(\s|$)"), "warn", f"directory tree → {_TASK_SUBMIT}"),
-    (re.compile(r"\bgit\s+(push|pull)\b"), "block", f"git network → {_TASK_SUBMIT_NET}"),
-    (re.compile(
-        r"\bgit\s+(add|commit|checkout|merge|rebase|worktree|clone|stash|reset|"
-        r"restore|switch|clean|cherry-pick|revert|tag)\b"),
-     "block", f"git mutation → {_TASK_SUBMIT}"),
-    (re.compile(r"\bgh\s"), "block", f"gh (mutations / net) → {_TASK_SUBMIT_NET}"),
+    (_ROUTE_GIT_NET_RE, "block", f"git network → {_TASK_SUBMIT_NET}"),
+    (_ROUTE_GIT_MUT_RE, "block", f"git mutation → {_TASK_SUBMIT}"),
+    (_ROUTE_GH_RE, "block", f"gh (mutations / net) → {_TASK_SUBMIT_NET}"),
     (re.compile(r"(?i)python3?\s+.*<<"), "block", f"Python heredoc → {_TASK_SUBMIT}"),
     (re.compile(r"(?i)\bgrep\b|\brg\b"), "warn",
      f"knowledge_search / store_search · symbols → code_graph_search · {_TASK_SUBMIT}"),
     (re.compile(r"(?i)\bfind\s"), "warn",
      f"code_graph_search / knowledge_search · {_TASK_SUBMIT}"),
 ]
+
+# Exactly the git/gh routing steers the orchestrator seat is exempt from.
+_GIT_GH_ROUTING = frozenset({_ROUTE_GIT_NET_RE, _ROUTE_GIT_MUT_RE, _ROUTE_GH_RE})
+
+
+def _env_declares_orchestrator() -> bool:
+    if os.environ.get("WILLOW_HUMAN_ORCHESTRATOR", "").strip() == "1":
+        return True
+    return os.environ.get("WILLOW_APP_ID", "").strip().lower() == _ORCHESTRATOR_APP_ID
+
+
+def _project_dir() -> Optional[str]:
+    """The project root, from CLAUDE_PROJECT_DIR. The harness sets it on every
+    hook invocation; it is the one reliable pointer to where .mcp.json lives."""
+    return os.environ.get("CLAUDE_PROJECT_DIR") or None
+
+
+def _mcp_json_declares_orchestrator(project_dir: str) -> bool:
+    """True when the project's .mcp.json runs a willow-mcp server as the willow
+    orchestrator seat. This is the production signal: the harness spawns this
+    hook WITHOUT the session's WILLOW_* env (only CLAUDE_* reaches it), so the
+    seat is read from the file the SessionStart hook writes, not the env.
+    Fail-safe: any missing/malformed file yields False (git stays routed)."""
+    try:
+        with open(os.path.join(project_dir, ".mcp.json")) as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        return False
+    servers = cfg.get("mcpServers")
+    if not isinstance(servers, dict):
+        return False
+    for server in servers.values():
+        env = (server or {}).get("env") if isinstance(server, dict) else None
+        if not isinstance(env, dict):
+            continue
+        if str(env.get("WILLOW_HUMAN_ORCHESTRATOR", "")).strip() == "1":
+            return True
+        if str(env.get("WILLOW_APP_ID", "")).strip().lower() == _ORCHESTRATOR_APP_ID:
+            return True
+    return False
+
+
+def _is_orchestrator_seat() -> bool:
+    """True when this hook runs for the willow human-orchestrator seat. Only the
+    git/gh routing nudges are lifted for it — never the self-grant guard, which
+    runs first and governs egress for every seat. Reading the seat from
+    .mcp.json is not a trust boundary (an agent that forged it would still hit
+    the unlifted self-grant guard), so a file signal is sufficient here."""
+    if _env_declares_orchestrator():   # honored if a harness ever propagates it
+        return True
+    project = _project_dir()
+    return bool(project and _mcp_json_declares_orchestrator(project))
 
 
 def _git_gh_inspect_allowed(command: str) -> bool:
@@ -127,10 +193,15 @@ def check_bash_routing(command: str) -> Optional[tuple[str, str]]:
     """Return (decision, reason) when a Bash habit should redirect to MCP, else None."""
     if not command or _git_gh_inspect_allowed(command):
         return None
+    orchestrator = _is_orchestrator_seat()
     for pattern, decision, hint in _BASH_ROUTING:
         if pattern.search(command):
+            # The orchestrator seat is not steered off git/gh; every other
+            # routing entry (psql/sqlite3/ls/…) still applies to it.
+            if orchestrator and pattern in _GIT_GH_ROUTING:
+                continue
             return decision, f"willow-mcp: prefer MCP tools — {hint}"
-    if _GIT_MUTATION_RE.search(command) or _GH_MUTATION_RE.search(command):
+    if not orchestrator and (_GIT_MUTATION_RE.search(command) or _GH_MUTATION_RE.search(command)):
         return "block", f"willow-mcp: prefer MCP tools — git/gh mutation → {_TASK_SUBMIT}"
     return None
 
