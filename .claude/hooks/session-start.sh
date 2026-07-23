@@ -5,9 +5,10 @@
 # The stdio server is spawned by the client from .mcp.json; if its venv or
 # $WILLOW_HOME aren't there yet, a missing import crashes it *before* the MCP
 # handshake and the client just reports a reconnect failure (README documents
-# this footgun). So this hook guarantees the prerequisites exist, and persists
-# the env the server needs — computed per-host, so nothing host-specific has to
-# live in the committed .mcp.json.
+# this footgun). So this hook guarantees the prerequisites exist and generates
+# a gitignored .mcp.json whose env block carries the per-host values the server
+# needs — the client spawns the server from .mcp.json alone, so env that only
+# lives in $CLAUDE_ENV_FILE never reaches it.
 #
 # Synchronous on purpose: the server must not spawn before its venv exists.
 # Idempotent: safe to re-run; skips work that's already done (helps container
@@ -60,24 +61,6 @@ if [ -x "$REPO/.venv/bin/python3" ]; then
   "$REPO/.venv/bin/python3" -m pip install -q pytest >&2 2>&1 || true
 fi
 
-# .mcp.json is gitignored (it's local runtime config, not source), so a fresh
-# clone has none for the client to load. Generate a minimal, env-free one — the
-# env is supplied via $CLAUDE_ENV_FILE below, so this stays portable. Never
-# clobber an existing file (you may have added your own servers/env).
-if [ ! -f "$REPO/.mcp.json" ]; then
-  cat > "$REPO/.mcp.json" <<'JSON'
-{
-  "mcpServers": {
-    "willow-mcp": {
-      "type": "stdio",
-      "command": ".venv/bin/python3",
-      "args": ["-m", "willow_mcp"]
-    }
-  }
-}
-JSON
-fi
-
 # Optional data-vault restore. If WILLOW_VAULT_RESTORE names an executable, run
 # it and adopt any core WILLOW_* env it prints on stdout (KEY=VALUE per line) —
 # WILLOW_HOME, WILLOW_STORE_ROOT, WILLOW_PG_DB, WILLOW_PG_USER, WILLOW_APP_ID.
@@ -99,8 +82,44 @@ if [ -n "${WILLOW_VAULT_RESTORE:-}" ] && [ -x "${WILLOW_VAULT_RESTORE}" ]; then
   fi
 fi
 
-# Persist the env for the whole session so the client-spawned MCP server (and
-# any shell you open) inherits it — this is why .mcp.json needs no env block.
+# .mcp.json is gitignored (it's local runtime config, not source), so a fresh
+# clone has none for the client to load. Generate one WITH the resolved env
+# embedded: the client spawns the stdio server directly from .mcp.json and does
+# NOT pass it the $CLAUDE_ENV_FILE session env (observed live: the server came
+# up with every WILLOW_* unset, defaulted to ~/.willow, and gate-denied every
+# seat). Generated after the vault restore so vault-supplied values land here.
+# WILLOW_HUMAN_ORCHESTRATOR rides along only for the willow operator seat, per
+# skills/session-start.md. Never clobber an existing file (you may have added
+# your own servers/env).
+if [ ! -f "$REPO/.mcp.json" ]; then
+  _orch_line=""
+  if [ "$WILLOW_APP_ID" = "willow" ]; then
+    _orch_line=',
+        "WILLOW_HUMAN_ORCHESTRATOR": "1"'
+  fi
+  cat > "$REPO/.mcp.json" <<JSON
+{
+  "mcpServers": {
+    "willow-mcp": {
+      "type": "stdio",
+      "command": ".venv/bin/python3",
+      "args": ["-m", "willow_mcp"],
+      "env": {
+        "WILLOW_APP_ID": "$WILLOW_APP_ID",
+        "WILLOW_HOME": "$WILLOW_HOME",
+        "WILLOW_STORE_ROOT": "$WILLOW_STORE_ROOT",
+        "WILLOW_PG_DB": "$WILLOW_PG_DB",
+        "WILLOW_PG_USER": "$WILLOW_PG_USER"$_orch_line
+      }
+    }
+  }
+}
+JSON
+fi
+
+# Persist the env for the whole session so any shell you open inherits it.
+# (The client-spawned MCP server does NOT read this file — its env comes from
+# the .mcp.json env block generated above.)
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   {
     echo "export WILLOW_HOME=\"$WILLOW_HOME\""
