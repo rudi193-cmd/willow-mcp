@@ -75,12 +75,42 @@ class _FallbackResult:
 
 # ── Directive handlers ────────────────────────────────────────────────────────
 
+# ── Directive safety (issue #161) ─────────────────────────────────────────────
+_SECRET_ENV_RE = re.compile(
+    r"PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|CREDENTIAL|SESSION_?KEY|_KEY$",
+    re.I,
+)
+
+
+def _env_is_secret(key: str) -> bool:
+    """Credential-shaped env vars are never exposed through mai (#161)."""
+    return bool(key) and bool(_SECRET_ENV_RE.search(key))
+
+
+_BLOCKED_HTTP_HOST_RE = re.compile(
+    r"^(localhost|0\.0\.0\.0|127\.|10\.|169\.254\.|192\.168\.|"
+    r"172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?|metadata\b)",
+    re.I,
+)
+
+
+def _http_host_blocked(url: str) -> bool:
+    """Block SSRF to loopback / link-local / private / metadata hosts (#161)."""
+    from urllib.parse import urlparse
+    p = urlparse(url)
+    if p.scheme not in ("http", "https"):
+        return True
+    return bool(_BLOCKED_HTTP_HOST_RE.match(p.hostname or ""))
+
+
 def _handle_env(attrs: dict[str, str], _content: str) -> str:
     key = attrs.get("key", attrs.get("var", ""))
     fallback = attrs.get("fallback", attrs.get("default", ""))
     if not key:
         # @env KEY or inline usage — try positional
         return fallback
+    if _env_is_secret(key):
+        return fallback  # never expose credential-shaped vars (#161)
     return os.environ.get(key, fallback)
 
 
@@ -102,9 +132,12 @@ def _handle_db(attrs: dict[str, str], _content: str) -> Any:
     if conn_info:
         uri = conn_info.uri
     if not uri:
-        db_name = os.environ.get("WILLOW_PG_DB", "willow_20")
-        pg_user = os.environ.get("WILLOW_PG_USER", os.environ.get("USER", ""))
-        uri = f"dbname={db_name} user={pg_user}"
+        # #161: never silently connect to the willow database. A @db must name an
+        # explicit @connect (declared by the doc author); otherwise refuse.
+        if fallback is not None:
+            return _FallbackResult(fallback)
+        return [{"error": "@db refused: no @connect declared (won't default to the "
+                          "willow database — #161)"}]
 
     cache_key = f"db:{using}:{raw_sql}"
     if cache_key in _cache:
@@ -146,6 +179,9 @@ def _handle_http(attrs: dict[str, str], _content: str) -> Any:
     url = _resolve_value(attrs.get("url", attrs.get("src", "")))
     if not url:
         return {"error": "no url"}
+    if _http_host_blocked(url):
+        return {"error": "@http refused: host not allowed "
+                         "(loopback/link-local/private/metadata blocked — #161)"}
     cache_key = f"http:{url}"
     if cache_key in _cache:
         return _cache[cache_key]
@@ -224,7 +260,10 @@ class Constraint:
 def extract_constraints(text: str) -> list[Constraint]:
     constraints = []
     pattern = re.compile(
-        r"@constraint(?:\s+severity=[\"']?(\w+)[\"']?)?\s+(.*?)(?=@constraint|$)",
+        # #156: accept BOTH `@constraint <rule>` and the colon form
+        # `@constraint: <rule>` — the colon form previously matched nothing and
+        # the rule was silently dropped. Separator is a colon or whitespace.
+        r"@constraint(?:\s*:\s*|\s+)(?:severity=[\"']?(\w+)[\"']?\s+)?(.*?)(?=@constraint|$)",
         re.DOTALL
     )
     for m in pattern.finditer(text):
@@ -240,23 +279,27 @@ def extract_constraints(text: str) -> list[Constraint]:
 # ── Conditional blocks ────────────────────────────────────────────────────────
 
 def apply_conditionals(text: str, consumer: str = "ai") -> str:
-    """Strip or keep @if/@endif blocks based on consumer."""
-    # @if consumer="ai" ... @endif
-    def _replace(m: re.Match) -> str:
-        attrs_str = m.group(1)
-        body = m.group(2)
-        attrs = parse_attrs(attrs_str)
-        req_consumer = attrs.get("consumer", "")
-        if not req_consumer or req_consumer == consumer:
-            return body
-        return ""
+    """Strip or keep @if/@endif blocks based on consumer.
 
-    text = re.sub(
-        r"@if\s+([^\n]+)\n(.*?)@endif",
-        _replace,
-        text,
-        flags=re.DOTALL,
+    #162: resolves NESTED @if/@endif correctly by rewriting innermost-first. A
+    flat, non-recursive regex let an inner @endif close an outer @if, leaking the
+    wrong audience's content and stranding a dangling @endif. We repeatedly
+    substitute the innermost block — one whose body contains no @if/@endif —
+    until none remain, so nesting resolves from the inside out.
+    """
+    def _replace(m: re.Match) -> str:
+        attrs = parse_attrs(m.group(1))
+        req_consumer = attrs.get("consumer", "")
+        return m.group(2) if (not req_consumer or req_consumer == consumer) else ""
+
+    innermost = re.compile(
+        r"@if\s+([^\n]+)\n((?:(?!@if\b)(?!@endif\b).)*?)@endif",
+        re.DOTALL,
     )
+    prev = None
+    while prev != text:
+        prev = text
+        text = innermost.sub(_replace, text)
     return text
 
 
@@ -322,7 +365,9 @@ def render(
         attrs = parse_attrs(m.group(1))
         key = attrs.get("key", attrs.get("var", m.group(2) if m.group(2) else ""))
         fallback = attrs.get("fallback", attrs.get("default", ""))
-        return os.environ.get(key, fallback) if key else fallback
+        if not key or _env_is_secret(key):   # #161: no secret exfil via @env
+            return fallback
+        return os.environ.get(key, fallback)
 
     text = re.sub(r"@env\s+(?:key=[\"']?(\w+)[\"']?|(\w+))([^\n]*)", _env_sub, text)
 
