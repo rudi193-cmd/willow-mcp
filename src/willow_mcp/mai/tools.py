@@ -154,7 +154,7 @@ def register(mcp: "FastMCP") -> None:
             raw = _read_file(file)
         except Exception as e:
             return [{"error": str(e)}]
-        phases = parser.extract_phases(raw)
+        phases = parser.extract_phases(_markdownai_body(raw))  # #157: strip frontmatter
         return [{"name": p.name, "line": p.line} for p in phases]
 
     @mcp.tool()
@@ -164,7 +164,7 @@ def register(mcp: "FastMCP") -> None:
             raw = _read_file(file)
         except Exception as e:
             return {"error": str(e)}
-        phases = parser.extract_phases(raw)
+        phases = parser.extract_phases(_markdownai_body(raw))  # #157: strip frontmatter
         matched = next((p for p in phases if p.name == phase), None)
         if not matched:
             return {"error": f"phase '{phase}' not found", "available": [p.name for p in phases]}
@@ -177,7 +177,7 @@ def register(mcp: "FastMCP") -> None:
             raw = _read_file(file)
         except Exception as e:
             return {"error": str(e)}
-        phases = parser.extract_phases(raw)
+        phases = parser.extract_phases(_markdownai_body(raw))  # #157: strip frontmatter
         names = [p.name for p in phases]
         if current_phase not in names:
             return {"error": f"phase '{current_phase}' not found", "available": names}
@@ -194,7 +194,7 @@ def register(mcp: "FastMCP") -> None:
             raw = _read_file(file)
         except Exception as e:
             return f"[mai_call_macro] error: {e}"
-        macros = parser.extract_macros(raw)
+        macros = parser.extract_macros(_markdownai_body(raw))  # #157: strip frontmatter
         return parser.call_macro(macros, macro, args or {})
 
     @mcp.tool()
