@@ -137,7 +137,12 @@ def classify(path: Path):
     total = max(1, directive_blocks + counts["prose"])
     prose_ratio = round(counts["prose"] / total, 2)
     if prose_ratio >= 0.85:
-        verdict = "NARRATIVE — protect. frontmatter + prose only; do NOT force directives."
+        if directive_blocks == 0:
+            verdict = "NARRATIVE (pure) — protect. frontmatter + @markdownai header only; nothing to lift."
+        else:
+            verdict = (f"NARRATIVE — protect the prose, but DO lift the {directive_blocks} "
+                       "explicitly-flagged structural segment(s) below (real sections/rules). "
+                       "Force NO new directives onto prose.")
     elif prose_ratio >= 0.55:
         verdict = "prose-led — thin directive layer (lift the few real rules/phases; keep the rest prose)."
     else:
