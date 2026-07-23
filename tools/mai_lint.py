@@ -152,6 +152,21 @@ def lint_file(path: Path, schema, quiet: bool) -> bool:
             fails.append(f"last @constraint swallows structural content that will "
                          f"not render: {structural[0].strip()!r} (#156)")
 
+    # @phase has no closing tag either — the last @phase captures to EOF. Each
+    # @phase is placed before its own `## N` section, so the last phase's tail
+    # should contain exactly ONE top-level (H2) heading (its own). A SECOND H2
+    # means an appended sibling section (e.g. a trailing `## Constraints` from
+    # the constraint-duplicate pattern) got silently buried inside the last
+    # phase. Give that section its own @phase, or place it before the phases.
+    phases = list(re.finditer(r"^@phase\b.*$", body, re.M))
+    if phases:
+        tail = body[phases[-1].end():]
+        h2 = [ln for ln in tail.splitlines() if re.match(r"^##[ \t]", ln)]
+        if len(h2) > 1:
+            fails.append(f"last @phase swallows an appended section: {h2[1].strip()!r} "
+                         "— give it its own @phase or move it before the phases "
+                         "(@phase has no close; it captures to EOF)")
+
     # balanced blocks
     for open_tok, close_tok in (("@if", "@endif"), ("@macro", "@endmacro")):
         o = len(re.findall(rf"^{open_tok}\b", body, re.MULTILINE))
