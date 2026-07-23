@@ -37,8 +37,15 @@ scaffolded `$WILLOW_HOME`, compiled manifests, and (best-effort) a local
 Postgres with every table created — run:
 
 ```bash
-scripts/sandbox-bootstrap.sh   # idempotent; ends with a live diagnostic_summary
+bash scripts/sandbox-bootstrap.sh   # idempotent; ends with a live diagnostic_summary
 ```
+
+On a bootstrapped sandbox the schema mappings for the tables the script itself
+just created are **auto-confirmed** (so `task_*` and knowledge writes work
+immediately), behind three guards: existing mapping artifacts are never
+touched, every field must resolve exact, and the live columns must equal the
+repo's own DDL — an adopted/foreign database always falls through to the
+human `schema_confirm_mapping` path (see `src/willow_mcp/sandbox_confirm.py`).
 
 It scaffolds a repo-local, gitignored `.willow/` so the sandbox never touches
 your real fleet state. Postgres is optional and handled best-effort (the SOIL
@@ -598,18 +605,29 @@ needs a manifest at `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json`:
 
 `permissions` is a list of group names and/or literal tool names —
 see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the authoritative set
-(39 groups). Common ones: `store_read`, `store_write`, `knowledge_read`,
+(42 groups). Common ones: `store_read`, `store_write`, `knowledge_read`,
 `knowledge_write`, `schema_admin`, `task_queue`, `agent_dispatch`,
 `dispatch_read`, `dispatch_write`, `fleet_read`, `context`, `audit`,
 `gap_read`, `gap_write`, `gap_promote`, `fork_read`, `fork_write`, `nest_read`,
 `nest_write`, `integration_read`, `web_read`, `code_graph_read`,
 `code_graph_write`, `full_access` — plus per-subsystem read/write groups for
-lineage, friction, commitments, and the human-loop. Fail-closed:
+lineage, friction, commitments, the human-loop, and MarkdownAI. Fail-closed:
 no manifest, or an empty `permissions` list, denies every call for that
 `app_id`. `gap_promote` is kept separate from `gap_write` — landing
 something as trusted knowledge is a more consequential act than logging or
 resolving a gap, the same reasoning `schema_admin` gets its own group
 instead of folding into `knowledge_write`.
+
+The MarkdownAI (mai) tools (registered only when `WILLOW_MCP_MARKDOWNAI=1`)
+are additionally per-app gated (#153/#161): `markdownai_read` and
+`markdownai_write` cover the file/render tools, and `markdownai_directives` —
+deliberately outside `full_access` — unlocks the side-effectful
+`@db`/`@http`/`@env` directives inside `render()`. Even with that grant:
+`@db` connections must be allowlisted in the manifest's `"mai_connections"`
+list and never default to the willow database; `@http` honors the operator's
+`consent.internet` plus an SSRF host blocklist; and `@env` resolves only keys
+named in the operator's `WILLOW_MAI_ENV_ALLOW` (comma-separated, default
+deny), with credential-shaped keys never resolving at all.
 
 There is also one **capability permission**, `task_net`, which is not a tool
 name but a privilege flag: it lets an app *ask* for `task_submit(allow_net=True)`.
