@@ -45,9 +45,10 @@ log carries a one-line entry and points there rather than duplicating.
 | B-37 | P0 | Fixed | kart / egress | `# allow_net` is now a request only. Kartikeya 0.0.2 requires a host authorizer for every network row and denies missing attribution/envelope/verifier or callback failure before shell launch. willow-mcp supplies execution-time capability, consent, lease, strict trust-root, Ed25519 signature, exact normalized task hash, expiry, and atomic nonce-replay checks. The signed envelope travels through TaskRow and SQLite/Postgres without inventing legacy authority; signing is an interactive local CLI with no MCP surface. | work order `60CB6361`; FRANK `8683cd84`, `41c2375a`; follow-up to B-19/B-21/B-29/B-32 |
 | B-38 | P2 | Fixed | diagnostics / severance | The severance check shipped in PR #57 asserted **three** surfaces — `store`, `postgres`, `trust_root` — and egress was not one of them. An install could be perfectly severed (own store, own database, trust root beyond reach, verdict `ok`) and still reach the internet, because the shell tool its operator actually calls takes `allow_net` as a **parameter** (B-37). Severance from a fleet's *state* is not severance from a fleet's *network*. **Fixed:** `_diag_severance` now asserts a fourth surface, `egress` (`_egress_severance`), that this process cannot forge the three-key network gate — reusing the manifest + lease-root paths and adding the two the `trust_root` message named but never measured: the `consent.internet` switch and the Ed25519 verification key (checkable only once B-37 moved the signing key beyond write reach). Strict-on + a forgeable key or unprotected verifier → `error` (breaks, like trust_root); strict-off → `unknown`/`warn` (degrades, never breaks, B-18) — so the 2026-07-09 install now reports `partial`, not `ok`. | found 2026-07-09 (hanuman); FRANK `8683cd84`; PR #57; unblocked by B-37; fixed 2026-07-20 |
 | B-39 | P1 | Fixed | docs / tool schema | `task_submit` and consent documentation once overstated submit-time checks as a fleet-wide network gate. The text was corrected when found; B-37 now closes the underlying executor defect with signed per-task authorization and execution-time policy checks. | found 2026-07-09 (willow seat); supersedes B-33 doc clause; closed structurally by B-37 |
-| B-40 | P1 | Fixed | worker / packaging | `willow-mcp worker` unstartable with **every published kartikeya** — the f1e8c9b guard imports `sandbox.resolve_sandbox_config`, which no PyPI release (≤0.0.7) ships, and the ImportError was fatal on every lane (including dev fast lanes the guard itself would allow), re-breaking B-22's shipped-drainer guarantee; the error's remedy ("Upgrade kartikeya") was unrunnable, same class as B-27. Fixed: fallback names the policy source itself by mirroring `load_sandbox_config`'s search order; production lanes still refuse the vendored default with the same message | issue #165; branch `claude/sandbox-setup-cmayov` |
-| B-41 | P2 | Fixed | deploy / claude-code-web | MCP server spawned with **no `WILLOW_*` env** in Claude Code web — the SessionStart hook wrote env to `$CLAUDE_ENV_FILE`, which shells inherit but the client-spawned stdio server does not; it defaulted `WILLOW_HOME` to `~/.willow` (no manifests) and gate-denied `session_enter` for every seat. B-12's bug class in a new lane. Fixed: `session-start.sh` generates the gitignored `.mcp.json` with the resolved env embedded (B-12's "env-freeze" polish); hook invoked via `bash` so a mode-stripped clone still boots | issue #166; branch `claude/sandbox-setup-cmayov` |
-| B-42 | P3 | Open | tests / schema | `tests/test_egress_row_gate_postgres.py` hardcodes the adopted fleet's `id` column, so all 6 tests fail (`UndefinedColumn: "id"`) against a sandbox bootstrapped from the repo's own `docs/schema/tasks.postgres.sql` (`task_id`) — green only where the live DB happens to match `willow_20` | issue #167 |
+| B-40 | P1 | Fixed | worker / packaging | `willow-mcp worker` unstartable with **every published kartikeya** — the f1e8c9b guard imports `sandbox.resolve_sandbox_config`, which no PyPI release (≤0.0.7) ships, and the ImportError was fatal on every lane (including dev fast lanes the guard itself would allow), re-breaking B-22's shipped-drainer guarantee; the error's remedy ("Upgrade kartikeya") was unrunnable, same class as B-27. Fixed: fallback names the policy source itself by mirroring `load_sandbox_config`'s search order; production lanes still refuse the vendored default with the same message. Residual: bump the pin + drop the fallback once kartikeya ships the API | issue #165 (closed); PR #172 |
+| B-41 | P2 | Fixed | deploy / claude-code-web | MCP server spawned with **no `WILLOW_*` env** in Claude Code web — the SessionStart hook wrote env to `$CLAUDE_ENV_FILE`, which shells inherit but the client-spawned stdio server does not; it defaulted `WILLOW_HOME` to `~/.willow` (no manifests) and gate-denied `session_enter` for every seat. B-12's bug class in a new lane. Fixed: `session-start.sh` generates the gitignored `.mcp.json` with the resolved env embedded (B-12's "env-freeze" polish); hook invoked via `bash` so a mode-stripped clone still boots. Follow-ups on the same seam: worker auto-start + guarded schema auto-confirm (`sandbox_confirm.py`), so a cold container boots the full stack | issue #166 (open for the WILLOW_HUMAN_ORCHESTRATOR decision); PR #172 |
+| B-42 | P3 | Fixed | tests / schema | `tests/test_egress_row_gate_postgres.py` hardcoded the adopted fleet's `id` column, so all 6 tests failed (`UndefinedColumn: "id"`) against a sandbox bootstrapped from the repo's own `docs/schema/tasks.postgres.sql` (`task_id`) — and its fixture wiped the live table via `DELETE FROM tasks`. Fixed: every test parametrized over BOTH layouts inside a dedicated pytest schema (`search_path`), so the schema-adapted row-gate contract is exercised on each and live data is never touched; 6 tests → 12 | issue #167 (closed by merge); PR #173 |
+| B-43 | P1 | Fixed | security / mai | mai directives executed **ungated** when the tools were registered — `@db` arbitrary SQL on the willow Postgres, `@http` open SSRF, `@env` any-env-var exfiltration, and internal `render()` calls ran all of it with no authorization anywhere in `mai/`. Fixed: three manifest groups (`markdownai_read`/`_write`/`_directives`, none in `full_access`), app_id threaded through all ten tools + `render()` (ungated render yields refusal text), `@db` requires a manifest-allowlisted `"mai_connections"` name, `@http` honors `consent.internet` + SSRF blocklist, `@env` default-denies behind `WILLOW_MAI_ENV_ALLOW`; 18 abuse tests | issues #161/#153; PR #173 |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -63,17 +64,6 @@ log carries a one-line entry and points there rather than duplicating.
 | B-09 | P2 | Stale | gate | Silent fallback on missing SAP gate — `openclaw_sap_gate` gone in rewritten `gate.py` | L-AUTH-01 |
 
 ## Open
-
-- **B-42 · P3** — **the egress row-gate tests assume the fleet's schema, not the
-  repo's.** `test_egress_row_gate_postgres.py` maps `task_id → id` and queries
-  `WHERE id = %s` — the adopted `willow_20` layout — while the repo's own
-  `docs/schema/tasks.postgres.sql` (what `sandbox-bootstrap.sh` and the
-  SessionStart hook apply) names the column `task_id`. On a clean sandbox all 6
-  tests fail at the INSERT fixture with `UndefinedColumn: "id"`; observed live
-  2026-07-23 (`6 failed, 1331 passed`). The schema-adaptation layer exists so
-  willow-mcp serves both layouts; the tests should too — either a fixture-owned
-  table in the layout under test, or parametrization over both column names.
-  Full detail: issue #167.
 
 - **B-31 · P1** — **willow-2.0's consent reader fails open.**
   ```python
@@ -185,6 +175,25 @@ log carries a one-line entry and points there rather than duplicating.
   failed rows have no recoverable completion time.
 
 ## Fixed
+
+- **B-42 · P3 (2026-07-23, PR #173)** — **the egress row-gate tests assumed the
+  fleet's schema, not the repo's.** The fixture mapped `task_id → id` and ran
+  raw SQL against whatever live `tasks` table it found (including
+  `DELETE FROM tasks`) — red 6/6 on any database built from
+  `docs/schema/tasks.postgres.sql`, which is exactly what the sandbox bootstrap
+  produces. **Fixed by parametrizing every test over BOTH layouts** (repo
+  `task_id` and fleet `id`) inside a dedicated pytest schema pointed at by
+  `search_path`, so the code under test's unqualified `FROM tasks` resolves to
+  the fixture's table: the schema-adapted contract is now exercised on each
+  layout, live data is never touched, and the choice follows the issue's own
+  argument (the adaptation layer serves both layouts; the tests should too).
+  6 tests → 12; sandbox suite fully green for the first time.
+
+- **B-43 · P1 (2026-07-23, PR #173)** — **mai directives executed ungated**
+  (issues #161/#153, the security-hardening half). One-line entry per the
+  header convention: full detail lives in the summary row above and issue #161;
+  design notes in the `security(mai)` commits on PR #173. Abuse-tested:
+  `tests/test_mai_directive_gate.py`.
 
 - **B-40 · P1 (2026-07-23)** — **the worker could not start on a clean install.**
   The f1e8c9b guard (refuse a production lane on an unobservable sandbox policy)

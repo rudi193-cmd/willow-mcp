@@ -117,6 +117,19 @@ if [ ! -f "$REPO/.mcp.json" ]; then
 JSON
 fi
 
+# Start a fast-lane Kart worker so task_submit has a drainer from the first
+# minute of a cold session — without one, every submission strands (B-26's
+# `stranded` signal names exactly this gap; observed live standing up this
+# sandbox). Best-effort and idempotent: skip when a worker already runs, log
+# to $WILLOW_HOME/logs/, and never fail the hook — a worker that can't start
+# degrades task_* only, and fleet_health/diagnostic_summary will say so.
+if [ -x "$REPO/.venv/bin/willow-mcp" ] && ! pgrep -f "willow-mcp worker" >/dev/null 2>&1; then
+  mkdir -p "$WILLOW_HOME/logs"
+  nohup "$REPO/.venv/bin/willow-mcp" worker --lane fast --interval 2 \
+    >> "$WILLOW_HOME/logs/worker.log" 2>&1 &
+  echo "started fast-lane Kart worker (pid $!)" >&2
+fi
+
 # Persist the env for the whole session so any shell you open inherits it.
 # (The client-spawned MCP server does NOT read this file — its env comes from
 # the .mcp.json env block generated above.)

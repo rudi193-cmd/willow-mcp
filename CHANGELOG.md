@@ -4,6 +4,79 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — 2026-07-23
+
+The web-sandbox season: make a cold Claude Code container boot the full stack
+unattended, close the #161 mai security hole, and consolidate every open
+branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`).
+
+### Security
+- **#161: the mai directive surface is gated.** The ten mai tools registered
+  on FastMCP with no app_id anywhere — `@db` ran arbitrary SQL on the willow
+  Postgres, `@http` was an open SSRF, `@env` exfiltrated any env var, and
+  internal `parser.render()` calls executed all of it ungated. Three new
+  permission groups (`markdownai_read` / `markdownai_write` /
+  `markdownai_directives`, none in `full_access`); `app_id` threaded through
+  every tool and `render()`; ungated renders yield refusal text; `@db` needs a
+  manifest-allowlisted `"mai_connections"` name (denials stay loud past
+  `on-error`); `@http` honors `consent.internet` + an SSRF host blocklist;
+  `@env` is default-deny behind `WILLOW_MAI_ENV_ALLOW` with credential-shaped
+  keys never resolving. 18 abuse tests. Also fixes a latent parser bug: the
+  old `@env` regex never fed `key=`/`fallback=` to `parse_attrs`, so every
+  keyed `@env` silently rendered `""`.
+
+### Fixed
+- **B-41 (issue #166): the web-sandbox MCP server booted blind.** The
+  SessionStart hook wrote env to `$CLAUDE_ENV_FILE`, which shells inherit but
+  the client-spawned stdio server does not — it defaulted `WILLOW_HOME` to an
+  empty `~/.willow` and gate-denied every seat. The hook now generates the
+  gitignored `.mcp.json` **with the resolved env embedded** (after the vault
+  restore, so vault-supplied values land), and is invoked via `bash` so a
+  mode-stripped clone still boots.
+- **B-40 (issue #165): `willow-mcp worker` was unstartable on a clean
+  install** — the f1e8c9b guard needs `kartikeya.sandbox.resolve_sandbox_config`,
+  which no published kartikeya (≤0.0.7) ships, and the ImportError was fatal on
+  every lane. The guard now names the policy source itself by mirroring
+  `load_sandbox_config`'s search order; production lanes still refuse the
+  vendored default. Remove the fallback once a kartikeya release ships the API.
+- **B-42 (issue #167): egress row-gate witness tests are layout-parametrized**
+  (repo `task_id` + fleet `id`) inside a dedicated pytest schema — previously
+  red 6/6 on any repo-DDL database and wiping the live `tasks` table via
+  `DELETE FROM tasks`. Sandbox suite fully green for the first time.
+- **Fleet-policy containment tests skip off the fleet host** instead of
+  erroring on every CI runner (`~/github/.willow/kart-sandbox.json` is a
+  fleet-host-only file; on it, the audit still fires at full strength).
+- **Bootstrap venv freshness (#165):** the "already importable — skipping
+  install" fast path now runs `pip check` and re-syncs the editable install
+  when a pyproject pin is unsatisfied (the kartikeya-0.0.5-under-a->=0.0.7-pin
+  failure mode).
+
+### Added
+- **Sandbox schema auto-confirm** (`willow_mcp/sandbox_confirm.py`, run by the
+  bootstrap): unlocks `task_*`/knowledge writes on the DDL the bootstrap itself
+  just applied, behind three guards — existing mapping artifacts are never
+  touched; every field must resolve exact@1.0; live columns must equal the
+  repo DDL. Adopted/foreign schemas always fall through to the human
+  `schema_confirm_mapping` path (B-10/B-11 posture preserved), and
+  auto-confirmed artifacts record `confirmed_by="sandbox-bootstrap"`.
+- **SessionStart worker auto-start:** the hook launches a fast-lane Kart
+  worker after the bootstrap (idempotent, logged to `$WILLOW_HOME/logs/`,
+  never fatal), so `task_submit` has a drainer from a cold container's first
+  minute instead of stranding (B-26's signal).
+- **Consolidation (PR #172):** merged `claude/pypi-package-quality-oojgm6`,
+  `fix/fleet-kart-sandbox-vault-unbind`, `claude/desk-organization-uby85b`
+  (mai corpus + the #163 parser/security cluster), and `claude/the-assembling`;
+  ported `experiment/sentry-observability`'s egress-gated Sentry module as
+  content (byte-identical to blob `a99374d`; wired in `__main__.py`), with the
+  `telemetry` exposure preset and an `observability` extra.
+- **Gates panel** friendly labels for the three MarkdownAI groups.
+
+### CI
+- **mai-lint runs before the test matrix** (#158): deterministic guard for the
+  #156/#157 regression classes on the default mai targets; auto-detection
+  leaves non-mai markdown (including the HELD canon) untouched. Scope is
+  mai_lint-only until the wtool keep-vs-retire call (handoff Q10).
+
 ## [2.0.1] — 2026-07-22
 
 Docs and packaging only — no behavior changes.
