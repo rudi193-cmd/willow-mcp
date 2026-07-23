@@ -51,9 +51,29 @@ generated files.
 6. **Keep template copies in sync** — `docs/templates/` and
    `src/willow_mcp/bundle/templates/` must stay byte-identical.
 
+## ⛔ GATE — hold before design/prose docs
+
+The loop is **paused at the safe-app-store boundary**. Mechanical bites
+(templates, skills — header + frontmatter + light `@if`/`@constraint`) run
+freely. **Design and prose docs do NOT get an agent until the directive
+strategy is designed with the operator.** This gate covers:
+
+- all of `safe-app-store` (starting with `VISION.md` and the gap analysis), and
+- willow-mcp's own design/prose docs (`docs/design/`, `docs/audits/`,
+  `docs/story/`).
+
+Why the gate: in a design doc a directive *does work* and *renders
+authoritatively* — a wrong `@db` is worse than a stale number, `@db` lines show
+literally on GitHub, and load-bearing prose can be mangled by an over-eager
+"add directives" pass. These need per-doc judgment, live-verified queries, and
+a deliberate strategy — not a swarm. Design first, then resume the loop with
+that strategy as a new learning.
+
 ## Bite ledger
 
 | # | Bite | Status | Gaps found |
 |---|------|--------|-----------|
 | 1 | willow-mcp templates (ASSIGNMENT, CLOSEOUT ×2 copies) | committed | 6 (folded in above) |
-| 2 | willow-mcp skills (13) — #154 | dispatched | — |
+| 2 | willow-mcp skills (13) — #154 | in flight | — |
+| — | **GATE: design-doc directive strategy** | **held** | — |
+| 3+ | safe-app-store + design/prose docs | blocked on gate | — |
