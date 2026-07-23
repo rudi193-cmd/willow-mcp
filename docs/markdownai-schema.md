@@ -58,6 +58,17 @@ and enums without freezing the frontmatter. Skills in this repo already carry
 `name`/`description`; they become *proper* mai docs by adding the
 `@markdownai v1.0` header line after the frontmatter.
 
+**Frontmatter authoring rules (learned converting the templates):**
+
+- **Quote placeholder values.** A `{…}` fill-in must be a quoted YAML string —
+  `title: "{title}"`, not `title: {title}` (unquoted `{…}` parses as a YAML
+  flow mapping and breaks the block).
+- **Enum fields can't hold a placeholder.** `priority` is
+  `high｜normal｜low` — a template puts a concrete default in frontmatter
+  (`priority: normal`) and leaves the human choice hint in the body
+  (`**Priority:** {high | normal | low}`). Don't write `priority: "{priority}"`;
+  it fails validation.
+
 **The closeout is tool-emitted.** `closeout.md` is not hand-written — the
 `handoff_write_v4` MCP tool renders it from a structured
 `handoff.json` (`handoff_v1`) it writes under
@@ -220,10 +231,14 @@ to: vishwakarma
 Scrubbed the manifest; verified no case numbers remain.
 
 ## Findings
-@db using="willow" raw="SELECT id, text, severity FROM findings WHERE dispatch_id='D-2026-07-23-001'" | @render type=table
+@db using="willow" raw="SELECT id, text, severity, evidence FROM findings WHERE dispatch_id='D-2026-07-23-001'" on-error="(findings pending — recorded in handoff.json)" | @render type=table
 ```
 
-The structured `handoff.json` behind it validates against
+**Always give `@db` an `on-error`** when the table may not exist: findings
+today live in `handoff.json` (a file), **not** a `findings` Postgres table, so
+this query only resolves once such a table/connection exists — until then the
+`on-error` fallback renders instead of a raw SQL error. The structured
+`handoff.json` behind it validates against
 [`handoff.schema.json`](schema/handoff.schema.json).
 
 The current `ASSIGNMENT`/`CLOSEOUT` **template files** use `{placeholder}`
