@@ -51,6 +51,19 @@ jobs:
       - name: Path guard
         run: bash scripts/path_guard.sh
 
+      - name: mai-lint (@markdownai docs)
+        # #158: deterministic guard against the #156/#157 regression classes
+        # (colon-form constraints, structural swallow, frontmatter
+        # @phase/@macro). No args → lints the default mai targets
+        # (docs/templates/, src/willow_mcp/bundle/templates/, skills/); it
+        # auto-detects @markdownai docs, so non-mai markdown — including the
+        # HELD Constitution/canon files, which are never mai-converted — is
+        # untouched. Scoped to mai_lint only: wiring the rest of tools/ into
+        # CI is deferred until the wtool keep-vs-retire call (handoff Q10).
+        run: |
+          pip install -q pyyaml jsonschema
+          python tools/mai_lint.py
+
       - name: Install dependencies
         run: |
           # PyPI kartikeya lags merged master (allow_db, cgroup caps) — drop once 0.0.7 ships.

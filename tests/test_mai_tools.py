@@ -3,12 +3,33 @@
 Vendored from willow-2.0 (sap/mai); adapted here to the willow_mcp package.
 The willow-2.0 original also had a test coupling mai to that repo's fylgja
 pre_tool hook — dropped, since that hook is not part of the vendored tool.
+
+#161: the tools are manifest-gated, so these tests run as a granted app
+("maitest", markdownai_read + markdownai_write). Denial-path coverage lives
+in tests/test_mai_directive_gate.py.
 """
 from __future__ import annotations
 
 import asyncio
+import json
+
+import pytest
 
 from willow_mcp.mai import tools as mai_tools
+
+_APP = "maitest"
+
+
+@pytest.fixture(autouse=True)
+def granted_app(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    app_dir = apps_root / _APP
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(
+        json.dumps({"permissions": ["markdownai_read", "markdownai_write"]})
+    )
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    return apps_root
 
 
 def _register():
@@ -31,7 +52,9 @@ def test_mai_write_file_on_disk(tmp_path):
     path = tmp_path / "doc.md"
     content = "@markdownai v1.0\n\n# Test\n\nHello.\n"
     m = _register()
-    result = asyncio.run(m.call_tool("mai_write_file", {"path": str(path), "content": content}))
+    result = asyncio.run(
+        m.call_tool("mai_write_file", {"path": str(path), "content": content, "app_id": _APP})
+    )
     assert '"ok": true' in str(result[0]) or "ok': True" in str(result[0])
     assert path.read_text(encoding="utf-8") == content
 
@@ -57,7 +80,7 @@ def test_read_renders_ai_format(tmp_path):
         encoding="utf-8",
     )
     m = _register()
-    out = str(asyncio.run(m.call_tool("mai_read_file", {"path": str(path)})))
+    out = str(asyncio.run(m.call_tool("mai_read_file", {"path": str(path), "app_id": _APP})))
     assert "Visible." in out
     assert "@markdownai" not in out
     assert "hidden instruction" not in out
@@ -78,7 +101,7 @@ def test_phases_and_constraints(tmp_path):
         encoding="utf-8",
     )
     m = _register()
-    phases = _result(asyncio.run(m.call_tool("mai_list_phases", {"file": str(path)})))
+    phases = _result(asyncio.run(m.call_tool("mai_list_phases", {"file": str(path), "app_id": _APP})))
     assert [p["name"] for p in phases] == ["one", "two"]
-    cons = _result(asyncio.run(m.call_tool("mai_get_constraints", {"file": str(path)})))
+    cons = _result(asyncio.run(m.call_tool("mai_get_constraints", {"file": str(path), "app_id": _APP})))
     assert cons[0]["severity"] == "critical"  # sorted most-severe first

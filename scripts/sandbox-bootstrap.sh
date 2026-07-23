@@ -6,7 +6,7 @@
 # onboarding); fleet operators use docs/OPERATOR-ONBOARD.md.
 #
 # One command to take a fresh clone to a working stdio MCP server:
-#   scripts/sandbox-bootstrap.sh
+#   bash scripts/sandbox-bootstrap.sh
 #
 # It does, in order (each step safe to re-run):
 #   1. create .venv and `pip install -e .`         (skipped if the venv imports)
@@ -49,6 +49,13 @@ if ! "$PY" -c 'import willow_mcp' 2>/dev/null; then
   "$PY" -m pip install --upgrade pip -q
   "$PY" -m pip install -e . -q
   echo "installed willow-mcp (editable)"
+elif ! "$PY" -m pip check >/dev/null 2>&1; then
+  # #165: an already-importable venv can still be stale against pyproject's
+  # pins — kartikeya 0.0.5 sat under a >=0.0.7 pin and left the worker
+  # unstartable, and the fast path above never re-checked. `pip check` spots
+  # the unsatisfied pin; re-sync instead of skipping.
+  "$PY" -m pip install -e . -q
+  echo "willow_mcp importable but pins unsatisfied — re-synced editable install"
 else
   echo "willow_mcp already importable — skipping install"
 fi

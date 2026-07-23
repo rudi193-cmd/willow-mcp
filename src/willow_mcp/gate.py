@@ -238,6 +238,25 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "human_loop_write": frozenset({
         "human_required_enqueue", "human_required_resolve", "human_attestation_create",
     }),
+    # MarkdownAI (mai) tools — #153/#161. Registration is already opt-in via
+    # WILLOW_MCP_MARKDOWNAI; these groups add per-app authorization on top,
+    # because a registered tool surface with no gate is exactly the #161 hole.
+    # Read/write cover the file+render tools; the directives group is the
+    # dangerous half — it unlocks side-effectful @db/@http/@env resolution
+    # inside render() via the pseudo-tool "__mai_directives__", which is
+    # checked by the parser and never registered as an MCP tool. None of the
+    # three ride full_access: mai reaches the filesystem, the database, and
+    # the network, so each is a deliberate grant (same reasoning as task_net).
+    "markdownai_read": frozenset({
+        "mai_read_file", "mai_list_phases", "mai_resolve_phase",
+        "mai_next_phase", "mai_call_macro", "mai_get_constraints",
+    }),
+    "markdownai_write": frozenset({
+        "mai_write_file", "mai_invalidate_cache",
+    }),
+    "markdownai_directives": frozenset({
+        "mai_execute_directive", "mai_get_env", "__mai_directives__",
+    }),
     "full_access": frozenset({
         # Core store
         "store_put", "store_get", "store_list", "store_update",

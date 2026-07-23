@@ -43,21 +43,41 @@ def test_env_refuses_secret_shaped_keys():
         assert parser._handle_env({"key": k, "fallback": "safe"}, "") == "safe"
 
 
-def test_env_still_returns_non_secret():
-    assert parser._handle_env({"key": "WILLOW_PG_DB", "fallback": "x"}, "") not in ("", "safe")
+def test_env_resolves_only_with_grant_and_allowlist(monkeypatch):
+    # #161 tightened @env to default-deny: even a non-secret key needs the
+    # directive grant AND an operator allowlist entry to resolve.
+    monkeypatch.setenv("WILLOW_PG_DB", "willow")
+    assert parser._handle_env({"key": "WILLOW_PG_DB", "fallback": "x"}, "") == "x"
+    monkeypatch.setattr(parser, "directives_permitted", lambda _a: True)
+    monkeypatch.setenv("WILLOW_MAI_ENV_ALLOW", "WILLOW_PG_DB")
+    assert parser._handle_env({"key": "WILLOW_PG_DB", "fallback": "x"}, "", app_id="x") == "willow"
 
 
-def test_db_refuses_without_explicit_connect():
-    r = parser._handle_db({"raw": "SELECT 1"}, "")
+# These three exercise the #163-era layers BENEATH the #161 directive gate
+# (no-default-connect, on-error, SSRF hosts), so they bypass the outer gate
+# explicitly; the gate's own denials are covered in test_mai_directive_gate.py.
+
+def _bypass_gate(monkeypatch):
+    monkeypatch.setattr(parser, "directives_permitted", lambda _a: True)
+    monkeypatch.setattr(parser, "_db_connection_allowed", lambda _a, _n: True)
+
+
+def test_db_refuses_without_explicit_connect(monkeypatch):
+    _bypass_gate(monkeypatch)
+    r = parser._handle_db({"raw": "SELECT 1"}, "", app_id="x")
     assert isinstance(r, list) and "refused" in str(r[0])
 
 
-def test_db_on_error_fallback_when_no_connect():
-    r = parser._handle_db({"raw": "SELECT 1", "on-error": "n/a"}, "")
+def test_db_on_error_fallback_when_no_connect(monkeypatch):
+    _bypass_gate(monkeypatch)
+    r = parser._handle_db({"raw": "SELECT 1", "on-error": "n/a"}, "", app_id="x")
     assert isinstance(r, parser._FallbackResult) and r.value == "n/a"
 
 
-def test_http_blocks_internal_hosts():
+def test_http_blocks_internal_hosts(monkeypatch):
+    _bypass_gate(monkeypatch)
+    from willow_mcp import consent
+    monkeypatch.setattr(consent, "internet_permitted", lambda: True)
     for u in ("http://localhost:5432", "http://127.0.0.1/", "http://169.254.169.254/latest",
               "http://10.0.0.1/", "file:///etc/passwd"):
-        assert "refused" in str(parser._handle_http({"url": u}, ""))
+        assert "refused" in str(parser._handle_http({"url": u}, "", app_id="x"))
