@@ -1,3 +1,11 @@
+---
+kind: doc
+name: product-layout-willow-mcp-locked
+description: "Locked v1.0 spec for the willow-mcp product layout: repo structure, the $WILLOW_HOME runtime tree, repo-to-home init mapping, bundled seeds, environment variables, CLI, and the implementation checklist."
+---
+
+@markdownai v1.0
+
 # Product layout — willow-mcp (LOCKED)
 
 *Status: **LOCKED** draft 1.0 — 2026-07-09*  
@@ -12,6 +20,7 @@ All runtime paths resolve through `src/willow_mcp/paths.py`. Do not hardcode `$W
 
 ---
 
+@phase 1-repository-layout-willow-mcp
 ## 1. Repository layout (`willow-mcp/`)
 
 What ships in the package and repo:
@@ -60,6 +69,7 @@ Skills/hooks exist at repo root for editing; **runtime** copies live under `$WIL
 
 ---
 
+@phase 2-runtime-layout-willow-home
 ## 2. Runtime layout (`$WILLOW_HOME`)
 
 Default: `~/.willow`. Override with env `WILLOW_HOME`.
@@ -137,6 +147,7 @@ never deletes operator data.
 
 ---
 
+@phase 3-repo-home-mapping-init
 ## 3. Repo → home mapping (init)
 
 | Repo source | Runtime destination | Init behavior |
@@ -151,6 +162,7 @@ never deletes operator data.
 
 ---
 
+@phase 4-bundled-seeds-src-willow-mcp-bundle
 ## 4. Bundled seeds (`src/willow_mcp/bundle/`)
 
 Wheel includes `bundle/` so init works offline after `pip install`.
@@ -166,6 +178,7 @@ Release maintainer syncs from repo root `skills/`, `hooks/`, `docs/templates/` i
 
 ---
 
+@phase 5-three-repos-product-centric
 ## 5. Three repos (product-centric)
 
 | Repo | Relationship to willow-mcp |
@@ -176,6 +189,7 @@ Release maintainer syncs from repo root `skills/`, `hooks/`, `docs/templates/` i
 
 ---
 
+@phase 6-filename-collisions-do-not-import-blindly
 ## 6. Filename collisions (do not import blindly)
 
 | Nest / charter name | Product location |
@@ -186,6 +200,7 @@ Release maintainer syncs from repo root `skills/`, `hooks/`, `docs/templates/` i
 
 ---
 
+@phase 7-environment-variables
 ## 7. Environment variables
 
 | Variable | Default | Purpose |
@@ -197,6 +212,7 @@ Release maintainer syncs from repo root `skills/`, `hooks/`, `docs/templates/` i
 
 ---
 
+@phase 8-cli
 ## 8. CLI
 
 ```bash
@@ -208,6 +224,7 @@ willow-mcp worker            # Kart queue drainer
 
 ---
 
+@phase 9-implementation-checklist
 ## 9. Implementation checklist
 
 | Item | Status |
@@ -226,3 +243,9 @@ willow-mcp worker            # Kart queue drainer
 ---
 
 *Locked by product design session 2026-07-09. Changes require bumping `.layout-version` and a note in CHANGELOG.*
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+**Never overwrite** existing operator files on init or upgrade.

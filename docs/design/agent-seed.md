@@ -1,3 +1,10 @@
+---
+kind: doc
+name: agent-seed-universal-participant-model-draft
+description: "Draft design doc defining agent_seed_v1, the participant schema for agent identity, persona, and context across cold boots, dispatches, and cross-channel propagation."
+---
+@markdownai v1.0
+
 # Agent seed — universal participant model (DRAFT)
 
 *Status: **DRAFT** — 2026-07-09*  
@@ -12,6 +19,7 @@ Governance decisions (charter seat, 2026-07-09):
 
 ---
 
+@phase 1-purpose
 ## 1. Purpose
 
 `agent_seed_v1` is the **participant document**: how to work with this agent across cold boots, dispatches, and cross-channel propagation.
@@ -46,6 +54,7 @@ Seed shapes **human context**. Registry shapes **machine permission**. Neither r
 
 ---
 
+@phase 2-schema-agent-seed-v1
 ## 2. Schema (`agent_seed_v1`)
 
 Template: [`agent-seed-template.json`](agent-seed-template.json).  
@@ -109,6 +118,7 @@ Structured gate for Dual Commit + PGP (replaces prose `"PENDING — …"` string
 
 ---
 
+@phase 3-coverage-map-wide-view
 ## 3. Coverage map (wide view)
 
 One shape, many roles — fill depth varies by `kind`:
@@ -128,6 +138,7 @@ One shape, many roles — fill depth varies by `kind`:
 
 ---
 
+@phase 4-placement-home-soil-kb-three-store
 ## 4. Placement — home, SOIL, KB (three-store)
 
 **Canonical source of truth:** filesystem under home — not search index.
@@ -202,6 +213,7 @@ Aligns with fleet KB pattern (tier + lifecycle + provenance):
 
 ---
 
+@phase 5-exposure-membrane-as-8
 ## 5. Exposure membrane (AS-8)
 
 Cross-ref: charter `dec-exposure-picker-ui-2026-07-09`.
@@ -230,6 +242,7 @@ Schema field paths are the checkbox IDs. Orthogonal to registry **tool** permiss
 
 ---
 
+@phase 6-pgp-ratification
 ## 6. PGP + ratification
 
 Cross-ref: `pgp-and-persona.md`.
@@ -244,6 +257,7 @@ Cross-ref: `pgp-and-persona.md`.
 
 ---
 
+@phase 7-session-boot-order
 ## 7. Session boot order
 
 ```
@@ -262,6 +276,7 @@ Charter orchestrator: picker reads project roster; Willow seat may be `locked`.
 
 ---
 
+@phase 8-relation-to-specialist-registry
 ## 8. Relation to specialist registry
 
 | Registry field | Seed relationship |
@@ -275,6 +290,7 @@ Registry slice **S-R*** for permissions remains blocked until operator ratifies 
 
 ---
 
+@phase 9-bundled-seeds-product-wheel
 ## 9. Bundled seeds (product wheel)
 
 | Ship in wheel | Do not ship |
@@ -289,6 +305,7 @@ Registry slice **S-R*** for permissions remains blocked until operator ratifies 
 
 ---
 
+@phase 10-implementation-slices
 ## 10. Implementation slices
 
 | Slice | Deliverable | Blocked on |
@@ -304,6 +321,7 @@ Registry slice **S-R*** for permissions remains blocked until operator ratifies 
 
 ---
 
+@phase 11-open-decisions-operator
 ## 11. Open decisions (operator)
 
 1. **Registry ↔ seed compile direction** — `job`/`not_job` source of truth?
@@ -314,6 +332,7 @@ Registry slice **S-R*** for permissions remains blocked until operator ratifies 
 
 ---
 
+@phase 12-deprecations-target
 ## 12. Deprecations (target)
 
 | Current | Future |
@@ -326,3 +345,13 @@ Registry slice **S-R*** for permissions remains blocked until operator ratifies 
 ---
 
 *Draft lineage: 0.1 (2026-07-09) — from Nest `agent_seed_template.json` + `sean_seed.json`; three-store and exposure decisions from charter governance session.*
+
+
+@phase constraints
+## Constraints
+
+@constraint severity="normal"
+**Do not** force agent_seed shape on: `*/atoms`, `turns`, `sessions`, `pa/commitments`, `pm/*`, `governance/decisions`.
+
+@constraint severity="critical"
+**Never** default full operator `cast` / `personal_note` into searchable KB. Exposure picker + `sensitivity` gate outbound slices.
