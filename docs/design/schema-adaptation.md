@@ -1,3 +1,11 @@
+---
+kind: doc
+name: schema-adaptation
+description: "Design for schema-adaptive access to external Postgres databases and OAuth identity claims in willow-mcp — discover-don't-assume mapping, with reads inferring and writes requiring confirmed mappings."
+---
+
+@markdownai v1.0
+
 # Design: Schema Adaptation for External Data — Databases and Identity Claims
 
 Status: DRAFT — §§1–5, 7–9 not yet implemented or ratified. **§6.3's core
@@ -27,6 +35,7 @@ Motivating incidents (two, same root cause at the time this doc was drafted):
 
 See conversation log for the full reasoning trail on both.
 
+@phase 1-problem-statement
 ## 1. Problem statement
 
 willow-mcp is meant to be pointed at **someone else's** database, not its own.
@@ -59,6 +68,7 @@ This rules out both options considered earlier in the conversation:
   tier 2 above, nobody may be positioned to notice it silently returned
   wrong data instead of crashing.
 
+@phase 2-design-principles
 ## 2. Design principles
 
 1. **Discover, don't assume.** Before any tool issues SQL against a host
@@ -90,6 +100,7 @@ This rules out both options considered earlier in the conversation:
    posture as the fleet's own FRANK ledger: the log is what makes an
    inference defensible after the fact, which matters most exactly in tier 3.
 
+@phase 3-architecture-sketch
 ## 3. Architecture sketch
 
 ```
@@ -220,6 +231,7 @@ permitted the `knowledge_write` group and still be refused a specific write
 because the mapping for that host table isn't confirmed yet. These are
 independent, composable gates, not a replacement for one another.
 
+@phase 4-degradation-error-behavior
 ## 4. Degradation & error behavior
 
 - Table introspection fails entirely (no such table) → tool returns
@@ -233,6 +245,7 @@ independent, composable gates, not a replacement for one another.
   surface a `schema_drift` warning rather than writing against columns that
   may no longer mean what a human confirmed them to mean.
 
+@phase 5-audit-logging
 ## 5. Audit logging
 
 Every introspection, every mapping proposal, every confirmation, and every
@@ -243,6 +256,7 @@ schema_audit.jsonl` if willow-mcp shouldn't depend on FRANK directly for a
 public-facing package). Minimum fields: timestamp, app_id, table, mapping
 snapshot, tool called, confirmed-by (human/heuristic).
 
+@phase 6-a-second-instance-of-the-same-problem-oauth-identity-claims
 ## 6. A second instance of the same problem: OAuth identity claims
 
 **Correction (2026-07-08, same day, later pass):** this section originally
@@ -383,6 +397,7 @@ improvement but a distinct piece of work from binding — a token could have a
 correctly narrow scope and still be bound to nobody, which is exactly
 today's state.
 
+@phase 7-cross-project-alignment-the-shape-projection-contract-ledger-0ba6a33f
 ## 7. Cross-project alignment: the shape-projection contract (ledger `0ba6a33f`)
 
 A separate project (shape-projection / consent-lease design, ledger
@@ -469,6 +484,7 @@ implicitly grants a projection. Collapsing them (e.g. treating "column is
 mapped" as "column may leave") would silently reintroduce a deny-list-shaped
 bug into an allow-list-shaped design.
 
+@phase 8-open-questions-for-next-pass-not-blocking-the-write-up
 ## 8. Open questions (for next pass, not blocking the write-up)
 
 - **Aliasing dictionary scope.** Should common aliases (`source`/`source_type`/
@@ -541,6 +557,7 @@ bug into an allow-list-shaped design.
   connector) must not ship without one. Track as a prerequisite gate on that
   work, not as its own standalone rollout step here.
 
+@phase 9-rollout-shape-sketch-not-committed
 ## 9. Rollout shape (sketch, not committed)
 
 1. `schema_profile.py` — introspection + heuristic mapping + artifact
@@ -597,3 +614,41 @@ that authenticates a real human and then silently accepts a changed email
 on an existing binding is a smaller but still real gap to ship with, not
 the "silently fails to authorize anyone" gap originally described here
 (that part is already fixed).
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+- **Self-provisioned isolated schema** (`willow_mcp.*` namespace, own tables) —
+  wrong, because then the tool never actually engages with the host's real
+  data. It solves the crash but defeats the entire premise of "works with any
+  codebase."
+- **Hardcoded column names** (today's code) — wrong, demonstrably: it crashes
+  the instant the host schema doesn't match the author's assumption, and by
+  tier 2 above, nobody may be positioned to notice it silently returned
+  wrong data instead of crashing.
+
+@constraint severity="normal"
+No silent best-effort writes, ever. This is the tier-2/tier-3 safety
+boundary: reads can be helpful-and-approximate, writes must be
+correct-or-refused.
+
+@constraint severity="critical"
+**Cross-cutting rule, restated for this codebase:** `SchemaProfile` /
+mapping artifact (§3.2) and any future `PROJECTION` artifact (point 2 above)
+are separate files with separate confirmation gates — a `schema_confirm_mapping`
+call (§8) changes only what willow-mcp believes a table means; it never
+implicitly grants a projection. Collapsing them (e.g. treating "column is
+mapped" as "column may leave") would silently reintroduce a deny-list-shaped
+bug into an allow-list-shaped design.
+
+@constraint severity="critical"
+A rooted mapping is still a proposal a human confirms; it never auto-applies,
+and it never overrides an exact-named column (so an exact-name trap — a
+`content` column holding a citation — is beaten only by the data-shape pass,
+not by names or memory). The ring store — the tree's canopy — is **bounded**
+(`WILLOW_MCP_SCHEMA_RINGS_MAX`, default 5000 pairs): an open, churning
+column-name vocabulary would otherwise grow it without limit, so past the cap
+`_prune` thins the canopy by LFU with an LRU tie-break (thinnest rings first,
+oldest-among-ties next), keeping the common load-bearing heartwood and letting
+stale one-off names rot.
