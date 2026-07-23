@@ -16,6 +16,10 @@ EXPOSURE_FORMAT = "exposure_v1"
 
 # Preset → dotted field paths (checkbox IDs for future UI picker).
 PRESET_FIELDS: dict[str, tuple[str, ...]] = {
+    # The narrowest destination — exposes NOTHING. Registered for egress sinks
+    # like Sentry telemetry, where the correct answer is "leak nothing at all"
+    # (see observability.py). apply_field_paths([]) yields an empty body.
+    "telemetry": (),
     "voice_only": ("persona.register", "persona.voice_rules"),
     "work_context": (
         "persona.register",
@@ -53,6 +57,7 @@ def default_exposure_config() -> dict[str, Any]:
             "agent_seed_mirror": "work_context",
             "grove": "voice_only",
             "cloud_llm": "voice_only",
+            "sentry": "telemetry",
             "dispatch": "work_context",
             "*": "voice_only",
         },
