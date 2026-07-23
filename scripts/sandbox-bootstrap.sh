@@ -92,6 +92,12 @@ else
       echo "applied $(basename "$f")"
     done
     echo "database '$WILLOW_PG_DB' ready"
+    # Sandbox-only schema auto-confirm: unlocks task_* / knowledge writes on
+    # the DDL this script itself just applied. Three guards inside (existing
+    # artifacts untouched; every field exact@1.0; live columns == repo DDL) —
+    # adopted/foreign schemas always fall through to the human confirm path.
+    # See src/willow_mcp/sandbox_confirm.py.
+    "$PY" -m willow_mcp.sandbox_confirm || true
   else
     echo "could not reach database '$WILLOW_PG_DB' as '$WILLOW_PG_USER' — skipping schema."
     echo "  (start your cluster, or re-run with WILLOW_PG_BOOTSTRAP_ROLE=1 on a bare cluster)"
