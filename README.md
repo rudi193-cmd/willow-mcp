@@ -749,6 +749,73 @@ that never claimed to be cut off cannot be caught lying about it. Set one and no
 the other and the unnamed surface reports `unknown`, which degrades: an
 unverifiable claim is not a passing one.
 
+## The companion layer
+
+Not everything in the package is a gate. A few subsystems exist to carry the
+*story* of an install — lessons, work-units, the shape of the collaboration —
+and a `tools/` directory turns jobs a model was doing by hand into
+deterministic scripts.
+
+### The Grove — rings for lessons
+
+`the_grove.py` is a rings store for lessons learned, sibling to
+`schema_profile`'s vocabulary rings but unbounded on purpose: vocabulary may be
+pruned cheaply; lessons are kept precisely so the deployment cannot become
+something that forgets them.
+
+```console
+$ python -m willow_mcp.the_grove            # the resting display
+The Grove is stable.
+Current depth: 0 rings.
+Soil health: Worth tending.
+
+Next gardener: unknown.
+Chapters remaining: as many as the rain requires.
+$ python -m willow_mcp.the_grove --status   # pipe-friendly: stability, depth, soil health
+```
+
+`core.record_lessons()` distills any SQLite journal (the table holding the
+writing is introspected, never assumed; the source is opened read-only) into
+exactly one ring carrying the lesson worth keeping. A diseased rings file reads
+as empty but reports the grove `unsettled` rather than silently claiming
+depth 0.
+
+### Forks — bounded work-unit tracking
+
+The seven `fork_*` tools (`fork_create` / `fork_status` / `fork_log` /
+`fork_list` / `fork_join` / `fork_merge` / `fork_delete`, under the
+`fork_read`/`fork_write` permission groups) track branch + PR work-units as
+durable SOIL records with an append-only change log — the same shape as gaps,
+lineage, and the human-loop queue, deliberately *not* a fleet-Postgres table
+(B-28's lesson: don't drag a schema migration into the shared database for a
+bookkeeping record). `fork_merge`/`fork_delete` count atom/KB change-log refs
+as promoted/archived bookkeeping.
+
+### Friction floor — the mirror detector
+
+`friction_scan` watches one thing: whether the agent has stopped being *other*
+and is mirroring the user back, smoothed, **while the user is escalating**.
+When a window of agent turns sits below the friction floor during escalation,
+it raises a loud, human-facing flag — persisted and deduped;
+`friction_flags_list` reads them back. It never blocks and never egresses: a
+signal, not a verdict. It must be driven from outside the watched model — a
+mirror cannot audit itself.
+
+### `tools/` — take the job off the model
+
+Deterministic harnesses for jobs a model was doing by hand — each turns
+conversational labor into a script, so the next session runs the tool instead
+of re-deriving the work. See [`tools/README.md`](tools/README.md) for the full
+wiring; the cast:
+
+| Script | Job it takes off the model |
+|---|---|
+| `wtool.py` | the substrate — call any of the server's tools from a shell (`--list`, JSON args), so *any* script can do what a model does through an MCP client |
+| `mai_lint.py` | deterministic @markdownai format validation (also a CI step) |
+| `mai_metrics.py` | record one metric per bite into SOIL; report the new-gaps-by-learnings convergence curve |
+| `mai_prose_split.py` | the prose/structure pass for converting narrative docs to @markdownai — separates protected prose from directive candidates, and a `prose_ratio` verdict flags story-shaped docs "do not force" instead of mangling them |
+| `provision_gate.py` | union permission groups into a gate manifest, validating every name against `gate.PERMISSION_GROUPS` — loud-fail on a typo instead of granting nothing |
+
 ## Hooks and skills (Claude Code)
 
 `.claude-plugin/plugin.json` registers a `PreToolUse` hook and thirteen skills
