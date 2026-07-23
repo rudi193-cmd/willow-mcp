@@ -115,6 +115,13 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   leaves non-mai markdown (including the HELD canon) untouched. Scope is
   mai_lint-only until the wtool keep-vs-retire call (handoff Q10).
 
+### Docs
+- **The companion layer is documented** — new README section covering the
+  Grove (lessons rings, `python -m willow_mcp.the_grove`), the `fork_*`
+  work-unit tracker, the friction-floor mirror detector, and the `tools/`
+  deterministic-harness suite; `tools/README.md` gains the missing
+  `mai_prose_split.py` row.
+
 ## [2.0.1] — 2026-07-22
 
 Docs and packaging only — no behavior changes.
