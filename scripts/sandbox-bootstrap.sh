@@ -6,7 +6,7 @@
 # onboarding); fleet operators use docs/OPERATOR-ONBOARD.md.
 #
 # One command to take a fresh clone to a working stdio MCP server:
-#   scripts/sandbox-bootstrap.sh
+#   bash scripts/sandbox-bootstrap.sh
 #
 # It does, in order (each step safe to re-run):
 #   1. create .venv and `pip install -e .`         (skipped if the venv imports)
@@ -40,7 +40,7 @@ export WILLOW_PG_USER="${WILLOW_PG_USER:-${USER:-$(id -un)}}"
 
 say() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 
-# ── 1. venv + editable install ────────────────────────────────────────
+# ── 1. venv + editable install ────────────────────────────────────────────────
 say "venv + install"
 if [ ! -x "$PY" ]; then
   python3 -m venv "$VENV"
@@ -60,17 +60,17 @@ else
   echo "willow_mcp already importable — skipping install"
 fi
 
-# ── 2. scaffold WILLOW_HOME ───────────────────────────────────────────
+# ── 2. scaffold WILLOW_HOME ───────────────────────────────────────────────────
 say "scaffold WILLOW_HOME ($WILLOW_HOME)"
 "$VENV/bin/willow-mcp-init" >/dev/null
 echo "home ready"
 
-# ── 3. compile manifests ──────────────────────────────────────────────
+# ── 3. compile manifests ──────────────────────────────────────────────────────
 say "compile manifests"
 "$VENV/bin/willow-mcp-compile" --force >/dev/null
 echo "manifests compiled"
 
-# ── 4. Postgres (best-effort) ─────────────────────────────────────────
+# ── 4. Postgres (best-effort) ─────────────────────────────────────────────────
 say "postgres (best-effort)"
 if [ "${WILLOW_SKIP_PG:-0}" = "1" ]; then
   echo "WILLOW_SKIP_PG=1 — skipping; SOIL store stands alone"
@@ -98,7 +98,7 @@ else
   fi
 fi
 
-# ── 5. live self-check ────────────────────────────────────────────────
+# ── 5. live self-check ────────────────────────────────────────────────────────
 say "diagnostic_summary (live stdio handshake)"
 WILLOW_APP_ID="${WILLOW_APP_ID:-willow}" "$PY" - <<'PY'
 import json, os, subprocess, sys
