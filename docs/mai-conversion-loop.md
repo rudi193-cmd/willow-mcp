@@ -50,6 +50,17 @@ generated files.
    SQL column aliases don't fit inside `raw="…"`; headers use raw column names.
 6. **Keep template copies in sync** — `docs/templates/` and
    `src/willow_mcp/bundle/templates/` must stay byte-identical.
+7. **`@constraint` placement collides with "don't reword."** Its greedy
+   capture forces the rule to the end; default to a short trailing
+   `## Constraints` section, or duplicate the rule verbatim if it opens the doc
+   — don't relocate load-bearing intro text.
+8. **A move pass needs a cross-reference sweep.** Relocating a section can turn
+   "see below" into a false forward-reference (hit in `tdd.md`).
+9. **Some real skills predate the frontmatter convention** (no `name`/
+   `description`) — add minimal frontmatter; they're skills, not process docs.
+10. **`@if consumer="ai"` needs an explicit criterion.** Working rule: wrap only
+    literal numbered `## Steps` execution scripts; leave tables/rationale/mixed
+    content unwrapped.
 
 ## ⛔ GATE — hold before design/prose docs
 
@@ -74,6 +85,10 @@ that strategy as a new learning.
 | # | Bite | Status | Gaps found |
 |---|------|--------|-----------|
 | 1 | willow-mcp templates (ASSIGNMENT, CLOSEOUT ×2 copies) | committed | 6 (folded in above) |
-| 2 | willow-mcp skills (13) — #154 | in flight | — |
+| 2 | willow-mcp skills (13 ×2 copies) — #154 | committed | 4 (folded in above) |
 | — | **GATE: design-doc directive strategy** | **held** | — |
 | 3+ | safe-app-store + design/prose docs | blocked on gate | — |
+
+10 learnings accumulated; the mechanical willow-mcp docs are done. Bites 7-8
+above (constraint placement, cross-ref sweep) are exactly the design-doc risks
+the gate exists for.
