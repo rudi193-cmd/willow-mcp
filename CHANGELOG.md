@@ -79,9 +79,15 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   erroring on every CI runner (`~/github/.willow/kart-sandbox.json` is a
   fleet-host-only file; on it, the audit still fires at full strength).
 - **Bootstrap venv freshness (#165):** the "already importable — skipping
-  install" fast path now runs `pip check` and re-syncs the editable install
-  when a pyproject pin is unsatisfied (the kartikeya-0.0.5-under-a->=0.0.7-pin
-  failure mode).
+  install" fast path now re-syncs the editable install when a pyproject pin is
+  unsatisfied (the kartikeya-0.0.5-under-a->=0.0.7-pin failure mode). `pip check`
+  alone MISSES this on a warm container — it reads the editable install's
+  recorded `Requires-Dist`, which a pin bump after the last `pip install -e .`
+  never refreshed, so the stale dep passes (observed live: kartikeya 0.0.5 under
+  a `>=0.0.7` pin, `pip check` green, four tests red and the worker unstartable).
+  The fast path now also runs `willow_mcp.deps_freshness`, which reads the
+  CURRENT `pyproject.toml` and checks each dependency's installed version against
+  its specifier directly; either guard failing triggers the re-sync.
 
 ### Added
 - **Sandbox schema auto-confirm** (`willow_mcp/sandbox_confirm.py`, run by the

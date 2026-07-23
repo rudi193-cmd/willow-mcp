@@ -49,15 +49,20 @@ if ! "$PY" -c 'import willow_mcp' 2>/dev/null; then
   "$PY" -m pip install --upgrade pip -q
   "$PY" -m pip install -e . -q
   echo "installed willow-mcp (editable)"
-elif ! "$PY" -m pip check >/dev/null 2>&1; then
+elif ! "$PY" -m pip check >/dev/null 2>&1 \
+     || ! "$PY" -m willow_mcp.deps_freshness 2>/dev/null; then
   # #165: an already-importable venv can still be stale against pyproject's
   # pins — kartikeya 0.0.5 sat under a >=0.0.7 pin and left the worker
-  # unstartable, and the fast path above never re-checked. `pip check` spots
-  # the unsatisfied pin; re-sync instead of skipping.
+  # unstartable, and the fast path above never re-checked. `pip check` alone
+  # MISSES this on a warm container: it reads the editable install's recorded
+  # Requires-Dist, which a pin bump after the last `pip install -e .` never
+  # refreshed, so a stale dep passes. `willow_mcp.deps_freshness` reads the
+  # CURRENT pyproject and checks installed versions against it directly, so a
+  # bumped pin is caught. Either signal failing → re-sync.
   "$PY" -m pip install -e . -q
-  echo "willow_mcp importable but pins unsatisfied — re-synced editable install"
+  echo "willow_mcp importable but a dependency pin is unsatisfied — re-synced editable install"
 else
-  echo "willow_mcp already importable — skipping install"
+  echo "willow_mcp already importable and pins satisfied — skipping install"
 fi
 
 # ── 2. scaffold WILLOW_HOME ───────────────────────────────────────────────────
