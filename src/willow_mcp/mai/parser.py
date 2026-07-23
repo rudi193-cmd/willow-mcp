@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-# ── Simple cache (directive results) ─────────────────────────────────────────
+# ── Simple cache (directive results) ─────────────────────────────────
 
 _cache: dict[str, Any] = {}
 
@@ -25,7 +25,7 @@ def invalidate(key: str | None = None) -> None:
         _cache.pop(key, None)
 
 
-# ── Attribute parsing ─────────────────────────────────────────────────────────
+# ── Attribute parsing ───────────────────────────────────────────────
 
 _ATTR_RE = re.compile(r'(\w[\w-]*)=(?:"([^"]*?)"|\'([^\']*?)\'|(\S+))')
 
@@ -38,7 +38,7 @@ def parse_attrs(text: str) -> dict[str, str]:
     }
 
 
-# ── Connection registry ────────────────────────────────────────────────────────
+# ── Connection registry ──────────────────────────────────────────────
 
 @dataclass
 class Connection:
@@ -65,7 +65,7 @@ def _register_connection(attrs: dict[str, str]) -> None:
     _connections[name] = Connection(name=name, conn_type=conn_type, uri=uri)
 
 
-# ── Fallback sentinel ─────────────────────────────────────────────────────────
+# ── Fallback sentinel ────────────────────────────────────────────────
 
 @dataclass
 class _FallbackResult:
@@ -73,9 +73,9 @@ class _FallbackResult:
     value: str
 
 
-# ── Directive handlers ────────────────────────────────────────────────────────
+# ── Directive handlers ───────────────────────────────────────────────
 
-# ── Directive safety (issue #161) ─────────────────────────────────────────────
+# ── Directive safety (issue #161) ─────────────────────────────────────
 _SECRET_ENV_RE = re.compile(
     r"PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|CREDENTIAL|SESSION_?KEY|_KEY$",
     re.I,
@@ -85,6 +85,49 @@ _SECRET_ENV_RE = re.compile(
 def _env_is_secret(key: str) -> bool:
     """Credential-shaped env vars are never exposed through mai (#161)."""
     return bool(key) and bool(_SECRET_ENV_RE.search(key))
+
+
+_DIRECTIVE_DENIED = (
+    "[mai directive denied: caller lacks the 'markdownai_directives' grant (#161)]"
+)
+
+
+def directives_permitted(app_id: str) -> bool:
+    """#161: side-effect directives (@db/@http/@env) resolve only for a caller
+    whose manifest grants markdownai_directives. An ungated internal
+    render() call (empty app_id) is fail-closed — the directives render as
+    refusals instead of executing."""
+    if not app_id:
+        return False
+    from willow_mcp import gate
+    return gate.permitted(app_id, "__mai_directives__")
+
+
+def _env_key_allowed(key: str) -> bool:
+    """#161: @env is default-deny. Only keys the operator names in
+    WILLOW_MAI_ENV_ALLOW (comma-separated) resolve — and never
+    credential-shaped ones, even when listed."""
+    if not key or _env_is_secret(key):
+        return False
+    allow = {
+        k.strip() for k in os.environ.get("WILLOW_MAI_ENV_ALLOW", "").split(",")
+        if k.strip()
+    }
+    return key in allow
+
+
+def _db_connection_allowed(app_id: str, name: str) -> bool:
+    """#161: a @db connection must be allowlisted in the calling app's
+    manifest under "mai_connections" (a list of @connect names). Missing
+    list, missing manifest, or unlisted name all deny."""
+    if not app_id or not name:
+        return False
+    from willow_mcp import gate
+    manifest = gate._load_manifest(app_id)
+    if not isinstance(manifest, dict):
+        return False
+    allowed = manifest.get("mai_connections")
+    return isinstance(allowed, list) and name in allowed
 
 
 _BLOCKED_HTTP_HOST_RE = re.compile(
@@ -103,22 +146,26 @@ def _http_host_blocked(url: str) -> bool:
     return bool(_BLOCKED_HTTP_HOST_RE.match(p.hostname or ""))
 
 
-def _handle_env(attrs: dict[str, str], _content: str) -> str:
+def _handle_env(attrs: dict[str, str], _content: str, app_id: str = "") -> str:
     key = attrs.get("key", attrs.get("var", ""))
     fallback = attrs.get("fallback", attrs.get("default", ""))
     if not key:
         # @env KEY or inline usage — try positional
         return fallback
-    if _env_is_secret(key):
-        return fallback  # never expose credential-shaped vars (#161)
+    # #161: gate + default-deny allowlist; env degrades quietly to fallback.
+    if not directives_permitted(app_id) or not _env_key_allowed(key):
+        return fallback
     return os.environ.get(key, fallback)
 
 
-def _handle_db(attrs: dict[str, str], _content: str) -> Any:
+def _handle_db(attrs: dict[str, str], _content: str, app_id: str = "") -> Any:
     """Execute a SQL query and return rows.
 
     on-error attr: value to return silently when the query fails.
     E.g.  @db using="willow" raw="SELECT ..." on-error=""
+
+    #161: gate denials are LOUD — on-error softens query failures, never a
+    refused authorization.
     """
     using = attrs.get("using", "default")
     raw_sql = attrs.get("raw", "")
@@ -126,6 +173,12 @@ def _handle_db(attrs: dict[str, str], _content: str) -> Any:
     fallback: str | None = attrs.get("on-error", None)
     if not raw_sql:
         return []
+
+    if not directives_permitted(app_id):
+        return [{"error": _DIRECTIVE_DENIED}]
+    if not _db_connection_allowed(app_id, using):
+        return [{"error": f"@db refused: connection {using!r} is not allowlisted in "
+                          "the app manifest's \"mai_connections\" (#161)"}]
 
     conn_info = _connections.get(using)
     uri = ""
@@ -175,10 +228,18 @@ def _handle_render(data: Any, attrs: dict[str, str]) -> str:
     return json.dumps(data, default=str, indent=2)
 
 
-def _handle_http(attrs: dict[str, str], _content: str) -> Any:
+def _handle_http(attrs: dict[str, str], _content: str, app_id: str = "") -> Any:
     url = _resolve_value(attrs.get("url", attrs.get("src", "")))
     if not url:
         return {"error": "no url"}
+    if not directives_permitted(app_id):
+        return {"error": _DIRECTIVE_DENIED}
+    # #161: honor the operator's standing egress consent — the same switch
+    # that gates Kart allow_net (B-29). Read fail-closed by consent.py.
+    from willow_mcp import consent
+    if not consent.internet_permitted():
+        return {"error": "@http refused: operator consent.internet is not granted "
+                         "(#161 / B-29)"}
     if _http_host_blocked(url):
         return {"error": "@http refused: host not allowed "
                          "(loopback/link-local/private/metadata blocked — #161)"}
@@ -199,7 +260,7 @@ def _handle_http(attrs: dict[str, str], _content: str) -> Any:
         return {"error": str(e)}
 
 
-# ── Phase / Macro ─────────────────────────────────────────────────────────────
+# ── Phase / Macro ───────────────────────────────────────────────────
 
 @dataclass
 class Phase:
@@ -248,7 +309,7 @@ def call_macro(macros: dict[str, Macro], name: str, args: dict[str, str]) -> str
     return result
 
 
-# ── Constraint / Concept extraction ───────────────────────────────────────────
+# ── Constraint / Concept extraction ───────────────────────────────────────
 
 @dataclass
 class Constraint:
@@ -276,7 +337,7 @@ def extract_constraints(text: str) -> list[Constraint]:
     return constraints
 
 
-# ── Conditional blocks ────────────────────────────────────────────────────────
+# ── Conditional blocks ────────────────────────────────────────────────
 
 def apply_conditionals(text: str, consumer: str = "ai") -> str:
     """Strip or keep @if/@endif blocks based on consumer.
@@ -303,7 +364,7 @@ def apply_conditionals(text: str, consumer: str = "ai") -> str:
     return text
 
 
-# ── Main renderer ─────────────────────────────────────────────────────────────
+# ── Main renderer ────────────────────────────────────────────────────
 
 def render(
     text: str,
@@ -313,6 +374,7 @@ def render(
     consumer: str = "ai",
     skill_args: str = "",
     skill_named_args: dict[str, str] | None = None,
+    app_id: str = "",
 ) -> str:
     """
     Render a MarkdownAI document.
@@ -323,14 +385,23 @@ def render(
     - Applies @if/@endif conditionals
     - Handles @phase filtering
     - In 'ai' format: strips comment lines, condenses whitespace
+
+    #161: side-effect directives (@db/@http/@env) resolve only when app_id
+    carries the markdownai_directives grant. A render with no app_id — every
+    internal/legacy call — is fail-closed: the document still renders, but
+    the dangerous directives yield refusal text instead of executing.
     """
+    allowed = directives_permitted(app_id)
+
     # Strip header
     text = re.sub(r"^@markdownai\s+v[\d.]+\s*\n?", "", text, count=1)
 
-    # Register connections
-    for m in re.finditer(r"^@connect\s+(\S+)\s+(.*)", text, re.MULTILINE):
-        attrs_str = f"name={m.group(1)} {m.group(2)}"
-        _register_connection(parse_attrs(attrs_str))
+    # Register connections — only for a directive-granted caller; an ungated
+    # render must not poison the process-global registry either (#161).
+    if allowed:
+        for m in re.finditer(r"^@connect\s+(\S+)\s+(.*)", text, re.MULTILINE):
+            attrs_str = f"name={m.group(1)} {m.group(2)}"
+            _register_connection(parse_attrs(attrs_str))
 
     # Remove @connect lines
     text = re.sub(r"^@connect.*\n?", "", text, flags=re.MULTILINE)
@@ -360,16 +431,24 @@ def render(
     # not output content
     text = re.sub(r"@prompt[^\n]*\n.*?@end\s*\n?", "", text, flags=re.DOTALL)
 
-    # Resolve @env directives
+    # Resolve @env directives — gate + default-deny allowlist (#161); env
+    # degrades quietly to its declared fallback. The old regex captured only
+    # the first token, so `key=`/`fallback=` attrs never reached parse_attrs
+    # and every keyed @env silently rendered "" — parse the whole rest of the
+    # line instead, with a bare `@env KEY` positional form kept working.
     def _env_sub(m: re.Match) -> str:
-        attrs = parse_attrs(m.group(1))
-        key = attrs.get("key", attrs.get("var", m.group(2) if m.group(2) else ""))
+        rest = m.group(1)
+        attrs = parse_attrs(rest)
+        key = attrs.get("key", attrs.get("var", ""))
+        if not key:
+            words = rest.split()
+            key = words[0] if words and "=" not in words[0] else ""
         fallback = attrs.get("fallback", attrs.get("default", ""))
-        if not key or _env_is_secret(key):   # #161: no secret exfil via @env
+        if not allowed or not key or not _env_key_allowed(key):
             return fallback
         return os.environ.get(key, fallback)
 
-    text = re.sub(r"@env\s+(?:key=[\"']?(\w+)[\"']?|(\w+))([^\n]*)", _env_sub, text)
+    text = re.sub(r"@env\s+([^\n]+)", _env_sub, text)
 
     # Resolve @db ... | @render chains
     def _db_render_sub(m: re.Match) -> str:
@@ -377,7 +456,7 @@ def render(
         render_attrs_str = m.group(2) or ""
         db_attrs = parse_attrs(db_attrs_str)
         render_attrs = parse_attrs(render_attrs_str)
-        data = _handle_db(db_attrs, "")
+        data = _handle_db(db_attrs, "", app_id=app_id)
         if isinstance(data, _FallbackResult):
             return data.value
         return _handle_render(data, render_attrs)
@@ -391,7 +470,7 @@ def render(
     # Standalone @db (no pipe)
     def _db_sub(m: re.Match) -> str:
         attrs = parse_attrs(m.group(1))
-        data = _handle_db(attrs, "")
+        data = _handle_db(attrs, "", app_id=app_id)
         if isinstance(data, _FallbackResult):
             return data.value
         return json.dumps(data, default=str)
@@ -401,7 +480,7 @@ def render(
     # @http
     def _http_sub(m: re.Match) -> str:
         attrs = parse_attrs(m.group(1))
-        result = _handle_http(attrs, "")
+        result = _handle_http(attrs, "", app_id=app_id)
         return json.dumps(result, default=str) if not isinstance(result, str) else result
 
     text = re.sub(r"@http\s+([^\n]+)", _http_sub, text)
