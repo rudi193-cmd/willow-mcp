@@ -3,6 +3,8 @@ name: schema-confirm
 description: Guided review and confirmation of a willow-mcp table's schema mapping before unlocking write tools for it
 ---
 
+@markdownai v1.0
+
 # /schema-confirm
 
 Walks through reviewing a willow-mcp table's schema mapping and confirming
@@ -81,6 +83,7 @@ table is re-confirmed.
 
 ## What this skill will not do
 
+@constraint severity=critical
 It will not call `schema_confirm_mapping` with no human input just to clear
 an `unconfirmed_schema` error and move on. Confirming a mapping grants
 standing to write against a real database using willow-mcp's understanding

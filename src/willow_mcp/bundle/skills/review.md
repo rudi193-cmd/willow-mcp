@@ -3,6 +3,8 @@ name: review
 description: Code review the current branch — check tests, security, placeholders, and patterns before suggesting merge
 ---
 
+@markdownai v1.0
+
 # /review
 
 Branch review checklist. Run before merging any PR. Catches missing tests,
@@ -18,6 +20,7 @@ See also: `worktree.md` (PR-only flow), `tdd.md` (test expectations).
 
 ## Steps
 
+@if consumer="ai"
 1. **See the diff** — `git diff master...HEAD` for the full branch diff, or
    `git diff HEAD` for uncommitted changes.
 
@@ -43,13 +46,7 @@ See also: `worktree.md` (PR-only flow), `tdd.md` (test expectations).
 4. **Report the verdict:**
    - **Passed**: list what was checked, confirm green, suggest merge if appropriate
    - **Failed**: list specific files and lines that need fixing before merge
-
-## Rules
-
-- Never approve without running tests. "Looks right" is not a review.
-- Security issues block merge. Always — especially egress, binding, and manifest edits.
-- Placeholders block merge. A `TODO` in merged code is a future bug.
-- Patterns matter — code that works but doesn't fit the codebase creates drift.
+@endif
 
 ## willow-mcp checklist (when relevant)
 
@@ -68,3 +65,11 @@ See also: `worktree.md` (PR-only flow), `tdd.md` (test expectations).
 - Test coverage gaps are worth flagging even if they don't block merge — at minimum,
   note them.
 - "Follows existing patterns" means look at adjacent code, not just the changed lines.
+
+## Rules
+
+@constraint severity=critical
+- Never approve without running tests. "Looks right" is not a review.
+- Security issues block merge. Always — especially egress, binding, and manifest edits.
+- Placeholders block merge. A `TODO` in merged code is a future bug.
+- Patterns matter — code that works but doesn't fit the codebase creates drift.

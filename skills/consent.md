@@ -3,6 +3,8 @@ name: consent
 description: Operator egress consent and leases — the three-key network gate for Kart and integration_call
 ---
 
+@markdownai v1.0
+
 # /consent — Egress consent (operator)
 
 Use when an agent asks for network access, or when you need to flip the fleet-wide
@@ -72,11 +74,10 @@ Ceiling TTL is 3h. Default 30m. Lease must name the same `app_id` as its file.
 
 ## What agents should say
 
+@if consumer="ai"
 > This needs egress to push the branch. Please run:
 > `willow-mcp grant-net hanuman --ttl 15m --reason "git push feat/foo"`
-
-Never: edit `settings.global.json`, run `grant-net`, or add `task_net` to a manifest
-so the agent's own next call succeeds.
+@endif
 
 ---
 
@@ -97,3 +98,9 @@ is `chown` + `WILLOW_MCP_STRICT_TRUST_ROOT=1` (see `kart-tasks.md` §2).
 Same three standing keys (`integration_call` permission + consent + lease). The
 integration adapter runs in the MCP server process, not Kart — but the gate model
 is parallel. No agent-side shortcut.
+
+## Constraints
+
+@constraint severity=critical
+Never: edit `settings.global.json`, run `grant-net`, or add `task_net` to a manifest
+so the agent's own next call succeeds.

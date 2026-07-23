@@ -3,6 +3,8 @@ name: brainstorming
 description: Structured brainstorm before any plan or implementation — search existing context first, generate three approaches, recommend one, stop until confirmed
 ---
 
+@markdownai v1.0
+
 # /brainstorming
 
 Use **before** entering plan mode or starting any implementation. Prevents building
@@ -16,6 +18,7 @@ the wrong thing.
 
 ## Steps
 
+@if consumer="ai"
 1. **Search existing context** — `knowledge_search`, grep the repo, read
    `docs/design/` and `docs/BUGS.md` before forming opinions. Never brainstorm in a
    vacuum when prior context exists.
@@ -24,13 +27,7 @@ the wrong thing.
 4. **Recommend one** — which and why in 2 sentences.
 5. **Flag constraints** — does this touch areas with known gotchas? Note them (see below).
 6. **Stop** — do not implement until the user confirms the approach.
-
-## Rules
-
-- Context search first. Never brainstorm blind.
-- Three approaches minimum. Two is lazy, four is stalling.
-- Constraints are hard gates, not suggestions.
-- Step 6 is not optional. "I'll just start" skips the whole point.
+@endif
 
 ## willow-mcp constraints to flag
 
@@ -51,3 +48,11 @@ the wrong thing.
   recommendation.
 - If the user rejects all three approaches, that's data — ask what's missing before
   generating more.
+
+## Rules
+
+@constraint severity=critical
+- Context search first. Never brainstorm blind.
+- Three approaches minimum. Two is lazy, four is stalling.
+- Constraints are hard gates, not suggestions.
+- Step 6 is not optional. "I'll just start" skips the whole point.

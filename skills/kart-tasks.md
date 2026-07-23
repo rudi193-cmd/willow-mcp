@@ -3,6 +3,8 @@ name: kart-tasks
 description: Guided use of willow-mcp's Kart task queue — submit/poll, signed per-task egress authorization, and worker liveness
 ---
 
+@markdownai v1.0
+
 # /kart-tasks
 
 Walks through using willow-mcp's sandboxed task queue (`task_submit`,
@@ -147,6 +149,7 @@ between "queued, a worker will get to it" and "queued, nothing is listening."
 
 ## What this skill will not do
 
+@constraint severity=critical
 It will not tell you to keep polling a `pending` task when `fleet_health` reports
 `stranded: true`. It will not add a `# allow_net` directive to task text as a
 shortcut around the `task_net` permission — that path is closed by design (B-21),

@@ -3,6 +3,8 @@ name: willow-serve
 description: Turn willow-mcp OAuth HTTP serve mode on or off on request, toggling both the systemd --user service and the .mcp.json client entry
 ---
 
+@markdownai v1.0
+
 # /willow-serve
 
 Turns willow-mcp's OAuth serve mode **on** or **off** without hand-editing
@@ -51,6 +53,7 @@ unless the credential was cleared (that is expected, not a failure).
 
 ## What this skill will not do
 
+@constraint severity=error
 - It does not hand-edit `.mcp.json` directly — the script owns that toggle so
   the entry and the running service never drift apart.
 - It does not disable OAuth or the identity-binding gate to make serve mode
