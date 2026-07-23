@@ -1,3 +1,11 @@
+---
+kind: doc
+name: "guardian-consent-seam-representing-a-subject-who-isnt-the-owner"
+description: "Design doc mapping how a shared subject-consent primitive lets willow-mcp, corpus-lens, the Nest, and UTETY represent owner-not-equal-subject consent, guardian roles, and fail-closed disclosure."
+---
+
+@markdownai v1.0
+
 # The guardian-consent seam: representing a subject who isn't the owner
 
 Status: **core extracted + binding shipped + gate live.** The stdlib-only core
@@ -339,3 +347,107 @@ not to pretend the *unrepresentable* away.
 *This is the map. The wall has always had two halves — "what may leave" (built
 four times over) and "whose data is it, and did they agree" (built once, in a
 classroom). This seam is where they meet.*
+
+@phase constraints
+## Constraints
+
+@constraint severity="critical"
+- `grant`/`revoke`/`permitted(store, subject_id, scope)` over a hash-chained,
+  append-only consent log — fail-closed on every path that isn't a *verified*
+  `granted` (absent store, broken chain, no record, `pending`, `revoked` → `False`).
+- `deidentify(text, identifiers)` — de-identify-or-refuse; proves the scrub or
+  raises **without ever echoing the surviving value**.
+- `record_disclosure`/`read_disclosures` — the per-subject, tamper-evident record
+  a guardian can read.
+- Scopes are **independent permissions, not a ladder**
+  (`local_only`, `process_analysis`, `kb_promotion`, `person_inference` — the
+  last name matching corpus-lens's capability); each is granted and checked on
+  its own.
+- **Not in the core, on purpose:** owner==subject is *not* special-cased (the
+  core doesn't know who the owner is); capacity/self-consent judgments are
+  deferred; and mutation is a library primitive an operator CLI calls — an app
+  can never grant consent on a subject's behalf. Enforcing all three is the
+  binding's job.
+
+@constraint severity="critical"
+- **corpus-lens** draws a hard line at *owner == subject* and quarantines
+  `PERSON_CLAIM_TYPES` behind a `person_inference` capability that the default
+  registry may never grant. It named the guardian-consent model (owner ≠ subject)
+  as its *"biggest unshipped gap"* and refused to ship it. There is no
+  representable way to say *"this claim is about someone else, and here is their
+  grant."*
+- **The Nest** makes `person` fragments of whoever shows up in a life-dump — a
+  co-parent, a child, an ex-partner. Today the wall keeps those out of the shared
+  KB by making them *anonymous counts*. But there is no **consent object** for
+  those non-owner subjects: the Nest can only ever wall them, never *admit* them
+  with a grant.
+- **willow-mcp**'s `consent.py` is **capability** consent — the owner flipping
+  `internet` / `cloud_llm` / `lan` about their own system. It has the right
+  fail-closed discipline (*"absence is not consent"*) but the wrong axis: it says
+  nothing about whose data is in play.
+- **UTETY** is the only piece that built the missing axis — because a classroom
+  *forces* it. The learner is a child; the operator is a parent; COPPA gives no
+  school-consent safe harbor (build-plan rule 4). So UTETY carries, in code, a
+  consent record *granted by a guardian on a subject's behalf*.
+
+@constraint severity="critical"
+**Scopes** name *what a subject agreed to*, so a grant is never all-or-nothing:
+
+- `local_only` — the subject's data may live on this device (the default a
+  household drop-folder assumes for its members).
+- `process_analysis` — process/structure derived from the subject's data may be
+  computed (corpus-lens over a shared corpus; the Nest's counts).
+- `kb_promotion` — de-identified structure about the subject may cross into the
+  shared KB (`nest_promote`).
+- `person_inference` — a person-shaped claim about the subject may be *made at
+  all* (corpus-lens's quarantined `PERSON_CLAIM_TYPES`; the highest bar).
+
+@constraint severity="critical"
+- **Read-only at runtime.** `permitted(subject_id, scope)` and a `disclosure`
+  reader. Fail-closed on every path.
+- **Mutation isolated** to an operator CLI, never an MCP tool — granting consent
+  is an owner-side act, like minting a manifest. The operator-terminal primitives
+  `subject_consent_binding.grant()` / `revoke()` (each gated by
+  `require_operator_terminal()`) are exposed as `willow-mcp grant-consent
+  <subject_id> <scope> --by <guardian>` and `willow-mcp revoke-consent …`;
+  `willow-mcp consent-status <subject_id>` is the read-only counterpart (like
+  `net-status` for `grant-net`).
+- **Composes into `_gate`**, not around it. A tool declares (in its manifest or a
+  small registry, like `tier_policy.TOOL_CLASS`) whether it *touches a subject*
+  and at what scope. `_guarded` → `_gate` gains a third check after `permitted`
+  and the tier ceiling: if the call carries a `subject_id` that is not the owner,
+  `subject_consent.permitted(subject_id, required_scope)` must pass. Absent ⇒
+  denied, receipted as `subject_consent_denied`.
+
+@constraint severity="critical"
+- **No consent record ⇒ denied.** Absence is not consent (the exact rule
+  `consent.py` already enforces for capabilities). An unparseable store denies;
+  it never falls back to a laxer source.
+- **Revocation is immediate and permanent-on-the-record.** `revoked` denies from
+  that moment; the transition is timestamped and chained. Erasing *when* consent
+  was withdrawn would gut the audit trail (UTETY audit B2) — so revocation adds a
+  row, never removes one.
+- **De-identification is verified or it refuses.** A boundary crossing that cannot
+  prove its scrub raises, exactly like `deidentify()`. The scan never emits the
+  value it is checking.
+- **The disclosure chain is tamper-evident both ways** — mid-chain edit (hash
+  links break) and tail truncation (anchored head+count mismatch).
+
+@constraint severity="critical"
+- **The no-one-can-consent case.** A subject who cannot consent and has no
+  guardian empowered to — a deceased relative in a life-dump, an ex-partner who
+  will not participate. The model **cannot conjure a grant that does not exist.**
+  What it *can* do is make their *unconsented* status representable and enforce it
+  fail-closed: their data stays `local_only` (owner-scope, never promoted, never
+  person-inferred) or is excluded. The seam replaces *silent inclusion* with
+  *explicit, enforced exclusion* — an honest improvement, not a resolution.
+- **Guardian ≠ good actor.** A guardian can consent abusively (a parent
+  surveilling a teen; corpus-lens's origin was a *custody schedule reconstructed
+  from keystroke timing*). The model records **who** consented and makes
+  revocation and disclosure available — it does **not** adjudicate whether the
+  guardian *should* have. The disclosure chain is a mitigation (the act is on the
+  record), not a safeguard against a bad guardian.
+- **Capacity to self-consent.** When does a subject earn `can_self_consent`
+  (a teen, a recovering adult)? The flag is carried; the *policy* (age thresholds,
+  capacity judgments) is deferred. UTETY's age-gate is the domain-specific
+  instance; a general answer is out of scope here.
