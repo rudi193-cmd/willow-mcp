@@ -150,7 +150,8 @@
       "commitment_read",
       "store_read",
       "knowledge_read",
-      "lineage_read"
+      "lineage_read",
+      "gap_write"
     ],
     "deny_tools": [],
     "persona_path": "personas/willow.md",
