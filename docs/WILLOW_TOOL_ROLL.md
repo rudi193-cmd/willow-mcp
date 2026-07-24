@@ -14,8 +14,9 @@ Lambretta* — the right genre for a grease-and-torque treatment of the stack.
 | `appendix-c-torque-settings` | `[MEASURE]` over guessed numbers; retry backoff 2/4/8/16s |
 | `appendix-d-jetting-standard-machines` | Stock baseline (consent all-off) vs rejetting for a tuned build |
 
-The reusable scripts referenced there (reconstruction recipe, seal/verify
-tooling) still live only in ephemeral `/workspace` and have not yet been
-relocated — see the manual's `01-tools-for-the-job` for what they are and where
-they belong (`sean-data-vault/scripts/` for the bench roll, this repo's
-`scripts/` for the ride roll).
+The reusable scripts are now persisted in this repo under
+`scripts/reconstruction/`, `scripts/ratification/`, and `scripts/diagnostics/`,
+indexed by [`scripts/TOOL_ROLL.md`](../scripts/TOOL_ROLL.md). They're an as-run
+snapshot (hardcoded `/workspace` roots and DB names — adjust for your host). The
+bench roll's canonical long-term home is `sean-data-vault/scripts/`, next to
+`restore-and-wire.sh`.
