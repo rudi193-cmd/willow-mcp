@@ -441,14 +441,30 @@ works unmodified on any clone once the venv above exists):
 Point `WILLOW_PG_DB` / `WILLOW_STORE_ROOT` at your host fleet store when you
 need Postgres knowledge or shared SOIL data.
 
-willow-mcp re-implements the SOIL / knowledge / dispatch core of the larger
-[willow-2.0](https://github.com/rudi193-cmd/willow-2.0) fleet server as a
-standalone product with a redesigned, smaller surface — **not** a drop-in copy of
-its tool API. Many tools were renamed in the redesign (`soil_*` → `store_*`,
-`ledger_*` → `frank_*`, `agent_task_*` → `task_*`), so an app is not portable
-between the two unchanged. See
-[`docs/migrations/willow-2.0-gap-inventory.md`](docs/migrations/willow-2.0-gap-inventory.md)
-for the verified tool-by-tool diff.
+**Version line.** willow-mcp is the **current substrate** the fleet consumes. It
+sits at the head of a lineage of *distinct machines* — each its own spec, not
+rebadges of one another:
+
+- **`willow-1.7` → `willow-1.9`** — earlier production lines; `willow-1.9` is
+  **archived** (April–May 2026 era).
+- **`willow-2.0`** — a distinct, larger-surface fleet server; now **legacy /
+  migration source**, not the current stack.
+- **`willow-mcp`** — the **current substrate**: a re-scoped re-implementation of
+  willow-2.0's SOIL / knowledge / dispatch core.
+
+willow-mcp re-implements that core as a standalone product with a redesigned,
+smaller surface — **not** a drop-in copy of
+[willow-2.0](https://github.com/rudi193-cmd/willow-2.0)'s tool API. Many tools
+were renamed in the redesign (`soil_*` → `store_*`, `ledger_*` → `frank_*`,
+`agent_task_*` → `task_*`), so an app is not portable between the two unchanged.
+See [`docs/migrations/willow-2.0-gap-inventory.md`](docs/migrations/willow-2.0-gap-inventory.md)
+for the verified tool-by-tool diff, and query `lineage_why` on the recorded atoms
+(`version-willow-mcp`, `version-willow-2.0`, `version-willow-1.9`,
+`version-willow-1.7`) for the provenance.
+
+> **Not the same "2.0".** The willow-**2.0** *fleet server* above is the
+> predecessor line. willow-mcp's own package version (e.g. "serve mode is
+> **2.0.0+**" below) is this product's semver — unrelated.
 
 ## HTTP serve mode (OAuth)
 
