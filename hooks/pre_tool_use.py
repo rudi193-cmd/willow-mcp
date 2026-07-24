@@ -111,9 +111,13 @@ _BASH_ROUTING: list[tuple[re.Pattern[str], str, str]] = [
      f"store_list / store_search for Willow data · filesystem → {_TASK_SUBMIT}"),
     (re.compile(r"^\s*(cat|head|tail)\s"), "warn",
      "Use the IDE Read tool for repo files · shell-only paths → task_submit"),
-    (re.compile(r"^\s*psql\s"), "block",
+    # Anchored to command position (start, or after &&/;/|) so a command that
+    # merely *names* psql/sqlite3 — a commit message, an echo, a --reason string
+    # — is not blocked; only an actual invocation is. (The raw-store block in
+    # check_bash is the real guard; this is the prefer-MCP nudge.)
+    (re.compile(r"(?:^|&&|;|\|)\s*psql\b"), "block",
      "knowledge_search / store_search — Postgres via MCP, not shell"),
-    (re.compile(r"\bsqlite3\b"), "block",
+    (re.compile(r"(?:^|&&|;|\|)\s*sqlite3\b"), "block",
      "store_get / store_list / store_search — SQLite store via MCP"),
     (re.compile(r"^\s*pwd\s*$"), "warn", "cwd is in context; fleet_status for roots"),
     (re.compile(r"^\s*tree(\s|$)"), "warn", f"directory tree → {_TASK_SUBMIT}"),
