@@ -345,8 +345,32 @@ _KEYSTORE_REASON = (
 )
 
 
+# "Retaking the seat": adding a WRITE-capable permission group (or widening
+# store_scope to everything) to a manifest re-grants the very authority the
+# SessionStart bootstrap strips back to read-only. Same sudo-invariant class as
+# task_net — an agent may REQUEST the seat, never CONFIRM it itself. Matched on
+# the group tokens (and a bare "*" store_scope) as they appear in a manifest's
+# JSON, so a Write/Edit or a shell redirect into the file both trip it.
+_SEAT_PRIV_RE = re.compile(
+    r"\b(store_write|store_all|knowledge_write|lineage_write|schema_admin|"
+    r"nest_write|gap_write|gap_purge|friction_write|task_db|full_access)\b"
+)
+_SCOPE_ALL_RE = re.compile(r'"store_scope"\s*:\s*\[\s*"\*"\s*\]')
+
+_SEAT_ESCALATION_REASON = (
+    "willow-mcp: this edits a manifest to add a WRITE-capable permission group "
+    "(store_write / knowledge_write / lineage_write / schema_admin / nest_write / "
+    "gap_write / friction_write / task_db / full_access) or widen store_scope to "
+    '"*" — "retaking the seat". The SessionStart bootstrap restores every seat to '
+    "read-only by default; re-granting write authority is an operator act, not a "
+    "self-grant. An agent may REQUEST the seat, never CONFIRM it itself (sudo "
+    "invariant, FRANK 90e52ab7). Ask the operator to grant it; do not write the file."
+)
+
+
 def check_bash_self_grant(command: str) -> Optional[str]:
-    """Block a command that mints a lease/envelope or grants itself task_net.
+    """Block a command that mints a lease/envelope, grants itself task_net, or
+    edits a manifest to retake a write-capable seat.
 
     Writes only. `cat`ting a lease, `willow-mcp net-status`, and `revoke-net` are
     all fine — reading a key is not holding one, and giving one up is never
@@ -364,6 +388,10 @@ def check_bash_self_grant(command: str) -> Optional[str]:
         return _KEYSTORE_REASON
     if _MANIFEST_RE.search(command) and _TASK_NET_RE.search(command):
         return _SELF_GRANT_REASON
+    if _MANIFEST_RE.search(command) and (
+        _SEAT_PRIV_RE.search(command) or _SCOPE_ALL_RE.search(command)
+    ):
+        return _SEAT_ESCALATION_REASON
     return None
 
 
@@ -379,12 +407,14 @@ def check_trust_root_write(tool_input: dict) -> Optional[str]:
     if _KEYSTORE_RE.search(path):
         return _KEYSTORE_REASON
     if _MANIFEST_RE.search(path):
-        # Only the permission that carries egress. Editing a manifest for any
+        # Only the permissions that carry escalation. Editing a manifest for any
         # other reason is ordinary work and must not be blocked.
         written = " ".join(str(tool_input.get(k, "") or "")
                            for k in ("content", "new_string", "new_str"))
         if _TASK_NET_RE.search(written):
             return _SELF_GRANT_REASON
+        if _SEAT_PRIV_RE.search(written) or _SCOPE_ALL_RE.search(written):
+            return _SEAT_ESCALATION_REASON
     return None
 
 
