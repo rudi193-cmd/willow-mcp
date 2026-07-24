@@ -225,27 +225,76 @@ def check_native_web(tool_name: str) -> Optional[tuple[str, str]]:
     return None
 
 
+# The command-string scan below cannot see a raw client that lives inside a
+# *script file*: `python3 drop.py` / `bash drop.sh` whose body opens a raw sqlite
+# connection against an owned store shows nothing on the command line. This
+# is the file-indirection gap the module's known-limits note names (a write
+# performed inside a script, not a `-c` one-liner). Read the invoked script and
+# apply the same two-key test (raw client + owned-store marker) to its contents.
+# Still a tripwire, not a control — a path built at runtime or an imported wrapper
+# evades it; the durable control is B-32 — but it ends the "the command string was
+# clean" deniability that let a script route around the guard.
+_SCRIPT_INVOKE_RE = re.compile(
+    r"(?:^|&&|;|\|)\s*(?:cd\s+(?P<cwd>[^\s;&|]+)\s*&&\s*)?"
+    r"(?:python3?|bash|sh|zsh)\s+(?:-\S+\s+)*(?P<script>[^\s;&|]+\.(?:py|sh))\b"
+)
+# A real DB *use* in the file — not the bare token, which appears in comments,
+# regexes (this hook's own source), and docs. Requires an actual open/connect or
+# a store client construction, so a file that merely names "sqlite3" is not caught.
+_SCRIPT_DB_USE_RE = re.compile(
+    r"\bimport\s+sqlite3\b|sqlite3\.connect\s*\(|"
+    r"psycopg2?\.connect\s*\(|psycopg\.connect\s*\(|asyncpg\.(?:connect|create_pool)\s*\(|"
+    r"create_engine\s*\(|\bSqliteStore\s*\(|\bpsql\s+-"
+)
+
+
+def _script_reaches_owned_store(command: str) -> Optional[str]:
+    """Block `python3 file.py` / `bash file.sh` whose file reaches a willow-mcp
+    owned store via a raw client — the same crossing as a shell client, one file
+    deeper. Fail-open on an unreadable target (tripwire, not a control)."""
+    for m in _SCRIPT_INVOKE_RE.finditer(command):
+        script, cwd = m.group("script"), m.group("cwd")
+        if os.path.isabs(script):
+            candidates = [script]
+        else:
+            candidates = [os.path.join(cwd, script)] if cwd else []
+            candidates += [os.path.join(os.getcwd(), script), script]
+        for path in candidates:
+            try:
+                with open(path, "r", errors="ignore") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            if _SCRIPT_DB_USE_RE.search(text) and _OWNED_MARKER_RE.search(text):
+                return (
+                    f"willow-mcp: {os.path.basename(path)} reaches a willow-mcp-owned "
+                    f"store via a raw DB client — blocked one file deeper, same as a "
+                    f"shell client. Use the MCP tools (store_*, knowledge_*, lineage_*, "
+                    f"kb_*) instead of scripting raw DB access. (tripwire; real control B-32)"
+                )
+            break  # read it and it's clean → this invocation is fine
+    return None
+
+
 def check_bash(command: str) -> Optional[str]:
-    """Return a block reason if `command` reaches for a willow-mcp-owned
-    store via a raw shell client, else None (allow)."""
+    """Return a block reason if `command` reaches for a willow-mcp-owned store via
+    a raw shell client — on the command line, or inside a script it invokes."""
     if not command:
         return None
-    if not _CLIENT_RE.search(command):
-        return None
-    if not _OWNED_MARKER_RE.search(command):
-        return None
-
-    client = _CLIENT_RE.search(command).group(1)
-    for marker, redirect in _TOOL_REDIRECTS.items():
-        if marker in command:
-            return (
-                f"willow-mcp: direct {client} access to its own store is blocked — "
-                f"use the MCP tools instead ({redirect})."
-            )
-    return (
-        f"willow-mcp: direct {client} access to a willow-mcp-owned store is "
-        f"blocked — use the matching MCP tool (store_*, knowledge_*, kb_*) instead."
-    )
+    if _CLIENT_RE.search(command) and _OWNED_MARKER_RE.search(command):
+        client = _CLIENT_RE.search(command).group(1)
+        for marker, redirect in _TOOL_REDIRECTS.items():
+            if marker in command:
+                return (
+                    f"willow-mcp: direct {client} access to its own store is blocked — "
+                    f"use the MCP tools instead ({redirect})."
+                )
+        return (
+            f"willow-mcp: direct {client} access to a willow-mcp-owned store is "
+            f"blocked — use the matching MCP tool (store_*, knowledge_*, kb_*) instead."
+        )
+    # File-indirection gap: the raw client lives inside an invoked script.
+    return _script_reaches_owned_store(command)
 
 
 # Kart sandbox directives the worker honors — matched exactly as the worker does
