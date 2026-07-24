@@ -149,13 +149,15 @@
       "orchestrator",
       "commitment_read",
       "store_read",
-      "knowledge_read"
+      "knowledge_read",
+      "lineage_read",
+      "gap_write"
     ],
     "deny_tools": [],
     "persona_path": "personas/willow.md",
     "persona_bundle": false,
     "entry_mode": "human_orchestrator",
-    "store_scope": ["willow_*", "projects_willow_stack", "projects_willow_pm_portfolio", "projects_willow_pm_milestones", "projects_willow_pa_commitments", "projects_willow_governance_flags", "projects_willow_governance_decisions", "projects_willow_orient"],
+    "store_scope": ["willow_*", "projects_willow_stack", "projects_willow_pm_portfolio", "projects_willow_pm_milestones", "projects_willow_pa_commitments", "projects_willow_governance_flags", "projects_willow_governance_decisions", "projects_willow_orient", "lineage", "lineage_edges"],
     "namespace": "willow/",
     "job": "DAG, dispatch, verify, report to operator",
     "not_job": "Implementation without envelope grant",

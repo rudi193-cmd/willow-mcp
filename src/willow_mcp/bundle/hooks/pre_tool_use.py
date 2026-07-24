@@ -111,9 +111,13 @@ _BASH_ROUTING: list[tuple[re.Pattern[str], str, str]] = [
      f"store_list / store_search for Willow data · filesystem → {_TASK_SUBMIT}"),
     (re.compile(r"^\s*(cat|head|tail)\s"), "warn",
      "Use the IDE Read tool for repo files · shell-only paths → task_submit"),
-    (re.compile(r"^\s*psql\s"), "block",
+    # Anchored to command position (start, or after &&/;/|) so a command that
+    # merely *names* psql/sqlite3 — a commit message, an echo, a --reason string
+    # — is not blocked; only an actual invocation is. (The raw-store block in
+    # check_bash is the real guard; this is the prefer-MCP nudge.)
+    (re.compile(r"(?:^|&&|;|\|)\s*psql\b"), "block",
      "knowledge_search / store_search — Postgres via MCP, not shell"),
-    (re.compile(r"\bsqlite3\b"), "block",
+    (re.compile(r"(?:^|&&|;|\|)\s*sqlite3\b"), "block",
      "store_get / store_list / store_search — SQLite store via MCP"),
     (re.compile(r"^\s*pwd\s*$"), "warn", "cwd is in context; fleet_status for roots"),
     (re.compile(r"^\s*tree(\s|$)"), "warn", f"directory tree → {_TASK_SUBMIT}"),
@@ -225,27 +229,76 @@ def check_native_web(tool_name: str) -> Optional[tuple[str, str]]:
     return None
 
 
+# The command-string scan below cannot see a raw client that lives inside a
+# *script file*: `python3 drop.py` / `bash drop.sh` whose body opens a raw sqlite
+# connection against an owned store shows nothing on the command line. This
+# is the file-indirection gap the module's known-limits note names (a write
+# performed inside a script, not a `-c` one-liner). Read the invoked script and
+# apply the same two-key test (raw client + owned-store marker) to its contents.
+# Still a tripwire, not a control — a path built at runtime or an imported wrapper
+# evades it; the durable control is B-32 — but it ends the "the command string was
+# clean" deniability that let a script route around the guard.
+_SCRIPT_INVOKE_RE = re.compile(
+    r"(?:^|&&|;|\|)\s*(?:cd\s+(?P<cwd>[^\s;&|]+)\s*&&\s*)?"
+    r"(?:python3?|bash|sh|zsh)\s+(?:-\S+\s+)*(?P<script>[^\s;&|]+\.(?:py|sh))\b"
+)
+# A real DB *use* in the file — not the bare token, which appears in comments,
+# regexes (this hook's own source), and docs. Requires an actual open/connect or
+# a store client construction, so a file that merely names "sqlite3" is not caught.
+_SCRIPT_DB_USE_RE = re.compile(
+    r"\bimport\s+sqlite3\b|sqlite3\.connect\s*\(|"
+    r"psycopg2?\.connect\s*\(|psycopg\.connect\s*\(|asyncpg\.(?:connect|create_pool)\s*\(|"
+    r"create_engine\s*\(|\bSqliteStore\s*\(|\bpsql\s+-"
+)
+
+
+def _script_reaches_owned_store(command: str) -> Optional[str]:
+    """Block `python3 file.py` / `bash file.sh` whose file reaches a willow-mcp
+    owned store via a raw client — the same crossing as a shell client, one file
+    deeper. Fail-open on an unreadable target (tripwire, not a control)."""
+    for m in _SCRIPT_INVOKE_RE.finditer(command):
+        script, cwd = m.group("script"), m.group("cwd")
+        if os.path.isabs(script):
+            candidates = [script]
+        else:
+            candidates = [os.path.join(cwd, script)] if cwd else []
+            candidates += [os.path.join(os.getcwd(), script), script]
+        for path in candidates:
+            try:
+                with open(path, "r", errors="ignore") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            if _SCRIPT_DB_USE_RE.search(text) and _OWNED_MARKER_RE.search(text):
+                return (
+                    f"willow-mcp: {os.path.basename(path)} reaches a willow-mcp-owned "
+                    f"store via a raw DB client — blocked one file deeper, same as a "
+                    f"shell client. Use the MCP tools (store_*, knowledge_*, lineage_*, "
+                    f"kb_*) instead of scripting raw DB access. (tripwire; real control B-32)"
+                )
+            break  # read it and it's clean → this invocation is fine
+    return None
+
+
 def check_bash(command: str) -> Optional[str]:
-    """Return a block reason if `command` reaches for a willow-mcp-owned
-    store via a raw shell client, else None (allow)."""
+    """Return a block reason if `command` reaches for a willow-mcp-owned store via
+    a raw shell client — on the command line, or inside a script it invokes."""
     if not command:
         return None
-    if not _CLIENT_RE.search(command):
-        return None
-    if not _OWNED_MARKER_RE.search(command):
-        return None
-
-    client = _CLIENT_RE.search(command).group(1)
-    for marker, redirect in _TOOL_REDIRECTS.items():
-        if marker in command:
-            return (
-                f"willow-mcp: direct {client} access to its own store is blocked — "
-                f"use the MCP tools instead ({redirect})."
-            )
-    return (
-        f"willow-mcp: direct {client} access to a willow-mcp-owned store is "
-        f"blocked — use the matching MCP tool (store_*, knowledge_*, kb_*) instead."
-    )
+    if _CLIENT_RE.search(command) and _OWNED_MARKER_RE.search(command):
+        client = _CLIENT_RE.search(command).group(1)
+        for marker, redirect in _TOOL_REDIRECTS.items():
+            if marker in command:
+                return (
+                    f"willow-mcp: direct {client} access to its own store is blocked — "
+                    f"use the MCP tools instead ({redirect})."
+                )
+        return (
+            f"willow-mcp: direct {client} access to a willow-mcp-owned store is "
+            f"blocked — use the matching MCP tool (store_*, knowledge_*, kb_*) instead."
+        )
+    # File-indirection gap: the raw client lives inside an invoked script.
+    return _script_reaches_owned_store(command)
 
 
 # Kart sandbox directives the worker honors — matched exactly as the worker does
@@ -345,8 +398,32 @@ _KEYSTORE_REASON = (
 )
 
 
+# "Retaking the seat": adding a WRITE-capable permission group (or widening
+# store_scope to everything) to a manifest re-grants the very authority the
+# SessionStart bootstrap strips back to read-only. Same sudo-invariant class as
+# task_net — an agent may REQUEST the seat, never CONFIRM it itself. Matched on
+# the group tokens (and a bare "*" store_scope) as they appear in a manifest's
+# JSON, so a Write/Edit or a shell redirect into the file both trip it.
+_SEAT_PRIV_RE = re.compile(
+    r"\b(store_write|store_all|knowledge_write|lineage_write|schema_admin|"
+    r"nest_write|gap_write|gap_purge|friction_write|task_db|full_access)\b"
+)
+_SCOPE_ALL_RE = re.compile(r'"store_scope"\s*:\s*\[\s*"\*"\s*\]')
+
+_SEAT_ESCALATION_REASON = (
+    "willow-mcp: this edits a manifest to add a WRITE-capable permission group "
+    "(store_write / knowledge_write / lineage_write / schema_admin / nest_write / "
+    "gap_write / friction_write / task_db / full_access) or widen store_scope to "
+    '"*" — "retaking the seat". The SessionStart bootstrap restores every seat to '
+    "read-only by default; re-granting write authority is an operator act, not a "
+    "self-grant. An agent may REQUEST the seat, never CONFIRM it itself (sudo "
+    "invariant, FRANK 90e52ab7). Ask the operator to grant it; do not write the file."
+)
+
+
 def check_bash_self_grant(command: str) -> Optional[str]:
-    """Block a command that mints a lease/envelope or grants itself task_net.
+    """Block a command that mints a lease/envelope, grants itself task_net, or
+    edits a manifest to retake a write-capable seat.
 
     Writes only. `cat`ting a lease, `willow-mcp net-status`, and `revoke-net` are
     all fine — reading a key is not holding one, and giving one up is never
@@ -364,6 +441,10 @@ def check_bash_self_grant(command: str) -> Optional[str]:
         return _KEYSTORE_REASON
     if _MANIFEST_RE.search(command) and _TASK_NET_RE.search(command):
         return _SELF_GRANT_REASON
+    if _MANIFEST_RE.search(command) and (
+        _SEAT_PRIV_RE.search(command) or _SCOPE_ALL_RE.search(command)
+    ):
+        return _SEAT_ESCALATION_REASON
     return None
 
 
@@ -379,12 +460,14 @@ def check_trust_root_write(tool_input: dict) -> Optional[str]:
     if _KEYSTORE_RE.search(path):
         return _KEYSTORE_REASON
     if _MANIFEST_RE.search(path):
-        # Only the permission that carries egress. Editing a manifest for any
+        # Only the permissions that carry escalation. Editing a manifest for any
         # other reason is ordinary work and must not be blocked.
         written = " ".join(str(tool_input.get(k, "") or "")
                            for k in ("content", "new_string", "new_str"))
         if _TASK_NET_RE.search(written):
             return _SELF_GRANT_REASON
+        if _SEAT_PRIV_RE.search(written) or _SCOPE_ALL_RE.search(written):
+            return _SEAT_ESCALATION_REASON
     return None
 
 
