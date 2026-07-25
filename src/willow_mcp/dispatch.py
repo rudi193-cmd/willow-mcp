@@ -521,7 +521,7 @@ def session_handoff_write(
         f"# Session handoff — {app_id}",
         "",
         "**Format:** session_handoff_v3",
-        f"**Entry mode:** human",
+        "**Entry mode:** human",
         f"**Session:** {session_id}",
         f"**Project:** {project_name or ''}",
         f"**Workspace:** {project_info.get('workspace') or ''}",

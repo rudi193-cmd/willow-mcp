@@ -23,8 +23,6 @@ from willow_mcp.commitments.commitment_ledger import (
 from willow_mcp.commitments.commitment_store import (
     CommitmentPersistence,
     _assert_no_forbidden,
-    _deserialize,
-    _serialize,
 )
 
 BASE = datetime(2026, 7, 20, 9, 0, 0)

@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 
 from willow_mcp import dispatch as ds
 from willow_mcp import human_session as hs

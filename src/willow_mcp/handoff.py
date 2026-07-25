@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from .dispatch import dispatch_read, dispatch_set_status
 from .paths import dispatch_dir

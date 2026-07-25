@@ -28,7 +28,7 @@ def test_propose_creates_unconfirmed_binding(home):
 
 
 def test_propose_is_idempotent_does_not_clobber(home):
-    first = ib.propose_binding("google", "sub123", "a@b.com")
+    ib.propose_binding("google", "sub123", "a@b.com")
     # A human could have confirmed it between the first and a repeat sign-in.
     ib.confirm_binding("google", "sub123", "someapp")
     second = ib.propose_binding("google", "sub123", "a@b.com")

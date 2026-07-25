@@ -25,7 +25,6 @@ def _fresh_rate_buckets():
 
 @pytest.fixture
 def app_id(tmp_path, monkeypatch):
-    import os
 
     apps_root = tmp_path / "mcp_apps"
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))

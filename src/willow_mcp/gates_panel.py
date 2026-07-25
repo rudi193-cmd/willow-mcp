@@ -39,8 +39,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
-from html import escape as _esc
+from dataclasses import dataclass
 from typing import Optional
 
 from . import consent, gates_html, lease, paths

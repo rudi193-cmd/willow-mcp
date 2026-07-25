@@ -223,7 +223,6 @@ def test_self_writable_skips_a_manifest_that_does_not_exist(home):
 def test_self_writable_is_empty_when_full_path_is_protected(home, monkeypatch):
     """Every pathname component must be outside the actor's write reach."""
     lease.grant("app", 600, issuer="op")  # creates the root
-    root = lease._leases_root()
     monkeypatch.setattr(lease.os, "access", lambda *_: False)
     assert lease.self_writable_trust_paths() == []
 
@@ -244,7 +243,6 @@ def test_read_only_leaf_beneath_writable_parent_is_replaceable(home, monkeypatch
 def test_self_writable_ignores_writable_home_ancestor(home, monkeypatch):
     """Hardened mcp_apps owned by another uid is not forgeable via .willow parent."""
     lease.grant("app", 600, issuer="op")
-    root = lease._leases_root()
     monkeypatch.setattr(lease, "path_is_directly_writable_for_trust", lambda path: False)
     assert lease.self_writable_trust_paths("app") == []
 

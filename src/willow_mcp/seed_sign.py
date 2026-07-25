@@ -11,8 +11,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from . import pgp
-from .paths import seeds_dir, willow_home
-from .seed_loader import SEED_FORMAT, load_seed_document, seed_path
+from .paths import willow_home
+from .seed_loader import load_seed_document, seed_path
 
 
 def _utc_now() -> str:

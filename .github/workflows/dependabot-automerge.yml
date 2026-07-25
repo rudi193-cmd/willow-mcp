@@ -1,0 +1,55 @@
+name: Dependabot auto-merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [master, main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  dependabot-pr:
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update branch with base
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr update-branch "$PR_NUMBER" --repo "${{ github.repository }}"
+
+      - name: Enable auto-merge
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-major' ||
+          steps.metadata.outputs.update-type == 'github_actions'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
+
+  refresh-stale-dependabot-prs:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refresh open Dependabot PRs after master moves
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mapfile -t prs < <(gh pr list --repo "${{ github.repository }}" --state open --author app/dependabot --json number --jq '.[].number')
+          for pr in "${prs[@]}"; do
+            echo "Updating Dependabot PR #${pr}"
+            gh pr update-branch "$pr" --repo "${{ github.repository }}" || true
+            gh pr merge --auto --squash "$pr" --repo "${{ github.repository }}" || true
+          done
