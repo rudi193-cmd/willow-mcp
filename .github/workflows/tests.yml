@@ -182,6 +182,39 @@ jobs:
           PGUSER: postgres
           PGPASSWORD: postgres
 
+  vendor-sync:
+    # Cross-repo drift-guard for the vendored friction_floor.py (box audit
+    # theme ①). tests/test_stance_friction.py pins the file against a hash so a
+    # LOCAL edit can't slip through; this job catches the OTHER direction —
+    # willow-gate advancing while the vendored copy stays behind (exactly how
+    # the stance_friction block went missing). Deliberately NOT in `test`'s
+    # needs, so it never blocks a merge on its own: if willow-gate isn't
+    # reachable (private, no token) it soft-skips with a warning; when it CAN
+    # read upstream it fails hard on any drift.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch willow-gate upstream (soft — needs read access)
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: rudi193-cmd/willow-gate
+          ref: main
+          path: .willow-gate-upstream
+          # Fine-grained PAT with read on willow-gate if it's private; falls
+          # back to the job token (works when the repo is public / same
+          # installation). Set FLEET_RO_TOKEN to enforce against a private upstream.
+          token: ${{ secrets.FLEET_RO_TOKEN || github.token }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Compare vendored friction_floor.py against upstream
+        run: python scripts/check_vendor_sync.py .willow-gate-upstream/src/willow_gate/friction_floor.py
+
   # Aggregate gate: branch protection requires a check named exactly "test".
   # The matrix legs report as "test-matrix (3.11)" / "test-matrix (3.12)";
   # this job carries the required name and only runs when every leg passed
