@@ -1,7 +1,6 @@
 """WO-1 Step 6 — Kokoro SPEAK + barge-in."""
 from __future__ import annotations
 
-import json
 import struct
 import threading
 import wave

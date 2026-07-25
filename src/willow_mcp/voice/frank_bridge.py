@@ -9,7 +9,7 @@ Design: willow/design/willow-voice-ingress-membrane.md (Step 5) · ΔΣ=42
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable
 
 from willow_mcp.voice.voice_controller import Frame, Receipt, VoiceController
 

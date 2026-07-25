@@ -19,7 +19,7 @@ so this module is testable without a real terminal or a real HTTP request.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from . import lease, manifest_admin

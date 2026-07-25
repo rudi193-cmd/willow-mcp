@@ -4781,7 +4781,6 @@ def _cmd_roster(args) -> None:
 def _cmd_sign_net_task(args) -> None:
     """Create a one-use task envelope from an operator's interactive terminal."""
     import secrets
-    import stat
 
     from . import egress_authorization, egress_setup, lease
 
@@ -5445,7 +5444,7 @@ def _main():
     regagent_p.add_argument("--max-trust", type=int, required=True, choices=[0, 1, 2, 3, 4])
     regagent_p.add_argument("--secret-file", default="",
                             help="read the 32+ byte secret from this file; omit to generate one")
-    regagent_list_p = subparsers.add_parser(
+    subparsers.add_parser(
         "list-agents", help="List registered agent ids and their trust ceilings (no secrets)")
     regagent_revoke_p = subparsers.add_parser(
         "revoke-agent", help="Remove an agent's secret + registry entry (operator-only)")

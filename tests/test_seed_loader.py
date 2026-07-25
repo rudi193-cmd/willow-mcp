@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 
 from willow_mcp import home_init as hi
 from willow_mcp import seed_loader as sl

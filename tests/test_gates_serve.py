@@ -7,7 +7,6 @@ through the rendered page) is covered manually, not in this suite, since it
 needs a headless browser; this file pins the API contract the page's JS
 depends on.
 """
-import json
 
 import pytest
 

@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 
 from willow_mcp import web_egress
 

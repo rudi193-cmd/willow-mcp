@@ -10,7 +10,6 @@ Design: willow/design/willow-voice-ingress-membrane.md · ΔΣ=42
 """
 from __future__ import annotations
 
-from typing import Optional
 
 from willow_mcp.voice.voice_controller import Frame
 

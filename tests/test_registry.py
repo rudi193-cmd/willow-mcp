@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 
 from willow_mcp import registry as reg
 from willow_mcp import home_init as hi

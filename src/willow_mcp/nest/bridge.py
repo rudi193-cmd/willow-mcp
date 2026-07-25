@@ -20,7 +20,6 @@ the manifest and ingests, mem_check-gated. The app itself has no MCP dependency.
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 
 try:  # works as a package or a plain script dir

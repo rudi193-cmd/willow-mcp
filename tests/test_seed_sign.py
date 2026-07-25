@@ -3,7 +3,6 @@
 import json
 from unittest.mock import MagicMock
 
-import pytest
 
 from willow_mcp import pgp
 from willow_mcp import seed_sign as ss

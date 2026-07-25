@@ -612,7 +612,6 @@ class WillowOAuthProvider(GroveOAuthProvider):
         @mcp.custom_route("/oauth/apple/callback", methods=["POST"])
         async def apple_callback(request: Request) -> HTMLResponse | RedirectResponse:
             form = await request.form()
-            code        = form.get("code", "")
             id_token    = form.get("id_token", "")
             pending_key = form.get("state", "")
             entry = provider._pending.pop(pending_key, None)

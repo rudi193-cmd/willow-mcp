@@ -201,7 +201,6 @@ class PgTaskQueue(TaskQueue):
         self._pg.commit()
 
     def mark_done(self, task_id: str, *, status: str, result: str) -> None:
-        c = self._col
         if status not in ("completed", "failed"):
             raise ValueError(
                 f"terminal status must be completed|failed, got {status!r}"

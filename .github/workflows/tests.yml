@@ -18,8 +18,36 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install lint tools
+        run: pip install ruff==0.15.0 bandit
+
+      - name: Ruff (enforced)
+        run: ruff check src tests
+
+      - name: Bandit (report-only — 26 B608 string-SQL findings to triage)
+        run: bandit -r src -ll -f txt 2>&1 | tee bandit-report.txt || true
+
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.txt
+          if-no-files-found: ignore
+
   test-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -47,6 +75,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Path guard
         run: bash scripts/path_guard.sh
@@ -157,7 +187,7 @@ jobs:
   # this job carries the required name and only runs when every leg passed
   # (a failed or skipped leg leaves it un-run, keeping the merge blocked).
   test:
-    needs: test-matrix
+    needs: [test-matrix, lint]
     runs-on: ubuntu-latest
     steps:
-      - run: echo "all matrix legs green"
+      - run: echo "all matrix legs and lint green"

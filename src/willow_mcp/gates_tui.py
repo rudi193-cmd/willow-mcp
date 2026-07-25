@@ -17,7 +17,6 @@ scripting.
 from __future__ import annotations
 
 import curses
-from typing import Optional
 
 from . import gates_actions, gates_panel
 

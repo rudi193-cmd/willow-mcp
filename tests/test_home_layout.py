@@ -2,7 +2,6 @@
 
 import json
 
-import pytest
 
 from willow_mcp import paths
 from willow_mcp import home_init as hi

@@ -24,7 +24,6 @@ Two honest constraints carried from upstream:
 from __future__ import annotations
 
 import hashlib
-from typing import Optional
 
 from .friction_floor import FrictionFloor, Turn
 

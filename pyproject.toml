@@ -84,3 +84,20 @@ packages = ["src/willow_mcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# Assigned lambdas (`q = lambda s, *a: ...`) are deliberate compact helpers
+# in this codebase; don't fight the style.
+ignore = ["E731"]
+
+[tool.ruff.lint.per-file-ignores]
+# server.py interleaves imports with module init on purpose: later modules
+# need _store/_receipt_log to exist at import time. Moving the imports up
+# would break the boot order, so E402 is accepted there.
+"src/willow_mcp/server.py" = ["E402"]
+# The test suite deliberately uses compact one-line setup statements
+# (`env("veep"); env("victim")`); don't fight the style.
+"tests/*" = ["E702"]

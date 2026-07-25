@@ -11,7 +11,6 @@ from willow_mcp.commitments.proactive import (
     proactive_enabled,
     publish_dew_signal,
     signal_path,
-    surfacings_to_payload,
 )
 from willow_mcp.voice.capture import MicCapture, pcm_frames
 from willow_mcp.voice.silero_vad import SileroVadFn, _CHUNK_SAMPLES
@@ -24,7 +23,7 @@ def _pcm(samples: int, value: int = 1000) -> bytes:
 
 
 def test_frames_to_audio_concatenates_pcm():
-    np = pytest.importorskip("numpy")
+    pytest.importorskip("numpy")
     frames = [Frame(seq=0, pcm=_pcm(4, 16384)), Frame(seq=1, pcm=_pcm(4, -16384))]
     audio = frames_to_audio(frames)
     assert audio.shape == (8,)

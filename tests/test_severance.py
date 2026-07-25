@@ -13,11 +13,10 @@ runtime path from `willow_home()`, so a correctly severed install has all of its
 paths under WILLOW_HOME. What is checkable is that none lies under the *fleet's*
 home. See `test_severed_install_reports_ok`, which is that end state.
 """
-import os
 
 import pytest
 
-from willow_mcp import egress_authorization, lease, paths, server
+from willow_mcp import lease, paths, server
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────

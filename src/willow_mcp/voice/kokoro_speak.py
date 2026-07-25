@@ -19,7 +19,7 @@ import threading
 import urllib.error
 import urllib.request
 import wave
-from typing import Callable, Optional
+from typing import Callable
 
 DEFAULT_KOKORO_URL = "http://localhost:5000/v1/audio/speech"
 DEFAULT_KOKORO_VOICE = "am_michael"

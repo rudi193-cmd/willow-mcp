@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import stat
-import sys
 import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone

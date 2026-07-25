@@ -166,7 +166,7 @@ def preset_denied(agent_id: str, preset: str) -> str | None:
     if data and norm in _FULL_PRESETS:
         kind = str((data.get("identity") or {}).get("kind") or "").lower()
         if kind == _OPERATOR_KIND:
-            return f"full_seed denied for operator kind"
+            return "full_seed denied for operator kind"
     return None
 
 

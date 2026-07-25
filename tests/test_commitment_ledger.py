@@ -12,7 +12,6 @@ from datetime import datetime, timedelta
 
 from willow_mcp.commitments.commitment_ledger import (
     CalendarEvent,
-    Commitment,
     CommitmentLedger,
     CommitmentState,
     DewConfig,
