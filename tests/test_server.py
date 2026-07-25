@@ -1827,7 +1827,12 @@ def egress_keys(tmp_path, monkeypatch):
     priv_path.chmod(0o600)
     pub_path.write_bytes(priv.public_key().public_bytes(
         serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
-    monkeypatch.setenv("WILLOW_MCP_EGRESS_PUBLIC_KEY", str(pub_path))
+    # Override the autouse _stub_egress_public_key_for_diagnostics fixture, which
+    # points resolve_public_key_path at a non-key stub for non-test_egress modules
+    # (this file is test_server). This explicit fixture is set up after the autouse
+    # one, so this setattr wins and the gate verifies against our real public key.
+    monkeypatch.setattr(
+        "willow_mcp.egress_setup.resolve_public_key_path", lambda: pub_path)
     monkeypatch.delenv("WILLOW_IN_KART", raising=False)
     return priv_path, pub_path
 
@@ -1857,8 +1862,10 @@ def test_task_submit_allow_db_enforced_requires_envelope(db_app, egress_keys, mo
     fake = _FakePg(columns=_TASKS_COLUMNS_DB)
     monkeypatch.setattr(server, "get_pg", lambda: fake)
     server.schema_confirm_mapping(app_id=db_app, table="tasks")
+    # A benign task: the point is the MISSING envelope, not destructiveness —
+    # kartikeya's submit-time scanner refuses destructive SQL before this gate.
     result = server.task_submit(
-        app_id=db_app, task="psql -c 'drop table knowledge'", allow_db=True)
+        app_id=db_app, task="psql -c 'select 1'", allow_db=True)
     assert "db_authorization_denied" in result.get("error", ""), result
 
 
