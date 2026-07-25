@@ -156,8 +156,11 @@ FRIENDLY_LABELS: dict[str, str] = {
     "task_net": "Request internet access (for tasks)",
     "integration_net": "Request internet access (for outside services)",
     "consent.internet": "Allow internet access, fleet-wide",
-    "consent.cloud_llm": "Allow cloud AI access, fleet-wide",
-    "consent.lan": "Allow local network access, fleet-wide",
+    # B11: cloud_llm / lan are modeled and reconciled but NOT read by any gated
+    # path (only consent.internet is enforced). Label them as reserved so the
+    # panel stops implying a protection that toggling them does not provide.
+    "consent.cloud_llm": "Cloud AI access (reserved — not yet enforced)",
+    "consent.lan": "Local network access (reserved — not yet enforced)",
     "strict_trust_root": "Extra-strict security mode",
     "enforce_binding": "Require signed agent identity (registered agents)",
     "announce": "Announce actions louder for less-trusted callers",

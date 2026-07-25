@@ -1196,6 +1196,24 @@ def session_reconcile(app_id: str, session_id: str, exit_declaration: dict) -> d
     if started is None:
         return {"error": "no_live_session",
                 "detail": "no live bound session for session_id — call session_bind first"}
+    # Before trusting the log as ground truth, verify its hash chain (B12). A
+    # same-uid process could delete the very rows that would show out-of-band use;
+    # an unverified log then under-reports and the diff reads clean. A broken chain
+    # means the audit trail was modified out of band, so the session cannot be
+    # reconciled clean — surface it loudly instead of passing on tampered ground.
+    integrity = _receipt_log.verify()
+    if not integrity.get("ok"):
+        _receipt_log.record(
+            app_id, "session_reconcile", "reconcile_discrepancy",
+            f"receipt_chain_broken at id={integrity.get('broken_at')} "
+            f"({integrity.get('reason')})")
+        return {"error": "receipt_integrity_failed", "clean": False,
+                "detail": (
+                    "the receipt log's hash chain is broken at id "
+                    f"{integrity.get('broken_at')} ({integrity.get('reason')}); the "
+                    "actual-tools ground truth cannot be trusted, so this session "
+                    "cannot be reconciled clean. The audit trail was modified out of "
+                    "band — an operator must investigate.")}
     # Ground truth: the DISTINCT set of tools that actually ran (outcome 'ok'),
     # scoped to this app_id and this session's window. distinct_tools is unbounded
     # by row count — a truncated fetch would let a late privileged call fall
