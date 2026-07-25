@@ -36,7 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --squash "$PR_URL"
+        run: gh pr merge --auto --merge "$PR_URL"
 
   refresh-stale-dependabot-prs:
     if: github.event_name == 'push'
@@ -51,5 +51,5 @@ jobs:
           for pr in "${prs[@]}"; do
             echo "Updating Dependabot PR #${pr}"
             gh pr update-branch "$pr" --repo "${{ github.repository }}" || true
-            gh pr merge --auto --squash "$pr" --repo "${{ github.repository }}" || true
+            gh pr merge --auto --merge "$pr" --repo "${{ github.repository }}" || true
           done
