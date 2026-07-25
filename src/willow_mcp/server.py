@@ -142,6 +142,18 @@ def _authority_check_enabled() -> bool:
         "1", "true", "yes", "on")
 
 
+def _enforce_db_perimeter() -> bool:
+    """B2 master switch, read live. OFF by default so this lands without breaking
+    any current `allow_db` caller: today's behavior (the `task_db` capability
+    check alone) is unchanged until an operator flips this on. ON: local Postgres
+    access also needs an operator-signed per-task envelope (`sign-db-task`) — the
+    same authority model `allow_net` already has, so a `task_db`-holding app can
+    no longer queue arbitrary `psql`. Enabling it presumes the operator has run
+    `setup-egress`; with no verifier configured, gated db work fails closed."""
+    return os.environ.get("WILLOW_MCP_ENFORCE_DB_PERIMETER", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 def _enforce_binding_gate(app_id: str, tool_name: str) -> Optional[dict]:
     """Apply the willow-gate binding as a CONTROL (Phase 3, H2), inside _gate and
     only after permitted() has already allowed the tool per the manifest.
@@ -483,6 +495,7 @@ _TASK_FIELDS = [
     "task",
     "submitted_by",
     "network_authorization",
+    "db_authorization",
     "agent",
     "lane",
     "status",
@@ -497,7 +510,8 @@ _TASK_FIELDS = [
     "retry_at",
 ]
 _TASK_READ_FIELDS = [
-    field for field in _TASK_FIELDS if field != "network_authorization"
+    field for field in _TASK_FIELDS
+    if field not in ("network_authorization", "db_authorization")
 ]
 
 # Registry of tables schema_confirm_mapping knows how to confirm, and the
@@ -1745,6 +1759,7 @@ def task_submit(
     allow_localhost: bool = False,
     allow_db: bool = False,
     network_authorization: str = "",
+    db_authorization: str = "",
 ) -> dict:
     """Submit a task to the Kart sandboxed execution queue. Returns task_id for polling.
 
@@ -1758,7 +1773,11 @@ def task_submit(
 
     Local Postgres access (socket mount + PG/POSTGRES env) requires `allow_db=True`
     and the separate `task_db` manifest capability — not granted by task_queue or
-    full_access. `# allow_db` in task text is a request, never authority.
+    full_access. `# allow_db` in task text is a request, never authority. When the
+    operator sets `WILLOW_MCP_ENFORCE_DB_PERIMETER` (off by default), `allow_db`
+    additionally requires an operator-signed per-task `db_authorization` envelope
+    (db scope) from `willow-mcp sign-db-task` — mirroring the network perimeter, so
+    a `task_db` holder can no longer submit arbitrary `psql`.
 
     The Kartikeya executor verifies all host gates and the signed envelope again
     immediately before shell launch. Missing attribution or envelope, an invalid
@@ -1907,6 +1926,51 @@ def task_submit(
 
     if allow_db:
         task = egress_authorization.canonical_db_task(task)
+        if _enforce_db_perimeter():
+            # B2: with the perimeter enforced, allow_db needs an operator-signed
+            # per-task envelope (db scope) — the same authority allow_net has, so a
+            # task_db-holding app can no longer queue arbitrary psql. Verified here
+            # at submit; the ExecutorDbAuthorizer re-verifies at shell launch once
+            # kartikeya exposes a db seam. `# allow_db` stays a request, not authority.
+            if not db_authorization:
+                return {"error": (
+                    "db_authorization_denied: WILLOW_MCP_ENFORCE_DB_PERIMETER is set, so "
+                    "local Postgres access requires an operator-signed per-task envelope "
+                    "from `willow-mcp sign-db-task`. Ask for one; no MCP tool can mint it.")}
+            public_key = egress_authorization.public_key_path()
+            if public_key is None:
+                return {"error": (
+                    "db_authorization_denied: no verifier configured — "
+                    "run `willow-mcp setup-egress` (WILLOW_MCP_EGRESS_PUBLIC_KEY)")}
+            db_task_id = egress_authorization.claimed_task_id(db_authorization)
+            if not db_task_id:
+                return {"error": "db_authorization_denied: malformed task_id claim"}
+            if task_id and db_task_id != task_id:
+                return {"error": (
+                    "db_authorization_denied: the db envelope's task_id does not match "
+                    "the network envelope's task_id for this submission")}
+            verified, reason, _ = egress_authorization.verify_envelope(
+                public_key_path=public_key,
+                submitted_by=app_id,
+                task_id=db_task_id,
+                agent=agent,
+                task=task,
+                envelope=db_authorization,
+                expected_scope=egress_authorization.DB_SCOPE,
+            )
+            if not verified:
+                return {"error": f"db_authorization_denied: {reason}"}
+            # .get(): a mapping confirmed before this field existed has no
+            # 'db_authorization' key at all (not just a null column), so a bare
+            # fields["db_authorization"] would KeyError. Absent key and null
+            # column both mean the same operator action — migrate + reconfirm.
+            if not (fields.get("db_authorization") or {}).get("column"):
+                return {"error": (
+                    "schema_unusable: the confirmed tasks mapping has no "
+                    "'db_authorization' column; apply the reviewed migration "
+                    "(docs/schema/tasks-add-db-authorization.sql) and reconfirm the "
+                    "mapping before submitting gated db work")}
+            task_id = db_task_id
 
     if not task_id:
         import random
@@ -1916,6 +1980,8 @@ def task_submit(
         values["submitted_by"] = app_id or "willow-mcp"
     if network_requested:
         values["network_authorization"] = network_authorization
+    if allow_db and _enforce_db_perimeter():
+        values["db_authorization"] = db_authorization
     if fields["agent"]["column"]:
         values["agent"] = agent
     if not fields["lane"]["column"]:
@@ -4828,6 +4894,56 @@ def _cmd_sign_net_task(args) -> None:
     print(envelope)
 
 
+def _cmd_sign_db_task(args) -> None:
+    """Sign one exact `# allow_db` task (B2), from an operator's interactive
+    terminal. Same machinery and key as sign-net-task, bound to the db scope."""
+    import secrets
+
+    from . import egress_authorization, egress_setup, lease
+
+    if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
+        print(
+            "Error: sign-db-task requires an interactive operator terminal "
+            "outside Kart; it cannot run from an MCP tool or queued task.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    key_path = Path(args.key).expanduser() if args.key else egress_setup.resolve_private_key_path()
+    if key_path is None:
+        print(
+            "Error: no egress signing key found. Run `willow-mcp setup-egress` once, "
+            "or pass --key / set WILLOW_MCP_EGRESS_SIGNING_KEY.\n"
+            "The private key is never read by the MCP server or worker.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    try:
+        egress_setup.validate_key_path(key_path)
+        raw_task = (
+            Path(args.task_file).read_text(encoding="utf-8")
+            if args.task_file
+            else args.task
+        )
+        canonical_task = egress_authorization.canonical_db_task(raw_task)
+        task_id = "".join(
+            secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ0123456789") for _ in range(8)
+        )
+        envelope = egress_authorization.sign_envelope(
+            private_key_path=key_path,
+            submitted_by=args.app_id,
+            task_id=task_id,
+            agent=args.agent,
+            task=canonical_task,
+            ttl_seconds=lease.parse_ttl(args.ttl),
+            nonce=secrets.token_urlsafe(24),
+            scope=egress_authorization.DB_SCOPE,
+        )
+    except (OSError, ValueError, PermissionError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(envelope)
+
+
 def _cmd_setup_egress(args) -> None:
     """`willow-mcp setup-egress` — one-time Ed25519 keypair bootstrap (local CLI only)."""
     from . import egress_setup
@@ -5538,6 +5654,26 @@ def _main():
         help="operator Ed25519 private PEM (default: setup-egress manifest or $WILLOW_MCP_EGRESS_SIGNING_KEY)",
     )
 
+    sign_db_p = subparsers.add_parser(
+        "sign-db-task",
+        help="Sign one exact allow_db task (interactive operator terminal only; never an MCP tool)",
+    )
+    sign_db_p.add_argument("app_id", help="submitted_by identity bound into the envelope")
+    sign_db_p.add_argument(
+        "--agent", default="kart", help="queue agent identity bound into the envelope"
+    )
+    sign_db_input = sign_db_p.add_mutually_exclusive_group(required=True)
+    sign_db_input.add_argument("--task", default="", help="exact task text to authorize")
+    sign_db_input.add_argument(
+        "--task-file", default="", help="UTF-8 file containing the exact task text"
+    )
+    sign_db_p.add_argument("--ttl", default="30m", help="envelope lifetime (ceiling 3h)")
+    sign_db_p.add_argument(
+        "--key",
+        default="",
+        help="operator Ed25519 private PEM (default: setup-egress manifest or $WILLOW_MCP_EGRESS_SIGNING_KEY)",
+    )
+
     setup_egress_p = subparsers.add_parser(
         "setup-egress",
         help="Create or register egress signing keys outside WILLOW_HOME (local CLI only)",
@@ -5797,6 +5933,8 @@ def _main():
         return
     if args.command == "sign-net-task":
         _cmd_sign_net_task(args)
+    if args.command == "sign-db-task":
+        _cmd_sign_db_task(args)
         return
     if args.command == "setup-egress":
         _cmd_setup_egress(args)
