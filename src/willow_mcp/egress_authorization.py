@@ -45,6 +45,12 @@ _ROW_GATE_FIELDS = ("task_id", "status", "completed_at", "result")
 
 ENVELOPE_FORMAT = "willow-net-auth-v2"
 NETWORK_SCOPE = "network"
+# The same signed-envelope machinery authorizes local Postgres access (B2). The
+# scope is bound into the signed payload and re-checked on verify, so a network
+# envelope can never authorize a `# allow_db` task or vice versa — the two are
+# cryptographically distinct even though they share a format and a signing key.
+DB_SCOPE = "database"
+_VALID_SCOPES = frozenset({NETWORK_SCOPE, DB_SCOPE})
 _NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{22,128}$")
 _TASK_ID_RE = re.compile(r"^[A-Z0-9]{8}$")
 _AGENT_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
@@ -150,8 +156,8 @@ def sign_envelope(
         raise ValueError("task_id must be exactly 8 uppercase letters or digits")
     if not _AGENT_RE.fullmatch(agent or ""):
         raise ValueError("agent must be 1..64 identifier characters")
-    if scope != NETWORK_SCOPE:
-        raise ValueError(f"unsupported network authorization scope {scope!r}")
+    if scope not in _VALID_SCOPES:
+        raise ValueError(f"unsupported authorization scope {scope!r}")
     if (
         not isinstance(ttl_seconds, int)
         or isinstance(ttl_seconds, bool)
@@ -196,9 +202,14 @@ def verify_envelope(
     agent: str,
     task: str,
     envelope: str,
+    expected_scope: str = NETWORK_SCOPE,
     now: datetime | None = None,
 ) -> tuple[bool, str, dict | None]:
-    """Verify signature and all task-bound claims without consuming the nonce."""
+    """Verify signature and all task-bound claims without consuming the nonce.
+
+    ``expected_scope`` binds the check to one authority domain: a caller
+    verifying a DB task passes ``DB_SCOPE`` and a network envelope (scope
+    ``network``) is refused with "scope mismatch", and vice versa."""
     try:
         parsed = json.loads(envelope)
     except (TypeError, json.JSONDecodeError):
@@ -216,7 +227,7 @@ def verify_envelope(
         return False, "task_id mismatch", payload
     if payload.get("agent") != agent:
         return False, "agent mismatch", payload
-    if payload.get("scope") != NETWORK_SCOPE:
+    if payload.get("scope") != expected_scope:
         return False, "scope mismatch", payload
     if payload.get("task_hash") != normalized_task_hash(task):
         return False, "task hash mismatch", payload

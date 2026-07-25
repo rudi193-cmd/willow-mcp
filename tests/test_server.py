@@ -1790,3 +1790,112 @@ def test_kb_startup_continuity_text_array_tags_uses_any(app_id, monkeypatch):
     assert '= ANY("tags")' in where_sql
     assert "::text LIKE" not in where_sql
     assert "continuity" in params
+
+
+# ── task_submit DB perimeter (B2): operator-signed envelope behind the flag ──
+#
+# Mirrors test_task_submit_writes_mapped_columns_after_confirm for allow_db.
+# WILLOW_MCP_ENFORCE_DB_PERIMETER is OFF by default (capability-only, today's
+# behavior); ON, allow_db also needs a db-scoped signed envelope. Runs under the
+# Postgres CI matrix (psycopg2), like the rest of this file.
+
+_TASKS_COLUMNS_DB = _TASKS_COLUMNS + [("db_authorization", "text")]
+
+
+@pytest.fixture
+def db_app(tmp_path, monkeypatch):
+    """An app that holds task_db — full_access does NOT grant it."""
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / "dbapp"
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(
+        json.dumps({"permissions": ["full_access", "task_db"]}))
+    return "dbapp"
+
+
+@pytest.fixture
+def egress_keys(tmp_path, monkeypatch):
+    """An Ed25519 operator keypair; point the verifier at the public key."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    priv = Ed25519PrivateKey.generate()
+    priv_path, pub_path = tmp_path / "op-private.pem", tmp_path / "op-public.pem"
+    priv_path.write_bytes(priv.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption()))
+    priv_path.chmod(0o600)
+    pub_path.write_bytes(priv.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+    # Override the autouse _stub_egress_public_key_for_diagnostics fixture, which
+    # points resolve_public_key_path at a non-key stub for non-test_egress modules
+    # (this file is test_server). This explicit fixture is set up after the autouse
+    # one, so this setattr wins and the gate verifies against our real public key.
+    monkeypatch.setattr(
+        "willow_mcp.egress_setup.resolve_public_key_path", lambda: pub_path)
+    monkeypatch.delenv("WILLOW_IN_KART", raising=False)
+    return priv_path, pub_path
+
+
+def _db_envelope(priv_path, *, task, submitted_by, task_id, agent="kart", scope=None):
+    from willow_mcp import egress_authorization as auth
+    return auth.sign_envelope(
+        private_key_path=priv_path, submitted_by=submitted_by, task_id=task_id,
+        agent=agent, task=auth.canonical_db_task(task), ttl_seconds=300,
+        nonce="abcdefghijklmnopqrstuvwxyz012345", scope=scope or auth.DB_SCOPE)
+
+
+def test_task_submit_allow_db_default_is_capability_only(db_app, monkeypatch):
+    """Flag OFF (default): allow_db needs task_db but NO envelope — today's
+    behavior, so this lands without breaking current callers."""
+    monkeypatch.delenv("WILLOW_MCP_ENFORCE_DB_PERIMETER", raising=False)
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=db_app, table="tasks")
+    result = server.task_submit(app_id=db_app, task="psql -c 'select 1'", allow_db=True)
+    assert result.get("status") == "pending", result
+
+
+def test_task_submit_allow_db_enforced_requires_envelope(db_app, egress_keys, monkeypatch):
+    """Flag ON, no envelope → refused before the row is queued."""
+    monkeypatch.setenv("WILLOW_MCP_ENFORCE_DB_PERIMETER", "1")
+    fake = _FakePg(columns=_TASKS_COLUMNS_DB)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=db_app, table="tasks")
+    # A benign task: the point is the MISSING envelope, not destructiveness —
+    # kartikeya's submit-time scanner refuses destructive SQL before this gate.
+    result = server.task_submit(
+        app_id=db_app, task="psql -c 'select 1'", allow_db=True)
+    assert "db_authorization_denied" in result.get("error", ""), result
+
+
+def test_task_submit_allow_db_enforced_accepts_signed_envelope(db_app, egress_keys, monkeypatch):
+    """Flag ON, a valid db-scoped envelope → queued; the signed task_id and the
+    db_authorization column are written."""
+    monkeypatch.setenv("WILLOW_MCP_ENFORCE_DB_PERIMETER", "1")
+    fake = _FakePg(columns=_TASKS_COLUMNS_DB)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=db_app, table="tasks")
+    task = "psql -c 'select 1'"
+    envelope = _db_envelope(egress_keys[0], task=task, submitted_by=db_app, task_id="DBGATE01")
+    result = server.task_submit(app_id=db_app, task=task, allow_db=True, db_authorization=envelope)
+    assert result.get("status") == "pending", result
+    assert result.get("task_id") == "DBGATE01", result
+    insert_sql, _ = fake.executed[-1]
+    assert insert_sql.startswith("INSERT INTO tasks")
+    assert "db_authorization" in insert_sql
+
+
+def test_task_submit_allow_db_enforced_rejects_network_scope(db_app, egress_keys, monkeypatch):
+    """A network-scoped envelope cannot satisfy the db gate (scope mismatch) —
+    routine egress authority must not reach Postgres."""
+    monkeypatch.setenv("WILLOW_MCP_ENFORCE_DB_PERIMETER", "1")
+    fake = _FakePg(columns=_TASKS_COLUMNS_DB)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=db_app, table="tasks")
+    from willow_mcp import egress_authorization as auth
+    task = "psql -c 'select 1'"
+    net_env = _db_envelope(egress_keys[0], task=task, submitted_by=db_app,
+                           task_id="DBGATE02", scope=auth.NETWORK_SCOPE)
+    result = server.task_submit(app_id=db_app, task=task, allow_db=True, db_authorization=net_env)
+    assert "db_authorization_denied" in result.get("error", ""), result
