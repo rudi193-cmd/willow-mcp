@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from willow_mcp import consent, consent_admin, envelopes, fleet_roster
-from willow_mcp.governance_ledger import entry_hash
+from willow_mcp.governance_ledger import entry_hash, entry_hash_v2
 
 
 class _Ledger:
@@ -329,7 +329,8 @@ def test_chain_insert_retries_on_prev_hash_conflict():
     assert pg.inserts == 2          # first lost the race, second won
     assert pg.rollbacks == 1
     assert pg.commits == 1
-    assert digest == entry_hash("head-hash", "decision", {"a": 1})
+    # A7: new appends use the v2 digest, which covers id + project.
+    assert digest == entry_hash_v2("head-hash", "rec-1", "willow", "decision", {"a": 1})
 
 
 # ── §4.5 one citation authorizes exactly one bounded act ─────────────────────
