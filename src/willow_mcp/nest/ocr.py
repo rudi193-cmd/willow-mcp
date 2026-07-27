@@ -61,6 +61,7 @@ def _ocr_image(path: Path) -> tuple[str, str]:
 
 
 def _extract_pdf(path: Path) -> tuple[str, str]:
+    # Try pdfplumber first (native text layer)
     try:
         import pdfplumber
         with pdfplumber.open(path) as pdf:
@@ -73,6 +74,7 @@ def _extract_pdf(path: Path) -> tuple[str, str]:
     except Exception:
         pass
 
+    # Fallback: pdf2image + tesseract (scanned PDFs)
     try:
         from pdf2image import convert_from_path
         import pytesseract

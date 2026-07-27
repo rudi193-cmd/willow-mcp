@@ -241,6 +241,9 @@ jobs:
       - name: Compare vendored mem_ratify against upstream (B8)
         run: python scripts/check_mem_ratify_sync.py .willow-upstream/mem_ratify
 
+      - name: Compare vendored Nest pipeline against upstream (A4)
+        run: python scripts/check_nest_pipeline_sync.py .safe-app-store-upstream/libs/nest-pipeline/src/nest_pipeline
+
   # Aggregate gate: branch protection requires a check named exactly "test".
   # The matrix legs report as "test-matrix (3.11)" / "test-matrix (3.12)";
   # this job carries the required name and only runs when every leg passed
