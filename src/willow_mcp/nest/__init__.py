@@ -16,7 +16,11 @@ returns its walled variant over MCP for the same reason. That asymmetry —
 relative/structural shape is process (shareable); absolute content is person
 (walled) — is the load-bearing decision, the same one corpuslens's Guard makes.
 
-Provenance: vendored from rudi193-cmd/safe-app-store ``apps/nest-seed`` (MIT).
-Only the content pipeline is vendored here; the live drop-folder router
-(``nest_intake``) is intentionally not part of this first cut. ΔΣ=42
+Provenance: the shared content pipeline is vendored from the canonical
+rudi193-cmd/safe-app-store ``libs/nest-pipeline`` (MIT; box audit A4). Keep the
+vendored modules byte-for-byte in sync with it — the drift-guard enforces it
+(``tests/test_nest_pipeline_vendor.py`` in-repo hash pin +
+``scripts/check_nest_pipeline_sync.py`` in CI's ``vendor-sync`` job). Only the
+content pipeline is vendored here; the live drop-folder router (``nest_intake``)
+is intentionally not part of this first cut. ΔΣ=42
 """
