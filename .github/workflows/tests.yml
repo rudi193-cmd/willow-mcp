@@ -183,14 +183,14 @@ jobs:
           PGPASSWORD: postgres
 
   vendor-sync:
-    # Cross-repo drift-guard for the vendored friction_floor.py (box audit
-    # theme ①). tests/test_stance_friction.py pins the file against a hash so a
-    # LOCAL edit can't slip through; this job catches the OTHER direction —
-    # willow-gate advancing while the vendored copy stays behind (exactly how
-    # the stance_friction block went missing). Deliberately NOT in `test`'s
-    # needs, so it never blocks a merge on its own: if willow-gate isn't
-    # reachable (private, no token) it soft-skips with a warning; when it CAN
-    # read upstream it fails hard on any drift.
+    # Cross-repo drift-guard for the vendored copies (box audit theme ①). The
+    # in-repo hash pins (tests/test_stance_friction.py, tests/test_subject_consent.py)
+    # catch LOCAL edits; this job catches the OTHER direction — an upstream
+    # advancing while the vendored copy stays behind (exactly how the
+    # stance_friction block went missing). Deliberately NOT in `test`'s needs,
+    # so it never blocks a merge on its own: if an upstream isn't reachable
+    # (private, no token) that check soft-skips with a warning; when it CAN read
+    # upstream it fails hard on any drift.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -208,12 +208,25 @@ jobs:
           # installation). Set FLEET_RO_TOKEN to enforce against a private upstream.
           token: ${{ secrets.FLEET_RO_TOKEN || github.token }}
 
+      - name: Fetch safe-app-store upstream (soft — needs read access)
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: rudi193-cmd/safe-app-store
+          path: .safe-app-store-upstream
+          # subject_consent (box audit A1) is vendored FROM safe-app-store's
+          # canonical libs/subject-consent. Same soft-fetch posture as willow-gate.
+          token: ${{ secrets.FLEET_RO_TOKEN || github.token }}
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Compare vendored friction_floor.py against upstream
         run: python scripts/check_vendor_sync.py .willow-gate-upstream/src/willow_gate/friction_floor.py
+
+      - name: Compare vendored subject_consent against upstream (A1)
+        run: python scripts/check_subject_consent_sync.py .safe-app-store-upstream/libs/subject-consent/src/subject_consent
 
   # Aggregate gate: branch protection requires a check named exactly "test".
   # The matrix legs report as "test-matrix (3.11)" / "test-matrix (3.12)";
