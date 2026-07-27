@@ -154,6 +154,83 @@ def _enforce_db_perimeter() -> bool:
         "1", "true", "yes", "on")
 
 
+def _enforce_mem_ratify() -> bool:
+    """B8 master switch, read live. OFF by default so this lands without changing
+    any current knowledge-base write: today's behavior (a `knowledge_ingest`/
+    `gap_promote`/`nest_promote` caller writes straight into the shared-Postgres
+    knowledge base with no tier/quorum/witness check) is byte-for-byte unchanged
+    until an operator flips this on. ON: the shared KB is treated as Article IV
+    Canon and every core write must clear `mem_ratify.ratify(...)` — the pure,
+    stdlib Canon-promotion gate vendored at `willow_mcp.mem_ratify` (canonical
+    home: the willow repo). Fail-closed: a write with no independent quorum /
+    Operator Key is refused, closing the box-scan B8 hole ("any ACL-holder writes
+    straight into shared-Postgres Canon"). This flag mirrors the fleet
+    off-by-default enforce-flag convention (`WILLOW_MCP_ENFORCE_DB_PERIMETER`,
+    B2). Note the second, independent knob inside mem_ratify itself: even with
+    this ON, `WILLOW_MEM_RATIFY_ENFORCE` (the gate's own env var, also default
+    OFF) decides whether a denial actually blocks — so flipping this alone still
+    only logs an advisory. Both must be ON to block. See mem_ratify/README.md
+    "follow-up" for the witness/tier metadata plumbing that makes an enabled gate
+    admit legitimate promotions rather than refusing every direct write."""
+    return os.environ.get("WILLOW_MCP_ENFORCE_MEM_RATIFY", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _mem_ratify_gate(app_id: str, domain: str, source: str) -> Optional[dict]:
+    """B8: consult the Article IV Canon-promotion gate for a shared-KB write.
+
+    Returns None to allow (gate not enforced, or the decision does not block),
+    or an error dict to refuse. A no-op unless `WILLOW_MCP_ENFORCE_MEM_RATIFY`
+    is set — the default path never calls this.
+
+    A bare knowledge write carries no witness/quorum/Operator-Key metadata today
+    (that plumbing is mem_ratify/README.md follow-up 1-3), so it is modeled as
+    what it actually is: an attempt to seat an unratified proposal (Contested)
+    straight into shared Canon (Canonical) with an empty quorum. `ratify()`
+    fail-closes on that, and `Decision.is_blocking()` folds in mem_ratify's own
+    `WILLOW_MEM_RATIFY_ENFORCE` knob so a denial blocks only when the operator
+    has turned BOTH knobs on; otherwise it is a logged advisory that changes
+    nothing. The Decision (reasons/flags/placeholders) is surfaced to the caller
+    for the audit trail."""
+    # Lazy, local import (kb_ingest-style): mem_ratify is pure stdlib so this is
+    # always importable, but importing only inside the enforced branch keeps
+    # import-time behavior and the default path provably untouched.
+    import logging
+
+    from . import mem_ratify
+
+    log = logging.getLogger("willow_mcp.server")
+
+    request = mem_ratify.RatifyRequest.build(
+        claim_id=f"knowledge_ingest:{app_id}:{domain or 'general'}",
+        current_tier=mem_ratify.Tier.CONTESTED,
+        target_tier=mem_ratify.Tier.CANONICAL,
+        proposer_id=app_id,
+        witnesses=(),
+    )
+    decision = mem_ratify.ratify(request)
+    detail = {
+        "allowed": decision.allowed,
+        "reasons": decision.reasons,
+        "flags_for_human": decision.flags_for_human,
+        "placeholders_relied_on": decision.placeholders_relied_on,
+        "enforcing": mem_ratify.enforcement_enabled(),
+    }
+    if decision.is_blocking():
+        log.warning("mem_ratify BLOCKED knowledge write by %s: %s", app_id, decision.reasons)
+        return {"error": (
+            "mem_ratify_denied: WILLOW_MCP_ENFORCE_MEM_RATIFY and WILLOW_MEM_RATIFY_ENFORCE "
+            "are both set, so a write into the shared knowledge base (Article IV Canon) must "
+            "clear the mem_ratify promotion gate. This write carries no independent quorum / "
+            "Operator Key and was refused, fail-closed."), "mem_ratify": detail}
+    if not decision.allowed:
+        # Advisory only: enforcement is off on at least one knob, so behavior is
+        # unchanged — but the denial is logged loudly per the off-by-default contract.
+        log.warning("mem_ratify ADVISORY (not blocking) for knowledge write by %s: %s",
+                    app_id, decision.reasons)
+    return None
+
+
 def _enforce_binding_gate(app_id: str, tool_name: str) -> Optional[dict]:
     """Apply the willow-gate binding as a CONTROL (Phase 3, H2), inside _gate and
     only after permitted() has already allowed the tool per the manifest.
@@ -1272,6 +1349,13 @@ def _knowledge_ingest_core(
     pg = get_pg()
     if not pg:
         return {"error": "postgres_unavailable"}
+
+    # B8: Article IV Canon-promotion gate. OFF by default — when the enforce flag
+    # is unset this call is skipped entirely and the write below is unchanged.
+    if _enforce_mem_ratify():
+        denied = _mem_ratify_gate(app_id, domain, source)
+        if denied:
+            return denied
 
     mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
     if "error" in mapping:

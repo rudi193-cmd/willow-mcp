@@ -218,6 +218,16 @@ jobs:
           # canonical libs/subject-consent. Same soft-fetch posture as willow-gate.
           token: ${{ secrets.FLEET_RO_TOKEN || github.token }}
 
+      - name: Fetch willow upstream (soft — needs read access)
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: rudi193-cmd/willow
+          path: .willow-upstream
+          # mem_ratify (box audit B8) is vendored FROM the willow repo's canonical
+          # mem_ratify package. Same soft-fetch posture as the others.
+          token: ${{ secrets.FLEET_RO_TOKEN || github.token }}
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -227,6 +237,9 @@ jobs:
 
       - name: Compare vendored subject_consent against upstream (A1)
         run: python scripts/check_subject_consent_sync.py .safe-app-store-upstream/libs/subject-consent/src/subject_consent
+
+      - name: Compare vendored mem_ratify against upstream (B8)
+        run: python scripts/check_mem_ratify_sync.py .willow-upstream/mem_ratify
 
   # Aggregate gate: branch protection requires a check named exactly "test".
   # The matrix legs report as "test-matrix (3.11)" / "test-matrix (3.12)";
