@@ -4561,9 +4561,16 @@ def env_check(app_id: str, fork_id: str) -> dict:
 # (migration shortlist §6). Homed on the SOIL store, not the fleet Postgres (no
 # unilateral schema migration — B-28), via willow_mcp.human_loop. The attester of
 # a human_attestation is ALWAYS the calling identity, never a free parameter, and
-# a non-forgeable by_human flag records whether that identity is the
+# a non-forgeable by_human flag records whether that identity is the ATTESTED
 # human-orchestrator seat — so an agent can never write a record claiming the
 # operator signed something (the sudo invariant, applied to attestation).
+#
+# "Non-forgeable" is load-bearing and was once false: by_human was computed by
+# string-comparing the caller-supplied app_id against "willow", so passing
+# app_id="willow" was the whole exploit. It now comes from human_session.
+# by_human_attested(), which reads a signal the caller cannot set — see that
+# function. Never reintroduce is_orchestrator_app() as a source of privilege;
+# it answers "what did this call name itself", not "who is calling".
 
 @mcp.tool()
 @_guarded("human_required_enqueue")
@@ -4619,15 +4626,18 @@ def human_attestation_create(app_id: str, subject_id: str,
 
     The attester is the CALLING identity — there is deliberately no `attested_by`
     parameter, so no caller can forge a record in another's name. `by_human` is
-    set from whether the caller is the human-orchestrator seat; only a by_human
-    record satisfies `has_attestation(require_human=True)`."""
+    set from whether the caller is the *attested* human-orchestrator seat — the
+    server's WILLOW_HUMAN_ORCHESTRATOR env in stdio, the confirmed OAuth binding
+    in serve — never from the app_id string alone; only a by_human record
+    satisfies `has_attestation(require_human=True)`."""
     from . import human_loop
-    from .human_session import is_orchestrator_app
+    from .human_session import by_human_attested
     try:
         return human_loop.create_attestation(
             _store, subject_id=subject_id, subject_type=subject_type,
             statement=statement, status=status, evidence_ref=evidence_ref,
-            attested_by=app_id, by_human=is_orchestrator_app(app_id))
+            attested_by=app_id,
+            by_human=by_human_attested(app_id, serve_mode=_SERVE_MODE))
     except human_loop.HumanLoopError as e:
         return {"error": str(e)}
 

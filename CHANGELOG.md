@@ -11,6 +11,28 @@ unattended, close the #161 mai security hole, and consolidate every open
 branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`).
 
 ### Security
+- **`by_human` on an attestation is no longer forgeable by naming yourself
+  `willow`.** `human_attestation_create` computed `by_human` as
+  `is_orchestrator_app(app_id)` — a lowercase string compare against a
+  caller-supplied tool-call argument — so any stdio caller passing
+  `app_id="willow"` wrote a record satisfying
+  `has_attestation(subject_id, require_human=True)`, the gate that means "the
+  operator personally signed this". The env-var check
+  `human_orchestrator_attested()` was consulted only by
+  `orchestrator_write_denial`, which fires only for `ORCHESTRATOR_WRITE_TOOLS`,
+  and `human_attestation_create` is not in that set. The flag now comes from
+  `human_session.by_human_attested()`, which reads a signal the caller cannot
+  set: `WILLOW_HUMAN_ORCHESTRATOR` on the server process (stdio) or the
+  confirmed OAuth identity binding (serve). It downgrades rather than denies —
+  an unattested willow seat still writes its attestation, with `by_human` False.
+
+  The test was the more consequential half of the defect:
+  `test_human_seat_attestation_is_marked_by_human` set
+  `WILLOW_HUMAN_ORCHESTRATOR=1` before asserting `by_human is True` and passed
+  identically without it, so a green suite asserted an invariant that did not
+  exist. Seven tests replace it, three of which fail against the old code, plus
+  a mutation guard that pins the *difference* between the attested and
+  unattested calls so the env var cannot silently stop being load-bearing again.
 - **#161: the mai directive surface is gated.** The ten mai tools registered
   on FastMCP with no app_id anywhere — `@db` ran arbitrary SQL on the willow
   Postgres, `@http` was an open SSRF, `@env` exfiltrated any env var, and
