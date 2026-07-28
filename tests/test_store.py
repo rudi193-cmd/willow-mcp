@@ -88,26 +88,59 @@ def test_delete_missing(store):
 # Consequences: store_delete was not durable, and a purged row could be
 # replaced under the same id with different content and a forged creation time.
 
+def _raw(store, collection, record_id, field):
+    """Read a column straight from SQLite, bypassing the `deleted = 0` filter
+    every public reader applies — the tombstone's own state is the assertion."""
+    conn = store._conn(collection)
+    return conn.execute(
+        f"SELECT {field} FROM records WHERE id = ?", (record_id,)
+    ).fetchone()[0]
+
+
 def test_put_does_not_resurrect_a_soft_deleted_record(store):
     store.put("col", {"v": "original"}, record_id="ID1")
+    created = _raw(store, "col", "ID1", "created_at")
     assert store.delete("col", "ID1") is True
 
-    with pytest.raises(ValueError, match="deleted"):
-        store.put("col", {"v": "ATTACKER"}, record_id="ID1")
+    store.put("col", {"v": "ATTACKER"}, record_id="ID1")
 
-    # still gone, and the tombstone still holds the original content
+    # the row stays tombstoned and keeps its original creation time, so the
+    # write is invisible rather than a resurrection with a fresh provenance
+    assert _raw(store, "col", "ID1", "deleted") == 1
+    assert _raw(store, "col", "ID1", "created_at") == created
     assert store.get("col", "ID1") is None
 
 
-def test_purged_collection_cannot_be_refilled_under_the_same_id(store):
+def test_purged_collection_stays_purged_under_the_same_id(store):
     """purge_collection is a bulk delete with the same tombstone semantics, so
-    the same id must stay burned afterwards."""
+    a re-put under a purged id must not bring the record back."""
     store.put("col", {"v": "original"}, record_id="ID1")
     assert store.purge_collection("col") == 1
 
-    with pytest.raises(ValueError, match="deleted"):
-        store.put("col", {"v": "ATTACKER"}, record_id="ID1")
+    store.put("col", {"v": "ATTACKER"}, record_id="ID1")
+
+    assert _raw(store, "col", "ID1", "deleted") == 1
     assert store.get("col", "ID1") is None
+    assert store.all("col") == []
+
+
+def test_put_into_a_tombstone_does_not_raise(store):
+    """Regression guard on the fix's first shape, which refused the write.
+
+    store_purge_collection is in the `store_write` group and nothing in db.py
+    ever sets `deleted` back to 0, so raising here let any app holding
+    store_write tombstone a collection and permanently brick every writer that
+    uses a stable record_id against it — context_save, human_loop.resolve,
+    gaps, forks, lineage, seed_mirror. That trades a forgery for an
+    agent-reachable denial of service, and the tombstone holds without it.
+    """
+    store.put("ctx", {"turn": 1}, record_id="session-1")
+    assert store.purge_collection("ctx") == 1
+
+    rid, action = store.put("ctx", {"turn": 2}, record_id="session-1")
+
+    assert rid == "session-1" and action == "work_quiet"
+    assert _raw(store, "ctx", "session-1", "deleted") == 1
 
 
 def test_put_preserves_created_at_across_updates(store):

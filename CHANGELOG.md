@@ -20,11 +20,22 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   content and a forged creation time, using only `store_write`.
 
   `put` is now an `ON CONFLICT DO UPDATE` upsert that leaves `created_at` and
-  `deleted` off the update list, so an existing row keeps both, and it refuses a
-  write to a tombstoned id rather than writing into a record the caller can
-  never read back. Every reader (`get` / `all` / `search` / `update` / `stats`)
-  filters `deleted = 0`, and `purge_collection` is explicitly "archive, not
-  drop" — `put` was the one writer that did not respect that.
+  `deleted` off the update list, so an existing row keeps both. A re-put of a
+  soft-deleted id updates the data but leaves the row tombstoned and its
+  creation time intact, so it stays invisible to every reader (`get` / `all` /
+  `search` / `update` / `stats` all filter `deleted = 0`). `purge_collection` is
+  explicitly "archive, not drop" — `put` was the one writer that did not respect
+  that.
+
+  The write is **not** refused, though landing invisibly is unsatisfying:
+  `store_purge_collection` is in the `store_write` group and nothing in `db.py`
+  ever sets `deleted` back to `0`, so refusing would let any app holding
+  `store_write` tombstone a collection and permanently brick every stable-id
+  writer against it — `context_save`, `human_loop.resolve`, `gaps`, `forks`,
+  `lineage`, `seed_mirror` — with no recovery path in code. That would trade a
+  forgery for an agent-reachable denial of service, and the forgery is already
+  closed by the column list alone. A test pins the non-refusal so it cannot be
+  reintroduced without the tombstone first gaining an operator-only exit.
 
   The `created_at` half was also a live data bug well beyond the security case:
   `put(record_id=...)` is the update idiom in `human_loop`, `lineage`, `gaps`,

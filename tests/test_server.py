@@ -144,11 +144,15 @@ def test_store_delete_is_durable_through_store_put(app_id):
     rid = put_result["id"]
     assert server.store_delete(app_id=app_id, collection="col", record_id=rid)["deleted"] is True
 
-    with pytest.raises(ValueError, match="deleted"):
-        server.store_put(app_id=app_id, collection="col",
-                         record={"v": "ATTACKER"}, record_id=rid)
+    # the re-put is accepted (refusing it would brick every stable-id writer
+    # after a purge — see test_put_into_a_tombstone_does_not_raise) but it
+    # lands in the tombstone: the record stays unreadable through the tool.
+    server.store_put(app_id=app_id, collection="col",
+                     record={"v": "ATTACKER"}, record_id=rid)
 
     assert "error" in server.store_get(app_id=app_id, collection="col", record_id=rid)
+    assert all(r.get("v") != "ATTACKER"
+               for r in server.store_list(app_id=app_id, collection="col"))
 
 
 def test_guarded_denies_unpermitted_app_id(tmp_path, monkeypatch):

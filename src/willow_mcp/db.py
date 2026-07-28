@@ -131,35 +131,35 @@ class Store:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             conn = self._conn(collection)
-            # A soft-deleted id is a tombstone, not free space.
+            # Upsert, not replace — and the omitted columns are the security fix.
             #
             # This was `INSERT OR REPLACE`, which in SQLite DELETEs the existing
-            # row and INSERTs a new one — so the two columns omitted from the
-            # statement took their schema defaults, and `deleted` defaults to 0
+            # row and INSERTs a new one, so the two columns left out of the
+            # statement took their schema defaults — and `deleted` defaults to 0
             # (:84). Re-putting a known id therefore UNDELETED it and stamped a
             # fresh created_at: store_delete was not durable, and a purged row
             # could be replaced under the same id with different content and a
-            # forged creation time.
+            # forged creation time, using only store_write.
             #
-            # Refuse rather than write into the tombstone. delete/purge_collection
-            # are "archive, not drop" (see purge_collection) and every reader
-            # filters `deleted = 0`, so a silent write here would report success
-            # for a record the caller can never read back — telling a caller a
-            # write landed when it is invisible is the failure this store's own
-            # readers are careful to avoid.
-            row = conn.execute(
-                "SELECT deleted FROM records WHERE id = ?", (rid,)
-            ).fetchone()
-            if row is not None and row[0]:
-                raise ValueError(
-                    f"record {rid!r} in collection {collection!r} is deleted; "
-                    "a put must not resurrect a tombstone (use a new id)"
-                )
-            # Upsert, not replace: created_at and deleted are absent from the
-            # DO UPDATE list, so an existing row keeps both. put(record_id=...)
-            # is the update idiom across human_loop, lineage, gaps, forks,
-            # friction, seed_mirror and context_save, all of which were having
-            # created_at rewritten on every ordinary write.
+            # `created_at` and `deleted` are absent from the DO UPDATE list, so
+            # an existing row keeps both. That is what makes the tombstone hold:
+            # a re-put of a soft-deleted id updates the data but leaves the row
+            # deleted with its creation time intact, so it stays invisible to
+            # get/all/search/update/stats. Rewriting created_at was also a live
+            # data bug on every ordinary write — put(record_id=...) is the update
+            # idiom across human_loop, lineage, gaps, forks, friction,
+            # seed_mirror and context_save.
+            #
+            # Deliberately NOT a refusal, though a write that lands invisibly is
+            # unsatisfying. `store_purge_collection` is in `store_write`, and
+            # nothing in this module ever sets `deleted` back to 0 — so raising
+            # here would let any app holding store_write tombstone a collection
+            # and permanently brick every stable-id writer against it
+            # (context_save, human_loop.resolve, gaps, forks, lineage, …) with no
+            # recovery path in code. That trades a forgery for an agent-reachable
+            # denial of service, and the forgery is already dead without it. If
+            # the tombstone is ever given an operator-only exit, revisit: a
+            # refusal is only honest once recovery exists.
             conn.execute(
                 "INSERT INTO records (id, data, created_at, updated_at, deviation, action, deleted) "
                 "VALUES (?, ?, ?, ?, ?, ?, 0) "
