@@ -6120,7 +6120,20 @@ def _main():
         _cmd_project(args)
         return
 
+    # Serve mode is SINGLE-INSTANCE per WILLOW_HOME — agent sessions, rate-limit
+    # buckets and in-flight OAuth state are process memory, so a second replica
+    # silently breaks binding and login rather than sharing load. Declared and
+    # enforced in instance_lock; see docs/design/stateless-session-state.md.
+    # The handle must outlive main(), so it is parked on the module (closing it
+    # would release the flock while the server is still running).
+    global _INSTANCE_LOCK
     if args.serve or _SERVE_MODE:
+        from . import instance_lock
+        try:
+            _INSTANCE_LOCK = instance_lock.acquire()
+        except instance_lock.InstanceLockError as e:
+            print(f"willow-mcp: refusing to start.\n{e}", file=sys.stderr)
+            raise SystemExit(1)
         mcp.run(transport="streamable-http")
     else:
         mcp.run(transport="stdio")
