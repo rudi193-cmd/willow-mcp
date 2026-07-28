@@ -5,6 +5,7 @@ rate_limited / error). Dedicated SQLite connection — never shares the
 Store's connections, so a busy receipt log can't stall a store_* call
 or vice versa.
 """
+import contextlib
 import hashlib
 import json
 import os
@@ -41,6 +42,14 @@ CREATE INDEX IF NOT EXISTS idx_receipts_app_id ON receipts(app_id);
 # forge a collision (the Nestor B4 lesson).
 _GENESIS = "0" * 64
 
+# Seconds a writer waits for SQLite's write lock before raising "database is
+# locked". Every chained append now takes that lock (BEGIN IMMEDIATE), so a
+# second willow-mcp process sharing this $WILLOW_HOME *queues* instead of
+# forking the chain — but only if it is willing to wait. sqlite3's 5s default is
+# thin for a home on network storage; a receipt write is milliseconds, so a
+# generous ceiling costs nothing and a spurious failure costs an audit row.
+_BUSY_TIMEOUT = 30.0
+
 
 def _entry_hash(prev_hash: str, ts: str, app_id: str, tool: str,
                 outcome: str, detail: Optional[str]) -> str:
@@ -63,9 +72,16 @@ class ReceiptLog:
         )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        # isolation_level=None (autocommit) so this module issues its OWN
+        # transactions. The chain's read-head-then-append MUST be one atomic unit
+        # across PROCESSES, and only an explicit `BEGIN IMMEDIATE` gives that:
+        # sqlite3's implicit transactions begin DEFERRED at the first *write*, so
+        # the SELECT that reads the chain head would sit outside the write lock and
+        # two processes would both read the same head. `timeout` is how long a
+        # writer waits for the lock before raising "database is locked".
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False,
+                                     isolation_level=None, timeout=_BUSY_TIMEOUT)
         self._conn.executescript(_SCHEMA)
-        self._conn.commit()
         self._migrate_backfill()
         # Optional post-write observer (app_id, tool, outcome, detail) → None. The
         # announcement policy (Phase 5) rides here so it sees EVERY record site
@@ -74,11 +90,34 @@ class ReceiptLog:
         # only decides how loudly to surface a row, never writes a second one.
         self.on_record = on_record
 
+    @contextlib.contextmanager
+    def _write_txn(self):
+        """One `BEGIN IMMEDIATE` … COMMIT/ROLLBACK around a read-then-write.
+
+        IMMEDIATE (not the sqlite3 default DEFERRED) takes the RESERVED write lock
+        up front, *before* the read — which is the whole point. The chain head is
+        read and the next row appended under one lock, so two processes sharing a
+        $WILLOW_HOME serialise instead of both reading the same head and appending
+        two rows that each claim it as prev_hash. That fork is unrepairable: the
+        log is append-only, so verify() fails from then on forever and
+        session_reconcile refuses every session (server.py's
+        `receipt_integrity_failed`). self._lock is still held outside this — it
+        keeps this process's threads off one connection — but a threading.Lock
+        says nothing to another process, which is exactly the gap.
+        """
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+        except BaseException:
+            self._conn.execute("ROLLBACK")
+            raise
+        self._conn.execute("COMMIT")
+
     def _migrate_backfill(self) -> None:
         """Add the chain columns to a pre-B12 table and hash any unchained rows
         in id order, establishing the chain over existing history. Idempotent:
         rows that already carry an entry_hash advance the chain from it."""
-        with self._lock:
+        with self._lock, self._write_txn():
             cols = {r[1] for r in self._conn.execute("PRAGMA table_info(receipts)")}
             if "prev_hash" not in cols:
                 self._conn.execute("ALTER TABLE receipts ADD COLUMN prev_hash TEXT")
@@ -100,7 +139,6 @@ class ReceiptLog:
                 self._conn.execute(
                     "UPDATE receipts SET prev_hash = ?, entry_hash = ? WHERE id = ?",
                     (prev_h, eh, id_))
-            self._conn.commit()
 
     def verify(self) -> dict:
         """Walk the chain in id order; return {ok, count, head} or, at the first
@@ -124,7 +162,7 @@ class ReceiptLog:
 
     def record(self, app_id: str, tool: str, outcome: str, detail: Optional[str] = None) -> None:
         ts = datetime.now(timezone.utc).isoformat()
-        with self._lock:
+        with self._lock, self._write_txn():
             row = self._conn.execute(
                 "SELECT entry_hash FROM receipts ORDER BY id DESC LIMIT 1").fetchone()
             prev = row[0] if row and row[0] else _GENESIS
@@ -134,7 +172,6 @@ class ReceiptLog:
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (ts, app_id, tool, outcome, detail, prev, entry)
             )
-            self._conn.commit()
         if self.on_record is not None:
             try:
                 self.on_record(app_id, tool, outcome, detail)
