@@ -140,7 +140,8 @@ def _skip_store_override(
     if key != "WILLOW_STORE_ROOT" or project_id != "willow":
         return False
     expanded = expand_home(val)
-    if "github/willow/.willow/store" in expanded:
+    # Names the legacy fleet SOIL path in order to skip the override, never to use it.
+    if "github/willow/.willow/store" in expanded:  # path-guard: allow
         return True
     raw_path = str(entry.get("path") or "").strip()
     if raw_path:
