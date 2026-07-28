@@ -11,6 +11,31 @@ unattended, close the #161 mai security hole, and consolidate every open
 branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`).
 
 ### Security
+- **The seat-escalation hook's denylist covers every write-capable permission
+  group again.** `bundle/hooks/pre_tool_use.py` blocks a manifest edit that
+  re-grants write authority the SessionStart bootstrap stripped — but its
+  literal token list named **10 of the 42** groups in `gate.PERMISSION_GROUPS`,
+  so `dispatch_write`, `human_loop_write`, `frank_write`, `envelope_apply`,
+  `orchestrator` (which expands to seven writes), `markdownai_directives` (what
+  `gate.py:241-249` calls "the dangerous half") and ten more were self-grantable
+  with the guardrail silent. Two of the four egress capabilities were also
+  unmatched: `integration_net` and `web_net` authorize egress from the *server*
+  process, the more privileged lane by the repo's own reasoning
+  (`gate.py:332-337`), and only `task_net` was checked.
+
+  All 26 write-capable groups and all 4 capabilities are now matched; the 16
+  read-only groups are explicitly left alone. `orchestrator`, `context` and
+  `binding` match only as quoted permission tokens — they are ordinary English
+  words and a bare-word match would fire on manifest prose.
+
+  The hook is stdlib-only by design (it runs in the agent's harness, where
+  `willow_mcp` may not import), so the list stays literal and is pinned from the
+  other side: `test_seat_guard_classification_covers_every_permission_group`
+  reads `gate.PERMISSION_GROUPS` and fails when a group appears in neither
+  column, so a new group forces the read-or-write call instead of defaulting to
+  unmatched. A companion test pins the bundled and repo copies of the hook
+  byte-identical — a fix applied to one and not the other is a guardrail that
+  passes CI and is absent in production.
 - **`by_human` on an attestation is no longer forgeable by naming yourself
   `willow`.** `human_attestation_create` computed `by_human` as
   `is_orchestrator_app(app_id)` — a lowercase string compare against a

@@ -518,3 +518,115 @@ def test_main_blocks_native_web_search():
     assert decision["decision"] == "block"
     assert "willow_web_search" in decision["reason"]
 
+
+
+# ── seat guard vs gate.PERMISSION_GROUPS: the drift this class of list invites ─
+#
+# The hook is stdlib-only by design — it runs inside the agent's harness, where
+# willow_mcp may not be importable — so its write-capable group list is a literal
+# regex. That is exactly the shape that goes quietly out of date: it named ten of
+# the forty-two groups, leaving dispatch_write, human_loop_write, frank_write,
+# markdownai_directives, orchestrator and eleven more self-grantable with the
+# guardrail silent. The pin has to come from this side, where gate IS importable.
+#
+# The classification below is total by construction: the first test fails if a
+# group exists in gate.PERMISSION_GROUPS and in neither column, so adding a group
+# forces the read-or-write call rather than defaulting it to "unmatched".
+
+# Groups containing at least one state-mutating tool. Three are judgment calls
+# worth naming: `binding` (session_bind writes the trust-ceiling binding),
+# `context` (context_save / context_expire), and `task_queue` (task_submit
+# executes sandboxed work). `integration_call` is here because a credentialed
+# outbound call has side effects the caller does not own.
+_WRITE_CAPABLE_GROUPS = {
+    "agent_dispatch", "binding", "code_graph_write", "commitment_write",
+    "context", "dispatch_write", "envelope_apply", "fork_write", "frank_write",
+    "friction_write", "full_access", "gap_promote", "gap_purge", "gap_write",
+    "human_loop_write", "integration_call", "knowledge_write", "lineage_write",
+    "markdownai_directives", "markdownai_write", "nest_write", "orchestrator",
+    "schema_admin", "store_all", "store_write", "task_queue",
+}
+
+# Groups that mutate nothing. `web_read` is deliberately here: willow_web_fetch
+# and willow_web_search write no willow state, and the egress they front is
+# gated separately by the web_net capability (covered below), not by this group.
+_READ_ONLY_GROUPS = {
+    "audit", "code_graph_read", "commitment_read", "dispatch_read", "fleet_read",
+    "fork_read", "friction_read", "gap_read", "human_loop_read",
+    "integration_read", "knowledge_read", "lineage_read", "markdownai_read",
+    "nest_read", "store_read", "web_read",
+}
+
+# Not permission groups — the capability half of the three-key egress gate, which
+# no group implies. All four are operator-only.
+_NET_CAPABILITIES = ("task_net", "task_db", "integration_net", "web_net")
+
+
+def _manifest_write(permission):
+    """The real decision, through the real entry point, on a manifest that grants
+    exactly this one permission."""
+    return pre_tool_use.check_trust_root_write({
+        "file_path": "/home/x/.willow/mcp_apps/someapp/manifest.json",
+        "content": '{"permissions": ["%s"]}' % permission,
+    })
+
+
+def test_seat_guard_classification_covers_every_permission_group():
+    """Drift guard. A new group in gate.PERMISSION_GROUPS must be classified
+    read-or-write here; this fails until it is."""
+    from willow_mcp import gate
+    classified = _WRITE_CAPABLE_GROUPS | _READ_ONLY_GROUPS
+    actual = set(gate.PERMISSION_GROUPS)
+    assert not (actual - classified), (
+        "permission groups classified in neither column: %s" % sorted(actual - classified))
+    assert not (classified - actual), (
+        "classified names that are not permission groups: %s" % sorted(classified - actual))
+    assert not (_WRITE_CAPABLE_GROUPS & _READ_ONLY_GROUPS)
+
+
+def test_seat_guard_covers_every_write_capable_group():
+    for group in sorted(_WRITE_CAPABLE_GROUPS):
+        assert _manifest_write(group) is not None, (
+            "%s is write-capable but self-granting it is not blocked" % group)
+
+
+def test_seat_guard_leaves_every_read_only_group_alone():
+    """The other half of the guard. Widening the denylist must not turn ordinary
+    manifest work into a block — the false-positive class B-18 removed."""
+    for group in sorted(_READ_ONLY_GROUPS):
+        assert _manifest_write(group) is None, (
+            "%s is read-only but self-granting it is blocked" % group)
+
+
+def test_seat_guard_covers_every_egress_capability():
+    for cap in _NET_CAPABILITIES:
+        assert _manifest_write(cap) is not None, "%s is not blocked" % cap
+
+
+def test_server_process_egress_capabilities_route_to_the_egress_reason():
+    """integration_net and web_net authorize egress from the server process, the
+    more privileged lane (gate.py:332-337). They must read as the egress
+    self-grant, not as a generic seat widening."""
+    for cap in ("task_net", "integration_net", "web_net"):
+        assert "REQUEST egress" in _manifest_write(cap)
+
+
+def test_ambiguous_group_names_do_not_fire_on_prose():
+    """orchestrator / context / binding are ordinary words. They must trip as a
+    quoted permission and stay silent in a description field."""
+    prose = pre_tool_use.check_trust_root_write({
+        "file_path": "/home/x/.willow/mcp_apps/someapp/manifest.json",
+        "content": '{"permissions": ["store_read"], '
+                   '"description": "reads context for the orchestrator, no binding"}',
+    })
+    assert prose is None
+    assert _manifest_write("orchestrator") is not None
+
+
+def test_bundled_hook_is_identical_to_the_repo_copy():
+    """src/willow_mcp/bundle/hooks/pre_tool_use.py is what ships to an agent's
+    harness; hooks/pre_tool_use.py is what these tests exercise. A fix applied to
+    one and not the other is a guardrail that passes CI and is absent in
+    production."""
+    bundled = Path(__file__).resolve().parents[1] / "src/willow_mcp/bundle/hooks/pre_tool_use.py"
+    assert bundled.read_text() == _HOOK_PATH.read_text()

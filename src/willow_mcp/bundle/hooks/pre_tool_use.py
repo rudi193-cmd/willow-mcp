@@ -9,10 +9,11 @@ Four guards:
   / `# allow_localhost`) in the task text — the server strips these (B-21),
   so it does nothing; the correct path is allow_net=True + the task_net
   permission (warns).
-- Any tool call that would write the keys authorizing this agent's own egress:
-  minting a lease under `mcp_apps/_net_leases/`, running `willow-mcp grant-net`
-  (via Bash *or* smuggled into Kart task text), or editing a manifest to add
-  `task_net` (blocks).
+- Any tool call that would write the keys authorizing this agent's own egress
+  or re-grant its own write seat: minting a lease under `mcp_apps/_net_leases/`,
+  running `willow-mcp grant-net` (via Bash *or* smuggled into Kart task text),
+  or editing a manifest to add an egress capability (`task_net` /
+  `integration_net` / `web_net`) or any write-capable permission group (blocks).
 
 That third guard is the sudo invariant (FRANK `90e52ab7`) enforced where the
 agent actually acts: *a model may REQUEST egress, never CONFIRM it.* It is a
@@ -371,7 +372,13 @@ _GRANT_CMD_RE = re.compile(
     r"|\bfleet_roster\.sync\s*\("
 )
 _MANIFEST_RE = re.compile(r"mcp_apps/[^/\s\"']+/manifest\.json")
-_TASK_NET_RE = re.compile(r"\btask_net\b")
+# The server-process / sandbox egress capabilities. These are NOT permission
+# groups — they are the capability half of the three-key gate (gate.py:326-341)
+# and no group implies them, which is the point: egress "must be granted on its
+# own line". `task_net` was the only one matched here; `integration_net` and
+# `web_net` authorize egress from the *server* process, which gate.py:332-337
+# identifies as the more privileged lane, and were silently absent.
+_NET_CAP_RE = re.compile(r"\b(task_net|integration_net|web_net)\b")
 # Reading a lease or a manifest is not escalation — `net-status` and
 # `diagnostic_summary` both do it, and blocking `cat` would be the false-positive
 # class B-18 removed. Only a command that plausibly *writes* one is the crossing.
@@ -404,16 +411,42 @@ _KEYSTORE_REASON = (
 # task_net — an agent may REQUEST the seat, never CONFIRM it itself. Matched on
 # the group tokens (and a bare "*" store_scope) as they appear in a manifest's
 # JSON, so a Write/Edit or a shell redirect into the file both trip it.
+#
+# This list MUST stay in step with gate.PERMISSION_GROUPS, and for a long time
+# did not: it named ten of the forty-two groups, so `dispatch_write`,
+# `human_loop_write`, `frank_write`, `markdownai_directives` ("the dangerous
+# half", gate.py:241-249), `orchestrator` (which expands to seven writes) and
+# eleven more were self-grantable with the guardrail silent. The hook cannot
+# import willow_mcp — it runs in the agent's harness, stdlib only — so the list
+# is literal here and pinned from the other side by
+# tests/test_pre_tool_use_hook.py::test_seat_guard_covers_every_write_capable_group,
+# which reads gate.PERMISSION_GROUPS and fails when a new group appears in
+# neither column. Add a group there and the test tells you which column it needs.
 _SEAT_PRIV_RE = re.compile(
-    r"\b(store_write|store_all|knowledge_write|lineage_write|schema_admin|"
-    r"nest_write|gap_write|gap_purge|friction_write|task_db|full_access)\b"
+    r"\b(agent_dispatch|code_graph_write|commitment_write|dispatch_write|"
+    r"envelope_apply|fork_write|frank_write|friction_write|full_access|"
+    r"gap_promote|gap_purge|gap_write|human_loop_write|integration_call|"
+    r"knowledge_write|lineage_write|markdownai_directives|markdownai_write|"
+    r"nest_write|schema_admin|store_all|store_write|task_db|task_queue)\b"
 )
+# `orchestrator`, `context` and `binding` are also write-capable groups, but
+# unlike the names above they are ordinary English words that occur in manifest
+# descriptions, commit messages and paths ("the orchestrator seat", "identity
+# binding"). A bare-word match would fire on prose — the false-positive class
+# B-18 removed. Require them to appear the way a permission actually does: as a
+# quoted string. The cost is that `sed -i 's/x/context/'` slips through; the
+# compound names above keep bare-word matching precisely because they do not.
+_SEAT_PRIV_QUOTED_RE = re.compile(r"[\"'](orchestrator|context|binding)[\"']")
 _SCOPE_ALL_RE = re.compile(r'"store_scope"\s*:\s*\[\s*"\*"\s*\]')
 
 _SEAT_ESCALATION_REASON = (
     "willow-mcp: this edits a manifest to add a WRITE-capable permission group "
-    "(store_write / knowledge_write / lineage_write / schema_admin / nest_write / "
-    "gap_write / friction_write / task_db / full_access) or widen store_scope to "
+    "(store_write / store_all / knowledge_write / lineage_write / schema_admin / "
+    "nest_write / gap_write / gap_promote / gap_purge / friction_write / task_db / "
+    "task_queue / dispatch_write / human_loop_write / frank_write / envelope_apply / "
+    "fork_write / commitment_write / code_graph_write / agent_dispatch / "
+    "integration_call / markdownai_write / markdownai_directives / orchestrator / "
+    "context / binding / full_access) or widen store_scope to "
     '"*" — "retaking the seat". The SessionStart bootstrap restores every seat to '
     "read-only by default; re-granting write authority is an operator act, not a "
     "self-grant. An agent may REQUEST the seat, never CONFIRM it itself (sudo "
@@ -439,10 +472,12 @@ def check_bash_self_grant(command: str) -> Optional[str]:
         return _SELF_GRANT_REASON
     if _KEYSTORE_RE.search(command):
         return _KEYSTORE_REASON
-    if _MANIFEST_RE.search(command) and _TASK_NET_RE.search(command):
+    if _MANIFEST_RE.search(command) and _NET_CAP_RE.search(command):
         return _SELF_GRANT_REASON
     if _MANIFEST_RE.search(command) and (
-        _SEAT_PRIV_RE.search(command) or _SCOPE_ALL_RE.search(command)
+        _SEAT_PRIV_RE.search(command)
+        or _SEAT_PRIV_QUOTED_RE.search(command)
+        or _SCOPE_ALL_RE.search(command)
     ):
         return _SEAT_ESCALATION_REASON
     return None
@@ -464,9 +499,10 @@ def check_trust_root_write(tool_input: dict) -> Optional[str]:
         # other reason is ordinary work and must not be blocked.
         written = " ".join(str(tool_input.get(k, "") or "")
                            for k in ("content", "new_string", "new_str"))
-        if _TASK_NET_RE.search(written):
+        if _NET_CAP_RE.search(written):
             return _SELF_GRANT_REASON
-        if _SEAT_PRIV_RE.search(written) or _SCOPE_ALL_RE.search(written):
+        if (_SEAT_PRIV_RE.search(written) or _SEAT_PRIV_QUOTED_RE.search(written)
+                or _SCOPE_ALL_RE.search(written)):
             return _SEAT_ESCALATION_REASON
     return None
 
