@@ -1,6 +1,13 @@
 # systemd --user unit template for willow-mcp OAuth HTTP serve mode.
 # Not used directly — `scripts/willow-serve install` fills in the @PLACEHOLDERS@
 # and writes the resolved unit to ~/.config/systemd/user/willow-mcp-serve.service.
+#
+# SINGLE-INSTANCE: run exactly ONE serve process per $WILLOW_HOME. Agent
+# sessions, rate-limit buckets and in-flight OAuth state live in process memory,
+# so a second instance does not share load — it silently breaks agent binding and
+# human login. The server enforces this itself (flock on $WILLOW_HOME/serve.lock)
+# and refuses to start rather than half-work; do not template this unit into
+# replicas. Rationale and migration order: docs/design/stateless-session-state.md.
 [Unit]
 Description=willow-mcp OAuth HTTP serve mode
 After=network-online.target
