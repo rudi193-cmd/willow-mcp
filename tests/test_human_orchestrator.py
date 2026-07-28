@@ -54,10 +54,11 @@ def test_specialist_write_not_human_gated(home):
 
 # ── by_human_attested: the seat claim vs. the seat ───────────────────────────
 #
-# These are unit-level on purpose. server._SERVE_MODE is computed from sys.argv
-# at import, so the serve branch cannot be reached through a tool call in-test
-# (that limitation is its own finding). Calling the predicate directly is the
-# only way to pin the serve arm today.
+# These are unit-level on purpose: they pin the predicate's own truth table,
+# both arms, independent of any caller. The serve arm is ALSO now driven end to
+# end — sign-in, confirmed binding, gate, tool body — in test_serve_mode_gate.py,
+# which enters serve mode through the server._serve_mode() accessor. That is the
+# test the earlier version of this comment said could not be written.
 
 def test_by_human_false_for_unattested_willow_claim(home, monkeypatch):
     monkeypatch.delenv("WILLOW_HUMAN_ORCHESTRATOR", raising=False)

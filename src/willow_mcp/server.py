@@ -377,6 +377,35 @@ _DEFAULT_APP_ID = os.environ.get("WILLOW_APP_ID", "")
 
 _SERVE_MODE = "--serve" in sys.argv
 
+
+def _serve_mode() -> bool:
+    """Is this process serving over HTTP+OAuth rather than speaking stdio?
+
+    The value is still `--serve` in argv, still decided once at import — this
+    changes nothing about how production picks a mode, and nothing about what
+    serve mode then does. What it adds is a *named seam*: every read of serve
+    mode that happens at call time goes through this one function, so a test
+    can enter the serve branch with
+    `monkeypatch.setattr(server, "_serve_mode", lambda: True)`.
+
+    Patching the `_SERVE_MODE` global happens to work today, because each read
+    site resolves it as a module global at call time. That is an accident of
+    how the reads are currently written, not a property anyone declared: the
+    first `from .server import _SERVE_MODE`, default-argument capture, or local
+    alias would snapshot it at import and strand the serve branch as untestable
+    again — with the tests still green, since they would be patching a name the
+    code no longer reads. Routing the reads through an accessor makes the seam
+    the thing being maintained.
+
+    The import-time branch below (which FastMCP to build, whether to mount the
+    OAuth provider) deliberately keeps reading `_SERVE_MODE` directly. That
+    decision is baked into the object graph before any test could patch
+    anything; routing it through here would imply an injectability that does
+    not exist.
+    """
+    return _SERVE_MODE
+
+
 _BASE_URL_ENV = (os.getenv("WILLOW_MCP_URL") or "").strip().rstrip("/")
 _BASE_URL = _BASE_URL_ENV if _BASE_URL_ENV else f"http://{_HOST}:{_PORT}"
 
@@ -496,7 +525,7 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
     Stdio mode (default): unchanged — app_id comes from the tool call, same
     single-operator trust model as before.
     """
-    if _SERVE_MODE:
+    if _serve_mode():
         effective, err = _resolve_serve_identity()
         if err:
             return None, err
@@ -548,7 +577,7 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
 
     from .human_session import orchestrator_write_denial
 
-    human_denial = orchestrator_write_denial(effective, tool_name, serve_mode=_SERVE_MODE)
+    human_denial = orchestrator_write_denial(effective, tool_name, serve_mode=_serve_mode())
     if human_denial:
         return None, {"error": human_denial}
 
@@ -3953,7 +3982,7 @@ def whoami(app_id: str = "") -> dict:
     Ungated otherwise, like diagnostic_summary, so it still answers when your
     manifest is empty or missing (it says exactly that)."""
     from . import gate
-    if _SERVE_MODE:
+    if _serve_mode():
         bound, err = _resolve_serve_identity()
         if err:
             return err
@@ -4007,9 +4036,9 @@ def diagnostic_summary(app_id: str = "") -> dict:
     Severance is asserted, never assumed: name a fleet with WILLOW_MCP_FLEET_HOME
     and WILLOW_MCP_FLEET_PG_DB and every shared surface becomes a named problem.
     Name none and the check reports `not_asserted` and changes nothing."""
-    mode = "serve" if _SERVE_MODE else "stdio"
+    mode = "serve" if _serve_mode() else "stdio"
     redact = False
-    if _SERVE_MODE:
+    if _serve_mode():
         bound, err = _resolve_serve_identity()
         if err:
             return {"verdict": "unauthenticated", "mode": mode, "detail": err["error"],
@@ -4046,7 +4075,7 @@ def diagnostic_summary(app_id: str = "") -> dict:
     report = {
         "verdict": verdict,
         "mode": mode,
-        "serve": {"host": _HOST, "port": _PORT, "base_url": _BASE_URL} if _SERVE_MODE else None,
+        "serve": {"host": _HOST, "port": _PORT, "base_url": _BASE_URL} if _serve_mode() else None,
         "app_id": eff or None,
         "checks": {"store": store, "postgres": postgres, "rings": rings,
                    "schema": schema, "manifest": manifest, "identity_bindings": bindings,
@@ -4637,7 +4666,7 @@ def human_attestation_create(app_id: str, subject_id: str,
             _store, subject_id=subject_id, subject_type=subject_type,
             statement=statement, status=status, evidence_ref=evidence_ref,
             attested_by=app_id,
-            by_human=by_human_attested(app_id, serve_mode=_SERVE_MODE))
+            by_human=by_human_attested(app_id, serve_mode=_serve_mode()))
     except human_loop.HumanLoopError as e:
         return {"error": str(e)}
 
@@ -6120,7 +6149,7 @@ def _main():
         _cmd_project(args)
         return
 
-    if args.serve or _SERVE_MODE:
+    if args.serve or _serve_mode():
         mcp.run(transport="streamable-http")
     else:
         mcp.run(transport="stdio")

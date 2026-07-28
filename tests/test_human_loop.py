@@ -181,9 +181,11 @@ def test_guarded_hands_the_tool_body_the_gate_resolved_app_id(mk_app, monkeypatc
     with the docstring still claiming otherwise, which is precisely the shape of
     the defect being repaired here.
 
-    Serve mode itself cannot be entered in-test (`_SERVE_MODE` is read from
-    sys.argv at import), but the substitution can: make `_gate` resolve to an
-    identity the caller did not pass, and assert the body saw the resolved one.
+    This stubs `_gate` outright, so it pins the substitution alone and stays
+    true whatever the gate decides. The serve arm it exists to protect is now
+    also driven for real — real OAuth session, real confirmed binding, real
+    gate — in test_serve_mode_gate.py, which enters serve mode through the
+    `server._serve_mode()` accessor rather than sys.argv.
     """
     mk_app("willow", ["human_loop_write", "human_loop_read"])
     caller = mk_app("hanuman", ["human_loop_write", "human_loop_read"])
