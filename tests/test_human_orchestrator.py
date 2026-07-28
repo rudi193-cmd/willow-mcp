@@ -50,3 +50,35 @@ def test_orchestrator_write_allowed_with_human_env(home, monkeypatch):
 
 def test_specialist_write_not_human_gated(home):
     assert hs.orchestrator_write_denial("hanuman", "dispatch_send", serve_mode=False) is None
+
+
+# ── by_human_attested: the seat claim vs. the seat ───────────────────────────
+#
+# These are unit-level on purpose. server._SERVE_MODE is computed from sys.argv
+# at import, so the serve branch cannot be reached through a tool call in-test
+# (that limitation is its own finding). Calling the predicate directly is the
+# only way to pin the serve arm today.
+
+def test_by_human_false_for_unattested_willow_claim(home, monkeypatch):
+    monkeypatch.delenv("WILLOW_HUMAN_ORCHESTRATOR", raising=False)
+    assert hs.by_human_attested("willow", serve_mode=False) is False
+
+
+def test_by_human_true_only_with_the_host_attestation(home, monkeypatch):
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    assert hs.by_human_attested("willow", serve_mode=False) is True
+
+
+def test_by_human_serve_mode_trusts_the_confirmed_binding(home, monkeypatch):
+    """In serve mode app_id reaches the tool body only after _gate replaced it
+    with the OAuth-bound identity, so 'willow' there means the operator ran
+    confirm-binding. No env var is needed — and none is consulted."""
+    monkeypatch.delenv("WILLOW_HUMAN_ORCHESTRATOR", raising=False)
+    assert hs.by_human_attested("willow", serve_mode=True) is True
+
+
+def test_by_human_false_for_every_non_willow_app(home, monkeypatch):
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    for app in ("hanuman", "", "willow-2", "wíllow"):
+        assert hs.by_human_attested(app, serve_mode=False) is False
+        assert hs.by_human_attested(app, serve_mode=True) is False

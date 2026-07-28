@@ -18,10 +18,28 @@ if rg -n '/home/[^/]+/willow-2\.0[^/]' \
   fail=1
 fi
 
-if rg -n 'github/willow/\.willow/store' \
+# The one check with a legitimate false positive: mcp_projects.py and
+# project_wiring.py name this path in order to DROP a project entry that
+# overrides WILLOW_STORE_ROOT to it — they enforce the same rule this guard
+# does, and a substring match cannot tell a rejection from a use. A line
+# carrying the `path-guard: allow` marker is exempt, which keeps the exemption
+# at the line that earned it and next to the reason: any NEW occurrence still
+# fails. Deliberately scoped to this check only — the other three have no such
+# case, and a global escape hatch would weaken them for nothing.
+#
+# Note the marker is honored across this check's whole glob set, deploy/**
+# included — not only the two files that earned it. That is wider than today's
+# need. It is left that way because the marker has to be written deliberately,
+# on the line, with a reason beside it; narrowing it to a file allowlist would
+# just add a second list to keep in sync, which is the failure mode this script
+# exists to catch. If deploy/** ever grows a marker, it wants the same scrutiny.
+store_hits="$(rg -n 'github/willow/\.willow/store' \
     --glob 'src/willow_mcp/deploy/**' \
     --glob 'src/willow_mcp/mcp_projects.py' \
-    --glob 'src/willow_mcp/project_wiring.py' . 2>/dev/null; then
+    --glob 'src/willow_mcp/project_wiring.py' . 2>/dev/null \
+    | grep -v 'path-guard: allow' || true)"
+if [[ -n "${store_hits}" ]]; then
+  echo "${store_hits}"
   echo "::error::Fleet SOIL is \$WILLOW_HOME/store — not github/willow/.willow/store"
   fail=1
 fi

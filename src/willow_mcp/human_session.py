@@ -52,6 +52,35 @@ def human_orchestrator_attested() -> bool:
     )
 
 
+def by_human_attested(app_id: str, *, serve_mode: bool) -> bool:
+    """True only when this call really comes from the human-orchestrator seat.
+
+    `is_orchestrator_app()` alone must never decide this. In stdio mode `app_id`
+    is a caller-supplied tool-call argument, so a string compare against it
+    records what the caller *called itself*, not who it is — any agent passing
+    app_id="willow" would mint a record the operator appears to have signed.
+
+    The two signals a caller cannot set for itself:
+      * stdio: WILLOW_HUMAN_ORCHESTRATOR on the *server process* environment,
+        set by the operator in the orchestrator workspace's MCP config. Nothing
+        reachable from a tool call can change the server's own env.
+      * serve: `app_id` is not caller-supplied at all — `server._gate` replaces
+        it with the identity resolved from the authenticated session's confirmed
+        OAuth binding (L-AUTH-02), which the operator created by hand with
+        `willow-mcp confirm-binding`. Reaching this function as "willow" in
+        serve mode already required that human confirmation.
+
+    Deliberately a *downgrade*, not a denial: an unattested willow seat still
+    writes its attestation, attributed to willow, with by_human False. The
+    operator's signature is the thing being withheld, not the record.
+    """
+    if not is_orchestrator_app(app_id):
+        return False
+    if serve_mode:
+        return True
+    return human_orchestrator_attested()
+
+
 def require_operator_terminal() -> None:
     """Fail-closed operator-presence gate for local mutation CLIs (Loki §4.3).
 

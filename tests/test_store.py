@@ -78,6 +78,96 @@ def test_delete_missing(store):
     assert store.delete("col", "GHOST") is False
 
 
+# ── the tombstone is durable (box audit P0) ──────────────────────────────────
+#
+# delete/purge_collection are soft: they set deleted=1 and the row stays in the
+# db, invisible to get/all/search/update/stats. put was the one writer that did
+# not respect that. It used INSERT OR REPLACE, which in SQLite DELETEs then
+# INSERTs, so the omitted `deleted` column silently took its schema default of
+# 0 — re-putting a known id undeleted the row AND gave it a fresh created_at.
+# Consequences: store_delete was not durable, and a purged row could be
+# replaced under the same id with different content and a forged creation time.
+
+def _raw(store, collection, record_id, field):
+    """Read a column straight from SQLite, bypassing the `deleted = 0` filter
+    every public reader applies — the tombstone's own state is the assertion."""
+    conn = store._conn(collection)
+    return conn.execute(
+        f"SELECT {field} FROM records WHERE id = ?", (record_id,)
+    ).fetchone()[0]
+
+
+def test_put_does_not_resurrect_a_soft_deleted_record(store):
+    store.put("col", {"v": "original"}, record_id="ID1")
+    created = _raw(store, "col", "ID1", "created_at")
+    assert store.delete("col", "ID1") is True
+
+    store.put("col", {"v": "ATTACKER"}, record_id="ID1")
+
+    # the row stays tombstoned and keeps its original creation time, so the
+    # write is invisible rather than a resurrection with a fresh provenance
+    assert _raw(store, "col", "ID1", "deleted") == 1
+    assert _raw(store, "col", "ID1", "created_at") == created
+    assert store.get("col", "ID1") is None
+
+
+def test_purged_collection_stays_purged_under_the_same_id(store):
+    """purge_collection is a bulk delete with the same tombstone semantics, so
+    a re-put under a purged id must not bring the record back."""
+    store.put("col", {"v": "original"}, record_id="ID1")
+    assert store.purge_collection("col") == 1
+
+    store.put("col", {"v": "ATTACKER"}, record_id="ID1")
+
+    assert _raw(store, "col", "ID1", "deleted") == 1
+    assert store.get("col", "ID1") is None
+    assert store.all("col") == []
+
+
+def test_put_into_a_tombstone_does_not_raise(store):
+    """Regression guard on the fix's first shape, which refused the write.
+
+    store_purge_collection is in the `store_write` group and nothing in db.py
+    ever sets `deleted` back to 0, so raising here let any app holding
+    store_write tombstone a collection and permanently brick every writer that
+    uses a stable record_id against it — context_save, human_loop.resolve,
+    gaps, forks, lineage, seed_mirror. That trades a forgery for an
+    agent-reachable denial of service, and the tombstone holds without it.
+    """
+    store.put("ctx", {"turn": 1}, record_id="session-1")
+    assert store.purge_collection("ctx") == 1
+
+    rid, action = store.put("ctx", {"turn": 2}, record_id="session-1")
+
+    assert rid == "session-1" and action == "work_quiet"
+    assert _raw(store, "ctx", "session-1", "deleted") == 1
+
+
+def test_put_preserves_created_at_across_updates(store):
+    """put(record_id=...) is the upsert idiom used by human_loop, lineage, gaps,
+    forks, friction, seed_mirror and context_save, so rewriting created_at on
+    every update was a live data bug as well as the forgery half of the P0.
+    updated_at still advances."""
+    store.put("col", {"v": 1}, record_id="ID1")
+    first = store.get("col", "ID1")
+
+    store.put("col", {"v": 2}, record_id="ID1")
+    second = store.get("col", "ID1")
+
+    assert second["v"] == 2
+    assert second["_created"] == first["_created"]
+    assert second["_updated"] >= first["_updated"]
+
+
+def test_put_still_creates_a_fresh_record_normally(store):
+    """The guard must not break the ordinary create/upsert path."""
+    rid, action = store.put("col", {"v": "new"})
+    assert store.get("col", rid)["v"] == "new"
+    assert action == "work_quiet"
+    store.put("col", {"v": "updated"}, record_id=rid)
+    assert store.get("col", rid)["v"] == "updated"
+
+
 def test_search_empty_query_returns_empty_not_crash(store):
     """Regression for L-AUTH-02 audit sibling L-BUG-01: an empty/whitespace
     query used to build a malformed SQL WHERE clause and raise instead of

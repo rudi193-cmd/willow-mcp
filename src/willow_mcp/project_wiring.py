@@ -134,7 +134,8 @@ def runtime_env(agent: str, entry: dict[str, Any]) -> dict[str, str]:
     overrides = entry.get("env") if isinstance(entry.get("env"), dict) else {}
     for key, val in overrides.items():
         if isinstance(val, str):
-            if key == "WILLOW_STORE_ROOT" and "github/willow/.willow/store" in expand_home(val):
+            # Names the legacy fleet SOIL path in order to DROP the override, never to use it.
+            if key == "WILLOW_STORE_ROOT" and "github/willow/.willow/store" in expand_home(val):  # path-guard: allow
                 continue
             env[key] = expand_home(val)
     return env

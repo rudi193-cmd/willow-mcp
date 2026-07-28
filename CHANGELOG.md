@@ -11,6 +11,83 @@ unattended, close the #161 mai security hole, and consolidate every open
 branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`).
 
 ### Security
+- **`Store.put` no longer resurrects soft-deleted records.** `put` used
+  `INSERT OR REPLACE`, which in SQLite DELETEs the existing row and INSERTs a
+  new one — so the columns omitted from the statement took their schema
+  defaults, and `deleted` defaults to `0`. Re-putting a known id **undeleted the
+  row and stamped a fresh `created_at`**. `store_delete` was therefore not
+  durable, and a purged row could be replaced under the same id with different
+  content and a forged creation time, using only `store_write`.
+
+  `put` is now an `ON CONFLICT DO UPDATE` upsert that leaves `created_at` and
+  `deleted` off the update list, so an existing row keeps both. A re-put of a
+  soft-deleted id updates the data but leaves the row tombstoned and its
+  creation time intact, so it stays invisible to every reader (`get` / `all` /
+  `search` / `update` / `stats` all filter `deleted = 0`). `purge_collection` is
+  explicitly "archive, not drop" — `put` was the one writer that did not respect
+  that.
+
+  The write is **not** refused, though landing invisibly is unsatisfying:
+  `store_purge_collection` is in the `store_write` group and nothing in `db.py`
+  ever sets `deleted` back to `0`, so refusing would let any app holding
+  `store_write` tombstone a collection and permanently brick every stable-id
+  writer against it — `context_save`, `human_loop.resolve`, `gaps`, `forks`,
+  `lineage`, `seed_mirror` — with no recovery path in code. That would trade a
+  forgery for an agent-reachable denial of service, and the forgery is already
+  closed by the column list alone. A test pins the non-refusal so it cannot be
+  reintroduced without the tombstone first gaining an operator-only exit.
+
+  The `created_at` half was also a live data bug well beyond the security case:
+  `put(record_id=...)` is the update idiom in `human_loop`, `lineage`, `gaps`,
+  `forks`, `friction`, `seed_mirror` and `context_save`, all of which were
+  having creation timestamps rewritten on every ordinary write.
+- **The seat-escalation hook's denylist covers every write-capable permission
+  group again.** `bundle/hooks/pre_tool_use.py` blocks a manifest edit that
+  re-grants write authority the SessionStart bootstrap stripped — but its
+  literal token list named **10 of the 42** groups in `gate.PERMISSION_GROUPS`,
+  so `dispatch_write`, `human_loop_write`, `frank_write`, `envelope_apply`,
+  `orchestrator` (which expands to seven writes), `markdownai_directives` (what
+  `gate.py:241-249` calls "the dangerous half") and ten more were self-grantable
+  with the guardrail silent. Two of the four egress capabilities were also
+  unmatched: `integration_net` and `web_net` authorize egress from the *server*
+  process, the more privileged lane by the repo's own reasoning
+  (`gate.py:332-337`), and only `task_net` was checked.
+
+  All 26 write-capable groups and all 4 capabilities are now matched; the 16
+  read-only groups are explicitly left alone. `orchestrator`, `context` and
+  `binding` match only as quoted permission tokens — they are ordinary English
+  words and a bare-word match would fire on manifest prose.
+
+  The hook is stdlib-only by design (it runs in the agent's harness, where
+  `willow_mcp` may not import), so the list stays literal and is pinned from the
+  other side: `test_seat_guard_classification_covers_every_permission_group`
+  reads `gate.PERMISSION_GROUPS` and fails when a group appears in neither
+  column, so a new group forces the read-or-write call instead of defaulting to
+  unmatched. A companion test pins the bundled and repo copies of the hook
+  byte-identical — a fix applied to one and not the other is a guardrail that
+  passes CI and is absent in production.
+- **`by_human` on an attestation is no longer forgeable by naming yourself
+  `willow`.** `human_attestation_create` computed `by_human` as
+  `is_orchestrator_app(app_id)` — a lowercase string compare against a
+  caller-supplied tool-call argument — so any stdio caller passing
+  `app_id="willow"` wrote a record satisfying
+  `has_attestation(subject_id, require_human=True)`, the gate that means "the
+  operator personally signed this". The env-var check
+  `human_orchestrator_attested()` was consulted only by
+  `orchestrator_write_denial`, which fires only for `ORCHESTRATOR_WRITE_TOOLS`,
+  and `human_attestation_create` is not in that set. The flag now comes from
+  `human_session.by_human_attested()`, which reads a signal the caller cannot
+  set: `WILLOW_HUMAN_ORCHESTRATOR` on the server process (stdio) or the
+  confirmed OAuth identity binding (serve). It downgrades rather than denies —
+  an unattested willow seat still writes its attestation, with `by_human` False.
+
+  The test was the more consequential half of the defect:
+  `test_human_seat_attestation_is_marked_by_human` set
+  `WILLOW_HUMAN_ORCHESTRATOR=1` before asserting `by_human is True` and passed
+  identically without it, so a green suite asserted an invariant that did not
+  exist. Seven tests replace it, three of which fail against the old code, plus
+  a mutation guard that pins the *difference* between the attested and
+  unattested calls so the env var cannot silently stop being load-bearing again.
 - **#161: the mai directive surface is gated.** The ten mai tools registered
   on FastMCP with no app_id anywhere — `@db` ran arbitrary SQL on the willow
   Postgres, `@http` was an open SSRF, `@env` exfiltrated any env var, and

@@ -131,9 +131,41 @@ class Store:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             conn = self._conn(collection)
+            # Upsert, not replace — and the omitted columns are the security fix.
+            #
+            # This was `INSERT OR REPLACE`, which in SQLite DELETEs the existing
+            # row and INSERTs a new one, so the two columns left out of the
+            # statement took their schema defaults — and `deleted` defaults to 0
+            # (:84). Re-putting a known id therefore UNDELETED it and stamped a
+            # fresh created_at: store_delete was not durable, and a purged row
+            # could be replaced under the same id with different content and a
+            # forged creation time, using only store_write.
+            #
+            # `created_at` and `deleted` are absent from the DO UPDATE list, so
+            # an existing row keeps both. That is what makes the tombstone hold:
+            # a re-put of a soft-deleted id updates the data but leaves the row
+            # deleted with its creation time intact, so it stays invisible to
+            # get/all/search/update/stats. Rewriting created_at was also a live
+            # data bug on every ordinary write — put(record_id=...) is the update
+            # idiom across human_loop, lineage, gaps, forks, friction,
+            # seed_mirror and context_save.
+            #
+            # Deliberately NOT a refusal, though a write that lands invisibly is
+            # unsatisfying. `store_purge_collection` is in `store_write`, and
+            # nothing in this module ever sets `deleted` back to 0 — so raising
+            # here would let any app holding store_write tombstone a collection
+            # and permanently brick every stable-id writer against it
+            # (context_save, human_loop.resolve, gaps, forks, lineage, …) with no
+            # recovery path in code. That trades a forgery for an agent-reachable
+            # denial of service, and the forgery is already dead without it. If
+            # the tombstone is ever given an operator-only exit, revisit: a
+            # refusal is only honest once recovery exists.
             conn.execute(
-                "INSERT OR REPLACE INTO records (id, data, created_at, updated_at, deviation, action) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO records (id, data, created_at, updated_at, deviation, action, deleted) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "data = excluded.data, updated_at = excluded.updated_at, "
+                "deviation = excluded.deviation, action = excluded.action",
                 (rid, json.dumps(record), now, now, deviation, action)
             )
             conn.commit()
