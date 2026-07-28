@@ -11,6 +11,25 @@ unattended, close the #161 mai security hole, and consolidate every open
 branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`).
 
 ### Security
+- **`Store.put` no longer resurrects soft-deleted records.** `put` used
+  `INSERT OR REPLACE`, which in SQLite DELETEs the existing row and INSERTs a
+  new one — so the columns omitted from the statement took their schema
+  defaults, and `deleted` defaults to `0`. Re-putting a known id **undeleted the
+  row and stamped a fresh `created_at`**. `store_delete` was therefore not
+  durable, and a purged row could be replaced under the same id with different
+  content and a forged creation time, using only `store_write`.
+
+  `put` is now an `ON CONFLICT DO UPDATE` upsert that leaves `created_at` and
+  `deleted` off the update list, so an existing row keeps both, and it refuses a
+  write to a tombstoned id rather than writing into a record the caller can
+  never read back. Every reader (`get` / `all` / `search` / `update` / `stats`)
+  filters `deleted = 0`, and `purge_collection` is explicitly "archive, not
+  drop" — `put` was the one writer that did not respect that.
+
+  The `created_at` half was also a live data bug well beyond the security case:
+  `put(record_id=...)` is the update idiom in `human_loop`, `lineage`, `gaps`,
+  `forks`, `friction`, `seed_mirror` and `context_save`, all of which were
+  having creation timestamps rewritten on every ordinary write.
 - **The seat-escalation hook's denylist covers every write-capable permission
   group again.** `bundle/hooks/pre_tool_use.py` blocks a manifest edit that
   re-grants write authority the SessionStart bootstrap stripped — but its

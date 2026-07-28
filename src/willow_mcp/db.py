@@ -131,9 +131,41 @@ class Store:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             conn = self._conn(collection)
+            # A soft-deleted id is a tombstone, not free space.
+            #
+            # This was `INSERT OR REPLACE`, which in SQLite DELETEs the existing
+            # row and INSERTs a new one — so the two columns omitted from the
+            # statement took their schema defaults, and `deleted` defaults to 0
+            # (:84). Re-putting a known id therefore UNDELETED it and stamped a
+            # fresh created_at: store_delete was not durable, and a purged row
+            # could be replaced under the same id with different content and a
+            # forged creation time.
+            #
+            # Refuse rather than write into the tombstone. delete/purge_collection
+            # are "archive, not drop" (see purge_collection) and every reader
+            # filters `deleted = 0`, so a silent write here would report success
+            # for a record the caller can never read back — telling a caller a
+            # write landed when it is invisible is the failure this store's own
+            # readers are careful to avoid.
+            row = conn.execute(
+                "SELECT deleted FROM records WHERE id = ?", (rid,)
+            ).fetchone()
+            if row is not None and row[0]:
+                raise ValueError(
+                    f"record {rid!r} in collection {collection!r} is deleted; "
+                    "a put must not resurrect a tombstone (use a new id)"
+                )
+            # Upsert, not replace: created_at and deleted are absent from the
+            # DO UPDATE list, so an existing row keeps both. put(record_id=...)
+            # is the update idiom across human_loop, lineage, gaps, forks,
+            # friction, seed_mirror and context_save, all of which were having
+            # created_at rewritten on every ordinary write.
             conn.execute(
-                "INSERT OR REPLACE INTO records (id, data, created_at, updated_at, deviation, action) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO records (id, data, created_at, updated_at, deviation, action, deleted) "
+                "VALUES (?, ?, ?, ?, ?, ?, 0) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "data = excluded.data, updated_at = excluded.updated_at, "
+                "deviation = excluded.deviation, action = excluded.action",
                 (rid, json.dumps(record), now, now, deviation, action)
             )
             conn.commit()

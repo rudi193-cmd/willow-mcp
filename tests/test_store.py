@@ -78,6 +78,63 @@ def test_delete_missing(store):
     assert store.delete("col", "GHOST") is False
 
 
+# ── the tombstone is durable (box audit P0) ──────────────────────────────────
+#
+# delete/purge_collection are soft: they set deleted=1 and the row stays in the
+# db, invisible to get/all/search/update/stats. put was the one writer that did
+# not respect that. It used INSERT OR REPLACE, which in SQLite DELETEs then
+# INSERTs, so the omitted `deleted` column silently took its schema default of
+# 0 — re-putting a known id undeleted the row AND gave it a fresh created_at.
+# Consequences: store_delete was not durable, and a purged row could be
+# replaced under the same id with different content and a forged creation time.
+
+def test_put_does_not_resurrect_a_soft_deleted_record(store):
+    store.put("col", {"v": "original"}, record_id="ID1")
+    assert store.delete("col", "ID1") is True
+
+    with pytest.raises(ValueError, match="deleted"):
+        store.put("col", {"v": "ATTACKER"}, record_id="ID1")
+
+    # still gone, and the tombstone still holds the original content
+    assert store.get("col", "ID1") is None
+
+
+def test_purged_collection_cannot_be_refilled_under_the_same_id(store):
+    """purge_collection is a bulk delete with the same tombstone semantics, so
+    the same id must stay burned afterwards."""
+    store.put("col", {"v": "original"}, record_id="ID1")
+    assert store.purge_collection("col") == 1
+
+    with pytest.raises(ValueError, match="deleted"):
+        store.put("col", {"v": "ATTACKER"}, record_id="ID1")
+    assert store.get("col", "ID1") is None
+
+
+def test_put_preserves_created_at_across_updates(store):
+    """put(record_id=...) is the upsert idiom used by human_loop, lineage, gaps,
+    forks, friction, seed_mirror and context_save, so rewriting created_at on
+    every update was a live data bug as well as the forgery half of the P0.
+    updated_at still advances."""
+    store.put("col", {"v": 1}, record_id="ID1")
+    first = store.get("col", "ID1")
+
+    store.put("col", {"v": 2}, record_id="ID1")
+    second = store.get("col", "ID1")
+
+    assert second["v"] == 2
+    assert second["_created"] == first["_created"]
+    assert second["_updated"] >= first["_updated"]
+
+
+def test_put_still_creates_a_fresh_record_normally(store):
+    """The guard must not break the ordinary create/upsert path."""
+    rid, action = store.put("col", {"v": "new"})
+    assert store.get("col", rid)["v"] == "new"
+    assert action == "work_quiet"
+    store.put("col", {"v": "updated"}, record_id=rid)
+    assert store.get("col", rid)["v"] == "updated"
+
+
 def test_search_empty_query_returns_empty_not_crash(store):
     """Regression for L-AUTH-02 audit sibling L-BUG-01: an empty/whitespace
     query used to build a malformed SQL WHERE clause and raise instead of

@@ -134,6 +134,23 @@ def test_store_put_and_get_round_trip(app_id):
     assert got["v"] == 1
 
 
+def test_store_delete_is_durable_through_store_put(app_id):
+    """End-to-end on the tool surface: the delete/re-put resurrection (box audit
+    P0). store_put used INSERT OR REPLACE, which dropped the row and let the
+    omitted `deleted` column fall back to its schema default of 0 — so a caller
+    could undelete any record it knew the id of, with a fresh created_at, using
+    only store_write. Now the tombstone holds and the attempt is loud."""
+    put_result = server.store_put(app_id=app_id, collection="col", record={"v": "original"})
+    rid = put_result["id"]
+    assert server.store_delete(app_id=app_id, collection="col", record_id=rid)["deleted"] is True
+
+    with pytest.raises(ValueError, match="deleted"):
+        server.store_put(app_id=app_id, collection="col",
+                         record={"v": "ATTACKER"}, record_id=rid)
+
+    assert "error" in server.store_get(app_id=app_id, collection="col", record_id=rid)
+
+
 def test_guarded_denies_unpermitted_app_id(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
