@@ -170,6 +170,32 @@ def test_by_human_actually_depends_on_the_host_attestation(mk_app, monkeypatch):
     assert attested["by_human"] is True
 
 
+def test_guarded_hands_the_tool_body_the_gate_resolved_app_id(mk_app, monkeypatch):
+    """Pins the cross-module assumption the serve arm of by_human_attested rests on.
+
+    `by_human_attested(app_id, serve_mode=True)` returns True *unconditionally*.
+    That is only safe because the app_id reaching a tool body in serve mode is
+    not the caller's: `_guarded` overwrites it with the identity `_gate` resolved
+    from the verified OAuth binding. If that substitution is ever refactored
+    away, the serve arm silently becomes an unconditional True — this fix undone,
+    with the docstring still claiming otherwise, which is precisely the shape of
+    the defect being repaired here.
+
+    Serve mode itself cannot be entered in-test (`_SERVE_MODE` is read from
+    sys.argv at import), but the substitution can: make `_gate` resolve to an
+    identity the caller did not pass, and assert the body saw the resolved one.
+    """
+    mk_app("willow", ["human_loop_write", "human_loop_read"])
+    caller = mk_app("hanuman", ["human_loop_write", "human_loop_read"])
+    monkeypatch.setattr(server, "_gate", lambda app_id, tool_name: ("willow", None))
+
+    rec = _fn(server.human_attestation_create)(app_id=caller, subject_id="ATOM_SUB")
+
+    # "hanuman" here would mean the body read the caller's argument instead of
+    # the gate's answer — the premise of the serve arm gone.
+    assert rec["attested_by"] == "willow"
+
+
 def test_has_attestation_require_human_gates_out_agent_signoff(mk_app):
     from willow_mcp import human_loop
     app = mk_app("hanuman", ["human_loop_write"])  # an agent attests

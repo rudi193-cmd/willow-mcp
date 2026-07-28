@@ -26,6 +26,13 @@ fi
 # at the line that earned it and next to the reason: any NEW occurrence still
 # fails. Deliberately scoped to this check only — the other three have no such
 # case, and a global escape hatch would weaken them for nothing.
+#
+# Note the marker is honored across this check's whole glob set, deploy/**
+# included — not only the two files that earned it. That is wider than today's
+# need. It is left that way because the marker has to be written deliberately,
+# on the line, with a reason beside it; narrowing it to a file allowlist would
+# just add a second list to keep in sync, which is the failure mode this script
+# exists to catch. If deploy/** ever grows a marker, it wants the same scrutiny.
 store_hits="$(rg -n 'github/willow/\.willow/store' \
     --glob 'src/willow_mcp/deploy/**' \
     --glob 'src/willow_mcp/mcp_projects.py' \
