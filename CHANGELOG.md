@@ -167,6 +167,29 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   its specifier directly; either guard failing triggers the re-sync.
 
 ### Added
+- **The serve-mode arm of `_gate` is now tested** (`tests/test_serve_mode_gate.py`,
+  21 tests). `_resolve_serve_identity()` and `_gate`'s serve branch — the L-AUTH-02
+  fix, the reason a signed-in caller cannot self-declare an `app_id` — had no test
+  at all; `grep -rn "_SERVE_MODE\|_resolve_serve_identity" tests/` came back empty.
+  The tests drive the whole path with a real `AccessToken` in the MCP SDK's own
+  `auth_context_var`: no session, a session missing `iss` or `sub`, a signed-in
+  identity with no confirmed binding, and a confirmed binding. All fail closed
+  except the last, which is gated **as the bound identity**, not as whatever
+  `app_id` the caller passed. This includes the `by_human` serve arm PR #197 could
+  not write: `by_human_attested(app_id, serve_mode=True)` is unconditionally True,
+  and these pin the premise that makes that sound — reaching a tool body as
+  `willow` in serve mode requires an operator-confirmed OAuth binding.
+
+  Serve mode is read through a new `server._serve_mode()` accessor at every site
+  that resolves at call time; the import-time FastMCP/auth-provider branch still
+  reads `_SERVE_MODE` directly, since that decision is baked into the object
+  graph before anything could patch it. The value is unchanged
+  (`"--serve" in sys.argv`) and serve mode's behaviour is unchanged. Note that
+  patching the `_SERVE_MODE` global also worked before this — the earlier claim
+  that serve mode "cannot be entered in-test" was wrong, and the comments in
+  `test_human_loop.py` / `test_human_orchestrator.py` saying so are corrected.
+  What the accessor buys is that the seam is now named and pinned by a test,
+  rather than being an accident of how the read sites happen to be written.
 - **Sandbox schema auto-confirm** (`willow_mcp/sandbox_confirm.py`, run by the
   bootstrap): unlocks `task_*`/knowledge writes on the DDL the bootstrap itself
   just applied, behind three guards — existing mapping artifacts are never
