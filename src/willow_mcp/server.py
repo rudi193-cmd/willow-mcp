@@ -49,7 +49,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from psycopg2.extras import Json
 
 from .db import Store, get_pg
@@ -93,13 +93,37 @@ _CALL_CREDENTIAL: "contextvars.ContextVar[Optional[dict]]" = contextvars.Context
 _BINDING_BOOTSTRAP_TOOLS = frozenset({"session_bind"})
 
 
+_CALL_CRED_UNAVAILABLE = False
+
+
 def _read_call_credential() -> Optional[dict]:
     """Pull the per-call credential the signing client attached to the MCP
     request's out-of-band `_meta` (key CREDENTIAL_META_KEY). Returns a normalized
     {session_id, call_nonce, sig} dict, or None if absent/malformed. Never raises —
     a missing request context or meta is simply "no credential"."""
+    global _CALL_CRED_UNAVAILABLE
     try:
-        from mcp.server.lowlevel.server import request_ctx
+        try:
+            from mcp.server.lowlevel.server import request_ctx
+        except ImportError:
+            # SDK 2.x removed the ambient request contextvar: `Context` (with
+            # .meta/.headers) is now INJECTED into tool functions instead. This
+            # function cannot read it without threading Context through
+            # _guarded. Say so ONCE and loudly rather than returning None
+            # forever — an operator watching an empty bind_observed stream would
+            # otherwise conclude "no client is signing yet" rather than "my SDK
+            # moved a symbol", which is the observation phase going dark without
+            # announcing it.
+            if not _CALL_CRED_UNAVAILABLE:
+                _CALL_CRED_UNAVAILABLE = True
+                import logging as _lg
+                _lg.getLogger("willow_mcp.server").error(
+                    "per-call credential channel unavailable: this SDK has no "
+                    "mcp.server.lowlevel.server.request_ctx. Binding observation "
+                    "records nothing and WILLOW_MCP_ENFORCE_BINDING=1 will deny "
+                    "every registered agent. Port _read_call_credential to the "
+                    "injected Context before enabling enforcement.")
+            return None
         rc = request_ctx.get(None)
         if rc is None:
             return None
@@ -426,8 +450,6 @@ _common_kwargs: dict[str, Any] = dict(
         "ask the operator. "
         "Pass app_id on every call — it matches your manifest in $WILLOW_HOME/mcp_apps/<app_id>/manifest.json."
     ),
-    host=_HOST,
-    port=_PORT,
 )
 
 if _SERVE_MODE:
@@ -443,7 +465,7 @@ if _SERVE_MODE:
         base_url=_BASE_URL,
         vault=_vault,
     )
-    mcp = FastMCP(
+    mcp = MCPServer(
         "willow-mcp",
         **_common_kwargs,
         auth_server_provider=_auth_provider,
@@ -460,7 +482,7 @@ if _SERVE_MODE:
     )
     _auth_provider.register_routes(mcp)
 else:
-    mcp = FastMCP("willow-mcp", **_common_kwargs)
+    mcp = MCPServer("willow-mcp", **_common_kwargs)
 
 
 # ── MarkdownAI (mai) tools — vendored from willow-2.0 (sap/mai) ──────────────────
@@ -6181,7 +6203,10 @@ def _main():
         except instance_lock.InstanceLockError as e:
             print(f"willow-mcp: refusing to start.\n{e}", file=sys.stderr)
             raise SystemExit(1)
-        mcp.run(transport="streamable-http")
+        # SDK 2.x: host/port moved off the constructor onto the transport,
+        # which is the stateless core making "where this instance listens" a
+        # property of the run rather than of the server object.
+        mcp.run(transport="streamable-http", host=_HOST, port=_PORT)
     else:
         mcp.run(transport="stdio")
 

@@ -21,7 +21,7 @@ from willow_mcp import gate
 from willow_mcp.mai import parser
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
 _MAI_HEADER = "@markdownai"
 
@@ -82,7 +82,7 @@ def _is_markdownai_path(path: Path) -> bool:
         return False
 
 
-def register(mcp: "FastMCP") -> None:
+def register(mcp: "MCPServer") -> None:
     """Register all MarkdownAI tools on the provided FastMCP instance."""
 
     @mcp.tool()

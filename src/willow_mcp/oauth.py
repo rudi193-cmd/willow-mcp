@@ -44,7 +44,7 @@ from .identity_binding import propose_binding
 from .vault import Vault
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
 _ACCESS_TTL  = 30 * 86400
 _CODE_TTL    = 300
@@ -502,7 +502,7 @@ class WillowOAuthProvider(GroveOAuthProvider):
         self._pending[key] = (client, params)
         return f"{self._base_url}/mcp-approve?pending={key}"
 
-    def register_routes(self, mcp: "FastMCP") -> None:
+    def register_routes(self, mcp: "MCPServer") -> None:
         """Register OAuth routes onto a FastMCP instance."""
         from starlette.requests import Request
         from starlette.responses import HTMLResponse, RedirectResponse
