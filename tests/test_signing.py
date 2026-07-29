@@ -11,16 +11,12 @@ import contextlib
 import json
 import types
 
-import mcp.types as mcp_types
 import pytest
 
 from willow_mcp import server, signing, agent_registry as reg, session_binder as sb
 from willow_mcp.db import Store
 from willow_mcp.receipts import ReceiptLog
 
-pytestmark = pytest.mark.skip(
-    reason="SDK 2.x port pending — SDK 2.x removed mcp.server.lowlevel.server.request_ctx. The per-call credential channel must be re-plumbed onto the injected Context (which carries .meta/.headers) before these can be rewritten; see docs/design/mcp-sdk-2-migration.md."
-)
 
 
 @pytest.fixture
@@ -51,14 +47,16 @@ def _register_and_bind(app_id, trust, tools=("read", "write")):
 
 @contextlib.contextmanager
 def _request_meta(meta_dict):
-    """Simulate an incoming MCP request whose `_meta` carries `meta_dict`."""
-    from mcp.server.lowlevel.server import request_ctx
-    meta = mcp_types.RequestParams.Meta(**meta_dict) if meta_dict is not None else None
-    token = request_ctx.set(types.SimpleNamespace(meta=meta))
-    try:
+    """Simulate an incoming MCP request whose `_meta` carries `meta_dict`.
+
+    Binds through `request_context.active`, the same primitive the production
+    middleware uses, so these exercise the real path rather than a test-only
+    copy of it. SDK 2.0's `RequestParamsMeta` is a TypedDict, so `_meta` is an
+    ordinary mapping — there is no model to construct.
+    """
+    from willow_mcp import request_context
+    with request_context.active(types.SimpleNamespace(meta=meta_dict)):
         yield
-    finally:
-        request_ctx.reset(token)
 
 
 def _enforce(monkeypatch):
