@@ -93,49 +93,38 @@ _CALL_CREDENTIAL: "contextvars.ContextVar[Optional[dict]]" = contextvars.Context
 _BINDING_BOOTSTRAP_TOOLS = frozenset({"session_bind"})
 
 
-_CALL_CRED_UNAVAILABLE = False
-
-
 def _read_call_credential() -> Optional[dict]:
     """Pull the per-call credential the signing client attached to the MCP
     request's out-of-band `_meta` (key CREDENTIAL_META_KEY). Returns a normalized
     {session_id, call_nonce, sig} dict, or None if absent/malformed. Never raises —
-    a missing request context or meta is simply "no credential"."""
-    global _CALL_CRED_UNAVAILABLE
-    try:
-        try:
-            from mcp.server.lowlevel.server import request_ctx
-        except ImportError:
-            # SDK 2.x removed the ambient request contextvar: `Context` (with
-            # .meta/.headers) is now INJECTED into tool functions instead. This
-            # function cannot read it without threading Context through
-            # _guarded. Say so ONCE and loudly rather than returning None
-            # forever — an operator watching an empty bind_observed stream would
-            # otherwise conclude "no client is signing yet" rather than "my SDK
-            # moved a symbol", which is the observation phase going dark without
-            # announcing it.
-            if not _CALL_CRED_UNAVAILABLE:
-                _CALL_CRED_UNAVAILABLE = True
-                import logging as _lg
-                _lg.getLogger("willow_mcp.server").error(
-                    "per-call credential channel unavailable: this SDK has no "
-                    "mcp.server.lowlevel.server.request_ctx. Binding observation "
-                    "records nothing and WILLOW_MCP_ENFORCE_BINDING=1 will deny "
-                    "every registered agent. Port _read_call_credential to the "
-                    "injected Context before enabling enforcement.")
-            return None
-        rc = request_ctx.get(None)
-        if rc is None:
-            return None
-        meta = getattr(rc, "meta", None)
-        extra = getattr(meta, "model_extra", None) or {}
-        cred = extra.get(CREDENTIAL_META_KEY)
-        if isinstance(cred, dict) and all(k in cred for k in ("session_id", "call_nonce", "sig")):
-            return {"session_id": str(cred["session_id"]),
-                    "call_nonce": str(cred["call_nonce"]),
-                    "sig": str(cred["sig"])}
-    except Exception:
+    a missing request context or meta is simply "no credential".
+
+    Reads `request_context.current_meta()`, which our own middleware publishes
+    from the `ServerRequestContext` the SDK hands it. SDK 1.x had an ambient
+    `mcp.server.lowlevel.server.request_ctx`; 2.0 removed it deliberately and
+    injects `Context` into tool functions instead — an injection that does not
+    reach a decorator wrapping 109 tools. See willow_mcp/request_context.py for
+    why the replacement is a ContextVar we own rather than one the SDK might
+    move again.
+    """
+    from . import request_context
+
+    meta = request_context.current_meta()
+    if meta is None:
         return None
+    # SDK 1.x `_meta` was a pydantic model carrying unknown keys in
+    # `.model_extra`; SDK 2.0's `RequestParamsMeta` is a TypedDict, i.e. an
+    # ordinary mapping. Read whichever this SDK hands us — the credential is an
+    # out-of-band key either way, and guessing wrong is a silent "no credential".
+    if isinstance(meta, dict):
+        extra = meta
+    else:
+        extra = getattr(meta, "model_extra", None) or {}
+    cred = extra.get(CREDENTIAL_META_KEY)
+    if isinstance(cred, dict) and all(k in cred for k in ("session_id", "call_nonce", "sig")):
+        return {"session_id": str(cred["session_id"]),
+                "call_nonce": str(cred["call_nonce"]),
+                "sig": str(cred["sig"])}
     return None
 
 
@@ -433,7 +422,13 @@ def _serve_mode() -> bool:
 _BASE_URL_ENV = (os.getenv("WILLOW_MCP_URL") or "").strip().rstrip("/")
 _BASE_URL = _BASE_URL_ENV if _BASE_URL_ENV else f"http://{_HOST}:{_PORT}"
 
+from .request_context import RequestContextMiddleware
+
 _common_kwargs: dict[str, Any] = dict(
+    # Outermost: publishes the per-request context on a ContextVar we own,
+    # which is how _read_call_credential reaches `_meta` now that SDK 2.0
+    # removed the ambient request contextvar.
+    middleware=[RequestContextMiddleware()],
     instructions=(
         "Willow sovereign agent platform (willow-mcp). "
         "FIRST CALL of every session: session_enter(app_id, session_id) — it returns your "
