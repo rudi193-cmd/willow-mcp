@@ -55,6 +55,16 @@ def _tok() -> str:
     return secrets.token_urlsafe(32)
 
 
+def _idp_of(data: dict) -> str | None:
+    """The upstream IdP name from a token record, old or new.
+
+    Records written before the rename key it `issuer`; new ones use `idp`. Read
+    both so an upgrade does not silently invalidate every live token — the
+    failure would look like "everyone signed out" and give no reason.
+    """
+    return data.get("idp") or data.get("issuer")
+
+
 class GroveOAuthProvider:
     """
     Minimal single-user OAuth 2.0 PKCE provider (lifted from grove/mcp_auth.py).
@@ -66,7 +76,10 @@ class GroveOAuthProvider:
         self._base_url   = base_url.rstrip("/")
         self._pending: dict[str, tuple[OAuthClientInformationFull, AuthorizationParams]] = {}
         self._codes:   dict[str, AuthorizationCode] = {}
-        # code -> {"issuer": ..., "subject": ...} — the verified IdP identity
+        # code -> {"idp": ..., "subject": ...} — the verified upstream IdP identity.
+        # NOT an RFC 9207 issuer: this is "google"/"apple", the NAME of the
+        # provider that authenticated the human, not a URL identifying this
+        # authorization server. See docs/design/idp-vs-issuer.md.
         # for this authorization code, consumed (and persisted onto the
         # issued access/refresh token) in exchange_authorization_code. Not
         # part of self._state: it only needs to survive the short _CODE_TTL
@@ -170,12 +183,12 @@ class GroveOAuthProvider:
         self._state["access_tokens"][access_tok] = {
             "token": access_tok, "client_id": client.client_id,
             "scopes": authorization_code.scopes, "expires_at": now + _ACCESS_TTL,
-            "issuer": identity.get("issuer"), "subject": identity.get("subject"),
+            "idp": identity.get("idp"), "subject": identity.get("subject"),
         }
         self._state["refresh_tokens"][refresh_tok] = {
             "token": refresh_tok, "client_id": client.client_id,
             "scopes": authorization_code.scopes, "expires_at": now + _REFRESH_TTL,
-            "issuer": identity.get("issuer"), "subject": identity.get("subject"),
+            "idp": identity.get("idp"), "subject": identity.get("subject"),
         }
         self._save_state()
         return OAuthToken(
@@ -210,12 +223,12 @@ class GroveOAuthProvider:
         self._state["access_tokens"][access_tok] = {
             "token": access_tok, "client_id": client.client_id,
             "scopes": effective_scopes, "expires_at": now + _ACCESS_TTL,
-            "issuer": old_data.get("issuer"), "subject": old_data.get("subject"),
+            "idp": _idp_of(old_data), "subject": old_data.get("subject"),
         }
         self._state["refresh_tokens"][new_refresh] = {
             "token": new_refresh, "client_id": client.client_id,
             "scopes": effective_scopes, "expires_at": now + _REFRESH_TTL,
-            "issuer": old_data.get("issuer"), "subject": old_data.get("subject"),
+            "idp": _idp_of(old_data), "subject": old_data.get("subject"),
         }
         self._save_state()
         return OAuthToken(
@@ -238,7 +251,11 @@ class GroveOAuthProvider:
             scopes=data["scopes"],
             expires_at=data.get("expires_at"),
             subject=data.get("subject"),
-            claims={"iss": data["issuer"]} if data.get("issuer") else None,
+            # `idp`, never `iss`. RFC 9207 / SEP-2468 give `iss` a specific
+            # meaning — THIS authorization server's issuer URL — and clients
+            # MUST validate a present `iss` against the recorded issuer. Putting
+            # "google" there made the two collide.
+            claims={"idp": _idp_of(data)} if _idp_of(data) else None,
         )
 
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
@@ -574,7 +591,7 @@ class WillowOAuthProvider(GroveOAuthProvider):
 
             propose_binding("google", sub, email)
             client, params = entry
-            auth_code = provider.issue_code(client, params, identity={"issuer": "google", "subject": sub})
+            auth_code = provider.issue_code(client, params, identity={"idp": "google", "subject": sub})
             redirect = str(params.redirect_uri)
             sep = "&" if "?" in redirect else "?"
             url = f"{redirect}{sep}code={auth_code}"
@@ -631,7 +648,7 @@ class WillowOAuthProvider(GroveOAuthProvider):
 
             propose_binding("apple", sub, email)
             client, params = entry
-            auth_code = provider.issue_code(client, params, identity={"issuer": "apple", "subject": sub})
+            auth_code = provider.issue_code(client, params, identity={"idp": "apple", "subject": sub})
             redirect = str(params.redirect_uri)
             sep = "&" if "?" in redirect else "?"
             url = f"{redirect}{sep}code={auth_code}"
