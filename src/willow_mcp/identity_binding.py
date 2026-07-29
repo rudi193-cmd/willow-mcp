@@ -3,7 +3,7 @@
 Implements docs/design/schema-adaptation.md §6.2-6.3 (SECURITY_AUDIT.md
 L-AUTH-02): a Google/Apple sign-in verifies *who* signed in but, on its own,
 grants that person no standing under gate.py. A binding maps
-(issuer, subject_id) -> app_id. It starts unconfirmed on first sign-in; only
+(idp, subject_id) -> app_id. It starts unconfirmed on first sign-in; only
 a confirmed binding lets _gate() resolve an authenticated session to real
 tool permissions. An authenticated-but-unbound caller is denied, the same as
 an unmanifested app_id in stdio mode — fail closed, not fail open.
@@ -30,7 +30,7 @@ def _write_json_atomic(path: Path, record: dict) -> None:
     tmp.write_text(json.dumps(record, indent=2))
     os.replace(tmp, path)
 
-# Subject/issuer values come from a verified IdP (Google tokeninfo / Apple JWT),
+# Subject/idp values come from a verified IdP (Google tokeninfo / Apple JWT),
 # not raw user input, but they still become filesystem path components here —
 # refuse anything that isn't a plain token before touching the filesystem.
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9_.\-:]{1,256}$")
@@ -43,29 +43,45 @@ def _bindings_root() -> Path:
     return root
 
 
+def _idp_of(record: dict) -> str:
+    """The IdP name from a binding record, written before or after the rename.
+
+    Pre-rename records key it `issuer`. The filename never changed — it has
+    always been `{idp}__{subject}.json` with the IdP NAME in it — so an old
+    record is found at the same path and only its inner key differs. Reading
+    both means the rename does not orphan a single confirmed binding.
+    """
+    return record.get("idp") or record.get("issuer") or ""
+
+
 def _safe_token(value: str, label: str) -> str:
     if not value or not _TOKEN_RE.match(value):
         raise ValueError(f"unsafe {label} for binding filename: {value!r}")
     return value
 
 
-def binding_path(issuer: str, subject_id: str) -> Path:
-    issuer = _safe_token(issuer, "issuer")
+def binding_path(idp: str, subject_id: str) -> Path:
+    idp = _safe_token(idp, "idp")
     subject_id = _safe_token(subject_id, "subject_id")
-    return _bindings_root() / f"{issuer}__{subject_id}.json"
+    return _bindings_root() / f"{idp}__{subject_id}.json"
 
 
-def load_binding(issuer: str, subject_id: str) -> Optional[dict]:
-    path = binding_path(issuer, subject_id)
+def load_binding(idp: str, subject_id: str) -> Optional[dict]:
+    """Read a binding. A pre-rename record is normalised to the `idp` key here,
+    once, so nothing downstream has to know two shapes existed."""
+    path = binding_path(idp, subject_id)
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text())
+        record = json.loads(path.read_text())
     except Exception:
         return None
+    if isinstance(record, dict) and "idp" not in record and "issuer" in record:
+        record["idp"] = record.pop("issuer")
+    return record
 
 
-def compute_email_basis(issuer: str, email: Optional[str]) -> str:
+def compute_email_basis(idp: str, email: Optional[str]) -> str:
     """§6.2: 'do we have an email' is not the interesting question — 'how
     much should anything downstream trust it' is. Google's tokeninfo email
     is IdP-asserted on every sign-in. Apple's may be a one-time snapshot
@@ -76,7 +92,7 @@ def compute_email_basis(issuer: str, email: Optional[str]) -> str:
     silently misbehave the first time it sees one of these."""
     if not email:
         return "unavailable"
-    if issuer == "apple":
+    if idp == "apple":
         if email.endswith("@privaterelay.appleid.com"):
             return "relay"
         return "first_auth_only"
@@ -96,10 +112,10 @@ def _note_email_drift(existing: dict, incoming_email: Optional[str]) -> None:
     existing["email_drift_detected_at"] = datetime.now(timezone.utc).isoformat()
     existing["drift_from_email"] = stored
     existing["drift_to_email"] = incoming_email
-    _write_json_atomic(binding_path(existing["issuer"], existing["subject_id"]), existing)
+    _write_json_atomic(binding_path(_idp_of(existing), existing["subject_id"]), existing)
 
 
-def propose_binding(issuer: str, subject_id: str, email: Optional[str]) -> dict:
+def propose_binding(idp: str, subject_id: str, email: Optional[str]) -> dict:
     """Create an unconfirmed binding artifact on first sign-in.
 
     Returns the existing record untouched if one is already on disk — a
@@ -108,46 +124,46 @@ def propose_binding(issuer: str, subject_id: str, email: Optional[str]) -> dict:
     email-drift flag (§6.3 step 4) if the incoming email differs from what
     was stored — that's an audit note, not a decision change.
     """
-    existing = load_binding(issuer, subject_id)
+    existing = load_binding(idp, subject_id)
     if existing is not None:
         _note_email_drift(existing, email)
         return existing
     now = datetime.now(timezone.utc).isoformat()
     record = {
-        "issuer": issuer,
+        "idp": idp,
         "subject_id": subject_id,
         "email": email,
-        "email_basis": compute_email_basis(issuer, email),
+        "email_basis": compute_email_basis(idp, email),
         "verified_at": now,
         "app_id": None,
         "confirmed": False,
         "created_at": now,
     }
-    _write_json_atomic(binding_path(issuer, subject_id), record)
+    _write_json_atomic(binding_path(idp, subject_id), record)
     return record
 
 
-def confirm_binding(issuer: str, subject_id: str, app_id: str) -> dict:
+def confirm_binding(idp: str, subject_id: str, app_id: str) -> dict:
     """Operator-only: bind a proposed identity to an app_id and confirm it.
 
     Not reachable from any MCP tool — call only from the local CLI.
     """
-    record = load_binding(issuer, subject_id)
+    record = load_binding(idp, subject_id)
     if record is None:
         raise ValueError(
-            f"no proposed binding for ({issuer}, {subject_id}) — "
+            f"no proposed binding for ({idp}, {subject_id}) — "
             "the person must sign in once via the OAuth approval page first"
         )
     record["app_id"] = app_id
     record["confirmed"] = True
     record["confirmed_at"] = datetime.now(timezone.utc).isoformat()
-    _write_json_atomic(binding_path(issuer, subject_id), record)
+    _write_json_atomic(binding_path(idp, subject_id), record)
     return record
 
 
-def resolve_app_id(issuer: str, subject_id: str) -> Optional[str]:
+def resolve_app_id(idp: str, subject_id: str) -> Optional[str]:
     """Return the bound app_id only if the binding is confirmed — None (fail closed) otherwise."""
-    record = load_binding(issuer, subject_id)
+    record = load_binding(idp, subject_id)
     if record and record.get("confirmed") and record.get("app_id"):
         return record["app_id"]
     return None

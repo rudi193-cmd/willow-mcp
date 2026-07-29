@@ -16,7 +16,7 @@ request populates.
 
 Four ways in, one of which works:
   * no authenticated session at all                     -> denied
-  * a session carrying no issuer, or no subject         -> denied
+  * a session carrying no idp, or no subject            -> denied
   * signed in, but no operator-confirmed binding        -> denied
   * signed in WITH a confirmed binding                  -> allowed, AS THE BOUND
                                                            IDENTITY
@@ -36,7 +36,7 @@ from willow_mcp import human_loop, identity_binding, server
 from willow_mcp.db import Store
 from willow_mcp.receipts import ReceiptLog
 
-ISSUER = "google"
+IDP = "google"
 SUBJECT = "sub-1234567890"
 
 
@@ -46,10 +46,10 @@ def _fn(tool):
 
 
 @contextlib.contextmanager
-def signed_in(issuer=ISSUER, subject=SUBJECT):
+def signed_in(idp=IDP, subject=SUBJECT):
     """Populate the SDK contextvar the way AuthContextMiddleware does per request.
 
-    `issuer=None` models a token whose claims carry no `iss`; `subject=None`
+    `idp=None` models a token whose claims carry no `idp`; `subject=None`
     models one with no `sub`. Both are the shapes `_resolve_serve_identity`
     must refuse rather than resolve.
     """
@@ -58,7 +58,7 @@ def signed_in(issuer=ISSUER, subject=SUBJECT):
         client_id="some-registered-client",
         scopes=["willow"],
         subject=subject,
-        claims={"iss": issuer} if issuer is not None else {},
+        claims={"idp": idp} if idp is not None else {},
     )
     reset = auth_context_var.set(AuthenticatedUser(token))
     try:
@@ -95,10 +95,10 @@ def serve(tmp_path, monkeypatch):
     return _mk
 
 
-def _bind(app_id, issuer=ISSUER, subject=SUBJECT):
+def _bind(app_id, idp=IDP, subject=SUBJECT):
     """What `willow-mcp confirm-binding` does: the operator's half of the handshake."""
-    identity_binding.propose_binding(issuer, subject, email="operator@example.com")
-    return identity_binding.confirm_binding(issuer, subject, app_id)
+    identity_binding.propose_binding(idp, subject, email="operator@example.com")
+    return identity_binding.confirm_binding(idp, subject, app_id)
 
 
 # ── the seam itself ──────────────────────────────────────────────────────────
@@ -141,7 +141,7 @@ def test_no_authenticated_session_is_denied(serve):
 def test_session_without_issuer_is_denied(serve):
     serve("caller")
     _bind("caller")
-    with signed_in(issuer=None):
+    with signed_in(idp=None):
         bound, err = server._resolve_serve_identity()
     assert bound is None
     assert "no bound identity" in err["error"]
@@ -169,7 +169,7 @@ def test_signed_in_without_a_binding_is_denied(serve):
 def test_proposed_but_unconfirmed_binding_is_denied(serve):
     """First sign-in writes an *unconfirmed* binding. Only a human confirms it."""
     serve("caller")
-    identity_binding.propose_binding(ISSUER, SUBJECT, email="operator@example.com")
+    identity_binding.propose_binding(IDP, SUBJECT, email="operator@example.com")
     with signed_in():
         bound, err = server._resolve_serve_identity()
     assert bound is None
@@ -186,11 +186,11 @@ def test_unconfirmed_binding_is_denied_even_when_it_names_an_app_id(serve):
     has confirmed. Only the `confirmed` flag can refuse this one.
     """
     serve("hanuman")
-    record = identity_binding.propose_binding(ISSUER, SUBJECT, email="operator@example.com")
+    record = identity_binding.propose_binding(IDP, SUBJECT, email="operator@example.com")
     record["app_id"] = "hanuman"
     assert record["confirmed"] is False
     identity_binding._write_json_atomic(
-        identity_binding.binding_path(ISSUER, SUBJECT), record)
+        identity_binding.binding_path(IDP, SUBJECT), record)
 
     with signed_in():
         bound, err = server._resolve_serve_identity()
@@ -247,7 +247,7 @@ def test_gate_denies_every_tool_call_when_not_signed_in(serve):
 
 
 def test_gate_binding_is_per_identity_not_global(serve):
-    """A confirmed binding for one (issuer, subject) grants nothing to another."""
+    """A confirmed binding for one (idp, subject) grants nothing to another."""
     serve("hanuman")
     _bind("hanuman")
     with signed_in(subject="sub-someone-else"):

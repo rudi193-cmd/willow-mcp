@@ -386,14 +386,18 @@ def _binding_rows() -> list[GateRow]:
         detail = f"subject={record.get('subject_id')} email={record.get('email')}"
         if record.get("email_drift"):
             detail += " — EMAIL DRIFT, verify before trusting"
-        issuer = record.get("issuer")
+        # `idp` since the rename; `issuer` on records written before it. This
+        # panel reads binding files straight off disk rather than through
+        # identity_binding.load_binding, so it needs the fallback itself —
+        # otherwise every pre-rename binding renders "via None".
+        idp = record.get("idp") or record.get("issuer")
         rows.append(GateRow(
-            id=f"binding.{f.stem}", label=f"identity binding ({issuer})",
-            friendly=f"Signed-in account (via {issuer})",
+            id=f"binding.{f.stem}", label=f"identity binding ({idp})",
+            friendly=f"Signed-in account (via {idp})",
             scope=record.get("app_id") or "(unbound)",
             state="on" if confirmed else "off", detail=detail, timer_shape="standing",
             action_cli=(None if confirmed else
-                        f"willow-mcp confirm-binding --issuer {issuer} "
+                        f"willow-mcp confirm-binding --idp {idp} "
                         f"--subject {record.get('subject_id')} --app-id <app_id>"),
         ))
     return rows

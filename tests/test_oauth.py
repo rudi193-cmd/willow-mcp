@@ -52,11 +52,11 @@ def test_load_authorization_code_wrong_client_denied(provider):
 
 def test_exchange_authorization_code_persists_identity(provider):
     client = _client()
-    code_str = provider.issue_code(client, _params(), identity={"issuer": "google", "subject": "sub123"})
+    code_str = provider.issue_code(client, _params(), identity={"idp": "google", "subject": "sub123"})
     code = asyncio.run(provider.load_authorization_code(client, code_str))
     token = asyncio.run(provider.exchange_authorization_code(client, code))
     stored = provider._state["access_tokens"][token.access_token]
-    assert stored["issuer"] == "google"
+    assert stored["idp"] == "google"
     assert stored["subject"] == "sub123"
 
 

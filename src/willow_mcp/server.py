@@ -512,16 +512,19 @@ def _resolve_serve_identity() -> tuple[Optional[str], Optional[dict]]:
     if token is None:
         return None, {"error": "gate denied: no authenticated session (serve mode requires OAuth sign-in)"}
 
-    issuer = (token.claims or {}).get("iss")
+    # `idp` — the upstream provider name ("google"/"apple"). Deliberately not
+    # `iss`: RFC 9207 reserves that for this server's own issuer URL, and
+    # SEP-2468 makes clients MUST-validate it. See docs/design/idp-vs-issuer.md.
+    idp = (token.claims or {}).get("idp")
     subject = token.subject
-    if not issuer or not subject:
+    if not idp or not subject:
         return None, {"error": "gate denied: authenticated session carries no bound identity"}
 
-    bound_app_id = resolve_app_id(issuer, subject)
+    bound_app_id = resolve_app_id(idp, subject)
     if not bound_app_id:
         return None, {
             "error": (
-                f"gate denied: identity ({issuer}, {subject}) is signed in but not yet bound to an "
+                f"gate denied: identity ({idp}, {subject}) is signed in but not yet bound to an "
                 "app_id — ask the operator to run `willow-mcp confirm-binding` for this identity"
             )
         }
@@ -4771,7 +4774,7 @@ def _cmd_confirm_binding(args) -> None:
     from .identity_binding import confirm_binding
 
     try:
-        record = confirm_binding(args.issuer, args.subject, args.app_id)
+        record = confirm_binding(args.idp, args.subject, args.app_id)
     except ValueError as e:
         print(f"Error: {e}")
         raise SystemExit(1)
@@ -5648,7 +5651,10 @@ def _main():
         "confirm-binding",
         help="Bind a signed-in OAuth identity to an app_id (local, stdio-only — never an MCP tool)",
     )
-    confirm_p.add_argument("--issuer", required=True, choices=["google", "apple"])
+    # The upstream provider, not an RFC 9207 issuer URL. `--issuer` stays as a
+    # deprecated alias so operator muscle memory and scripts keep working.
+    confirm_p.add_argument("--idp", "--issuer", dest="idp", required=True,
+                           choices=["google", "apple"])
     confirm_p.add_argument("--subject", required=True, help="The IdP 'sub' claim for this identity")
     confirm_p.add_argument("--app-id", required=True, dest="app_id")
 
