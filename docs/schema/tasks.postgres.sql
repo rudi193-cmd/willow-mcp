@@ -27,7 +27,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     claimed_at    timestamptz,
     attempts      integer NOT NULL DEFAULT 0,
     max_attempts  integer NOT NULL DEFAULT 3,
-    retry_at      timestamptz
+    retry_at      timestamptz,
+    -- Absorbed from willow-2.0's `core/pg_bridge.py` definition when this table
+    -- became singly-owned (see docs/design/tasks-schema-ownership.md). Both are
+    -- written by that repo's queue logic; canonical carries them so the
+    -- migration never has to drop a column another repo is still writing.
+    submitter_run_id text,
+    updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
 -- Claim path: WHERE status='pending' AND agent=? ORDER BY created_at.
