@@ -13,15 +13,27 @@ still required by the writer, still mirrored, and still shown as an off switch
 by `README.md:154` and `skills/consent.md`. Relabelling is why this is still
 open — see `docs/design/consent-toggles.md`.
 
-**These are stubs, not coverage.** Each one is `xfail(strict=True)`: it fails
-today, keeps the suite green, and flips to a hard failure the moment enforcement
-lands — at which point the marker comes off and the test becomes real. Two
-tests in this file are NOT marked: they pass today and guard properties the
-enforcement must not break.
+**PARTIALLY ENFORCED AS OF 2026-07-28.** `cloud_llm` now gates the Nest model
+sinks (`model_egress.py`); `lan` still gates nothing. The tests below are in
+three states, and the mix is the point:
 
-Both nest model modules read their destination into a module constant at import
-time (`nest/embed.py:22`, `nest/llm.py:26`), so these tests patch the module
-attribute, never the environment.
+  * **unmarked and passing** — the enforcement that landed, now real coverage
+  * **`xfail(strict=True)`** — still-open gaps. Strict, so each flips to a hard
+    failure the moment someone closes it, and the marker comes off then
+  * the carve-out guards, which passed before and must keep passing
+
+`lan` is deliberately still a stub rather than half-enforced: gating Kart's
+`# allow_localhost` on it denies a mode that works on every install today
+(`home_init` writes `lan: false` everywhere), which is a breaking change needing
+a release note. See docs/design/consent-toggles.md.
+
+A note on method, because it changed. These tests originally patched
+`nest/embed.py`'s and `nest/llm.py`'s module constants, on the assumption the
+gate would live where the socket is opened. It cannot: those modules are
+vendored byte-for-byte from safe-app-store's `libs/nest-pipeline` under a CI
+drift-guard, and are deliberately policy-free. The gate sits at willow-mcp's own
+tool boundary instead, so the tests patch `$OLLAMA_HOST` — the thing an operator
+actually sets — rather than a module attribute.
 """
 from __future__ import annotations
 
@@ -80,7 +92,6 @@ def _legacy(home, **con):
 # ── the general antidote ─────────────────────────────────────────────────────
 
 
-@pytest.mark.xfail(strict=True, reason=NOT_YET)
 def test_every_consent_key_has_an_enforcing_helper():
     """Every key in CONSENT_KEYS has a named enforcing helper in consent.py.
 
@@ -97,7 +108,6 @@ def test_every_consent_key_has_an_enforcing_helper():
     assert missing == [], f"consent keys with no enforcing helper: {missing}"
 
 
-@pytest.mark.xfail(strict=True, reason=NOT_YET)
 def test_cloud_llm_permitted_exists_and_is_fail_closed(home):
     """`cloud_llm_permitted()` denies when no policy can be read.
 
@@ -113,7 +123,6 @@ def test_cloud_llm_permitted_exists_and_is_fail_closed(home):
     assert consent.cloud_llm_permitted() is True
 
 
-@pytest.mark.xfail(strict=True, reason=NOT_YET)
 def test_lan_permitted_exists_and_is_fail_closed(home):
     """`lan_permitted()` denies when no policy can be read. Same property as
     `cloud_llm_permitted`, asserted separately so a partial implementation that
@@ -135,42 +144,95 @@ def test_lan_permitted_exists_and_is_fail_closed(home):
 # the default and false of the variable.
 
 
-@pytest.mark.xfail(strict=True, reason=NOT_YET)
-def test_nest_embedding_to_a_public_host_is_denied_without_cloud_llm_consent(home, monkeypatch):
-    """Document text must not reach an off-box embedding model unconsented.
+# ── the gate, at the boundary it can actually live on ───────────────────────
+#
+# These three were written asserting the gate inside `nest/embed.py` and
+# `nest/llm.py`, where the socket is opened. That is the right answer to "where
+# does egress happen" and the wrong answer to "where does the check go": those
+# modules are vendored BYTE-FOR-BYTE from safe-app-store's libs/nest-pipeline
+# under a hash pin and a CI vendor-sync job (nest/__init__.py:19-25), and the
+# library is deliberately policy-free so each consumer keeps its own layers
+# outside the shared core. A consent check there would fork the canonical
+# library to carry one consumer's policy, and break the drift-guard.
+#
+# So they now assert at willow-mcp's own boundary — the tool that decides to
+# invoke the pipeline, which is also where the false promise was written. The
+# property under test is unchanged: document content does not reach an off-box
+# model without consent.
 
-    `nest_scan` defaults to `use_embed=True` (server.py:1442) and
-    `nest/classify.py:286` embeds the document *body*, not metadata. The Nest DB
-    is described by `nest/bridge.py:85` as the local-only PII zone. With
-    `OLLAMA_HOST` pointed off-box, that body is shipped to whoever answers, and
-    no consent key is consulted on the way.
+
+def _app(home, name="nesty", perms=("nest_read", "nest_write")):
+    d = home / "mcp_apps" / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "manifest.json").write_text(json.dumps({"permissions": list(perms)}))
+    return name
+
+
+def test_nest_scan_to_an_off_box_model_is_denied_without_cloud_llm_consent(home, monkeypatch):
+    """Document text must not reach an off-box model unconsented.
+
+    `nest_scan` defaults to `use_embed=True` and `nest/classify.py` embeds the
+    document *body*, not metadata — into what `nest/__init__.py` calls the local
+    PII zone. With $OLLAMA_HOST pointed off-box that body went to whoever
+    answered, and no consent key was consulted.
     """
-    from willow_mcp.nest import embed
+    from willow_mcp import model_egress
 
     _canonical(home, internet=True, cloud_llm=False, lan=False)
-    monkeypatch.setattr(embed, "DEFAULT_HOST", "https://ollama.example.net")
-    monkeypatch.setattr(embed, "_installed", {"nomic-embed-text"})
-    monkeypatch.setattr(embed.urllib.request, "urlopen", _sentinel_urlopen)
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.example.net")
 
-    assert embed.embed_document("a private document body") is None
+    denial = model_egress.denial("nest_scan")
+    assert denial is not None, "off-box model host was permitted with cloud_llm false"
+    assert "cloud_llm_denied" in denial["error"]
+    # The denial must name the key and the file, or it just trains people to
+    # route around it.
+    assert "consent.cloud_llm" in denial["error"]
+    assert "settings.global.json" in denial["error"]
 
 
-@pytest.mark.xfail(strict=True, reason=NOT_YET)
-def test_nest_classification_to_a_public_host_is_denied_without_cloud_llm_consent(home, monkeypatch):
-    """File text must not reach an off-box generative model unconsented.
+def test_nest_scan_returns_the_denial_instead_of_opening_a_socket(home, monkeypatch, tmp_path):
+    """End to end through the real tool: denied, and nothing dialled out."""
+    import urllib.request
 
-    `nest/llm.py:153` sends the first 6000 characters of a file and
-    `nest/llm.py:188` base64-encodes whole images. `_http_json` (nest/llm.py:63)
-    is the single funnel for both, and is the natural chokepoint.
-    """
-    from willow_mcp.nest import llm
+    from willow_mcp import server
 
     _canonical(home, internet=True, cloud_llm=False, lan=False)
-    monkeypatch.setattr(llm, "DEFAULT_HOST", "https://ollama.example.net")
-    monkeypatch.setattr(llm, "_installed_models", {"llama3.2:3b"})
-    monkeypatch.setattr(llm.urllib.request, "urlopen", _sentinel_urlopen)
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.example.net")
+    monkeypatch.setattr(urllib.request, "urlopen", _sentinel_urlopen)
+    app = _app(home)
+    folder = tmp_path / "drop"
+    folder.mkdir()
+    (folder / "diary.txt").write_text("a private document body")
 
-    assert llm.classify_text("a private document body", "diary.txt") is None
+    fn = getattr(server.nest_scan, "__wrapped__", server.nest_scan)
+    out = fn(app_id=app, folder=str(folder), use_embed=True, dry_run=True)
+
+    assert "error" in out and "cloud_llm_denied" in out["error"]
+
+
+def test_nest_scan_on_loopback_needs_no_consent_key(home, monkeypatch):
+    """The carve-out, pinned. `home_init` writes cloud_llm:false into every
+    install, so requiring the key for localhost would deny the default
+    configuration everywhere and teach operators to switch it on permanently —
+    which is how a consent gate becomes a formality."""
+    from willow_mcp import model_egress
+
+    _canonical(home, internet=False, cloud_llm=False, lan=False)
+    for host in ("http://localhost:11434", "http://127.0.0.1:11434", "http://[::1]:11434"):
+        monkeypatch.setenv("OLLAMA_HOST", host)
+        assert model_egress.denial("nest_scan") is None, host
+
+
+def test_an_unresolvable_or_malformed_model_host_fails_closed(home, monkeypatch):
+    """"I could not tell where this goes" must not read as "it goes nowhere"."""
+    from willow_mcp import model_egress
+
+    _canonical(home, internet=True, cloud_llm=False, lan=False)
+    # NB: an EMPTY value is not here — it means "unset", falls back to the
+    # localhost default, and is correctly allowed.
+    for host in ("http://nonexistent.invalid", "not a url", "http://"):
+        monkeypatch.setenv("OLLAMA_HOST", host)
+        assert model_egress.denial("nest_scan") is not None, host
 
 
 @pytest.mark.xfail(strict=True, reason=NOT_YET)

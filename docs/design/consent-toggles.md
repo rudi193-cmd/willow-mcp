@@ -146,6 +146,36 @@ Define the key as **"may model inference leave this host?"** — not "is the
 destination a brand-name provider", which is unanswerable and would rot the
 moment someone self-hosts.
 
+> ## CORRECTION, 2026-07-28 — the chokepoints below cannot carry the gate
+>
+> Items 1 and 2 name `nest/embed.py:67` and `nest/llm.py:63`. Those are the right
+> answer to *where does egress happen* and the wrong answer to *where does the
+> check go*.
+>
+> Both modules are **vendored byte-for-byte** from `safe-app-store`'s
+> `libs/nest-pipeline` (box audit A4), under an in-repo hash pin
+> (`tests/test_nest_pipeline_vendor.py`) and a CI `vendor-sync` job — see
+> `nest/__init__.py:19-25`. The library is also deliberately policy-free: *"Apps
+> that consume it keep their own app-specific layers outside this core."*
+> Putting a consent check inside would fork the canonical library to carry one
+> consumer's policy and break the drift-guard on its next run.
+>
+> **The gate therefore sits at willow-mcp's own tool boundary** —
+> `model_egress.denial()`, called from `nest_scan` before it imports the
+> pipeline. That is also where the false promise was written (`nest_scan`'s
+> docstring: *"Nothing leaves the machine; no cloud inference"*), so the check
+> and the claim now live on the same lines.
+>
+> This is a narrower change than planned and it keeps the drift-guard green. It
+> is also strictly better placed for a second reason the plan did not anticipate:
+> the vendored copy is destined to be *replaced* by the shared library, so a gate
+> inside it would have been written into the code slated for deletion.
+>
+> Consequence for item 2's `/api/tags` note: gating at the tool boundary covers
+> the probe automatically, because `nest_scan` returns the denial before any
+> `nest` module is imported. The probe is only reachable through tools that are
+> themselves gated.
+
 Chokepoints, in order of preference:
 
 1. **`src/willow_mcp/nest/embed.py:67`** — `_post()`, the single funnel for

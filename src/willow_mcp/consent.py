@@ -197,3 +197,32 @@ def internet_permitted() -> bool:
     grant. Read at both submit time and execution time; the signed per-task
     envelope supplies the separate one-use authority (B-37)."""
     return permitted("internet")
+
+
+def cloud_llm_permitted() -> bool:
+    """Standing consent for model inference that leaves this machine.
+
+    Read by `model_egress.denial()`, which gates the Nest tools. Until that
+    landed this key was modelled, reconciled, mirrored and displayed while
+    **nothing consulted it** — a switch the operator could flip, watch persist,
+    and receive no protection from. `gates_panel` labelled it "reserved — not
+    yet enforced", which fixed the label and not the toggle, and only for people
+    who read the panel rather than the settings file.
+    """
+    return permitted("cloud_llm")
+
+
+def lan_permitted() -> bool:
+    """Standing consent for local-network access.
+
+    NOT YET CONSULTED BY ANY GATED PATH — the same defect `cloud_llm` had, still
+    open, and deliberately left that way rather than half-enforced. Enforcing it
+    means splitting non-loopback egress into private-vs-public, and gating
+    Kart's `# allow_localhost` on it denies a mode that works on every install
+    today (`home_init` writes `lan: false` everywhere). That is a real breaking
+    change and needs a release note, not a quiet default flip.
+
+    Kept as a helper so the asymmetry is visible in code: the enforced key has a
+    caller, this one does not. See docs/design/consent-toggles.md.
+    """
+    return permitted("lan")
