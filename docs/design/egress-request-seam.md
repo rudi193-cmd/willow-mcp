@@ -1,0 +1,128 @@
+---
+kind: doc
+name: egress-request-seam
+description: "Where an agent that needs egress should ASK for it instead of failing — the three denial sites, why a PreToolUse hook is the weakest of three options, and why SEP-2322 made the right one possible on 2026-07-29."
+---
+
+@markdownai v1.0
+
+# The egress request seam
+
+## The gap
+
+An agent that needs network reaches a denial and stops. The three-key gate is
+correct — capability, standing consent, time-boxed lease, plus a signed
+per-task envelope — and no MCP tool may mint any of them. That is the whole
+point: *an agent may REQUEST egress, never CONFIRM it.*
+
+But the REQUEST half was never built. The agent gets an error dict, and the
+request is whatever the agent then says to the operator in prose. Observed live
+this session: a lease expired 2026-07-21, an agent needed `gh pr create`, and
+the entire request mechanism was the agent pasting a shell command into chat and
+hoping. Nothing was queued. Nothing was recorded. Nothing resumed.
+
+**The denial is not the problem. The absence of a request path is.**
+
+## The three sites
+
+One shape, three call sites — which is the argument for a single seam rather
+than three hooks:
+
+| Site | Denial |
+|---|---|
+| `server.task_submit` — Key 3 | `lease_denied` when `lease.read_lease(app_id)["status"] != "active"` |
+| `web_egress.egress_denial` | `lease_denied` on the same read, for `willow_web_*` |
+| `integrations.egress_denial` | mirror of the above, for `integration_call` |
+
+`model_egress.denial` (added 2026-07-28) is a fourth of the same family but
+denies on `consent.cloud_llm`, which is a standing switch rather than a lease —
+an operator edit, not a grant. Worth including for consistency; less urgent.
+
+## Three ways to build it, weakest first
+
+### 1. A PreToolUse hook — what this looks like it wants, and the weakest option
+
+`bundle/hooks/pre_tool_use.py` already blocks self-grant attempts, so the
+machinery is familiar. A hook could intercept a network-bearing `task_submit`
+and emit "ask the operator for a lease."
+
+**Why it is weakest:** a hook can block and it can print. It cannot carry state.
+The agent is told to ask, asks in prose, and the resumption is still a human
+re-reading a transcript and a fresh tool call with no link to the original. It
+automates the *message*, not the *request*. And it sits outside the gate it
+speaks for — the hook runs in the agent's harness, where `willow_mcp` may not
+even import, which is exactly why its permission list drifted behind
+`gate.PERMISSION_GROUPS` for so long.
+
+### 2. Auto-enqueue to `human_required` — durable, still not blocking
+
+On `lease_denied`, call `human_loop.enqueue` with `kind="consent"` and a payload
+naming app_id, the exact task text, the scope (`allow_net` vs
+`allow_localhost`), and the requesting session. The operator sees a real queue
+item; `human_required_resolve` records who granted and when.
+
+**What it buys:** the request becomes a record instead of a sentence. States,
+not deletions. It is auditable and it survives the session.
+
+**What it does not buy:** the agent still does not pause. `human_required_enqueue`
+writes a row and returns — the module docstring says the discipline is
+*"automation pauses for a human"* and nothing pauses. The agent gets a queue id
+and carries on, which is a bulletin board, not a gate.
+
+### 3. `InputRequiredResult` — the one that actually pauses, newly possible
+
+**SEP-2322**, in the 2026-07-28 revision: a server returns
+`InputRequiredResult` carrying `inputRequests`, and the client **retries the
+call echoing `requestState`**. That is a native pause-and-resume — the first
+protocol-level way to suspend a tool call until a person acts.
+
+`task_submit` returns `InputRequiredResult` on `lease_denied`.
+`human_required_resolve` — or `grant-net` itself — satisfies it. The agent's
+original call resumes with the lease in place. No prose, no re-derivation, no
+operator reading a transcript to reconstruct what was being asked.
+
+**This became available today.** willow-mcp went to SDK 2.0 on 2026-07-29
+(#202, #204). Before that there was no way to hold a call open, which is
+plausibly why this has resisted fixing for so long — the missing piece was in
+the protocol, not the codebase.
+
+## Recommended shape
+
+Build **2 and 3 together**, in one place, at the denial:
+
+1. A single `egress_request` module both `egress_denial` funnels and
+   `task_submit` call when a lease is the missing key.
+2. It enqueues the durable `human_required` record — so the ask outlives the
+   session and is auditable — **and** returns `InputRequiredResult` so the
+   caller blocks.
+3. `grant-net` resolves both: the queue item closes, the `requestState`
+   satisfies, the original call resumes.
+
+Skip the PreToolUse hook. A guardrail that can only speak is the wrong tool for
+a request that needs to be recorded and resumed.
+
+## What must not change
+
+- **No MCP tool mints a lease.** The request path must not become a grant path.
+  `grant-net` stays CLI-only and operator-terminal-gated.
+- **The denial stays fail-closed.** If enqueue fails, the call is still denied —
+  a request mechanism that swallows its own failure and proceeds is worse than
+  none.
+- **The signed envelope is unaffected.** A lease is necessary, never sufficient;
+  `sign-net-task` remains a separate operator act.
+- **`require_operator_terminal` keeps both arms.** The sandbox check before the
+  tty check is what makes the seat non-forgeable.
+
+## Open questions
+
+- **Does the request name the exact task, or the app?** Exact task is
+  auditable and matches the envelope's granularity; per-app is fewer
+  interruptions. The envelope is per-task, so per-task is probably right.
+- **TTL on an unanswered request.** An egress ask nobody answers should expire
+  rather than sit open forever — `lease.max_ttl_seconds` (3h) is a natural
+  ceiling.
+- **Does `model_egress` join?** Its missing key is a standing switch, not a
+  lease. An "ask to flip consent.cloud_llm" request is coherent but is a
+  different act from "ask for a time-boxed grant."
+
+*ΔΣ=42*
