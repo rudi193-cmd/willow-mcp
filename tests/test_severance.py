@@ -186,13 +186,23 @@ def test_fleet_database_is_violated(fleet, tmp_path, monkeypatch):
     assert "postgres" in out["violated"]
 
 
-def test_data_violation_degrades_but_does_not_break(fleet, tmp_path, monkeypatch):
+def test_data_violation_degrades_but_does_not_break(
+    fleet, tmp_path, monkeypatch, egress_locked
+):
+    """A DATA violation (store/postgres on the fleet) warns; it does not break.
+
+    `egress_locked` is required, not incidental. B-38 added a fourth surface
+    whose violation is deliberately an `error` that BREAKS — see
+    `test_egress_forgeable_under_strict_is_violated`. Leave it unpinned and this
+    test measures that authority violation instead of the data one it names, and
+    fails for a reason it never mentions.
+    """
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "own" / "mcp_apps"))
     sev = server._diag_severance(_store(fleet / "store"), _pg("willow_20"), _lease())
     problems = server._derive_problems(
         _store(fleet / "store"), _pg("willow_20"), {"status": "ok"}, "stdio", severance=sev)
     sevp = [p for p in problems if p["check"] == "severance"]
-    assert sevp and all(p["severity"] == "warn" for p in sevp)
+    assert sevp and all(p["severity"] == "warn" for p in sevp), sevp
     assert server._derive_verdict(problems) == "degraded"
 
 
@@ -254,8 +264,14 @@ def test_fleet_home_without_db_leaves_postgres_unknown(tmp_path, monkeypatch):
     assert "postgres" in out["unknown"]
 
 
-def test_unknown_surface_degrades_rather_than_passing(tmp_path, monkeypatch):
-    """An unverifiable claim is not a passing one."""
+def test_unknown_surface_degrades_rather_than_passing(tmp_path, monkeypatch, egress_locked):
+    """An unverifiable claim is not a passing one.
+
+    `egress_locked` pins the B-38 surface for the same reason as the data test
+    above: an unpinned forgeable-egress violation is an `error` that breaks, and
+    would make this assert `broken` while claiming to be about an *unknown*
+    surface degrading.
+    """
     monkeypatch.setenv("WILLOW_MCP_FLEET_HOME", str(tmp_path / "fleet"))
     monkeypatch.delenv("WILLOW_MCP_FLEET_PG_DB", raising=False)
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "own" / "mcp_apps"))
@@ -287,13 +303,26 @@ def test_check_catches_the_current_install(fleet, monkeypatch):
     trust root inside the fleet home, postgres on the fleet DB, verdict `ok`.
 
     A check that is born green has never been observed to fail. This is the case
-    it exists for, and it must come out `broken`."""
+    it exists for, and it must come out `broken`.
+
+    `egress` (B-38) is deliberately NOT in the violated set here. Strict trust
+    root is off by default — conftest pins it off so an operator's environment
+    cannot decide a test — and without strict mode the egress surface is
+    `severed: None`, i.e. UNKNOWN rather than violated. See
+    `test_severed_but_strict_off_is_not_ok`: an install that cannot prove network
+    severance reports `partial`, and unprovable is not the same claim as broken.
+
+    The three below are the surfaces this install's wiring made *checkable and
+    false*. Adding egress would assert a violation the check cannot substantiate
+    at this configuration, which is the failure mode severance exists to refuse.
+    """
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(fleet / "mcp_apps"))
     store, pg = _store(fleet / "store"), _pg("willow_20")
     sev = server._diag_severance(store, pg, _lease([str(fleet / "mcp_apps" / "_net_leases")]))
 
     assert sev["status"] == "violated"
     assert set(sev["violated"]) == {"store", "postgres", "trust_root"}
+    assert sev["surfaces"]["egress"]["severed"] is None, "unprovable, not violated"
 
     problems = server._derive_problems(store, pg, {"status": "ok"}, "stdio", severance=sev)
     assert server._derive_verdict(problems) == "broken"
