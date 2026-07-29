@@ -4,6 +4,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import logging
 import os
 import stat
 import tempfile
@@ -12,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import consent
+
+logger = logging.getLogger("willow_mcp.consent_admin")
 
 
 def _require_operator_terminal() -> None:
@@ -90,10 +93,26 @@ def _append_audit(path: Path, event: dict) -> None:
 
 def write_consent(values: dict[str, bool], *, action: str = "set") -> dict:
     _require_operator_terminal()
+    # A retired key is dropped with a warning, not refused. An operator whose
+    # script still passes `lan` should get their internet/cloud_llm write applied
+    # and be told the key is gone — rejecting the whole write would punish them
+    # for a key this build removed underneath them.
+    retired = sorted(k for k in values if consent.retired(k))
+    if retired:
+        values = {k: v for k, v in values.items() if k not in retired}
+        logger.warning(
+            "consent: %s removed and ignored — the key gated nothing; "
+            "see docs/design/consent-toggles.md",
+            ", ".join(repr(k) for k in retired),
+        )
     if set(values) != set(consent.CONSENT_KEYS) or not all(
         type(value) is bool for value in values.values()
     ):
-        raise ValueError("consent requires exactly internet/cloud_llm/lan booleans")
+        raise ValueError(
+            "consent requires exactly "
+            + "/".join(consent.CONSENT_KEYS)
+            + " booleans"
+        )
     canonical_path, mirror_path = consent.settings_path(), consent.legacy_path()
     # One critical section for the whole read-modify-write across canonical,
     # mirror, and audit (§4.4) — no interleaving with a concurrent operator.

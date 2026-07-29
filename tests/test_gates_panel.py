@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from willow_mcp import gates_panel, lease, manifest_admin
+from willow_mcp import consent, gates_panel, lease, manifest_admin
 from willow_mcp.gate import (
     INTEGRATION_NET_PERMISSION,
     NET_PERMISSION,
@@ -71,10 +71,21 @@ def test_collect_consent_rows_are_never_actionable_via_cli(apps_root):
     """consent.py is a read-only consumer by design — the panel must never
     offer a CLI command that would write settings.global.json from here."""
     rows = gates_panel.collect()
-    for key in ("internet", "cloud_llm", "lan"):
+    for key in consent.CONSENT_KEYS:
         row = _row(rows, f"consent.{key}")
         assert row.action_cli is None
         assert row.action_note is not None
+
+
+def test_a_retired_consent_key_gets_no_panel_row(apps_root):
+    """A key nothing honours must not be rendered as a switch. `lan` was
+    displayed for months while gating nothing; the panel is where an operator
+    would have believed it."""
+    rows = gates_panel.collect()
+    ids = {r.id for r in rows}
+    for key in consent._REMOVED_KEYS:
+        assert f"consent.{key}" not in ids
+        assert f"consent.{key}" not in gates_panel.FRIENDLY_LABELS
 
 
 def test_collect_env_gates_are_process_lifetime_not_actionable(apps_root):

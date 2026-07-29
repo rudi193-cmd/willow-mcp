@@ -1,31 +1,39 @@
-"""The two consent keys that persist, reconcile, and display but gate nothing.
+"""The consent keys that persisted, reconciled, and displayed while gating nothing.
 
-`consent.CONSENT_KEYS` declares three keys. `consent.py` supplies exactly one
-enforcing helper — `internet_permitted()` — and only that key has callers.
-`consent.cloud_llm` and `consent.lan` are accepted by `permitted()`, written by
-`consent_admin`, mirrored into `consent.json`, returned by `diagnostic_summary`,
-and rendered by `gates_panel`. An operator can flip either one, watch it persist,
-watch it reconcile across two files, and receive no protection at all.
+`CONSENT_KEYS` once declared three, with exactly one enforcing helper. Both
+`cloud_llm` and `lan` were accepted by `permitted()`, written by `consent_admin`,
+mirrored into `consent.json`, returned by `diagnostic_summary` and rendered by
+`gates_panel` — so an operator could flip either, watch it persist, watch it
+reconcile across two files, and receive no protection at all. Relabelling them
+"(reserved — not yet enforced)" fixed one string in one renderer and left the
+switch.
 
-`gates_panel.py:159-163` relabelled them "(reserved — not yet enforced)". That
-string lives in one dictionary in one renderer; the key is still in the model,
-still required by the writer, still mirrored, and still shown as an off switch
-by `README.md:154` and `skills/consent.md`. Relabelling is why this is still
-open — see `docs/design/consent-toggles.md`.
+**Both are resolved now, in opposite directions, and the asymmetry is the point.**
 
-**PARTIALLY ENFORCED AS OF 2026-07-28.** `cloud_llm` now gates the Nest model
-sinks (`model_egress.py`); `lan` still gates nothing. The tests below are in
-three states, and the mix is the point:
+`cloud_llm` was **ENFORCED** (2026-07-28): `model_egress.denial()` gates the Nest
+model sinks, because `$OLLAMA_HOST` really can point off-box and
+`nest/classify.py` really does send document bodies. There was a capability
+there to govern.
 
-  * **unmarked and passing** — the enforcement that landed, now real coverage
-  * **`xfail(strict=True)`** — still-open gaps. Strict, so each flips to a hard
-    failure the moment someone closes it, and the marker comes off then
-  * the carve-out guards, which passed before and must keep passing
+`lan` was **RETIRED** (2026-07-29). The plan said enforce; the plan was wrong.
+`# allow_localhost` is implemented as the *absence* of `--unshare-net`, so it
+shares the host network namespace and reaches the public internet — the
+directive's name describes an intent, not a confinement. With no "LAN but not
+internet" state in the sandbox there was no capability for a third key to gate,
+and `consent.internet` already governs both directives correctly. Enforcing
+`lan` would have denied a mode that works on every install in order to imply a
+protection that does not exist, which is the defect the key already was. See
+`consent._REMOVED_KEYS`.
 
-`lan` is deliberately still a stub rather than half-enforced: gating Kart's
-`# allow_localhost` on it denies a mode that works on every install today
-(`home_init` writes `lan: false` everywhere), which is a breaking change needing
-a release note. See docs/design/consent-toggles.md.
+A key that gates nothing gets deleted or gets a caller. It does not get a label.
+
+A note on method, because it changed. These tests originally patched
+`nest/embed.py`'s and `nest/llm.py`'s module constants, on the assumption the
+gate would live where the socket is opened. It cannot: those modules are
+vendored byte-for-byte from safe-app-store's `libs/nest-pipeline` under a CI
+drift-guard, and are deliberately policy-free. The gate sits at willow-mcp's own
+tool boundary instead, so the tests patch `$OLLAMA_HOST` — the thing an operator
+actually sets — rather than a module attribute.
 
 A note on method, because it changed. These tests originally patched
 `nest/embed.py`'s and `nest/llm.py`'s module constants, on the assumption the
@@ -123,15 +131,28 @@ def test_cloud_llm_permitted_exists_and_is_fail_closed(home):
     assert consent.cloud_llm_permitted() is True
 
 
-def test_lan_permitted_exists_and_is_fail_closed(home):
-    """`lan_permitted()` denies when no policy can be read. Same property as
-    `cloud_llm_permitted`, asserted separately so a partial implementation that
-    lands one helper and forgets the other cannot pass."""
-    assert consent.lan_permitted() is False
-    _canonical(home, internet=True, cloud_llm=True, lan="yes")
-    assert consent.lan_permitted() is False, '"yes" is not true'
-    _canonical(home, internet=False, cloud_llm=False, lan=True)
-    assert consent.lan_permitted() is True
+def test_lan_is_retired_not_enforced(home):
+    """`lan` was removed 2026-07-29, replacing `lan_permitted()`.
+
+    The plan in docs/design/consent-toggles.md said ENFORCE. That rested on
+    `# allow_localhost` being a LAN-scoped mode distinct from full egress, and
+    it is not: kartikeya's sandbox omits `--unshare-net` for both directives, so
+    the task shares the host network namespace unfiltered. There is no "LAN but
+    not internet" capability to gate, and a third key would have implied a
+    confinement the sandbox never provided — the defect the key already was.
+
+    A file still carrying it must be ignored, not rejected: that is the whole
+    migration.
+    """
+    assert consent.retired("lan") is True
+    assert "lan" not in consent.CONSENT_KEYS
+    assert not hasattr(consent, "lan_permitted")
+
+    _canonical(home, internet=True, cloud_llm=True, lan=True)
+    out = consent.read_consent()
+    assert out["status"] == "ok", "a retired key must not fail the read"
+    assert "lan" not in out["consent"], "a retired key must not be projected"
+    assert consent.internet_permitted() is True, "the live keys still govern"
 
 
 # ── cloud_llm: the model-inference sinks ─────────────────────────────────────
@@ -302,23 +323,36 @@ def test_kokoro_synthesis_to_a_public_host_is_denied_without_cloud_llm_consent(h
         speaker._http_synthesize("something the operator said out loud")
 
 
-# ── lan: the local-network destination class ─────────────────────────────────
+# ── lan: retired, not enforced ───────────────────────────────────────────────
 #
-# `# allow_localhost` is named for loopback and implemented as the *absence* of
-# --unshare-net (kartikeya/sandbox.py:390-401) — it shares the host network
-# namespace, reaching the LAN and the public internet. kartikeya's own docstring
-# (sandbox.py:561-565) says so. `network_mode = "localhost"` (sandbox.py:747) is
-# a string in a manifest dict, not a restriction.
+# Three stubs lived here demanding that `consent.lan` gate `# allow_localhost`
+# at submit, at the executor, and at a private-IP model host. They are deleted
+# rather than left as an xfail promise, because the premise underneath them is
+# false — and the preamble that introduced them said so without noticing:
+#
+#   "`# allow_localhost` is named for loopback and implemented as the *absence*
+#    of --unshare-net — it shares the host network namespace, reaching the LAN
+#    AND THE PUBLIC INTERNET."
+#
+# A directive that reaches the public internet is not a LAN-scoped capability.
+# The sandbox has exactly two states, netns-isolated and netns-shared, so there
+# is no "LAN but not internet" mode for a third key to govern; `allow_net` and
+# `allow_localhost` are correctly gated on `consent.internet` today. Enforcing
+# `lan` would have denied a mode that works on every install in order to imply a
+# confinement that does not exist — which is the defect the key already was.
+#
+# So the key is gone. See consent._REMOVED_KEYS and
+# docs/design/consent-toggles.md. `test_lan_is_retired_not_enforced` above pins
+# the migration: a settings file still carrying it is ignored, never rejected.
 
 
-@pytest.mark.xfail(strict=True, reason=NOT_YET)
-def test_allow_localhost_task_requires_lan_consent(tmp_path, monkeypatch):
-    """A host-network-namespace task is denied when consent.lan is off.
+def test_allow_localhost_is_gated_on_internet_because_it_reaches_it(tmp_path, monkeypatch):
+    """The positive claim left standing after `lan` was retired.
 
-    Today `server.py:1917` folds `allow_localhost` into `allow_net` and checks
-    only `consent.internet`, so `consent.lan` governs the one Kart mode named
-    after it and grants nothing. The operator who set `lan: false` has not
-    restricted this task in any way.
+    `# allow_localhost` shares the host network namespace, so it reaches the
+    public internet and `consent.internet` is the correct key for it — not an
+    approximation pending a finer one. This pins that, so nobody re-derives the
+    LAN split from the directive's name.
     """
     from willow_mcp import server
 
@@ -331,70 +365,18 @@ def test_allow_localhost_task_requires_lan_consent(tmp_path, monkeypatch):
     monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.delenv("WILLOW_SETTINGS_GLOBAL", raising=False)
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
-    _canonical(tmp_path, internet=True, cloud_llm=True, lan=False)
+    # internet off, and the retired key still present in the file
+    _canonical(tmp_path, internet=False, cloud_llm=True, lan=True)
     monkeypatch.setattr(server, "get_pg", lambda: SimpleNamespace())
 
     result = server.task_submit(
         app_id="lanapp", task="echo hi", allow_localhost=True,
     )
 
-    assert "consent.lan" in result.get("error", "")
-
-
-@pytest.mark.xfail(strict=True, reason=NOT_YET)
-def test_executor_applies_the_same_lan_split_as_submit(tmp_path, monkeypatch):
-    """Submit-time and execution-time must agree on which key applies.
-
-    `ExecutorNetworkAuthorizer` (egress_authorization.py:384-393) re-checks the
-    host policy immediately before shell launch and today reads only
-    `internet_permitted()`. A `lan` key enforced at submit but not at the
-    executor is a gate with a documented bypass — the exact class of bug B-29
-    closed for `internet`, reintroduced one key over.
-
-    The check belongs beside the existing `consent.internet_permitted()` call at
-    egress_authorization.py:390 — ahead of the lease and trust-root checks, so
-    the denial names the key the operator actually turned off.
-    """
-    from willow_mcp import egress_authorization
-
-    apps_root = tmp_path / "mcp_apps"
-    app_dir = apps_root / "lanapp"
-    app_dir.mkdir(parents=True)
-    (app_dir / "manifest.json").write_text(
-        json.dumps({"permissions": ["full_access", "task_net"]})
-    )
-    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
-    monkeypatch.delenv("WILLOW_SETTINGS_GLOBAL", raising=False)
-    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
-    _canonical(tmp_path, internet=True, cloud_llm=True, lan=False)
-
-    row = SimpleNamespace(
-        submitted_by="lanapp", task_id="LANTASK1", agent="kart",
-        task="echo hi\n# allow_localhost",
-    )
-    authorizer = egress_authorization.ExecutorNetworkAuthorizer()
-
-    assert authorizer(row, "{}") is False
-    assert "lan" in authorizer.last_error
-
-
-@pytest.mark.xfail(strict=True, reason=NOT_YET)
-def test_nest_embedding_to_a_private_host_requires_lan_consent(home, monkeypatch):
-    """An RFC1918 model host is LAN egress, not internet egress.
-
-    This is what makes `lan` a real key rather than a synonym for `internet`:
-    pointing OLLAMA_HOST at the GPU box in the next room is exactly the
-    destination class that `web_fetch.py:35-54` and `mai/parser.py:133-146`
-    already go out of their way to block, reached by a path that checks nothing.
-    """
-    from willow_mcp.nest import embed
-
-    _canonical(home, internet=True, cloud_llm=True, lan=False)
-    monkeypatch.setattr(embed, "DEFAULT_HOST", "http://192.168.1.50:11434")
-    monkeypatch.setattr(embed, "_installed", {"nomic-embed-text"})
-    monkeypatch.setattr(embed.urllib.request, "urlopen", _sentinel_urlopen)
-
-    assert embed.embed_document("a private document body") is None
+    error = result.get("error", "")
+    assert "consent" in error, error
+    assert "consent.internet" in error, "the denial must name the key that governs"
+    assert "consent.lan" not in error, "a retired key must never appear in a denial"
 
 
 # ── the mirror as a write path into a security decision ──────────────────────
@@ -412,11 +394,10 @@ def test_legacy_mirror_cannot_grant_the_newly_enforced_keys(home):
     `consent.py:157-160` adopts the flat mirror wholesale when the canonical
     file is absent — a fresh install before `willow-mcp-init`, or a
     WILLOW_SETTINGS_GLOBAL pointing at a path that does not exist yet. Once
-    `cloud_llm`/`lan` bite, that branch lets a file written by another
-    repository turn on a one-key permission with no capability and no lease
-    behind it. `internet` keeps its historical fallback; the new keys must be
-    canonical-only, which narrows the mirror's authority rather than extending
-    it.
+    `cloud_llm` bites, that branch lets a file written by another repository turn
+    on a one-key permission with no capability and no lease behind it.
+    `internet` keeps its historical fallback; `cloud_llm` must be canonical-only,
+    which narrows the mirror's authority rather than extending it.
     """
     _legacy(home, internet=True, cloud_llm=True, lan=True)
 
@@ -424,7 +405,7 @@ def test_legacy_mirror_cannot_grant_the_newly_enforced_keys(home):
     assert out["source"] == "legacy"
     assert consent.permitted("internet") is True, "internet keeps its historical fallback"
     assert consent.permitted("cloud_llm") is False
-    assert consent.permitted("lan") is False
+    assert "lan" not in out["consent"], "a retired key is not grantable from anywhere"
 
 
 @pytest.mark.xfail(strict=True, reason=NOT_YET)
@@ -449,7 +430,7 @@ def test_an_enforced_key_turned_on_outside_willow_mcp_is_reported(home):
     out = consent.read_consent()
     unattested = out.get("unattested") or []
     assert "cloud_llm" in unattested
-    assert "lan" in unattested
+    assert "lan" not in unattested, "a retired key has no provenance to report"
 
 
 def test_canonical_still_wins_over_a_permissive_mirror_for_the_new_keys(home):
@@ -459,31 +440,33 @@ def test_canonical_still_wins_over_a_permissive_mirror_for_the_new_keys(home):
     likely to break by accident: canonical governs, the mirror is reported, and
     the operator decides which file states their intent.
     """
+    # Both files still carry the retired `lan`, as a real upgraded install does.
+    # It must be ignored on both sides — not projected, and not reported as a
+    # disagreement the operator has to adjudicate.
     _canonical(home, internet=False, cloud_llm=False, lan=False)
     _legacy(home, internet=True, cloud_llm=True, lan=True)
 
     out = consent.read_consent()
     assert out["source"] == "canonical"
     assert consent.permitted("cloud_llm") is False
-    assert consent.permitted("lan") is False
-    assert sorted(out["disagreement"]["keys"]) == ["cloud_llm", "internet", "lan"]
+    assert "lan" not in out["consent"]
+    assert sorted(out["disagreement"]["keys"]) == ["cloud_llm", "internet"]
 
 
 # ── the UI must stop calling a live key reserved ─────────────────────────────
 
 
-@pytest.mark.xfail(strict=True, reason=NOT_YET)
-def test_gates_panel_stops_calling_enforced_keys_reserved():
-    """Relabelling was the previous attempt; it has to be undone, not extended.
+def test_no_live_consent_key_is_labelled_reserved():
+    """Relabelling was the previous attempt; it had to be undone, not extended.
 
-    `gates_panel.py:162-163` labels both keys "(reserved — not yet enforced)".
-    Leaving that string in place after enforcement lands is the same failure
-    inverted: a panel telling an operator that a live protection is inert. The
-    panel's honesty about the gap is only honest while the gap exists.
+    Both keys once read "(reserved — not yet enforced)", which was honest only
+    while the gap existed. `cloud_llm` is enforced now and `lan` is gone, so no
+    surviving key may carry that string — a panel telling an operator a live
+    protection is inert is the same failure inverted.
     """
     from willow_mcp import gates_panel
 
-    for key in ("cloud_llm", "lan"):
+    for key in consent.CONSENT_KEYS:
         label = gates_panel.FRIENDLY_LABELS[f"consent.{key}"]
-        assert "reserved" not in label.lower(), f"consent.{key} is enforced but still labelled reserved"
+        assert "reserved" not in label.lower(), f"consent.{key} is live but labelled reserved"
         assert "not yet enforced" not in label.lower()

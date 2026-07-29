@@ -59,7 +59,33 @@ from . import paths
 
 logger = logging.getLogger("willow_mcp.consent")
 
-CONSENT_KEYS = ("internet", "cloud_llm", "lan")
+CONSENT_KEYS = ("internet", "cloud_llm")
+
+#: Retired keys. Read tolerantly, never projected, never grantable.
+#:
+#: `lan` was removed 2026-07-29 rather than enforced. It was modelled,
+#: persisted, mirrored to the legacy file and rendered in the gates panel for
+#: months while nothing consulted it — and the plan to enforce it rested on a
+#: premise the sandbox does not implement: that `# allow_localhost` is a
+#: LAN-scoped mode distinct from full egress.
+#:
+#: It is not. `kartikeya/sandbox.py` omits `--unshare-net` for BOTH `allow_net`
+#: and `allow_localhost`, so the task shares the host network namespace
+#: unfiltered; the only difference is that `allow_localhost` gets no credential
+#: env. That module's own docstring says it plainly: "it can still reach every
+#: service listening on the host namespace and therefore requires the same
+#: attributable per-task authorization as allow_net".
+#:
+#: So there is no "LAN but not internet" capability here to gate. `allow_net`
+#: and `allow_localhost` are correctly gated on `consent.internet` today, and a
+#: third key would have implied a confinement the sandbox never provided —
+#: which is the defect this key already was, not its cure.
+#:
+#: Migration is a no-op by construction: `_strict_bools` projects only
+#: CONSENT_KEYS, so a settings file still carrying `lan` is ignored rather than
+#: rejected, and the next operator write drops it.
+#: See docs/design/consent-toggles.md.
+_REMOVED_KEYS = ("lan",)
 
 # Every key denied. The value returned whenever consent cannot be positively read.
 _DENY_ALL: dict[str, bool] = {k: False for k in CONSENT_KEYS}
@@ -212,17 +238,13 @@ def cloud_llm_permitted() -> bool:
     return permitted("cloud_llm")
 
 
-def lan_permitted() -> bool:
-    """Standing consent for local-network access.
+def retired(key: str) -> bool:
+    """Whether `key` is a consent key this build no longer honours.
 
-    NOT YET CONSULTED BY ANY GATED PATH — the same defect `cloud_llm` had, still
-    open, and deliberately left that way rather than half-enforced. Enforcing it
-    means splitting non-loopback egress into private-vs-public, and gating
-    Kart's `# allow_localhost` on it denies a mode that works on every install
-    today (`home_init` writes `lan: false` everywhere). That is a real breaking
-    change and needs a release note, not a quiet default flip.
-
-    Kept as a helper so the asymmetry is visible in code: the enforced key has a
-    caller, this one does not. See docs/design/consent-toggles.md.
+    `lan_permitted()` used to live here, documenting itself as the one key with
+    no caller. That asymmetry is now resolved by removal rather than by
+    enforcement — see `_REMOVED_KEYS` for why the sandbox has no LAN-scoped
+    capability to gate. Callers that need to explain a retired key to an
+    operator ask here instead of carrying their own list.
     """
-    return permitted("lan")
+    return key in _REMOVED_KEYS
