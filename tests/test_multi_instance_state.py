@@ -254,7 +254,7 @@ def test_serve_takes_the_instance_lock_before_running(monkeypatch):
     server._main()
 
     assert len(calls) == 1
-    assert ran == [{"transport": "streamable-http"}]
+    assert ran == [{"transport": "streamable-http", "host": server._HOST, "port": server._PORT}]
     assert server._INSTANCE_LOCK == "handle"
 
 
