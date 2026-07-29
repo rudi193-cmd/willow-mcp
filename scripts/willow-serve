@@ -49,11 +49,15 @@ have_unit() { [ -f "$UNIT_FILE" ]; }
 have_worker_unit() { [ -f "$WORKER_UNIT_FILE" ]; }
 
 # Expand a lane argument to instance unit names. all -> both lanes.
+# Prints lanes to stdout; returns 2 on invalid input.
 worker_lanes() {  # $1 = fast|batch|all (default all)
   case "${1:-all}" in
     fast|batch) echo "$1" ;;
     all) echo "fast batch" ;;
-    *) echo "invalid lane: $1 (want fast|batch|all)" >&2; exit 2 ;;
+    *)
+      echo "invalid lane: $1 (want fast|batch|all)" >&2
+      return 2
+      ;;
   esac
 }
 
@@ -114,21 +118,44 @@ case "${1:-}" in
     ;;
   worker-install)
     [ -f "$WORKER_TEMPLATE" ] || { echo "missing template: $WORKER_TEMPLATE" >&2; exit 1; }
-    [ -x "$VENV_PY" ] || echo "warning: $VENV_PY not found — create the venv first (see README)" >&2
-    "$VENV_PY" -c "import kartikeya" 2>/dev/null \
-      || echo "warning: kartikeya not importable from the venv — worker will exit at start (pip install -e . or pip install willow-mcp)" >&2
+    if [ -x "$VENV_PY" ]; then
+      "$VENV_PY" -c "import kartikeya" 2>/dev/null \
+        || echo "warning: kartikeya not importable from the venv — worker will exit at start (pip install -e . or pip install willow-mcp)" >&2
+      if ! "$VENV_PY" -c "import mcp.server.mcpserver" 2>/dev/null; then
+        echo "refreshing repo venv (MCP SDK 2.0 required for worker)…" >&2
+        "$VENV_PY" -m pip install -e "$REPO_ROOT" -q
+      fi
+    else
+      echo "warning: $VENV_PY not found — create the venv first (see README)" >&2
+    fi
+    # Fleet defaults — do not inherit the caller's WILLOW_HOME (hooks often set
+    # the sovereign redirect). Override with WILLOW_SERVE_WILLOW_HOME if needed.
+    WILLOW_HOME="${WILLOW_SERVE_WILLOW_HOME:-$HOME/github/.willow}"
+    WILLOW_STORE_ROOT="${WILLOW_SERVE_STORE_ROOT:-$WILLOW_HOME/store}"
+    WILLOW_PG_DB="${WILLOW_SERVE_PG_DB:-willow_20}"
+    WILLOW_PG_USER="${WILLOW_SERVE_PG_USER:-${USER:-}}"
+    HEARTBEAT_ROOT="${WILLOW_SERVE_HEARTBEAT_ROOT:-$WILLOW_HOME/worker_heartbeat}"
+    KART_SANDBOX_CONFIG="${WILLOW_SERVE_KART_SANDBOX:-$WILLOW_HOME/kart-sandbox.json}"
     mkdir -p "$UNIT_DIR"
     sed -e "s#@VENV@#$VENV_PY#g" \
         -e "s#@WORKDIR@#$REPO_ROOT#g" \
         -e "s#@APPID@#$APP_ID#g" \
+        -e "s#@WILLOW_HOME@#$WILLOW_HOME#g" \
+        -e "s#@WILLOW_STORE_ROOT@#$WILLOW_STORE_ROOT#g" \
+        -e "s#@WILLOW_PG_DB@#$WILLOW_PG_DB#g" \
+        -e "s#@WILLOW_PG_USER@#$WILLOW_PG_USER#g" \
+        -e "s#@HEARTBEAT_ROOT@#$HEARTBEAT_ROOT#g" \
+        -e "s#@KART_SANDBOX_CONFIG@#$KART_SANDBOX_CONFIG#g" \
         "$WORKER_TEMPLATE" > "$WORKER_UNIT_FILE"
     systemctl --user daemon-reload
     echo "installed $WORKER_UNIT_FILE  (app_id $APP_ID; lanes are unit instances)"
+    echo "  WILLOW_HOME=$WILLOW_HOME  PG=$WILLOW_PG_DB  sandbox=$KART_SANDBOX_CONFIG"
     echo "next: willow-serve worker-on   # starts fast + batch"
     ;;
   worker-on)
     have_worker_unit || { echo "unit not installed — run: willow-serve worker-install" >&2; exit 1; }
-    for lane in $(worker_lanes "${2:-all}"); do
+    lanes="$(worker_lanes "${2:-all}")" || exit $?
+    for lane in $lanes; do
       systemctl --user start "$WORKER_UNIT@$lane"
       if systemctl --user is-active --quiet "$WORKER_UNIT@$lane"; then
         echo "worker ON   $lane lane"
@@ -139,7 +166,8 @@ case "${1:-}" in
     done
     ;;
   worker-off)
-    for lane in $(worker_lanes "${2:-all}"); do
+    lanes="$(worker_lanes "${2:-all}")" || exit $?
+    for lane in $lanes; do
       have_worker_unit && systemctl --user stop "$WORKER_UNIT@$lane" || true
       echo "worker OFF  $lane lane"
     done
