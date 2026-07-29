@@ -170,7 +170,29 @@ class FileBackend:
     Append writes the row, then the anchor (atomic tmp+replace). A crash *between*
     the two leaves rows/anchor out of step — which `_verify` reads as tampered and
     FAILS CLOSED (deny), never silently accepts. A backend needing crash atomicity
-    should make the pair transactional (that is why the backend is pluggable)."""
+    should make the pair transactional (that is why the backend is pluggable).
+
+    EMPTIED IS NOT ABSENT. The count anchor detects deleting the *newest* rows.
+    It cannot, on its own, detect deleting them ALL: `read_rows() -> None` means
+    "no such chain", and absent is legitimately not tampered, so a backend that
+    answers None for an emptied chain hands an attacker the strongest attack
+    available *and* the simplest — delete every row and the log reads as one that
+    never existed. The revocation, the disclosure that names them: gone, quietly.
+
+    The two files are siblings, and that is the evidence. An anchor with no rows
+    beside it is positive proof rows were here, so this backend reads that state
+    as EMPTIED (`[]`, which `_verify` rejects) and answers `None` only when there
+    is genuinely nothing left — neither file. Unreadable rows count as emptied
+    too, on the same evidence: ambiguity resolves to tampered, never to absent.
+    (marching-arts's SqliteConsentBackend reaches the same conclusion from the
+    same argument; its rows and anchor share one store.)
+
+    Consequently an orphaned anchor also BLOCKS `append_row`: without that, the
+    next honest grant would start a fresh chain at genesis, overwrite the orphan
+    with `count=1`, and leave a store that verifies clean with the deleted
+    history gone — the attack laundered by its victim. Recovering deliberately
+    means removing the anchor too, which is the operator saying "there is no
+    chain here" in the one way that is not also a silent rewrite."""
 
     def __init__(self, root: Path | str) -> None:
         self.root = Path(root)
@@ -182,10 +204,21 @@ class FileBackend:
             return self.root / "disclosures" / chain.split("/", 1)[1]
         raise SubjectConsentError(f"unknown chain: {chain!r}")
 
+    def _rows_path(self, chain: str) -> Path:
+        return self._base(chain).with_suffix(".jsonl")
+
+    def _anchor_path(self, chain: str) -> Path:
+        return self._base(chain).with_suffix(".anchor.json")
+
+    def _emptied_or_absent(self, chain: str) -> list[dict] | None:
+        """No usable rows. `[]` (emptied → tampered) if an anchor survives to
+        prove rows were here; `None` (absent → clean) only if nothing does."""
+        return [] if self._anchor_path(chain).is_file() else None
+
     def read_rows(self, chain: str) -> list[dict] | None:
-        path = self._base(chain).with_suffix(".jsonl")
+        path = self._rows_path(chain)
         if not path.is_file():
-            return None
+            return self._emptied_or_absent(chain)
         rows: list[dict] = []
         try:
             for line in path.read_text(encoding="utf-8").splitlines():
@@ -194,20 +227,27 @@ class FileBackend:
                     continue
                 obj = json.loads(line)
                 if not isinstance(obj, dict):
-                    return None
+                    return self._emptied_or_absent(chain)
                 rows.append(obj)
         except Exception:
-            return None
+            return self._emptied_or_absent(chain)
         return rows
 
     def append_row(self, chain: str, row: dict) -> None:
-        path = self._base(chain).with_suffix(".jsonl")
+        path = self._rows_path(chain)
+        if not path.is_file() and self._anchor_path(chain).is_file():
+            # An anchor with no rows file: the chain was emptied, not absent.
+            # Appending here would rebuild it from genesis and destroy the only
+            # evidence of that. Refuse — the core refuses broken chains too.
+            raise ChainTamperError(
+                "refusing to extend a chain whose rows are gone but whose anchor remains"
+            )
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
 
     def read_anchor(self, chain: str) -> dict | None:
-        path = self._base(chain).with_suffix(".anchor.json")
+        path = self._anchor_path(chain)
         if not path.is_file():
             return None
         try:
@@ -217,7 +257,7 @@ class FileBackend:
             return None
 
     def write_anchor(self, chain: str, anchor: dict) -> None:
-        path = self._base(chain).with_suffix(".anchor.json")
+        path = self._anchor_path(chain)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(anchor, sort_keys=True), encoding="utf-8")
@@ -263,10 +303,29 @@ def _verify(rows: list[dict], anchor: dict | None) -> bool:
 def _append(backend: Backend, chain: str, payload: dict) -> str:
     """Append one hash-chained row + advance the anchor. Returns the new head hash.
     Verifies the existing chain first and REFUSES to extend a broken or truncated
-    one — a tampered store must not be silently continued."""
-    existing = backend.read_rows(chain) or []
-    if existing and not _verify(existing, backend.read_anchor(chain)):
+    one — a tampered store must not be silently continued.
+
+    THE EMPTIED CHAIN. ``read_rows`` returns None for "absent" and [] for
+    "present but empty", and that distinction is the whole defence against the
+    complete truncation: delete every row, leave the anchor, and [] beside a
+    surviving anchor is positive evidence that rows were here.
+
+    This used to read ``read_rows(chain) or []``, collapsing the two — and since
+    [] is falsy the guard below was then skipped, so NO backend could make this
+    refuse an emptied chain however carefully it reported one.
+
+    The consequence was worse than a missed detection. ``verify`` did catch the
+    wipe, but the next honest append restarted at genesis and overwrote the
+    orphaned anchor with ``count=1``, after which the store verified clean and
+    the deleted history was gone with nothing left to say so. The detection
+    window was real and self-closing: any legitimate write laundered it.
+
+    So: ``is not None``, and an emptied chain fails verification and is refused.
+    Genuinely absent still starts at genesis, which is how a first grant works."""
+    existing = backend.read_rows(chain)
+    if existing is not None and not _verify(existing, backend.read_anchor(chain)):
         raise ChainTamperError("refusing to append to a broken chain")
+    existing = existing or []
     prev = existing[-1]["hash"] if existing else _GENESIS
     payload = dict(payload, prev_hash=prev)
     h = _row_hash(payload)

@@ -288,7 +288,7 @@ _MARKER = "from __future__ import annotations"
 #: canonical safe-app-store libs/subject-consent copy.
 EXPECTED_BODY_SHA256 = {
     "__init__.py": "81ed754027759edd081ea431dee8d3f14ac96832ce16d7a4f1c630ca98786ed6",
-    "core.py": "ee37299cdba49bba3a1731196291b7144fd677d22b9783dff7199596e483f46e",
+    "core.py": "d08d13033140672d3b8974f64231dd352ec92ff2de2a861c196af1552ba16a7c",
 }
 
 
