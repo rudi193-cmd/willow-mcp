@@ -156,10 +156,11 @@ FRIENDLY_LABELS: dict[str, str] = {
     "task_net": "Request internet access (for tasks)",
     "integration_net": "Request internet access (for outside services)",
     "consent.internet": "Allow internet access, fleet-wide",
-    # B11: cloud_llm / lan are modeled and reconciled but NOT read by any gated
-    # path (only consent.internet is enforced). Label them as reserved so the
-    # panel stops implying a protection that toggling them does not provide.
-    "consent.cloud_llm": "Cloud AI access (reserved — not yet enforced)",
+    # cloud_llm is enforced as of 2026-07-28 — model_egress.denial() gates the
+    # Nest sinks on it. `lan` still is not read by any gated path, and keeps the
+    # reserved label so the panel does not imply a protection toggling it does
+    # not provide. Removing that label is part of enforcing it, not before.
+    "consent.cloud_llm": "Off-machine AI inference",
     "consent.lan": "Local network access (reserved — not yet enforced)",
     "strict_trust_root": "Extra-strict security mode",
     "enforce_binding": "Require signed agent identity (registered agents)",

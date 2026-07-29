@@ -1476,12 +1476,30 @@ def nest_scan(
 
     dry_run=True (default): classify and report counts WITHOUT writing the DB —
     inspect what a dump would become before committing it. dry_run=False writes.
-    use_embed uses a local Ollama embedding model when present (falls back to
-    regex offline); use_llm escalates the uncertain tail to a local text/vision
-    model. Nothing leaves the machine; no cloud inference.
+    use_embed uses an Ollama embedding model when present (falls back to regex
+    offline); use_llm escalates the uncertain tail to a text/vision model.
+
+    Inference stays on this machine by default. It is NOT unconditional: the
+    seams post to $OLLAMA_HOST, and if that points off-box this tool requires the
+    operator's standing `consent.cloud_llm` and denies without it. Classification
+    sends document bodies, so where that host points is a privacy decision, not a
+    performance one. (This docstring used to promise "nothing leaves the machine"
+    flatly, which was true of the default and false of the variable.)
     """
     import contextlib
     import io
+
+    from . import model_egress
+
+    # Before any work: classification sends fragment CONTENT to the model, so an
+    # off-box host is egress out of the Nest PII zone. Checked at the tool
+    # boundary rather than in nest/embed.py — those modules are vendored
+    # byte-for-byte from safe-app-store's libs/nest-pipeline under a CI
+    # drift-guard, and are deliberately policy-free. See model_egress.
+    if use_embed or use_llm:
+        denial = model_egress.denial("nest_scan")
+        if denial:
+            return denial
 
     from .nest import ingest as _ingest
 

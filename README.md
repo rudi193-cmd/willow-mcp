@@ -151,7 +151,7 @@ one-use signed task envelope. Any missing element denies before shell launch:
 
 ```jsonc
 // $WILLOW_HOME/settings.global.json — the off switch
-{ "consent": { "internet": false, "cloud_llm": true, "lan": false } }
+{ "consent": { "internet": false, "cloud_llm": false, "lan": false } }
 ```
 
 ```console
