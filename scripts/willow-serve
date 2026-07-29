@@ -118,12 +118,15 @@ case "${1:-}" in
     ;;
   worker-install)
     [ -f "$WORKER_TEMPLATE" ] || { echo "missing template: $WORKER_TEMPLATE" >&2; exit 1; }
-    [ -x "$VENV_PY" ] || echo "warning: $VENV_PY not found — create the venv first (see README)" >&2
-    "$VENV_PY" -c "import kartikeya" 2>/dev/null \
-      || echo "warning: kartikeya not importable from the venv — worker will exit at start (pip install -e . or pip install willow-mcp)" >&2
-    if ! "$VENV_PY" -c "import mcp.server.mcpserver" 2>/dev/null; then
-      echo "refreshing repo venv (MCP SDK 2.0 required for worker)…" >&2
-      "$VENV_PY" -m pip install -e "$REPO_ROOT" -q
+    if [ -x "$VENV_PY" ]; then
+      "$VENV_PY" -c "import kartikeya" 2>/dev/null \
+        || echo "warning: kartikeya not importable from the venv — worker will exit at start (pip install -e . or pip install willow-mcp)" >&2
+      if ! "$VENV_PY" -c "import mcp.server.mcpserver" 2>/dev/null; then
+        echo "refreshing repo venv (MCP SDK 2.0 required for worker)…" >&2
+        "$VENV_PY" -m pip install -e "$REPO_ROOT" -q
+      fi
+    else
+      echo "warning: $VENV_PY not found — create the venv first (see README)" >&2
     fi
     # Fleet defaults — do not inherit the caller's WILLOW_HOME (hooks often set
     # the sovereign redirect). Override with WILLOW_SERVE_WILLOW_HOME if needed.
