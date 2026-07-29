@@ -57,7 +57,6 @@ _DEFAULT_SETTINGS: dict[str, Any] = {
     "consent": {
         "internet": False,
         "cloud_llm": False,
-        "lan": False,
     },
 }
 

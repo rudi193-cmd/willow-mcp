@@ -43,8 +43,7 @@ Edit the canonical file (not the legacy mirror alone):
 {
   "consent": {
     "internet": false,
-    "cloud_llm": false,
-    "lan": false
+    "cloud_llm": false
   }
 }
 ```

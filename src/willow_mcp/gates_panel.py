@@ -157,11 +157,10 @@ FRIENDLY_LABELS: dict[str, str] = {
     "integration_net": "Request internet access (for outside services)",
     "consent.internet": "Allow internet access, fleet-wide",
     # cloud_llm is enforced as of 2026-07-28 — model_egress.denial() gates the
-    # Nest sinks on it. `lan` still is not read by any gated path, and keeps the
-    # reserved label so the panel does not imply a protection toggling it does
-    # not provide. Removing that label is part of enforcing it, not before.
+    # Nest sinks on it. `consent.lan` was REMOVED 2026-07-29 rather than
+    # enforced: it named a confinement the sandbox does not implement, so there
+    # is no row for it to label. See consent._REMOVED_KEYS.
     "consent.cloud_llm": "Off-machine AI inference",
-    "consent.lan": "Local network access (reserved — not yet enforced)",
     "strict_trust_root": "Extra-strict security mode",
     "enforce_binding": "Require signed agent identity (registered agents)",
     "announce": "Announce actions louder for less-trusted callers",
