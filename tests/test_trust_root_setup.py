@@ -11,7 +11,13 @@ from willow_mcp import paths
 from willow_mcp import trust_root_setup as trs
 
 
-def test_audit_reports_forgeable_paths_on_default_home(home):
+def test_audit_reports_forgeable_paths_on_default_home(home, monkeypatch):
+    # "default home" has to mean a default ENVIRONMENT too. This asserts
+    # strict_trust_root is off, and WILLOW_MCP_STRICT_TRUST_ROOT is inherited —
+    # so on an install that runs strict mode (this repo's own MCP config does)
+    # the test failed while reporting nothing about the code. The sibling test
+    # below sets the variable on purpose; this one must clear it on purpose.
+    monkeypatch.delenv("WILLOW_MCP_STRICT_TRUST_ROOT", raising=False)
     hi.ensure_home_layout()
     audit = trs.audit_trust_root("hanuman")
     assert audit["strict_trust_root"] is False

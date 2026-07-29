@@ -20,9 +20,19 @@ from willow_mcp.subject_consent import core
 
 
 def _run(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
+    """Invoke the CLI in a subprocess.
+
+    A `None` value in `env` UNSETS that variable rather than passing it through.
+    That matters because this inherits the parent environment, so an ambient
+    variable can silently decide which branch of a gate the test exercises —
+    `require_operator_terminal` checks WILLOW_IN_KART *before* the tty, so a run
+    inside the Kart sandbox refuses for a different reason than the one the test
+    names. A test whose meaning depends on where it runs is not pinning anything.
+    """
     import os
 
     merged = {**os.environ, **(env or {})}
+    merged = {k: v for k, v in merged.items() if v is not None}
     return subprocess.run(
         [sys.executable, "-m", "willow_mcp", *args],
         capture_output=True,
@@ -50,23 +60,45 @@ def home(tmp_path, monkeypatch):
 
 # ── fail-closed: mutation refused off an operator terminal ─────────────────────
 
-def test_grant_consent_refused_without_operator_terminal(tmp_path):
-    # a subprocess has no interactive operator tty → require_operator_terminal fires
-    out = _run(
-        "grant-consent", "subj-1", "kb_promotion", "--by", "guardian",
-        env={"WILLOW_HOME": str(tmp_path)},
-    )
-    assert out.returncode == 1, out.stdout
-    assert "operator terminal" in out.stderr.lower()
+#: `require_operator_terminal` has four refusal arms and checks them in order:
+#: WILLOW_IN_KART, then isatty, then tty-verifiable, then tty-ownership. Each
+#: test below pins WHICH arm it exercises, because the first one is set by the
+#: ambient environment and would otherwise decide silently.
+_NOT_IN_SANDBOX = {"WILLOW_IN_KART": None}
 
 
-def test_revoke_consent_refused_without_operator_terminal(tmp_path):
+@pytest.mark.parametrize("subcommand", ["grant-consent", "revoke-consent"])
+def test_consent_mutation_refused_without_operator_terminal(tmp_path, subcommand):
+    """The tty arm. A subprocess has no interactive operator tty.
+
+    WILLOW_IN_KART is cleared so this exercises the isatty check wherever it
+    runs. Without that it passed outside a sandbox and failed inside one — not
+    because the gate was wrong, but because a *different* arm of the same gate
+    fired first and said so in different words.
+    """
     out = _run(
-        "revoke-consent", "subj-1", "kb_promotion", "--by", "guardian",
-        env={"WILLOW_HOME": str(tmp_path)},
+        subcommand, "subj-1", "kb_promotion", "--by", "guardian",
+        env={"WILLOW_HOME": str(tmp_path), **_NOT_IN_SANDBOX},
     )
     assert out.returncode == 1, out.stdout
-    assert "operator terminal" in out.stderr.lower()
+    assert "operator terminal" in out.stderr.lower(), out.stderr
+
+
+@pytest.mark.parametrize("subcommand", ["grant-consent", "revoke-consent"])
+def test_consent_mutation_refused_inside_the_kart_sandbox(tmp_path, subcommand):
+    """The sandbox arm, now on purpose.
+
+    This is the branch a Kart run was hitting by accident. It is the stronger of
+    the two — an agent draining tasks can allocate a pty and forge isatty(), but
+    it cannot leave the sandbox it was launched in — so it deserves a test of its
+    own rather than being reached by luck.
+    """
+    out = _run(
+        subcommand, "subj-1", "kb_promotion", "--by", "guardian",
+        env={"WILLOW_HOME": str(tmp_path), "WILLOW_IN_KART": "1"},
+    )
+    assert out.returncode == 1, out.stdout
+    assert "kart sandbox" in out.stderr.lower(), out.stderr
 
 
 # ── argparse fails closed on an unknown scope ──────────────────────────────────
