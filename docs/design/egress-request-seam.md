@@ -113,16 +113,55 @@ a request that needs to be recorded and resumed.
 - **`require_operator_terminal` keeps both arms.** The sandbox check before the
   tty check is what makes the seat non-forgeable.
 
-## Open questions
+## Decided (operator, 2026-07-29)
 
-- **Does the request name the exact task, or the app?** Exact task is
-  auditable and matches the envelope's granularity; per-app is fewer
-  interruptions. The envelope is per-task, so per-task is probably right.
-- **TTL on an unanswered request.** An egress ask nobody answers should expire
-  rather than sit open forever — `lease.max_ttl_seconds` (3h) is a natural
-  ceiling.
-- **Does `model_egress` join?** Its missing key is a standing switch, not a
-  lease. An "ask to flip consent.cloud_llm" request is coherent but is a
-  different act from "ask for a time-boxed grant."
+- **The request names the exact task**, not the app. It matches the envelope's
+  granularity — a lease is per-app but the signed authority is per-task, so an
+  ask that names the app would be broader than the grant it leads to.
+- **TTL: 3 hours maximum**, matching `lease.max_ttl_seconds`. An unanswered
+  egress ask expires rather than sitting open forever. An expired request is a
+  denial, never a grant.
+- **Every egress point is included**, `model_egress` among them. Its missing key
+  is a standing switch rather than a lease, so the *resolution* differs — an ask
+  to flip `consent.cloud_llm` is not an ask for a time-boxed grant — but the
+  agent's side is identical, and a request path with a hole in it teaches
+  operators that some denials are askable and others are dead ends.
+
+## Why this is a blocker, not an ergonomic
+
+**An operator who is not comfortable at a CLI currently cannot grant egress at
+all.** `grant-net` is terminal-only and `require_operator_terminal` enforces it
+with a tty-ownership check. For that operator the three-key gate is not a gate,
+it is a wall: the agent can ask, and there is no surface on which they can
+answer.
+
+That reframes the priority. This is not about saving the operator a paste — it is
+the difference between a fleet a non-CLI operator can run and one they cannot.
+
+It also creates the one real tension in this design, so name it rather than
+discover it later:
+
+> *No MCP tool may mint a lease* and *the operator must be able to answer without
+> a terminal* both have to hold.
+
+They are compatible, because the constraint is on **who confirms**, not on **what
+they type**. The resolution already half exists — `willow-mcp gates --serve`
+binds a local dashboard on 127.0.0.1 with working buttons. A grant confirmed
+there is an operator act at an operator-owned surface; it is not an MCP tool
+minting anything, and no agent can reach it.
+
+So the approval surface should be:
+
+1. **`gates --serve`** — the button path, for the operator who does not want a
+   terminal. Localhost-bound, no agent reachability.
+2. **Grove's human-required pane** — where the queued request already belongs,
+   once Grove is repointed at willow-mcp's queue (see the fleet notes on that
+   repointing; Grove currently reads willow-2.0's Postgres table).
+3. **`grant-net`** — unchanged, for the operator who prefers the CLI.
+
+`require_operator_terminal` guards the CLI arm. The dashboard arm needs its own
+equivalent — a localhost bind plus the same not-in-Kart check is the shape, and
+whatever it is must be written down beside this, because an approval surface with
+a weaker check than the one it replaces is how the whole gate gets undone.
 
 *ΔΣ=42*
