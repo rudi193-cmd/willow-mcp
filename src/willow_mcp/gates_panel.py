@@ -156,11 +156,11 @@ FRIENDLY_LABELS: dict[str, str] = {
     "task_net": "Request internet access (for tasks)",
     "integration_net": "Request internet access (for outside services)",
     "consent.internet": "Allow internet access, fleet-wide",
-    # B11: cloud_llm / lan are modeled and reconciled but NOT read by any gated
-    # path (only consent.internet is enforced). Label them as reserved so the
-    # panel stops implying a protection that toggling them does not provide.
-    "consent.cloud_llm": "Cloud AI access (reserved — not yet enforced)",
-    "consent.lan": "Local network access (reserved — not yet enforced)",
+    # cloud_llm is enforced as of 2026-07-28 — model_egress.denial() gates the
+    # Nest sinks on it. `consent.lan` was REMOVED 2026-07-29 rather than
+    # enforced: it named a confinement the sandbox does not implement, so there
+    # is no row for it to label. See consent._REMOVED_KEYS.
+    "consent.cloud_llm": "Off-machine AI inference",
     "strict_trust_root": "Extra-strict security mode",
     "enforce_binding": "Require signed agent identity (registered agents)",
     "announce": "Announce actions louder for less-trusted callers",
@@ -385,14 +385,18 @@ def _binding_rows() -> list[GateRow]:
         detail = f"subject={record.get('subject_id')} email={record.get('email')}"
         if record.get("email_drift"):
             detail += " — EMAIL DRIFT, verify before trusting"
-        issuer = record.get("issuer")
+        # `idp` since the rename; `issuer` on records written before it. This
+        # panel reads binding files straight off disk rather than through
+        # identity_binding.load_binding, so it needs the fallback itself —
+        # otherwise every pre-rename binding renders "via None".
+        idp = record.get("idp") or record.get("issuer")
         rows.append(GateRow(
-            id=f"binding.{f.stem}", label=f"identity binding ({issuer})",
-            friendly=f"Signed-in account (via {issuer})",
+            id=f"binding.{f.stem}", label=f"identity binding ({idp})",
+            friendly=f"Signed-in account (via {idp})",
             scope=record.get("app_id") or "(unbound)",
             state="on" if confirmed else "off", detail=detail, timer_shape="standing",
             action_cli=(None if confirmed else
-                        f"willow-mcp confirm-binding --issuer {issuer} "
+                        f"willow-mcp confirm-binding --idp {idp} "
                         f"--subject {record.get('subject_id')} --app-id <app_id>"),
         ))
     return rows

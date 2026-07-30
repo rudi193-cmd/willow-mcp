@@ -33,9 +33,9 @@ def granted_app(tmp_path, monkeypatch):
 
 
 def _register():
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
-    m = FastMCP("test-mai")
+    m = MCPServer("test-mai")
     mai_tools.register(m)
     return m
 
@@ -55,7 +55,7 @@ def test_mai_write_file_on_disk(tmp_path):
     result = asyncio.run(
         m.call_tool("mai_write_file", {"path": str(path), "content": content, "app_id": _APP})
     )
-    assert '"ok": true' in str(result[0]) or "ok': True" in str(result[0])
+    assert '"ok": true' in str(result.content) or "ok': True" in str(result.content)
     assert path.read_text(encoding="utf-8") == content
 
 
@@ -87,9 +87,19 @@ def test_read_renders_ai_format(tmp_path):
 
 
 def _result(call_result):
-    """FastMCP call_tool returns (content_blocks, structured); list-returning
-    tools wrap the list under structured['result']."""
-    structured = call_result[1] if isinstance(call_result, tuple) else call_result
+    """Unwrap a tool's structured payload.
+
+    SDK 1.x FastMCP returned a (content_blocks, structured) tuple; SDK 2.x
+    returns a CallToolResult with `.structured_content`. Both shapes are handled
+    so this reads the same against either SDK. List-returning tools wrap the
+    list under structured['result'] in both.
+    """
+    if hasattr(call_result, "structured_content"):
+        structured = call_result.structured_content
+    elif isinstance(call_result, tuple):
+        structured = call_result[1]
+    else:
+        structured = call_result
     return structured["result"] if isinstance(structured, dict) and "result" in structured else structured
 
 

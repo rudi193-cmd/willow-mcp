@@ -49,7 +49,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from psycopg2.extras import Json
 
 from .db import Store, get_pg
@@ -97,21 +97,34 @@ def _read_call_credential() -> Optional[dict]:
     """Pull the per-call credential the signing client attached to the MCP
     request's out-of-band `_meta` (key CREDENTIAL_META_KEY). Returns a normalized
     {session_id, call_nonce, sig} dict, or None if absent/malformed. Never raises —
-    a missing request context or meta is simply "no credential"."""
-    try:
-        from mcp.server.lowlevel.server import request_ctx
-        rc = request_ctx.get(None)
-        if rc is None:
-            return None
-        meta = getattr(rc, "meta", None)
-        extra = getattr(meta, "model_extra", None) or {}
-        cred = extra.get(CREDENTIAL_META_KEY)
-        if isinstance(cred, dict) and all(k in cred for k in ("session_id", "call_nonce", "sig")):
-            return {"session_id": str(cred["session_id"]),
-                    "call_nonce": str(cred["call_nonce"]),
-                    "sig": str(cred["sig"])}
-    except Exception:
+    a missing request context or meta is simply "no credential".
+
+    Reads `request_context.current_meta()`, which our own middleware publishes
+    from the `ServerRequestContext` the SDK hands it. SDK 1.x had an ambient
+    `mcp.server.lowlevel.server.request_ctx`; 2.0 removed it deliberately and
+    injects `Context` into tool functions instead — an injection that does not
+    reach a decorator wrapping 109 tools. See willow_mcp/request_context.py for
+    why the replacement is a ContextVar we own rather than one the SDK might
+    move again.
+    """
+    from . import request_context
+
+    meta = request_context.current_meta()
+    if meta is None:
         return None
+    # SDK 1.x `_meta` was a pydantic model carrying unknown keys in
+    # `.model_extra`; SDK 2.0's `RequestParamsMeta` is a TypedDict, i.e. an
+    # ordinary mapping. Read whichever this SDK hands us — the credential is an
+    # out-of-band key either way, and guessing wrong is a silent "no credential".
+    if isinstance(meta, dict):
+        extra = meta
+    else:
+        extra = getattr(meta, "model_extra", None) or {}
+    cred = extra.get(CREDENTIAL_META_KEY)
+    if isinstance(cred, dict) and all(k in cred for k in ("session_id", "call_nonce", "sig")):
+        return {"session_id": str(cred["session_id"]),
+                "call_nonce": str(cred["call_nonce"]),
+                "sig": str(cred["sig"])}
     return None
 
 
@@ -409,7 +422,13 @@ def _serve_mode() -> bool:
 _BASE_URL_ENV = (os.getenv("WILLOW_MCP_URL") or "").strip().rstrip("/")
 _BASE_URL = _BASE_URL_ENV if _BASE_URL_ENV else f"http://{_HOST}:{_PORT}"
 
+from .request_context import RequestContextMiddleware
+
 _common_kwargs: dict[str, Any] = dict(
+    # Outermost: publishes the per-request context on a ContextVar we own,
+    # which is how _read_call_credential reaches `_meta` now that SDK 2.0
+    # removed the ambient request contextvar.
+    middleware=[RequestContextMiddleware()],
     instructions=(
         "Willow sovereign agent platform (willow-mcp). "
         "FIRST CALL of every session: session_enter(app_id, session_id) — it returns your "
@@ -426,8 +445,6 @@ _common_kwargs: dict[str, Any] = dict(
         "ask the operator. "
         "Pass app_id on every call — it matches your manifest in $WILLOW_HOME/mcp_apps/<app_id>/manifest.json."
     ),
-    host=_HOST,
-    port=_PORT,
 )
 
 if _SERVE_MODE:
@@ -443,7 +460,7 @@ if _SERVE_MODE:
         base_url=_BASE_URL,
         vault=_vault,
     )
-    mcp = FastMCP(
+    mcp = MCPServer(
         "willow-mcp",
         **_common_kwargs,
         auth_server_provider=_auth_provider,
@@ -460,7 +477,7 @@ if _SERVE_MODE:
     )
     _auth_provider.register_routes(mcp)
 else:
-    mcp = FastMCP("willow-mcp", **_common_kwargs)
+    mcp = MCPServer("willow-mcp", **_common_kwargs)
 
 
 # ── MarkdownAI (mai) tools — vendored from willow-2.0 (sap/mai) ──────────────────
@@ -495,16 +512,19 @@ def _resolve_serve_identity() -> tuple[Optional[str], Optional[dict]]:
     if token is None:
         return None, {"error": "gate denied: no authenticated session (serve mode requires OAuth sign-in)"}
 
-    issuer = (token.claims or {}).get("iss")
+    # `idp` — the upstream provider name ("google"/"apple"). Deliberately not
+    # `iss`: RFC 9207 reserves that for this server's own issuer URL, and
+    # SEP-2468 makes clients MUST-validate it. See docs/design/idp-vs-issuer.md.
+    idp = (token.claims or {}).get("idp")
     subject = token.subject
-    if not issuer or not subject:
+    if not idp or not subject:
         return None, {"error": "gate denied: authenticated session carries no bound identity"}
 
-    bound_app_id = resolve_app_id(issuer, subject)
+    bound_app_id = resolve_app_id(idp, subject)
     if not bound_app_id:
         return None, {
             "error": (
-                f"gate denied: identity ({issuer}, {subject}) is signed in but not yet bound to an "
+                f"gate denied: identity ({idp}, {subject}) is signed in but not yet bound to an "
                 "app_id — ask the operator to run `willow-mcp confirm-binding` for this identity"
             )
         }
@@ -1476,12 +1496,30 @@ def nest_scan(
 
     dry_run=True (default): classify and report counts WITHOUT writing the DB —
     inspect what a dump would become before committing it. dry_run=False writes.
-    use_embed uses a local Ollama embedding model when present (falls back to
-    regex offline); use_llm escalates the uncertain tail to a local text/vision
-    model. Nothing leaves the machine; no cloud inference.
+    use_embed uses an Ollama embedding model when present (falls back to regex
+    offline); use_llm escalates the uncertain tail to a text/vision model.
+
+    Inference stays on this machine by default. It is NOT unconditional: the
+    seams post to $OLLAMA_HOST, and if that points off-box this tool requires the
+    operator's standing `consent.cloud_llm` and denies without it. Classification
+    sends document bodies, so where that host points is a privacy decision, not a
+    performance one. (This docstring used to promise "nothing leaves the machine"
+    flatly, which was true of the default and false of the variable.)
     """
     import contextlib
     import io
+
+    from . import model_egress
+
+    # Before any work: classification sends fragment CONTENT to the model, so an
+    # off-box host is egress out of the Nest PII zone. Checked at the tool
+    # boundary rather than in nest/embed.py — those modules are vendored
+    # byte-for-byte from safe-app-store's libs/nest-pipeline under a CI
+    # drift-guard, and are deliberately policy-free. See model_egress.
+    if use_embed or use_llm:
+        denial = model_egress.denial("nest_scan")
+        if denial:
+            return denial
 
     from .nest import ingest as _ingest
 
@@ -4736,7 +4774,7 @@ def _cmd_confirm_binding(args) -> None:
     from .identity_binding import confirm_binding
 
     try:
-        record = confirm_binding(args.issuer, args.subject, args.app_id)
+        record = confirm_binding(args.idp, args.subject, args.app_id)
     except ValueError as e:
         print(f"Error: {e}")
         raise SystemExit(1)
@@ -5613,7 +5651,10 @@ def _main():
         "confirm-binding",
         help="Bind a signed-in OAuth identity to an app_id (local, stdio-only — never an MCP tool)",
     )
-    confirm_p.add_argument("--issuer", required=True, choices=["google", "apple"])
+    # The upstream provider, not an RFC 9207 issuer URL. `--issuer` stays as a
+    # deprecated alias so operator muscle memory and scripts keep working.
+    confirm_p.add_argument("--idp", "--issuer", dest="idp", required=True,
+                           choices=["google", "apple"])
     confirm_p.add_argument("--subject", required=True, help="The IdP 'sub' claim for this identity")
     confirm_p.add_argument("--app-id", required=True, dest="app_id")
 
@@ -6163,7 +6204,10 @@ def _main():
         except instance_lock.InstanceLockError as e:
             print(f"willow-mcp: refusing to start.\n{e}", file=sys.stderr)
             raise SystemExit(1)
-        mcp.run(transport="streamable-http")
+        # SDK 2.x: host/port moved off the constructor onto the transport,
+        # which is the stateless core making "where this instance listens" a
+        # property of the run rather than of the server object.
+        mcp.run(transport="streamable-http", host=_HOST, port=_PORT)
     else:
         mcp.run(transport="stdio")
 

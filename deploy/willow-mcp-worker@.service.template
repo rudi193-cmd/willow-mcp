@@ -1,0 +1,29 @@
+# systemd --user unit template for the willow-mcp Kart worker (kartikeya-bounded).
+# Not used directly — `scripts/willow-serve worker-install` fills in the
+# @PLACEHOLDERS@ and writes the resolved template unit to
+# ~/.config/systemd/user/willow-mcp-worker@.service.
+# The instance name (%i) is the lane: willow-mcp-worker@fast / willow-mcp-worker@batch.
+[Unit]
+Description=willow-mcp Kart worker (%i lane)
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=@WORKDIR@
+Environment=WILLOW_HOME=@WILLOW_HOME@
+Environment=WILLOW_STORE_ROOT=@WILLOW_STORE_ROOT@
+Environment=WILLOW_PG_DB=@WILLOW_PG_DB@
+Environment=WILLOW_PG_USER=@WILLOW_PG_USER@
+Environment=WILLOW_APP_ID=@APPID@
+Environment=WILLOW_WORKER_HEARTBEAT_ROOT=@HEARTBEAT_ROOT@
+Environment=KART_SANDBOX_CONFIG=@KART_SANDBOX_CONFIG@
+ExecStart=@VENV@ -m willow_mcp.worker --lane %i --app-id @APPID@ --require-postgres
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=willow-mcp-worker-%i
+
+[Install]
+WantedBy=default.target

@@ -59,7 +59,33 @@ from . import paths
 
 logger = logging.getLogger("willow_mcp.consent")
 
-CONSENT_KEYS = ("internet", "cloud_llm", "lan")
+CONSENT_KEYS = ("internet", "cloud_llm")
+
+#: Retired keys. Read tolerantly, never projected, never grantable.
+#:
+#: `lan` was removed 2026-07-29 rather than enforced. It was modelled,
+#: persisted, mirrored to the legacy file and rendered in the gates panel for
+#: months while nothing consulted it — and the plan to enforce it rested on a
+#: premise the sandbox does not implement: that `# allow_localhost` is a
+#: LAN-scoped mode distinct from full egress.
+#:
+#: It is not. `kartikeya/sandbox.py` omits `--unshare-net` for BOTH `allow_net`
+#: and `allow_localhost`, so the task shares the host network namespace
+#: unfiltered; the only difference is that `allow_localhost` gets no credential
+#: env. That module's own docstring says it plainly: "it can still reach every
+#: service listening on the host namespace and therefore requires the same
+#: attributable per-task authorization as allow_net".
+#:
+#: So there is no "LAN but not internet" capability here to gate. `allow_net`
+#: and `allow_localhost` are correctly gated on `consent.internet` today, and a
+#: third key would have implied a confinement the sandbox never provided —
+#: which is the defect this key already was, not its cure.
+#:
+#: Migration is a no-op by construction: `_strict_bools` projects only
+#: CONSENT_KEYS, so a settings file still carrying `lan` is ignored rather than
+#: rejected, and the next operator write drops it.
+#: See docs/design/consent-toggles.md.
+_REMOVED_KEYS = ("lan",)
 
 # Every key denied. The value returned whenever consent cannot be positively read.
 _DENY_ALL: dict[str, bool] = {k: False for k in CONSENT_KEYS}
@@ -197,3 +223,28 @@ def internet_permitted() -> bool:
     grant. Read at both submit time and execution time; the signed per-task
     envelope supplies the separate one-use authority (B-37)."""
     return permitted("internet")
+
+
+def cloud_llm_permitted() -> bool:
+    """Standing consent for model inference that leaves this machine.
+
+    Read by `model_egress.denial()`, which gates the Nest tools. Until that
+    landed this key was modelled, reconciled, mirrored and displayed while
+    **nothing consulted it** — a switch the operator could flip, watch persist,
+    and receive no protection from. `gates_panel` labelled it "reserved — not
+    yet enforced", which fixed the label and not the toggle, and only for people
+    who read the panel rather than the settings file.
+    """
+    return permitted("cloud_llm")
+
+
+def retired(key: str) -> bool:
+    """Whether `key` is a consent key this build no longer honours.
+
+    `lan_permitted()` used to live here, documenting itself as the one key with
+    no caller. That asymmetry is now resolved by removal rather than by
+    enforcement — see `_REMOVED_KEYS` for why the sandbox has no LAN-scoped
+    capability to gate. Callers that need to explain a retired key to an
+    operator ask here instead of carrying their own list.
+    """
+    return key in _REMOVED_KEYS
