@@ -1,6 +1,6 @@
 """willow-mcp Claude Code hook — PreToolUse.
 
-Four guards:
+Five guards:
 - Bash reaching for raw psql/psycopg2/sqlite3 against a database or store
   willow-mcp owns, instead of going through the MCP tools (blocks).
 - Bash habits that duplicate MCP tools (ls/grep/git-mutation/python-heredoc) —
@@ -9,6 +9,10 @@ Four guards:
   / `# allow_localhost`) in the task text — the server strips these (B-21),
   so it does nothing; the correct path is allow_net=True + the task_net
   permission (warns).
+- The IDE-native web tools, now that `willow_web_*` ships: WebSearch and
+  WebFetch are blocked with a redirect, so a fetch goes through the seat that
+  records it rather than around it (blocks). Wired by its own
+  `WebSearch|WebFetch` matcher in deploy/claude-settings.json.
 - Any tool call that would write the keys authorizing this agent's own egress
   or re-grant its own write seat: minting a lease under `mcp_apps/_net_leases/`,
   running `willow-mcp grant-net` (via Bash *or* smuggled into Kart task text),
