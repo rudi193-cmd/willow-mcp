@@ -68,6 +68,51 @@ def test_check_bash_allows_unrelated_commands(command):
     assert pre_tool_use.check_bash(command) is None
 
 
+# ── check_bash: the script-indirection path, allow side ─────────────────
+#
+# _script_reaches_owned_store() reads the invoked file and applies the same
+# two-key test (raw DB client + owned-store marker) to its contents. The block
+# side is what a bad-command suite exercises; these pin the *allow* side, which
+# is where a broadened guard would start blocking ordinary scripts. Broadening
+# the two-key test to `if True` — every readable invoked script blocks — left
+# the suite green before these existed, so nothing checked that a benign
+# `python3 x.py` survives.
+
+
+@pytest.fixture
+def script_dir(tmp_path, monkeypatch):
+    """Run check_bash with cwd at tmp_path, so a relative script resolves."""
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+@pytest.mark.parametrize("body, why", [
+    ('print("hello")', "no DB client and no marker"),
+    # One key each — the same discriminators test_check_bash_allows_unrelated_commands
+    # applies to the command line, applied one file deeper.
+    ("import sqlite3\nsqlite3.connect('/tmp/unrelated.db')\n", "DB client, no owned marker"),
+    ('open("notes.md").read()  # records\n', "marker word, no DB client"),
+])
+def test_check_bash_allows_a_benign_invoked_script(script_dir, body, why):
+    (script_dir / "helper.py").write_text(body)
+    assert pre_tool_use.check_bash("python3 helper.py") is None, why
+
+
+def test_check_bash_allows_a_benign_script_via_the_cd_form(script_dir):
+    """The `cd X && python3 y.py` form the guard reads a cwd out of — a benign
+    script reached that way is still ordinary work."""
+    (script_dir / "tools").mkdir()
+    (script_dir / "tools" / "report.py").write_text('print("report")\n')
+    assert pre_tool_use.check_bash("cd tools && python3 report.py") is None
+
+
+def test_check_bash_fails_open_on_an_unreadable_script(script_dir):
+    """Tripwire, not a control: a script it cannot read is not a block. Named so
+    a future change that makes the guard fail *closed* is a deliberate choice
+    with a red test behind it, not a silent one."""
+    assert pre_tool_use.check_bash("python3 does_not_exist.py") is None
+
+
 # ── main(): stdin/stdout contract ───────────────────────────────────────
 
 _SEAT_ENV_KEYS = ("WILLOW_APP_ID", "WILLOW_HUMAN_ORCHESTRATOR", "CLAUDE_PROJECT_DIR")
@@ -366,6 +411,12 @@ def test_main_handles_empty_and_malformed_stdin_without_crashing():
 
 # ── check_bash_routing: MCP redirect table ─────────────────────────────
 
+# Only the `gh` case actually pins the inspect exemption. `git status` and
+# `git log` are allowed for two independent reasons — the exemption's early
+# return, and the fact that no _BASH_ROUTING entry matches a bare git inspect
+# verb anyway — so deleting the exemption's git half leaves them green. Verified
+# by narrowing _GIT_INSPECT_RE (nothing red) and _GH_INSPECT_RE (red here).
+# Keep the gh parameter: it is the one carrying the assertion.
 @pytest.mark.parametrize("command", [
     "git status",
     "git log -3 --oneline",
@@ -518,6 +569,41 @@ def test_main_blocks_native_web_search():
     assert decision["decision"] == "block"
     assert "willow_web_search" in decision["reason"]
 
+
+# ── check_native_web: allow side ────────────────────────────────────────
+#
+# The guard redirects the IDE-native web tools to willow_web_*. Its allow side
+# is the sanctioned alternative itself: if the guard ever broadens to match on
+# "web" rather than the two exact tool names, it starts blocking the very path
+# it steers toward — and every block-side test still passes. Broadening it to
+# also fire on willow_web_* left the suite green before these existed.
+
+
+@pytest.mark.parametrize("tool_name", [
+    "mcp__willow-mcp__willow_web_search",
+    "mcp__willow-mcp__willow_web_fetch",
+    "willow_web_search",
+    "willow_web_fetch",
+])
+def test_check_native_web_allows_the_sanctioned_alternative(tool_name):
+    assert pre_tool_use.check_native_web(tool_name) is None
+
+
+@pytest.mark.parametrize("tool_name", ["", "Bash", "Read", "task_submit", "WebSocket"])
+def test_check_native_web_allows_every_other_tool(tool_name):
+    assert pre_tool_use.check_native_web(tool_name) is None
+
+
+def test_main_stays_silent_for_the_sanctioned_web_tool():
+    """End to end: the MCP web tool produces no decision at all, so a fetch
+    through the recording seat is not merely permitted but uncommented."""
+    code, stdout = _run_hook({
+        "tool_name": "mcp__willow-mcp__willow_web_fetch",
+        "tool_input": {"url": "https://example.com"},
+        "session_id": "s1",
+    })
+    assert code == 0
+    assert stdout == ""
 
 
 # ── seat guard vs gate.PERMISSION_GROUPS: the drift this class of list invites ─
