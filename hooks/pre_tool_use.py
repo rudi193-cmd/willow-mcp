@@ -69,7 +69,8 @@ _OWNED_MARKER_RE = re.compile(
 _TOOL_REDIRECTS = {
     "knowledge": "knowledge_search / kb_at / kb_startup_continuity (read) or "
                   "knowledge_ingest / kb_journal / kb_promote (write, requires "
-                  "schema_confirm_mapping first)",
+                  "schema_confirm_mapping first) or knowledge_flag / "
+                  "knowledge_retract (knowledge_curate)",
     "records": "store_get / store_list / store_search / store_search_all (read) or "
                "store_put / store_update / store_delete (write)",
 }
@@ -594,7 +595,7 @@ _SEAT_PRIV_RE = re.compile(
     r"\b(agent_dispatch|code_graph_write|commitment_write|dispatch_write|"
     r"envelope_apply|fork_write|frank_write|friction_write|full_access|"
     r"gap_promote|gap_purge|gap_write|human_loop_write|integration_call|"
-    r"knowledge_write|lineage_write|markdownai_directives|markdownai_write|"
+    r"knowledge_curate|knowledge_write|lineage_write|markdownai_directives|markdownai_write|"
     r"nest_write|schema_admin|store_all|store_write|task_db|task_queue)\b"
 )
 # `orchestrator`, `context` and `binding` are also write-capable groups, but
@@ -609,7 +610,7 @@ _SCOPE_ALL_RE = re.compile(r'"store_scope"\s*:\s*\[\s*"\*"\s*\]')
 
 _SEAT_ESCALATION_REASON = (
     "willow-mcp: this edits a manifest to add a WRITE-capable permission group "
-    "(store_write / store_all / knowledge_write / lineage_write / schema_admin / "
+    "(store_write / store_all / knowledge_write / knowledge_curate / lineage_write / schema_admin / "
     "nest_write / gap_write / gap_promote / gap_purge / friction_write / task_db / "
     "task_queue / dispatch_write / human_loop_write / frank_write / envelope_apply / "
     "fork_write / commitment_write / code_graph_write / agent_dispatch / "

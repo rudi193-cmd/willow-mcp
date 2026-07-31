@@ -65,6 +65,9 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "knowledge_ingest",
         "kb_ingest", "kb_journal", "kb_promote",
     }),
+    "knowledge_curate": frozenset({
+        "knowledge_flag", "knowledge_retract",
+    }),
     "task_queue": frozenset({
         "task_submit", "task_status", "task_list",
     }),
