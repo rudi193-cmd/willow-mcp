@@ -190,6 +190,17 @@ gap rather than re-polling a task nothing will run.
 **plus worker liveness**. Check `stranded` first: it is exactly the distinction
 between "queued, a worker will get to it" and "queued, nothing is listening."
 
+## 6. Submit-time scan and execution caps (#111)
+
+`task_submit` runs **`kartikeya.check_kart_task`** before the row is queued —
+same scanner the worker uses, including **resource_exhaustion** (fork-bomb and
+infinite-spin patterns). A match returns `KART-SECURITY` and never touches Postgres.
+
+The worker runs tasks through **`kartikeya.sandbox.run_shell`** with **memory and
+PID caps on by default** (2G / 512 PIDs unless tuned via `KART_MEM_MAX` /
+`KART_PIDS_MAX`; disable only with `WILLOW_KART_NO_RLIMIT=1`). Results may include
+`resource_limit`: `cgroup` or `rlimit`.
+
 ## What this skill will not do
 
 @constraint severity=critical
