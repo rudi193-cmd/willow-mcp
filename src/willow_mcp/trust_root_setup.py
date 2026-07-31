@@ -4,6 +4,13 @@ The agent may REQUEST egress; only the operator (via a uid the agent does not
 share write access with) may CONFIRM it. ``harden-trust-root`` chowns policy
 roots to ``willow-operator`` and restores MCP runtime write paths (``store/``,
 ``dispatch/``, …) to the runtime user.
+
+The egress signing key (``egress_trust_directory()``) gets its own step
+(``apply_egress_key_hardening``, #182) at a stricter mode than the policy
+roots above: manifests and leases stay world-*readable* after hardening (the
+gate still reads its own policy as an unprivileged process) but the private
+key becomes owner-only (0700/0600) — holding read access to it needs no
+forgery at all, so nothing but the trust owner may ever read it.
 """
 
 from __future__ import annotations
@@ -63,6 +70,17 @@ def trust_root_directories() -> list[Path]:
             seen.add(key)
             out.append(root)
     return out
+
+
+def egress_trust_directory() -> Path:
+    """The egress key custody directory (#182) — deliberately outside
+    $WILLOW_HOME (egress_setup's own docstring: keys live outside worker-
+    sandbox mounts), so it is NOT one of trust_root_directories() and needs
+    its own hardening step with its own — stricter — target mode. Lazily
+    imported: trust_root_setup has no module-level dependency on egress_setup
+    today, and this keeps it that way."""
+    from . import egress_setup
+    return egress_setup.config_dir()
 
 
 def runtime_writable_directories() -> list[Path]:
@@ -144,6 +162,15 @@ def audit_trust_root(app_id: str = "") -> dict[str, Any]:
                 consent_writable.append({"key": "consent", "path": str(path)})
         except OSError:
             consent_writable.append({"key": "consent", "path": str(path)})
+
+    # #182: readable, not writable — the egress private key needs no forgery
+    # at all if this process can just read it, so it belongs in the same
+    # "what could this process act with" list even though the test differs.
+    if lease.egress_key_readable_by_self():
+        from . import egress_setup
+        key_path = egress_setup.resolve_private_key_path()
+        forgeable.append({"key": "egress_private_key",
+                          "path": str(key_path) if key_path else "<unresolved>"})
 
     strict = lease.strict_trust_root()
     all_forgeable = forgeable + consent_writable
@@ -293,6 +320,35 @@ def apply_trust_root_hardening(owner: str, *, dry_run: bool = False) -> dict[str
     return {"owner": trust_owner, "actions": actions, "dry_run": dry_run}
 
 
+def apply_egress_key_hardening(owner: str, *, dry_run: bool = False) -> dict[str, Any]:
+    """chown the egress key directory to ``owner`` — owner-only (0700/0600),
+    NOT the world-readable 0755/0644 the policy roots above use (#182).
+
+    Manifests and leases must stay world-readable after hardening: the gate
+    still needs to read its own policy from an unprivileged process. The
+    egress private key is the opposite case — holding read access to it
+    needs no forgery at all, the process can sign with genuine authority —
+    so nothing but the trust owner may read it, ever.
+
+    A missing directory (egress never set up on this box) is reported, not
+    an error: nothing to harden is not a hardening failure.
+    """
+    trust_owner = resolve_trust_owner(owner)
+    root = egress_trust_directory().expanduser()
+    if not root.exists() and not dry_run:
+        return {"owner": trust_owner, "actions": [], "dry_run": dry_run,
+                "path": str(root), "present": False}
+    actions: list[str] = []
+    if root.exists() or dry_run:
+        actions.extend(_chown_target(root, trust_owner, dry_run=dry_run))
+        if root.exists():
+            actions.extend(
+                _chmod_tree(root, dir_mode=0o700, file_mode=0o600, dry_run=dry_run)
+            )
+    return {"owner": trust_owner, "actions": actions, "dry_run": dry_run,
+            "path": str(root), "present": root.exists() or dry_run}
+
+
 def repair_runtime_permissions(runtime_user: str = "", *, dry_run: bool = False) -> dict[str, Any]:
     """Restore MCP runtime write paths to the server user (store, dispatch, …)."""
     user = resolve_runtime_user(runtime_user)
@@ -343,13 +399,15 @@ def repair_runtime_permissions(runtime_user: str = "", *, dry_run: bool = False)
 def apply_filesystem_hardening(owner: str, *, dry_run: bool = False) -> dict[str, Any]:
     """Trust-root hardening plus runtime repair (backward-compatible name)."""
     trust = apply_trust_root_hardening(owner, dry_run=dry_run)
+    egress = apply_egress_key_hardening(owner, dry_run=dry_run)
     runtime = repair_runtime_permissions(dry_run=dry_run)
     return {
         "owner": trust["owner"],
         "runtime_user": runtime["runtime_user"],
-        "actions": trust["actions"] + runtime["actions"],
+        "actions": trust["actions"] + egress["actions"] + runtime["actions"],
         "dry_run": dry_run,
         "trust": trust,
+        "egress": egress,
         "runtime": runtime,
     }
 
@@ -365,6 +423,7 @@ def harden_trust_root(
     """Apply filesystem separation and wire strict trust root into MCP env."""
     before = audit_trust_root()
     trust = apply_trust_root_hardening(owner or default_trust_owner(), dry_run=dry_run)
+    egress = apply_egress_key_hardening(owner or default_trust_owner(), dry_run=dry_run)
     runtime = (
         repair_runtime_permissions(runtime_user, dry_run=dry_run)
         if repair_runtime
@@ -390,9 +449,10 @@ def harden_trust_root(
         "filesystem": {
             "owner": trust["owner"],
             "runtime_user": runtime["runtime_user"],
-            "actions": trust["actions"] + runtime["actions"],
+            "actions": trust["actions"] + egress["actions"] + runtime["actions"],
             "dry_run": dry_run,
             "trust": trust,
+            "egress": egress,
             "runtime": runtime,
         },
         "mcp_json_updated": merged,
@@ -405,6 +465,7 @@ def operator_command_hints(owner: str) -> list[str]:
     prefix = f"sudo -u {owner} {cli}" if os.geteuid() != 0 else cli
     return [
         f"{prefix} grant-net <app_id> --ttl 30m --reason \"…\"",
+        f"{prefix} sign-net-task <app_id> --task-file /path/to/task.sh",
         f"{prefix} consent set internet true",
         f"{prefix} revoke-net <app_id>",
         "Reload the IDE after MCP env changes.",

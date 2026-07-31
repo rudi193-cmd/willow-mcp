@@ -302,6 +302,58 @@ def test_strict_trust_root_defaults_off(home):
     assert lease.strict_trust_root() is False
 
 
+# ── path_is_self_readable / egress_key_readable_by_self (#182) ──────────────
+
+def test_path_is_self_readable_true_for_a_file_this_process_can_read(tmp_path):
+    f = tmp_path / "readable.txt"
+    f.write_text("x")
+    assert lease.path_is_self_readable(f) is True
+
+
+def test_path_is_self_readable_false_for_a_missing_file(tmp_path):
+    assert lease.path_is_self_readable(tmp_path / "ghost.txt") is False
+
+
+def test_path_is_self_readable_false_for_a_directory(tmp_path):
+    """Leaf must be a file — a directory is not 'the key', it's where it lives."""
+    assert lease.path_is_self_readable(tmp_path) is False
+
+
+def test_path_is_self_readable_respects_os_access(tmp_path, monkeypatch):
+    f = tmp_path / "locked.pem"
+    f.write_text("secret")
+    monkeypatch.setattr(lease.os, "access", lambda *_: False)
+    assert lease.path_is_self_readable(f) is False
+
+
+def test_egress_key_not_readable_when_no_key_is_configured(home, monkeypatch):
+    from willow_mcp import egress_setup
+    monkeypatch.setattr(egress_setup, "resolve_private_key_path", lambda: None)
+    assert lease.egress_key_readable_by_self() is False
+
+
+def test_egress_key_readable_when_this_process_can_read_it(home, monkeypatch):
+    """The core #182 finding, reproduced: a key chmod 600 on a single-uid host
+    is readable by the very process the gate is supposed to keep it from."""
+    from willow_mcp import egress_setup
+    key = home / "egress" / "private.pem"
+    key.parent.mkdir(parents=True)
+    key.write_text("-----BEGIN PRIVATE KEY-----\n...")
+    key.chmod(0o600)
+    monkeypatch.setattr(egress_setup, "resolve_private_key_path", lambda: key)
+    assert lease.egress_key_readable_by_self() is True
+
+
+def test_egress_key_not_readable_when_this_process_cannot_read_it(home, monkeypatch):
+    from willow_mcp import egress_setup
+    key = home / "egress" / "private.pem"
+    key.parent.mkdir(parents=True)
+    key.write_text("-----BEGIN PRIVATE KEY-----\n...")
+    monkeypatch.setattr(egress_setup, "resolve_private_key_path", lambda: key)
+    monkeypatch.setattr(lease.os, "access", lambda *_: False)
+    assert lease.egress_key_readable_by_self() is False
+
+
 # ── no MCP tool may mint a lease ─────────────────────────────────────────────
 
 def test_lease_is_not_reachable_as_an_mcp_tool():

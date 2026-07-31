@@ -216,3 +216,26 @@ def test_diagnostic_summary_includes_rings_check(tmp_path, monkeypatch):
     report = server.diagnostic_summary(app_id="willow")
     assert "rings" in report["checks"]
     assert report["checks"]["rings"]["backend"] == "schema-rings"
+
+
+# ── _diag_net_lease's private_key_readable field (#182) ──────────────────────
+
+def test_diag_net_lease_reports_key_not_readable_by_default(tmp_path, monkeypatch):
+    """The conftest-wide egress stub (resolve_private_key_path -> None) means a
+    clean test environment has nothing to read — the honest default. Pin
+    self_writable to [] too (a tmp_path is always writable by the test uid,
+    which is its own unrelated reason for 'warn' — see conftest.py) so this
+    isolates the private-key field specifically."""
+    from willow_mcp import lease
+    monkeypatch.setattr(lease, "self_writable_trust_paths", lambda *_: [])
+    out = server._diag_net_lease("someapp")
+    assert out["private_key_readable"] is False
+    assert out["status"] == "ok"
+
+
+def test_diag_net_lease_reports_key_readable_and_warns(monkeypatch):
+    from willow_mcp import lease
+    monkeypatch.setattr(lease, "egress_key_readable_by_self", lambda: True)
+    out = server._diag_net_lease("someapp")
+    assert out["private_key_readable"] is True
+    assert out["status"] == "warn"
