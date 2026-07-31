@@ -218,6 +218,29 @@ as the 2026-07-30 allow-side pass, found by the same method, one level up:
 build the thing that goes looking, rather than trust that the last look was
 enough.
 
+**Addendum (2026-07-31, later the same day):** a UX audit found this hook
+blocking its own project's documented onboarding path — `scripts/sandbox-
+bootstrap.sh` (the README's one-command setup) trips `_script_reaches_owned_
+store`, because it legitimately creates the Postgres database and applies
+schema before any MCP tool exists to call instead, and its own source
+contains both a raw `psql` invocation and `WILLOW_PG_DB`. A scan of
+`scripts/` found 16 other files in the same position (diagnostics/
+ratification/reconstruction tooling) — not an isolated case.
+
+Fixed by exempting `scripts/` itself, not by allowlisting individual files
+(too high-maintenance, and would keep missing new ones) and not by a marker
+comment inside a script (weaker than the status quo — any agent-written
+file could add the same comment and self-exempt). A path check anchored on
+`CLAUDE_PROJECT_DIR`/cwd is closer to the actual distinction that matters: a
+script already committed under `scripts/` went through the same review this
+hook file did, which is a different trust class from an agent writing a new
+script in the working tree mid-session — the actual thing this guard exists
+to catch. Still a tripwire, not a control: an agent that edited one of these
+files first could ride the exemption too, and the durable answer to that is
+B-32, same as everywhere else in this module. Pinned by four new tests,
+including one against the real `scripts/sandbox-bootstrap.sh` file rather
+than only a fixture standing in for it.
+
 **Addendum (2026-07-31):** closed the handoff's open "any `SessionStart`
 hook change?" question — no action. Two separate `SessionStart` hooks exist:
 `willow_mcp.session_start_hook` (packaged, bridges a supported client's

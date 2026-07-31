@@ -1,6 +1,6 @@
 ---
 name: kart-tasks
-description: Guided use of willow-mcp's Kart task queue — submit/poll, signed per-task egress authorization, and worker liveness
+description: Guided use of willow-mcp's Kart task queue — submit/poll, signed per-task egress and local-Postgres authorization, and worker liveness
 ---
 
 @markdownai v1.0
@@ -135,7 +135,46 @@ The real control is ownership: put the lease root and manifest under a uid the
 agent does not run as, then set `WILLOW_MCP_STRICT_TRUST_ROOT=1` so egress is
 refused whenever the process reading the keys could also have written them.
 
-## 3. Polling
+## 3. The database model — the same shape as the network model, one key shorter
+
+Local Postgres access is opt-in too, gated the same way egress is (B2), just
+without a standing lease step:
+
+| Key | Question it answers | Where it lives | Who turns it |
+|---|---|---|---|
+| `task_db` | *May this app ever reach local Postgres?* | `mcp_apps/<app>/manifest.json` | operator, granted once — **not** included in `task_queue` or `full_access` |
+| `WILLOW_MCP_ENFORCE_DB_PERIMETER` | *Is a signed envelope required at all?* | server env | operator; **off by default** |
+| **signed envelope** | *This submitter, exact task, `db` scope, expiry, nonce?* | `tasks.db_authorization` | operator, `willow-mcp sign-db-task`, one use |
+
+- Pass **`allow_db=True`**. Without the **`task_db`** capability you get
+  `db_denied`. With `task_db` and the perimeter off (the default), that alone
+  is enough — `allow_db=True` unlocks the local Postgres socket/env for the
+  task.
+- **When the operator turns on `WILLOW_MCP_ENFORCE_DB_PERIMETER`**, `allow_db`
+  additionally needs an operator-signed per-task envelope:
+  `willow-mcp sign-db-task <app_id> --task "…" --ttl 30m`. Without one you get
+  `db_authorization_denied`. This closes exactly the gap `task_db` alone
+  leaves open — a `task_db` holder could otherwise queue arbitrary `psql`
+  forever, with no per-task limit, the same crossing B-37 closed for
+  network.
+- The envelope is scoped to `db`, so a `sign-net-task` envelope can never
+  authorize db work and vice versa — reusing one for the other fails
+  verification, not silently succeeds.
+- **`# allow_db` in task text is a request, never authority** — same rule as
+  `# allow_net`. The server strips any caller-supplied `# allow_db` line
+  unconditionally before storing the task (B-21's rule, same code path); it
+  can only enter through the permission-checked `allow_db=True` argument.
+- Schema prerequisite: the confirmed `tasks` mapping needs a
+  `db_authorization` column. Apply
+  `docs/schema/tasks-add-db-authorization.sql` once, then reconfirm the
+  mapping — without it you get `schema_unusable` even with a valid envelope.
+
+So: **db access = `allow_db=True` + `task_db`**, and once the operator
+enforces the perimeter, **+ an operator-signed `db_authorization` envelope,
+scoped to `db`, one use.** Never a directive in the task string, and never a
+network envelope reused for db (or vice versa).
+
+## 4. Polling
 
 ```
 task_status(app_id=..., task_id=...)
@@ -145,7 +184,7 @@ Returns `status`, `result`, and completion time. Poll with restraint — if
 `fleet_health` reports `stranded: true` (see §0), stop and report the worker
 gap rather than re-polling a task nothing will run.
 
-## 4. Listing
+## 5. Listing
 
 `task_list` filters by status/agent; `fleet_health` gives the aggregate counts
 **plus worker liveness**. Check `stranded` first: it is exactly the distinction
@@ -155,9 +194,10 @@ between "queued, a worker will get to it" and "queued, nothing is listening."
 
 @constraint severity=critical
 It will not tell you to keep polling a `pending` task when `fleet_health` reports
-`stranded: true`. It will not add a `# allow_net` directive to task text as a
-shortcut around the `task_net` permission — that path is closed by design (B-21),
-and the correct move is to ask the operator to grant the permission. And it will
-not edit a manifest, flip a consent file, or issue a lease to make your own egress
-call succeed: requesting egress and confirming it are separate authorities, and
-you hold only the first.
+`stranded: true`. It will not add a `# allow_net` or `# allow_db` directive to
+task text as a shortcut around the `task_net`/`task_db` permissions — that path
+is closed by design (B-21/B2), and the correct move is to ask the operator to
+grant the permission. And it will not edit a manifest, flip a consent file,
+issue a lease, or sign a db/net envelope to make your own egress or database
+call succeed: requesting access and confirming it are separate authorities,
+and you hold only the first.
