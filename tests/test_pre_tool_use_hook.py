@@ -81,6 +81,52 @@ def test_check_bash_allows_unrelated_commands(command):
     assert pre_tool_use.check_bash(command) is None
 
 
+# ── check_bash_remote_fail_closed (#164) ─────────────────────────────────
+
+@pytest.fixture
+def remote_gate_down(tmp_path, monkeypatch):
+    wh = tmp_path / ".willow"
+    enforcement = wh / "enforcement"
+    enforcement.mkdir(parents=True)
+    (enforcement / "remote_posture.json").write_text(
+        json.dumps({"mcp_live": False}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CLAUDE_CODE_REMOTE", "true")
+    monkeypatch.setenv("WILLOW_HOME", str(wh))
+    return wh
+
+
+def test_remote_fail_closed_blocks_bare_psql(remote_gate_down):
+    reason = pre_tool_use.check_bash_remote_fail_closed("psql -c 'select 1'")
+    assert reason is not None
+    assert "remote enforcement" in reason
+
+
+def test_remote_fail_closed_blocks_sqlite3_and_curl(remote_gate_down):
+    assert pre_tool_use.check_bash_remote_fail_closed("sqlite3 /tmp/x.db '.tables'")
+    assert pre_tool_use.check_bash_remote_fail_closed("curl -s https://example.com")
+
+
+def test_remote_fail_closed_allows_when_gate_live(remote_gate_down):
+    path = remote_gate_down / "enforcement" / "remote_posture.json"
+    path.write_text(json.dumps({"mcp_live": True}), encoding="utf-8")
+    assert pre_tool_use.check_bash_remote_fail_closed("psql -c 'select 1'") is None
+
+
+def test_remote_fail_closed_inactive_without_ccr_flag(monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_REMOTE", raising=False)
+    monkeypatch.setenv("WILLOW_HOME", "/tmp/.willow")
+    assert pre_tool_use.check_bash_remote_fail_closed("psql -c 'select 1'") is None
+
+
+def test_remote_fail_closed_without_marker_fails_closed(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAUDE_CODE_REMOTE", "true")
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path / ".willow"))
+    reason = pre_tool_use.check_bash_remote_fail_closed("curl https://example.com")
+    assert reason is not None
+
+
 # ── check_bash: the script-indirection path, allow side ─────────────────
 #
 # _script_reaches_owned_store() reads the invoked file and applies the same

@@ -1,8 +1,10 @@
 """willow-mcp Claude Code hook — PreToolUse.
 
-Five guards:
+Six guards:
 - Bash reaching for raw psql/psycopg2/sqlite3 against a database or store
   willow-mcp owns, instead of going through the MCP tools (blocks).
+- In Claude Code remote sessions (#164): when SessionStart recorded no live MCP
+  gate, bare psql/sqlite3/curl are blocked outright (not merely redirected).
 - Bash habits that duplicate MCP tools or Kart's sandboxed execution —
   filesystem reads (ls/grep/find/cat), git/gh mutation, python heredoc,
   raw network egress (curl/wget/pip/npm/ssh/scp), background/detached
@@ -396,6 +398,57 @@ def _script_reaches_owned_store(command: str) -> Optional[str]:
     return None
 
 
+_REMOTE_POSTURE_FILE = "remote_posture.json"
+_REMOTE_FAIL_CLOSED_MSG = (
+    "willow-mcp: remote enforcement — Willow MCP gate is not live "
+    "(see SessionStart banner). Raw psql/sqlite3/curl are denied without "
+    "the gate. Fix: bash scripts/sandbox-bootstrap.sh and ensure .mcp.json "
+    "+ PreToolUse hooks are wired; then use store_*/knowledge_*/kb_* MCP tools."
+)
+# Bare clients in remote sessions when the gate is absent (#164) — not the
+# owned-store marker path in check_bash(), which only fires when a willow
+# store/db name appears on the command line.
+_FAIL_CLOSED_SHELL_RE = re.compile(
+    r"(?:^|[;&|]\s*)(?:psql|sqlite3)\b|(?:^|[;&|]\s*)curl\b",
+    re.IGNORECASE,
+)
+
+
+def _load_remote_posture() -> Optional[dict]:
+    candidates: list[str] = []
+    wh = os.environ.get("WILLOW_HOME")
+    if wh:
+        candidates.append(os.path.join(wh, "enforcement", _REMOTE_POSTURE_FILE))
+    project = _project_dir()
+    if project:
+        candidates.append(os.path.join(project, ".willow", "enforcement", _REMOTE_POSTURE_FILE))
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    return None
+
+
+def _remote_mcp_gate_absent() -> bool:
+    if os.environ.get("CLAUDE_CODE_REMOTE", "").strip().lower() != "true":
+        return False
+    posture = _load_remote_posture()
+    if posture is None:
+        return True
+    return not posture.get("mcp_live", False)
+
+
+def check_bash_remote_fail_closed(command: str) -> Optional[str]:
+    """Block raw DB/network clients in CCR when SessionStart recorded no live gate."""
+    if not command or not _remote_mcp_gate_absent():
+        return None
+    if _FAIL_CLOSED_SHELL_RE.search(command):
+        return _REMOTE_FAIL_CLOSED_MSG
+    return None
+
+
 def check_bash(command: str) -> Optional[str]:
     """Return a block reason if `command` reaches for a willow-mcp-owned store via
     a raw shell client — on the command line, or inside a script it invokes."""
@@ -648,7 +701,11 @@ def main() -> None:
         print(json.dumps({"decision": decision, "reason": route_reason}))
     elif tool_name == "Bash":
         command = tool_input.get("command", "")
-        reason = check_bash_self_grant(command) or check_bash(command)
+        reason = (
+            check_bash_self_grant(command)
+            or check_bash_remote_fail_closed(command)
+            or check_bash(command)
+        )
         if reason:
             print(json.dumps({"decision": "block", "reason": reason}))
         else:
