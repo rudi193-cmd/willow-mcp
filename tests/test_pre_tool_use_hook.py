@@ -142,6 +142,55 @@ def test_check_bash_fails_open_on_an_unreadable_script(script_dir):
     assert pre_tool_use.check_bash("python3 does_not_exist.py") is None
 
 
+# ── check_bash: the repo's own scripts/ tree is exempt ───────────────────
+#
+# Found live (2026-07-31): scripts/sandbox-bootstrap.sh — the README's
+# documented one-command setup — trips this guard when run through Bash,
+# because it legitimately creates the Postgres database and applies schema
+# before any MCP tool exists to call instead. A scan of scripts/ found 16
+# other files in the same position (diagnostics/ratification/reconstruction
+# tooling). A script already committed under scripts/ went through the same
+# review this hook file did; that is a different trust class from an agent
+# writing a new script in the working tree, which is what this guard exists
+# to catch.
+
+def test_check_bash_allows_a_reviewed_script_under_scripts_dir(script_dir):
+    (script_dir / "scripts").mkdir()
+    (script_dir / "scripts" / "bootstrap.sh").write_text(
+        "psql -U someone -d $WILLOW_PG_DB -c 'select 1'\n"
+    )
+    assert pre_tool_use.check_bash("bash scripts/bootstrap.sh") is None
+
+
+def test_check_bash_allows_a_reviewed_script_in_a_scripts_subdir(script_dir):
+    (script_dir / "scripts" / "diagnostics").mkdir(parents=True)
+    (script_dir / "scripts" / "diagnostics" / "stats.py").write_text(
+        "import sqlite3\nsqlite3.connect('WILLOW_STORE_ROOT')\n"
+    )
+    assert pre_tool_use.check_bash("python3 scripts/diagnostics/stats.py") is None
+
+
+def test_check_bash_still_blocks_outside_scripts_dir(script_dir):
+    """The exemption is scripts/ specifically, not a blanket loosening — a file
+    that merely has 'scripts' as a substring of its own directory name
+    ('myscripts/') must not ride the exemption."""
+    (script_dir / "myscripts").mkdir()
+    (script_dir / "myscripts" / "drop.sh").write_text(
+        "psql -U someone -d $WILLOW_PG_DB -c 'select 1'\n"
+    )
+    reason = pre_tool_use.check_bash("bash myscripts/drop.sh")
+    assert reason is not None
+    assert "willow-mcp" in reason
+
+
+def test_check_bash_allows_the_real_sandbox_bootstrap_script():
+    """End to end, against the actual file this bug was found on — not a
+    fixture standing in for it. Runs from the repo root (pytest's normal
+    cwd), the same way a live Claude Code session invoking the README's
+    documented setup command would."""
+    assert pre_tool_use.check_bash("bash scripts/sandbox-bootstrap.sh") is None
+
+
 def test_check_bash_allows_a_two_level_script_chain(script_dir):
     """The guard reads one level of indirection, deliberately, not two. A
     script whose own body merely shells out to a *second* script that reaches

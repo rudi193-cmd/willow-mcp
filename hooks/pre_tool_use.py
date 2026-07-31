@@ -330,6 +330,42 @@ _SCRIPT_DB_USE_RE = re.compile(
 )
 
 
+def _repo_scripts_dir() -> Optional[str]:
+    """This repo's own scripts/ directory, if resolvable — anchored on
+    CLAUDE_PROJECT_DIR (what the harness sets on every hook invocation) or
+    cwd as a fallback, same anchor _mcp_json_declares_orchestrator uses."""
+    root = _project_dir() or os.getcwd()
+    d = os.path.join(root, "scripts")
+    return d if os.path.isdir(d) else None
+
+
+def _is_repo_scripts_path(path: str) -> bool:
+    """True when `path` resolves inside this repo's committed scripts/ tree.
+
+    Found live (2026-07-31): 17 files under scripts/ — sandbox-bootstrap.sh
+    (the README's documented one-command setup) plus diagnostics/ratification/
+    reconstruction tooling — all legitimately touch a raw DB client against an
+    owned-store marker as ordinary infrastructure work (creating the database,
+    applying schema, before any MCP tool exists to call instead). That is a
+    different act from an agent reaching for a raw client out of habit mid
+    session, which is what this guard exists to catch. A script already
+    committed under scripts/ went through the same review this hook file did;
+    a script an agent is about to write in the working tree did not — that is
+    the line this exemption draws, by path, not by content. (Still a tripwire:
+    an agent that edited one of these files first could still ride this
+    exemption — the durable control for that is B-32, same as everywhere else
+    in this module.)"""
+    scripts_dir = _repo_scripts_dir()
+    if not scripts_dir:
+        return False
+    try:
+        real_scripts = os.path.realpath(scripts_dir)
+        real_path = os.path.realpath(path)
+    except OSError:
+        return False
+    return real_path == real_scripts or real_path.startswith(real_scripts + os.sep)
+
+
 def _script_reaches_owned_store(command: str) -> Optional[str]:
     """Block `python3 file.py` / `bash file.sh` whose file reaches a willow-mcp
     owned store via a raw client — the same crossing as a shell client, one file
@@ -347,6 +383,8 @@ def _script_reaches_owned_store(command: str) -> Optional[str]:
                     text = fh.read()
             except OSError:
                 continue
+            if _is_repo_scripts_path(path):
+                break
             if _SCRIPT_DB_USE_RE.search(text) and _OWNED_MARKER_RE.search(text):
                 return (
                     f"willow-mcp: {os.path.basename(path)} reaches a willow-mcp-owned "
