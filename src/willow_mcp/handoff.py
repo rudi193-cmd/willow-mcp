@@ -68,12 +68,33 @@ def handoff_write_v4(
 
 
 def _render_closeout(dispatch_id: str, app_id: str, handoff: dict, pkt: dict) -> str:
+    written = handoff.get("written_at") or ""
+    date = written[:10] if len(written) >= 10 else ""
+    reply_to = handoff.get("reply_to", "willow")
+    fm_lines = [
+        "kind: closeout",
+        f"dispatch_id: {json.dumps(dispatch_id)}",
+        f"from: {json.dumps(app_id)}",
+        f"to: {json.dumps(reply_to)}",
+    ]
+    if date:
+        fm_lines.append(f"date: {json.dumps(date)}")
+    role = handoff.get("role") or pkt.get("meta", {}).get("role")
+    if role:
+        fm_lines.append(f"role: {json.dumps(role)}")
+
     lines = [
+        "---",
+        *fm_lines,
+        "---",
+        "",
+        "@markdownai v1.0",
+        "",
         f"# Closeout {dispatch_id}",
         "",
         f"**From:** {app_id}",
-        f"**To:** {handoff.get('reply_to', 'willow')}",
-        f"**Date:** {handoff.get('written_at', '')}",
+        f"**To:** {reply_to}",
+        f"**Date:** {written}",
         "",
         "## What Was Done",
         "",

@@ -53,6 +53,36 @@ def test_handoff_write_v4_emits_handoff_v1_format_intentional(home):
     assert handoff["format"] == "handoff_v1"
 
 
+def test_handoff_write_v4_closeout_is_proper_mai(home):
+    """closeout.md is a conforming @markdownai document (#155)."""
+    sent = ds.dispatch_send(
+        "willow", "loki", "# Task\n", role="loki", summary="task"
+    )
+    did = sent["dispatch_id"]
+    ho.handoff_write_v4(
+        "loki",
+        did,
+        findings=[{"id": "f1", "text": "note", "severity": "low", "evidence": []}],
+        narrative="Shipped.",
+    )
+    closeout = (home / "dispatch" / did / "closeout.md").read_text(encoding="utf-8")
+    assert closeout.startswith("---\n")
+    assert "kind: closeout\n" in closeout
+    assert f"dispatch_id: {json.dumps(did)}\n" in closeout
+    body = closeout.split("---", 2)[2].lstrip("\n")
+    assert body.startswith("@markdownai v1.0\n")
+
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from tools.mai_lint import _load_schema, lint_file
+
+    assert lint_file(
+        home / "dispatch" / did / "closeout.md", _load_schema(), quiet=True
+    )
+
+
 def test_full_lifecycle(home):
     md = "# Task\n\nDo the audit.\n"
     sent = ds.dispatch_send("willow", "loki", md, role="loki")
