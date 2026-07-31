@@ -61,9 +61,9 @@ applies all four for you. Each `knowledge`/`tasks` write path stays locked
 behind `schema_confirm_mapping` until you confirm the mapping once.
 
 > **PATH note:** `~/.local/bin/willow-mcp` is often the **fleet** shim (`sap_mcp.py`), not this
-> product. Use the product venv binary:
-> `~/github/.willow/venvs/willow-mcp/bin/willow-mcp-compile --force`
-> or `.../bin/willow-mcp compile-agents --force` after `pip install -e .` in that venv.
+> product. Use the venv binary from wherever you ran `pip install willow-mcp` (or
+> `pip install -e .` in a clone) — e.g. `.venv/bin/willow-mcp-compile --force` or
+> `.venv/bin/willow-mcp compile-agents --force` — not a bare `willow-mcp` on `PATH`.
 
 Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (LOCKED).
 
@@ -369,6 +369,15 @@ willow-mcp worker --once          # drain what's queued, then exit
 The engine is [`kartikeya`](https://pypi.org/project/kartikeya/), a hard
 dependency — a base `pip install willow-mcp` ships a working drainer.
 
+`--lane` is `fast` or `batch` (env fallback: `WILLOW_WORKER_LANE`, then
+kartikeya's own `KART_WORKER_LANE`, then `fast`). The two aren't just
+separate queues — `batch` forces `production` mode: it refuses to start on
+kartikeya's generic/vendored sandbox default (unless you also pass
+`--allow-generic-sandbox`) and requires a real Postgres connection. `fast`
+only enters `production` mode if you pass `--require-postgres` explicitly.
+Fast-lane concurrency (`--slots`) defaults from kartikeya's `KART_FAST_WORKERS`
+env var, or `3` if unset.
+
 A running worker publishes a heartbeat under `$WILLOW_HOME/worker_heartbeat/`,
 which `fleet_health` reads back:
 
@@ -611,6 +620,27 @@ timestamps terminal rows.
 | `WILLOW_MCP_HOST` | `127.0.0.1` | Serve-mode bind host (`--host` overrides) |
 | `WILLOW_MCP_PORT` | `8765` | Serve-mode bind port (`--port` overrides) |
 | `WILLOW_MCP_URL` | *(derived)* | Public base URL for OAuth issuer/callbacks in serve mode |
+| `WILLOW_MCP_PYTHON` | *(searched)* | Interpreter used when wiring willow-mcp into a project (`onboard`/`project sync`) — falls back to a venv search, then `python3` |
+| `WILLOW_MCP_ENFORCE_DB_PERIMETER` | *(off)* | When `1`, local Postgres access via a Kart task also needs an operator-signed envelope (`sign-db-task`), not just the `task_db` capability. See [`kart-tasks` skill](skills/kart-tasks.md) |
+| `WILLOW_MCP_AUTHORITY_CHECK` | *(off)* | Enables the S1 authority-check seam for dispatch gating. Landing the module must not change live behavior until an operator opts in |
+| `WILLOW_MCP_ENFORCE_MEM_RATIFY` | *(off)* | Master switch for the Article IV Canon-promotion gate on shared-KB writes. The gate's own `WILLOW_MEM_RATIFY_ENFORCE` (also off by default) must **also** be on before a denial actually blocks — either alone only logs advisory |
+| `WILLOW_OWNER_SUBJECT_ID` | *(unset)* | `subject_id` treated as the consent owner (exempt from subject-consent grants). Unset = no subject is the owner — the strict, safe default |
+| `WILLOW_SETTINGS_GLOBAL` | *(derived)* | Overrides the canonical fleet settings-file path — the file `consent.json` mirrors (see `docs/BUGS.md` B-30 if you're chasing a mismatch between the two) |
+| `WILLOW_IN_KART` | *(unset)* | Set inside a Kart sandbox; blocks network-authorization signing and forces non-interactive CLI paths. Not meant to be set by hand |
+| `WILLOW_MCP_TRUST_OWNER` | `willow-operator` | Trust-root unix user, used by `harden-trust-root` (see [Trust-root hardening](docs/OPERATOR-ONBOARD.md#trust-root-hardening-b-32)) |
+| `WILLOW_MCP_RUNTIME_USER` | `$SUDO_USER` or caller | Explicit runtime-user override for trust-root setup |
+| `WILLOW_MCP_EGRESS_CONFIG_DIR` | `~/.config/willow-mcp/egress` | Egress key/manifest directory |
+| `WILLOW_MCP_EGRESS_SIGNING_KEY` | *(from manifest)* | Overrides the private key path used to sign egress manifests |
+| `WILLOW_SEARCH_PROVIDER_ORDER` | `ddg_html` | Comma-separated web-search provider chain order |
+| `WILLOW_SOIL_HEARTBEAT_INTERVAL` | *(subsystem default)* | SOIL watchman heartbeat interval, seconds. Per-watchman override: `WILLOW_SOIL_HEARTBEAT_INTERVAL_<KEY>` |
+| `WILLOW_CODE_GRAPH_DB` | `$WILLOW_HOME/code_graph/graph.db` | Symbol/code-graph SQLite DB path |
+| `WILLOW_ENVELOPE_REGISTRY` | `<project>/envelopes/pre-approved.json` | Pre-approved envelope registry path |
+| `WILLOW_SYSCALL_TABLE` | *(sibling of registry)* | `syscall-table.json` path |
+| `WILLOW_FLEET_ROSTER` | *(derived)* | `fleet.json` roster path |
+| `WILLOW_MCP_GROVE_RINGS` | `$WILLOW_HOME/grove/rings.json` | Grove ring-state store path |
+| `WILLOW_MCP_SCHEMA_RINGS` | `$WILLOW_HOME/schema_rings.json` | Confirmed-schema-mapping cache path (see also `WILLOW_MCP_SCHEMA_RINGS_MAX`) |
+| `WILLOW_SENTRY_DSN` | *(unset)* | Sentry DSN — unset means observability is fully disabled (fail-closed default); PII, breadcrumbs, and stack locals are scrubbed regardless |
+| `WILLOW_SENTRY_ENV` / `WILLOW_SENTRY_RELEASE` / `WILLOW_SENTRY_TRACES` | `experiment` / `willow-mcp@experiment` / `0` | Sentry environment tag, release tag, trace sample rate — no-ops unless `WILLOW_SENTRY_DSN` is set |
 | `SAP_SAFE_ROOT` | `~/.sap/Applications` | SAFE folder root |
 | `SAP_PGP_FINGERPRINT` | *(empty)* | Pinned GPG fingerprint |
 
