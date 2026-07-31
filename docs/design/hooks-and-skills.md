@@ -292,6 +292,20 @@ ones about to touch hooks. No code change.
 `tests/test_skills_sync.py`). Also trimmed stale B-32/B-28 narratives from
 `docs/BUGS.md` Open section (both are Fixed in the summary table).
 
+**Addendum (2026-07-31, item G):** built the counts-in-prose lint the
+2026-07-30 handoff's question 8 asked about — `tools/counts_in_prose_lint.py`,
+wired into the suite via `tests/test_counts_in_prose.py`. Didn't have to
+invent a test case: checking it against this repo's own live claims found it
+had already happened, silently — "`_guarded` wraps 109 tools" in three files
+(`request_context.py`, `server.py`, `test_request_context.py`) and "103
+tools" in two spots in `tools/README.md`, both stale (real counts: 103
+`_guarded`-wrapped, 105 registered). Fixed all five. Scoped deliberately
+narrow: a registry of specific (file, claim, real-value-function) entries,
+not a general number-scanner — CHANGELOG.md/BUGS.md/handoffs/migrations state
+a count as of a past moment on purpose (archive, don't delete), and flagging
+those would be noise, not a guard, the same distinction this doc's own
+addenda keep drawing between a live claim and a historical record.
+
 @phase constraints
 ## Constraints
 
