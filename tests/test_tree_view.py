@@ -184,9 +184,9 @@ def test_build_tree_has_every_part(home):
 def test_build_tree_degrades_without_postgres(home):
     manifest_admin.set_permission("testapp", "full_access", True)
     tree = tree_view.build_tree("testapp")
-    assert tree["sap"] == {"error": "postgres_unavailable"}
-    assert tree["canopy"] == {"error": "postgres_unavailable"}
-    assert tree["leaves"] == {"error": "postgres_unavailable"}
+    assert tree["sap"]["error"] == "postgres_unavailable"
+    assert tree["canopy"]["error"] == "postgres_unavailable"
+    assert tree["leaves"]["error"] == "postgres_unavailable"
     # trunk's task/agent rollups must not fabricate numbers when their source erred
     assert tree["trunk"]["tasks_total"] is None
     assert tree["trunk"]["agents"] is None

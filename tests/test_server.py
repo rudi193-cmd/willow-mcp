@@ -350,9 +350,26 @@ def test_knowledge_search_empty_query_short_circuits(app_id):
     assert server.knowledge_search(app_id=app_id, query="   ") == {"results": []}
 
 
+def test_postgres_unavailable_call_sites_all_use_the_shared_helper():
+    """Found live (2026-07-31): 19 call sites each hand-wrote
+    {"error": "postgres_unavailable"} with no next step, while
+    diagnostic_summary's own Postgres check had good phrasing sitting
+    unused. Consolidated into server._postgres_unavailable(); this pins
+    that no call site regresses back to a bare hand-written literal that
+    would silently drift from the shared one again."""
+    import inspect
+
+    source = inspect.getsource(server)
+    assert 'return {"error": "postgres_unavailable"}' not in source
+    assert server._postgres_unavailable()["error"] == "postgres_unavailable"
+    assert "diagnostic_summary" in server._postgres_unavailable()["detail"]
+
+
 def test_knowledge_search_postgres_unavailable(app_id, monkeypatch):
     monkeypatch.setattr(server, "get_pg", lambda: None)
-    assert server.knowledge_search(app_id=app_id, query="hi") == {"error": "postgres_unavailable"}
+    result = server.knowledge_search(app_id=app_id, query="hi")
+    assert result["error"] == "postgres_unavailable"
+    assert "diagnostic_summary" in result["detail"]
 
 
 def test_knowledge_search_table_not_found(app_id, monkeypatch):
@@ -547,7 +564,8 @@ def test_schema_confirm_mapping_unknown_table(app_id, monkeypatch):
 def test_schema_confirm_mapping_postgres_unavailable(app_id, monkeypatch):
     monkeypatch.setattr(server, "get_pg", lambda: None)
     result = server.schema_confirm_mapping(app_id=app_id, table="knowledge")
-    assert result == {"error": "postgres_unavailable"}
+    assert result["error"] == "postgres_unavailable"
+    assert "diagnostic_summary" in result["detail"]
 
 
 def test_schema_confirm_mapping_marks_confirmed(app_id, monkeypatch):
