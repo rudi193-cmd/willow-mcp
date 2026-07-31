@@ -13,6 +13,8 @@ from typing import Optional
 import psycopg2
 import psycopg2.extras
 
+from . import postgres_lifecycle
+
 _pg_conn = None
 _pg_lock = threading.Lock()
 
@@ -58,18 +60,30 @@ def collection_in_scope(collection: str, scope: Optional[list]) -> bool:
 def get_pg() -> Optional[psycopg2.extensions.connection]:
     """Return a Postgres connection via Unix socket, or None."""
     global _pg_conn
+
+    def _connect():
+        conn = psycopg2.connect(
+            dbname=os.environ.get("WILLOW_PG_DB", "willow"),
+            user=os.environ.get("WILLOW_PG_USER", os.environ.get("USER", "")),
+        )
+        conn.autocommit = True
+        return conn
+
     with _pg_lock:
         try:
             if _pg_conn is None or _pg_conn.closed:
-                _pg_conn = psycopg2.connect(
-                    dbname=os.environ.get("WILLOW_PG_DB", "willow"),
-                    user=os.environ.get("WILLOW_PG_USER", os.environ.get("USER", "")),
-                )
-                _pg_conn.autocommit = True
+                _pg_conn = _connect()
             _pg_conn.cursor().execute("SELECT 1")
             return _pg_conn
         except Exception:
             _pg_conn = None
+            if postgres_lifecycle.ensure_enabled() and postgres_lifecycle.try_recover():
+                try:
+                    _pg_conn = _connect()
+                    _pg_conn.cursor().execute("SELECT 1")
+                    return _pg_conn
+                except Exception:
+                    _pg_conn = None
             return None
 
 
