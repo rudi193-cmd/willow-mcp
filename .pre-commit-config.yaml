@@ -1,0 +1,14 @@
+# Local guardrails mirroring CI (#158 mai regressions, ruff).
+repos:
+  - repo: local
+    hooks:
+      - id: mai-lint
+        name: mai_lint (@markdownai docs)
+        entry: python tools/mai_lint.py
+        language: system
+        pass_filenames: false
+      - id: ruff
+        name: ruff check
+        entry: ruff check src tests
+        language: system
+        pass_filenames: false

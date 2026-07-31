@@ -81,14 +81,23 @@ def _ddl_columns(ddl_path: Path, table: str) -> set[str] | None:
     return cols or None
 
 
-def _all_exact(mapping: dict) -> bool:
+def _all_exact(mapping: dict, ddl_cols: set[str] | None = None) -> bool:
     fields = mapping.get("fields") or {}
     if not fields:
         return False
-    return all(
-        f.get("tier") == "exact" and f.get("confidence") == 1.0
-        for f in fields.values()
-    )
+    for name, f in fields.items():
+        # Canonical fields the repo DDL does not carry yet (e.g. db_authorization
+        # before the reviewed migration lands) resolve as unmapped — that is not
+        # evidence of an adopted schema, so bootstrap may ignore them.
+        if (
+            ddl_cols is not None
+            and f.get("tier") == "unmapped"
+            and name not in ddl_cols
+        ):
+            continue
+        if f.get("tier") != "exact" or f.get("confidence") != 1.0:
+            return False
+    return True
 
 
 # The exact key set schema_profile.resolve() writes for a discovery placeholder
@@ -164,7 +173,7 @@ def auto_confirm(schema_dir: Path, app_ids: list[str]) -> list[dict]:
                 results.append(decision)
                 continue
             # Guard 2 — one non-exact field means adopted schema, human path.
-            if not _all_exact(mapping):
+            if not _all_exact(mapping, ddl_cols):
                 decision["reason"] = "guard 2: not every field is exact@1.0"
                 results.append(decision)
                 continue

@@ -16,6 +16,92 @@ from willow_mcp import sandbox_confirm as sc
 
 _REPO = Path(__file__).resolve().parent.parent
 _SCHEMA_DIR = _REPO / "docs" / "schema"
+_TEST_SCHEMA = "pytest_sandbox_confirm"
+
+
+def _psql_bootstrap_schema(pg, schema: str) -> None:
+    """Apply repo DDL files into an isolated schema (needs psql on PATH)."""
+    import os
+    import shutil
+    import subprocess
+
+    if not shutil.which("psql"):
+        pytest.skip("psql required to bootstrap repo DDL for sandbox_confirm")
+
+    params = pg.get_dsn_parameters()
+    env = os.environ.copy()
+    for key in ("host", "port", "user", "password", "dbname"):
+        val = params.get(key) or env.get(
+            f"PG{key.upper()}" if key != "dbname" else "PGDATABASE"
+        )
+        if val:
+            env[f"PG{key.upper()}" if key != "dbname" else "PGDATABASE"] = str(val)
+
+    subprocess.run(
+        [
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            f"DROP SCHEMA IF EXISTS {schema} CASCADE",
+            "-c",
+            f"CREATE SCHEMA {schema}",
+        ],
+        check=True,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    for table in ("tasks", "knowledge"):
+        ddl = _SCHEMA_DIR / f"{table}.postgres.sql"
+        subprocess.run(
+            [
+                "psql",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                f"SET search_path TO {schema}",
+                "-f",
+                str(ddl),
+            ],
+            check=True,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+
+@pytest.fixture
+def repo_ddl_pg(pg_available, monkeypatch):
+    """Postgres with repo-authored tasks/knowledge in an isolated schema.
+
+    ``schema_profile.introspect`` only reads ``public``; patch it so
+    sandbox_confirm tests do not depend on the operator's adopted fleet tables."""
+    from willow_mcp import schema_profile as sp
+
+    pg = pg_available
+    _psql_bootstrap_schema(pg, _TEST_SCHEMA)
+
+    def _introspect(conn, table: str):
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT column_name, data_type FROM information_schema.columns "
+                "WHERE table_schema = %s AND table_name = %s "
+                "ORDER BY ordinal_position",
+                (_TEST_SCHEMA, table),
+            )
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+        return [sp.ColumnInfo(name=r[0], data_type=r[1]) for r in rows]
+
+    monkeypatch.setattr(sp, "introspect", _introspect)
+    yield pg
+    cur = pg.cursor()
+    cur.execute(f"DROP SCHEMA IF EXISTS {_TEST_SCHEMA} CASCADE")
+    pg.commit()
+    cur.close()
 
 
 # ── _ddl_columns parsing (pure) ──────────────────────────────────────
@@ -79,7 +165,7 @@ def _decisions_for(results, table):
     return [d for d in results if d["table"] == table]
 
 
-def test_happy_path_confirms_repo_authored_schema(apps_root, pg_available):
+def test_happy_path_confirms_repo_authored_schema(apps_root, repo_ddl_pg):
     """Fresh artifacts + repo DDL tables (the bootstrapped sandbox shape)
     confirm, and the artifact says a machine did it."""
     from willow_mcp import schema_profile as sp
@@ -87,7 +173,7 @@ def test_happy_path_confirms_repo_authored_schema(apps_root, pg_available):
     results = sc.auto_confirm(_SCHEMA_DIR, ["testapp"])
     tasks = _decisions_for(results, "tasks")
     assert tasks and tasks[0]["confirmed"], tasks
-    fp = sp.db_fingerprint(pg_available)
+    fp = sp.db_fingerprint(repo_ddl_pg)
     artifact = sp.load_mapping("testapp", fp, "tasks")
     assert artifact["confirmed"] is True
     assert artifact["confirmed_by"] == "sandbox-bootstrap"
@@ -111,14 +197,14 @@ def test_guard1_human_marked_artifact_untouched(apps_root, pg_available):
     )
 
 
-def test_guard1_pristine_placeholder_is_reconfirmed_not_stranded(apps_root, pg_available):
+def test_guard1_pristine_placeholder_is_reconfirmed_not_stranded(apps_root, repo_ddl_pg):
     """A pristine placeholder — exactly what schema_profile.resolve() scatters as
     a discovery side effect — is re-derived and confirmed, not locked as
     unconfirmed by guard 1. This is the warm-container bug: a prior run's
     placeholder must not strand every later run on unconfirmed_schema."""
     from willow_mcp import schema_profile as sp
 
-    fp = sp.db_fingerprint(pg_available)
+    fp = sp.db_fingerprint(repo_ddl_pg)
     placeholder = {
         "schema_version": 1, "database": fp, "table": "tasks",
         "discovered_at": "2026-01-01T00:00:00+00:00", "confirmed": False,
