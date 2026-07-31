@@ -134,6 +134,24 @@ actually needs them:
   tool) — `Bash` covers the common case; broadening the match surface is
   cheap to add later if a real gap shows up, not worth guessing at now.
 
+  **Closed (2026-07-31):** a real gap showed up, and it's a more direct
+  bypass than the one this named — a `Write`/`Edit`/`MultiEdit` targeting a
+  willow-mcp-owned SQLite store file (`store.db`/`vault.db`/`kart.db`/
+  `mcp_receipt.db`) directly needs **no DB client at all**, so `_CLIENT_RE`'s
+  command/script-text scan never sees it; every existing guard on the
+  Write/Edit path (`check_trust_root_write`) only watches lease/keystore/
+  manifest targets, not the store files themselves. Added
+  `check_owned_db_file_write()`, matched on filename (not resolved real
+  path, so a relative or symlinked target is still caught) and wired
+  alongside `check_trust_root_write` in the same `Write`/`Edit`/`MultiEdit`
+  branch. Postgres has no local file to write into, so this is SQLite-only —
+  the Bash-scoped raw-client guard is still the only coverage there, which is
+  correct: reaching Postgres without a client isn't a thing. Tests pin both
+  the block side (the four exact filenames) and the allow side (substring
+  traps like `restore.db`/`backup_store.db`/`store.db.bak`, verified this
+  doesn't regress to a bare-substring match), plus an end-to-end `main()`
+  case in each direction.
+
 @phase 5-schema-confirm-md-skill
 ## 5. `schema-confirm.md` skill
 
@@ -273,6 +291,20 @@ ones about to touch hooks. No code change.
 `skills/knowledge-curate.md` (bundled copies kept identical per
 `tests/test_skills_sync.py`). Also trimmed stale B-32/B-28 narratives from
 `docs/BUGS.md` Open section (both are Fixed in the summary table).
+
+**Addendum (2026-07-31, item G):** built the counts-in-prose lint the
+2026-07-30 handoff's question 8 asked about — `tools/counts_in_prose_lint.py`,
+wired into the suite via `tests/test_counts_in_prose.py`. Didn't have to
+invent a test case: checking it against this repo's own live claims found it
+had already happened, silently — "`_guarded` wraps 109 tools" in three files
+(`request_context.py`, `server.py`, `test_request_context.py`) and "103
+tools" in two spots in `tools/README.md`, both stale (real counts: 103
+`_guarded`-wrapped, 105 registered). Fixed all five. Scoped deliberately
+narrow: a registry of specific (file, claim, real-value-function) entries,
+not a general number-scanner — CHANGELOG.md/BUGS.md/handoffs/migrations state
+a count as of a past moment on purpose (archive, don't delete), and flagging
+those would be noise, not a guard, the same distinction this doc's own
+addenda keep drawing between a live claim and a historical record.
 
 @phase constraints
 ## Constraints
