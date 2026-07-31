@@ -179,15 +179,15 @@ $WILLOW_HOME/
 @phase 5-implementation-slices
 ## 5. Implementation slices
 
-| Slice | Deliverable |
-|-------|-------------|
-| P1 | `pgp.py` — verify only, fail closed, port from fleet gate |
-| P1 | Manifest `.sig` check in `gate.permitted()` when fingerprint env set |
-| P2 | `attest_session` CLI + session file `.sig` |
-| P2 | Orchestrator write gate checks attestation |
-| P3 | `dispatch` meta `.sig` on send |
-| Persona | Document contract; charter hook reads project + user rosters |
-| Persona | `meta.json` persona fields on `dispatch_send` |
+| Slice | Deliverable | Status |
+|-------|-------------|--------|
+| P1 | `pgp.py` — verify only, fail closed, port from fleet gate | Shipped |
+| P1 | Manifest `.sig` check in `gate.permitted()` when fingerprint env set | **Shipped 2026-07-31 (B-45, issue #183)** — landed in `gate._load_manifest()` rather than `permitted()` directly, so every caller of `_load_manifest` (`authorized`, `store_scope`, `permitted`, …) denies uniformly, not just the one this slice named. `willow-mcp sign-manifest` CLI added alongside. |
+| P2 | `attest_session` CLI + session file `.sig` | Not started |
+| P2 | Orchestrator write gate checks attestation | Not started |
+| P3 | `dispatch` meta `.sig` on send | Not started |
+| Persona | Document contract; charter hook reads project + user rosters | Not started |
+| Persona | `meta.json` persona fields on `dispatch_send` | Not started |
 
 ---
 

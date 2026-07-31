@@ -116,6 +116,26 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   and B-38's `_egress_severance` now measure read exposure and fold it into
   `self_writable`/`forgeable_keys`, breaking the severance verdict under
   strict mode exactly like a forgeable manifest does.
+- **B-45/#183: app manifests were unsigned, writable JSON — a forgeable
+  identity and a self-grantable capability.** Any process that could write
+  `mcp_apps/<app>/manifest.json` could add itself `full_access`, or create a
+  new one and become any identity outright (demonstrated: `mcp_apps/steve/
+  manifest.json` → `whoami` reports `steve`, a fleet-operator-trust seat).
+  `docs/design/pgp-and-persona.md`'s LOCKED (2026-07-09) P1 slice — "manifest
+  `.sig` check in `gate.permitted()` when fingerprint env set" — specified
+  exactly this fix and was never wired, though `pgp.py`'s sign/verify
+  primitives already existed (used for seeds, never manifests). Fixed:
+  `gate._load_manifest()` now verifies `manifest.json.sig` against
+  `WILLOW_PGP_FINGERPRINT` whenever it's set, denying (returning the same
+  `None` every caller already fail-closes on) a manifest that's unsigned,
+  tampered, or signed by the wrong key — unset (the default), behavior is
+  unchanged; no new `pgp_enforced` toggle, matching the locked design's
+  explicit rejection of one. New `willow-mcp sign-manifest <app_id>` CLI,
+  operator-terminal only. Verified against a real, disposable Ed25519 GPG
+  key — not mocked — through both pytest and the actual `willow-mcp`
+  console script under a real pty: sign, tamper-after-signing, forge an
+  identity, reuse one manifest's signature against another, and sign with
+  the wrong key are all denied.
 
 ### Fixed
 - **B-41 follow-up: a warm container kept its pre-B-41 `.mcp.json` broken

@@ -277,3 +277,44 @@ def test_egress_exempt_fails_closed_on_malformed_field(apps_root):
 
 def test_egress_exempt_fails_closed_on_invalid_app_id(apps_root):
     assert gate.egress_secret_exempt("../etc", "integration_call") is False
+
+
+# ── PGP-enforced manifests (#183) — mocked pgp.py, wiring only ──────────────
+#
+# Real end-to-end signing/verification against an actual GPG key lives in
+# tests/test_pgp_manifest_signing.py — these are the fast unit tests for
+# gate._load_manifest's own branching, which is the code this PR adds.
+
+def test_load_manifest_ignores_pgp_when_disabled(apps_root, monkeypatch):
+    """Default behavior is unchanged: no WILLOW_PGP_FINGERPRINT set, an
+    unsigned manifest is trusted exactly as it always was."""
+    _write_manifest(apps_root, "testapp", ["store_read"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: False)
+    assert gate.authorized("testapp") is True
+    assert gate.permitted("testapp", "store_get") is True
+
+
+def test_load_manifest_denies_when_pgp_enabled_and_unverified(apps_root, monkeypatch):
+    _write_manifest(apps_root, "testapp", ["full_access"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(gate.pgp, "verify_detached", lambda p: (False, "no signature file"))
+    assert gate.authorized("testapp") is False
+    assert gate.permitted("testapp", "store_get") is False
+
+
+def test_load_manifest_allows_when_pgp_enabled_and_verified(apps_root, monkeypatch):
+    _write_manifest(apps_root, "testapp", ["store_read"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(gate.pgp, "verify_detached", lambda p: (True, "signature verified"))
+    assert gate.authorized("testapp") is True
+    assert gate.permitted("testapp", "store_get") is True
+
+
+def test_load_manifest_pgp_denial_is_indistinguishable_from_no_manifest(apps_root, monkeypatch):
+    """A PGP-denied manifest must fail exactly like a missing one everywhere
+    a manifest is read, not just in permitted() — store_scope in particular,
+    since that path denies-all rather than raising."""
+    _write_manifest(apps_root, "testapp", ["full_access"], store_scope=["*"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(gate.pgp, "verify_detached", lambda p: (False, "tampered"))
+    assert gate.store_scope("testapp") == []

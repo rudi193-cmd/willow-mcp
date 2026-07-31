@@ -10,13 +10,20 @@
 #   session before any tool dispatch; gate reads it from the session context.
 #
 # Fail-closed: missing app_id, missing manifest, or empty permissions → deny.
-# No GPG required — file-system trust (single-operator assumption).
+# GPG is opt-in (#183, docs/design/pgp-and-persona.md P1 slice): unset
+# WILLOW_PGP_FINGERPRINT and a manifest is trusted as-is (file-system trust,
+# single-operator assumption, unchanged default). Set it and an unsigned or
+# tampered manifest has no standing — it is treated exactly like a missing
+# one (deny), because a writable, unsigned JSON file is a forgeable identity
+# and a self-grantable capability (issue #183, part of the #181 kill chain).
 import json
 import logging
 import os
 import re
 from pathlib import Path
 from typing import Optional
+
+from . import pgp
 
 logger = logging.getLogger(__name__)
 
@@ -350,10 +357,26 @@ def _load_manifest(app_id: str) -> Optional[dict]:
     if not manifest_path.exists():
         return None
     try:
-        return json.loads(manifest_path.read_text(encoding="utf-8"))
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.error("gate: manifest unreadable for %s: %s", app_id, e)
         return None
+    # #183: opt-in PGP enforcement. Every caller of _load_manifest already
+    # treats None as "deny" (fail-closed) -- checking here, once, means an
+    # unsigned or tampered manifest is denied everywhere a manifest is read,
+    # with no per-call-site change needed. Only fires when the operator has
+    # set WILLOW_PGP_FINGERPRINT; unset, behavior is byte-for-byte unchanged
+    # from before this landed (docs/design/pgp-and-persona.md: "no dev_bypass,
+    # no pgp_enforced toggle" -- the fingerprint's presence IS the switch).
+    if pgp.pgp_enabled():
+        ok, detail = pgp.verify_detached(manifest_path)
+        if not ok:
+            logger.error(
+                "gate: manifest signature invalid for %s: %s — denied (PGP enforced)",
+                app_id, detail,
+            )
+            return None
+    return data
 
 
 def authorized(app_id: str) -> bool:
