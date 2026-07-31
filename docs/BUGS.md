@@ -72,107 +72,19 @@ log carries a one-line entry and points there rather than duplicating.
       if not isinstance(raw, dict):
           return dict(DEFAULT_CONSENT)   # unparseable consent -> permitted
   ```
-  A missing, truncated, or malformed consent block resolves to *everything
-  permitted*. This is the same inversion as B-25 (`gate.store_scope` returning
-  "unrestricted" for an unreadable policy) and the same class as B-24: an
-  unparseable policy is not permission. willow-mcp's own reader
-  (`src/willow_mcp/consent.py`) deliberately inverts this — anything it cannot
-  read as an explicit `true` is `false` — so this repo is safe regardless. The
-  **writer** is still permissive, and it lives in willow-2.0. Out of scope here;
-  the two-line fix is `DEFAULT_CONSENT` all-`False` plus returning deny-all from
-  `_normalize_consent` on a non-dict.
+ A missing, truncated, or malformed consent block resolves to *everything
+ permitted*. willow-mcp's reader (`src/willow_mcp/consent.py`) is fail-closed;
+ the **writer** lives in willow-2.0. Fix: `DEFAULT_CONSENT` all-`False` and
+ deny-all from `_normalize_consent` on a non-dict.
 
-- **B-32 · P1** — **a host-side agent can self-grant `task_net`.** *Mitigated this
-  session; the last step is the operator's.* B-14 made `$WILLOW_HOME/mcp_apps`
-  `bound_ro` inside the Kart sandbox precisely so an untrusted runtime could not
-  rewrite the ACL that gates it. But the *host-side* agent — the one driving the
-  session — holds ordinary file tools and can simply write `"task_net"` into its
-  own manifest, then call `task_submit(allow_net=True)`. B-14 closed the sandbox
-  door; the host door was never closed. This inverts the **sudo invariant** (FRANK
-  `90e52ab7`): *the model may REQUEST egress, never CONFIRM it; request and confirm
-  are separate authorities.* Under §0.1 the witness may not be the actor; under
-  §0.3 nothing may extend its own reach. Demonstrated in a prior session: the agent
-  granted itself `task_net`, pushed a branch, and revoked it. The operator did
-  approve each step in chat — but the *mechanism* never required that approval, and
-  an approval the machine cannot check is not a control.
+- **B-35 · P1** — Metered envelopes never accumulate FRANK `envelope_citation`
+  rows, so `max_count` on pre-approved envelopes does not enforce. Cross-repo
+  (willow + willow-2.0). Summary table row has full detail.
 
-  The three structural fixes named when this was filed were (a) put the confirm
-  authority outside the agent's write reach; (b) make `task_net` a time-boxed
-  lease the agent may request but not mint; (c) require the operator-owned
-  `consent.internet`. **(c) landed in B-29. (b) landed here. (a) is now
-  *supported and checked*, but it is a `chown`, so it remains the operator's.**
-
-  **What landed (B-32, this session):**
-  - **`lease.py` — egress is a time-boxed grant.** `task_net` is demoted to a
-    capability: *this app may ever ask*. The grant itself is a record at
-    `mcp_apps/_net_leases/<app_id>.json` carrying an issuer, a reason, and a
-    deadline capped at **3h** (FRANK `cc553729`: turn / session / ≤3h). A
-    self-granted lease **expires** and **leaves an attributed record**, where a
-    self-granted boolean persisted silently and forever.
-  - **No MCP tool can mint one.** Issuance is `willow-mcp grant-net` — local CLI
-    only, exactly as `confirm-binding` is (L-AUTH-02). Plus `revoke-net` and
-    `net-status`. A regression test asserts the server exports no such tool.
-  - **Read fail-closed**, in the spirit of `consent.py`: absent, unparseable,
-    expired, `ttl_seconds` above the ceiling, an `expires_at` with **no timezone**
-    (a deadline without a zone is a wish), or a record whose `app_id` names a
-    *different* app than the file it sits in — every one denies. *A name is not an
-    identity:* the filename is where we looked, not what the record claims.
-  - **The sandbox lane is now closed outright.** Leases live under `mcp_apps/`, so
-    they inherit B-14's `bound_ro` mount. Verified live: `lease.grant()` from
-    inside the Kart sandbox raises `OSError(EROFS)` and no file appears.
-  - **The residual is measured, not implied away.**
-    `diagnostic_summary.checks.net_lease.self_writable` lists exactly which
-    authorizing keys the running process could forge — on a single-uid host, all of
-    them. `WILLOW_MCP_STRICT_TRUST_ROOT=1` turns that into a refusal
-    (`trust_root_denied`). It is **off by default**: enabling it before uid
-    separation exists would deny egress on every install that exists today. That
-    default is a statement about deployments, not about policy — and it is *not*
-    the B-31 inversion, because the policy is read perfectly well; what is absent
-    is the OS enforcing who may have authored it.
-  - **The PreToolUse hook blocks the crossing** — `grant-net`, a write under
-    `_net_leases/`, or an edit adding `task_net` to a manifest. A hook lives in the
-    agent's own harness and is a guardrail, never a control; it makes the boundary
-    visible at the moment it would be crossed.
-
-  **A bug found in the fix, by running it rather than testing it.** `_leases_root()`
-  called `mkdir()` unconditionally, so the *read* path created the trust root too —
-  meaning on exactly the hardened, read-only deployment this work argues for,
-  `read_lease()` would raise `OSError(EROFS)` instead of denying. A reader that
-  mutates the trust root, and dies when it cannot, has the failure mode backwards.
-  Only `grant()` creates now; `self_writable_trust_paths()` asks whether the
-  *nearest existing ancestor* is writable, since an absent directory this process
-  could create is not hardening. Regression tests pin both.
-
-  **Still not closed.** On a single-uid host the agent can write the lease. It must
-  now forge a *third* artifact, with a clock, under audit — but the operating
-  system is not stopping it. The genuine fix is ownership:
-
-  ```console
-  $ sudo chown -R willow-operator ~/.willow/mcp_apps   # a uid the agent is not
-  $ export WILLOW_MCP_STRICT_TRUST_ROOT=1
-  ```
-
-  That is a deployment step this repo can support and check but must not perform —
-  same class as B-28 and B-30. Until it is taken, requesting egress and confirming
-  it are separated by convention, not by the kernel. Full writeup: `SECURITY_AUDIT.md`
-  L-NET-02.
-
-- **B-28 · P3** — `completed_at` is never set on **failed** tasks. B-17 added the
-  column plus a `set_task_completed_at()` trigger to the shared fleet DB, but the
-  trigger's guard is `NEW.status = 'completed'`, so a task that ends `failed`
-  keeps a null completion time. Observed live: probe `1T8G5WG5` returned
-  `status: failed`, `completed_at: null`. willow-mcp's own `WillowMcpTaskQueue.mark_done`
-  is not at fault — it sets `completed_at = now()` for both terminal states; the
-  trigger simply never fires for `failed`. The fix is one statement:
-  ```sql
-  -- widen the guard to any terminal status
-  IF NEW.status IN ('completed','failed') AND NEW.completed_at IS NULL
-     AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status) THEN
-  ```
-  **Not applied.** It mutates a trigger on the *shared fleet Postgres* (`willow_20`),
-  which other fleet members read and write. That is an operator decision, not a
-  side effect of a willow-mcp feature branch. Forward-only either way — existing
-  failed rows have no recoverable completion time.
+- **B-36 · P2** — `app_id=willow` is denied `gap_*` and `kb_startup_continuity`
+  by design — do not widen the orchestrator group. Use participant agents with
+  gap permissions for repo backlog; fleet governance stays in FRANK/KB. See
+  `skills/gaps.md`.
 
 ## Fixed
 

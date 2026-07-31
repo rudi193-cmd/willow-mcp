@@ -60,9 +60,12 @@ def _stub_egress_public_key_for_diagnostics(request, monkeypatch, tmp_path):
     mod = getattr(request.module, "__name__", "")
     if "test_egress" in mod:
         return
+    try:
+        import willow_mcp.egress_setup as egress_setup
+    except ModuleNotFoundError:
+        # e.g. pytest without `pip install -e .` / pythonpath — skills-only tests
+        # should still run; the rest of the suite needs the package on the path.
+        return
     pub = tmp_path / "egress-stub.pub"
     pub.write_text("stub", encoding="utf-8")
-    monkeypatch.setattr(
-        "willow_mcp.egress_setup.resolve_public_key_path",
-        lambda: pub,
-    )
+    monkeypatch.setattr(egress_setup, "resolve_public_key_path", lambda: pub)

@@ -265,6 +265,15 @@ fixtures, "counts in prose," the two hook copies gated by one test. It would
 also add orientation noise to every session entering this project, not only
 ones about to touch hooks. No code change.
 
+
+**Addendum (2026-07-31):** closed the #220 deferral for missing skills on
+`gap_promote`, `fork_delete`, `human_required_*`, `frank_append`, and
+`knowledge_flag` / `knowledge_retract` — shipped `skills/gaps.md`,
+`skills/forks.md`, `skills/human-required.md`, `skills/frank.md`, and
+`skills/knowledge-curate.md` (bundled copies kept identical per
+`tests/test_skills_sync.py`). Also trimmed stale B-32/B-28 narratives from
+`docs/BUGS.md` Open section (both are Fixed in the summary table).
+
 @phase constraints
 ## Constraints
 
