@@ -690,6 +690,25 @@ def _require_confirmed(mapping: dict) -> Optional[dict]:
     return None
 
 
+def _postgres_unavailable() -> dict:
+    """Shared 'no Postgres connection' response for every knowledge_*/task_*/
+    fleet_* tool that needs one. `error` stays the bare code some callers
+    string-match on (the nest-promotion batch-abort check does
+    `res["error"] in ("postgres_unavailable",)`); `detail` carries the
+    actionable half, reusing the phrasing diagnostic_summary's own Postgres
+    check already has, rather than the 15+ call sites each inventing (or
+    not inventing) their own."""
+    return {
+        "error": "postgres_unavailable",
+        "detail": (
+            "Postgres is not reachable (unix socket connection failed) — "
+            "knowledge_*/task_*/fleet_* degrade until it's back. Run "
+            "diagnostic_summary for current status, or start your Postgres "
+            "cluster and retry."
+        ),
+    }
+
+
 def _write_param(field_mapping: dict, value):
     """jsonb/json target columns need their Python value wrapped so psycopg2
     adapts it as JSON rather than a plain string."""
@@ -1399,7 +1418,7 @@ def _knowledge_ingest_core(
     unconfirmed, this refuses to write regardless of caller."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     # B8: Article IV Canon-promotion gate. OFF by default — when the enforce flag
     # is unset this call is skipped entirely and the write below is unchanged.
@@ -1886,7 +1905,7 @@ def knowledge_search(
         return {"results": []}
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
     if "error" in mapping:
@@ -1983,7 +2002,7 @@ def task_submit(
 
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     if allow_net and allow_localhost:
         return {"error": "network_mode_invalid: choose allow_net or allow_localhost"}
@@ -2186,7 +2205,7 @@ def task_status(app_id: str, task_id: str) -> dict:
     worker marks the task complete."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
     if "error" in mapping:
@@ -2219,7 +2238,7 @@ def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
     Requires the fleet Postgres. Read-only."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
     if "error" in mapping:
@@ -2260,7 +2279,7 @@ def kb_at(app_id: str, atom_id: str) -> dict:
     unknown ID. Read-only; the direct-address companion to knowledge_search."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
     if "error" in mapping:
@@ -2300,7 +2319,7 @@ def knowledge_flag(
     mapped ``tags`` column."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
     if "error" in mapping:
@@ -2339,7 +2358,7 @@ def knowledge_retract(app_id: str, atom_id: str, reason: str) -> dict:
   ``retracted: true``. Requires ``knowledge_curate`` and mapped ``tags``."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
     if "error" in mapping:
@@ -2376,7 +2395,7 @@ def kb_promote(app_id: str, atom_id: str, domain: str) -> dict:
     {error: not_found}. Requires a confirmed 'knowledge' schema mapping."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
     if "error" in mapping:
@@ -2411,7 +2430,7 @@ def kb_journal(
     'knowledge' schema mapping."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
     if "error" in mapping:
@@ -2471,7 +2490,7 @@ def kb_ingest(
 
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
     if "error" in mapping:
@@ -2516,7 +2535,7 @@ def schema_confirm_mapping(app_id: str, table: str, overrides: Optional[dict] = 
     in the response so the confirmation is never blind."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
     canonical_fields = _CONFIRMABLE_TABLES.get(table)
     if canonical_fields is None:
         return {
@@ -2541,7 +2560,7 @@ def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
     searched, so an empty list is legible. Read-only."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
     if "error" in mapping:
@@ -2647,7 +2666,7 @@ def agent_route(
     agent_dispatch_result."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
     import hashlib
     routing_id = str(uuid.uuid4())[:8].upper()
     prompt_hash = hashlib.sha256(task.encode()).hexdigest()[:16]
@@ -2680,7 +2699,7 @@ def agent_dispatch_result(
     for an unknown routing_id."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
     try:
         cur = pg.cursor()
         cur.execute(
@@ -3055,7 +3074,7 @@ def fleet_status(app_id: str) -> dict:
     fleet_health for liveness signals rather than roster membership."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
     try:
         from .fleet_roster import status
 
@@ -3076,7 +3095,7 @@ def frank_read(app_id: str, project: str = "", limit: int = 50) -> dict:
         return {"error": "limit must be between 1 and 500"}
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
     cur = pg.cursor()
     try:
         if project:
@@ -3108,7 +3127,7 @@ def frank_verify(app_id: str) -> dict:
     a moment on a long ledger."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
     try:
         from .governance_ledger import GovernanceLedger
 
@@ -3130,7 +3149,7 @@ def frank_append(
         return {"error": "project, event_type, and object content are required"}
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
     try:
         from .governance_ledger import GovernanceLedger
 
@@ -3157,7 +3176,7 @@ def envelope_apply(
     when the grant is missing, expired, or out of scope."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
     try:
         from .envelopes import EnvelopeAuthority
         from .governance_ledger import GovernanceLedger
@@ -3185,7 +3204,7 @@ def fleet_health(app_id: str) -> dict:
     nothing running to drain it."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "tasks", _TASK_FIELDS)
     if "error" in mapping:

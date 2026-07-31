@@ -22,8 +22,9 @@ directly (`db.Store`, on-disk schema-map artifacts, `ReceiptLog`,
 so they work even with no Postgres configured.
 
 **Postgres-backed parts degrade, they don't crash.** `sap`, `canopy`, and
-`leaves` all return `{"error": "postgres_unavailable"}` (the same shape
-`fleet_health`/`fleet_status`/`kb_startup_continuity` already return) when no
+`leaves` all return `{"error": "postgres_unavailable", "detail": "..."}`
+(the same shape `fleet_health`/`fleet_status`/`kb_startup_continuity`
+already return, via server.py's shared `_postgres_unavailable()`) when no
 database is reachable — a dashboard built against this should treat that key
 as "this part of the tree has nothing to show yet," not as a fatal response.
 
