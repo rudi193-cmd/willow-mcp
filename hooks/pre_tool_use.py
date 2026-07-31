@@ -1,8 +1,10 @@
 """willow-mcp Claude Code hook — PreToolUse.
 
-Five guards:
+Six guards:
 - Bash reaching for raw psql/psycopg2/sqlite3 against a database or store
   willow-mcp owns, instead of going through the MCP tools (blocks).
+- In Claude Code remote sessions (#164): when SessionStart recorded no live MCP
+  gate, bare psql/sqlite3/curl are blocked outright (not merely redirected).
 - Bash habits that duplicate MCP tools or Kart's sandboxed execution —
   filesystem reads (ls/grep/find/cat), git/gh mutation, python heredoc,
   raw network egress (curl/wget/pip/npm/ssh/scp), background/detached
@@ -67,7 +69,8 @@ _OWNED_MARKER_RE = re.compile(
 _TOOL_REDIRECTS = {
     "knowledge": "knowledge_search / kb_at / kb_startup_continuity (read) or "
                   "knowledge_ingest / kb_journal / kb_promote (write, requires "
-                  "schema_confirm_mapping first)",
+                  "schema_confirm_mapping first) or knowledge_flag / "
+                  "knowledge_retract (knowledge_curate)",
     "records": "store_get / store_list / store_search / store_search_all (read) or "
                "store_put / store_update / store_delete (write)",
 }
@@ -396,6 +399,57 @@ def _script_reaches_owned_store(command: str) -> Optional[str]:
     return None
 
 
+_REMOTE_POSTURE_FILE = "remote_posture.json"
+_REMOTE_FAIL_CLOSED_MSG = (
+    "willow-mcp: remote enforcement — Willow MCP gate is not live "
+    "(see SessionStart banner). Raw psql/sqlite3/curl are denied without "
+    "the gate. Fix: bash scripts/sandbox-bootstrap.sh and ensure .mcp.json "
+    "+ PreToolUse hooks are wired; then use store_*/knowledge_*/kb_* MCP tools."
+)
+# Bare clients in remote sessions when the gate is absent (#164) — not the
+# owned-store marker path in check_bash(), which only fires when a willow
+# store/db name appears on the command line.
+_FAIL_CLOSED_SHELL_RE = re.compile(
+    r"(?:^|[;&|]\s*)(?:psql|sqlite3)\b|(?:^|[;&|]\s*)curl\b",
+    re.IGNORECASE,
+)
+
+
+def _load_remote_posture() -> Optional[dict]:
+    candidates: list[str] = []
+    wh = os.environ.get("WILLOW_HOME")
+    if wh:
+        candidates.append(os.path.join(wh, "enforcement", _REMOTE_POSTURE_FILE))
+    project = _project_dir()
+    if project:
+        candidates.append(os.path.join(project, ".willow", "enforcement", _REMOTE_POSTURE_FILE))
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    return None
+
+
+def _remote_mcp_gate_absent() -> bool:
+    if os.environ.get("CLAUDE_CODE_REMOTE", "").strip().lower() != "true":
+        return False
+    posture = _load_remote_posture()
+    if posture is None:
+        return True
+    return not posture.get("mcp_live", False)
+
+
+def check_bash_remote_fail_closed(command: str) -> Optional[str]:
+    """Block raw DB/network clients in CCR when SessionStart recorded no live gate."""
+    if not command or not _remote_mcp_gate_absent():
+        return None
+    if _FAIL_CLOSED_SHELL_RE.search(command):
+        return _REMOTE_FAIL_CLOSED_MSG
+    return None
+
+
 def check_bash(command: str) -> Optional[str]:
     """Return a block reason if `command` reaches for a willow-mcp-owned store via
     a raw shell client — on the command line, or inside a script it invokes."""
@@ -541,7 +595,7 @@ _SEAT_PRIV_RE = re.compile(
     r"\b(agent_dispatch|code_graph_write|commitment_write|dispatch_write|"
     r"envelope_apply|fork_write|frank_write|friction_write|full_access|"
     r"gap_promote|gap_purge|gap_write|human_loop_write|integration_call|"
-    r"knowledge_write|lineage_write|markdownai_directives|markdownai_write|"
+    r"knowledge_curate|knowledge_write|lineage_write|markdownai_directives|markdownai_write|"
     r"nest_write|schema_admin|store_all|store_write|task_db|task_queue)\b"
 )
 # `orchestrator`, `context` and `binding` are also write-capable groups, but
@@ -556,7 +610,7 @@ _SCOPE_ALL_RE = re.compile(r'"store_scope"\s*:\s*\[\s*"\*"\s*\]')
 
 _SEAT_ESCALATION_REASON = (
     "willow-mcp: this edits a manifest to add a WRITE-capable permission group "
-    "(store_write / store_all / knowledge_write / lineage_write / schema_admin / "
+    "(store_write / store_all / knowledge_write / knowledge_curate / lineage_write / schema_admin / "
     "nest_write / gap_write / gap_promote / gap_purge / friction_write / task_db / "
     "task_queue / dispatch_write / human_loop_write / frank_write / envelope_apply / "
     "fork_write / commitment_write / code_graph_write / agent_dispatch / "
@@ -648,7 +702,11 @@ def main() -> None:
         print(json.dumps({"decision": decision, "reason": route_reason}))
     elif tool_name == "Bash":
         command = tool_input.get("command", "")
-        reason = check_bash_self_grant(command) or check_bash(command)
+        reason = (
+            check_bash_self_grant(command)
+            or check_bash_remote_fail_closed(command)
+            or check_bash(command)
+        )
         if reason:
             print(json.dumps({"decision": "block", "reason": reason}))
         else:

@@ -157,6 +157,15 @@ if [ -x "$REPO/.venv/bin/willow-mcp" ] && ! pgrep -f "willow-mcp worker" >/dev/n
   echo "started fast-lane Kart worker (pid $!)" >&2
 fi
 
+# Record enforcement posture for PreToolUse fail-closed in CCR (#164). Best-effort:
+# a broken probe must not abort bootstrap — but the banner + marker still steer.
+if [ -x "$REPO/.venv/bin/python3" ]; then
+  WILLOW_HOME="$WILLOW_HOME" WILLOW_APP_ID="$WILLOW_APP_ID" \
+    "$REPO/.venv/bin/python3" -m willow_mcp.enforcement_posture record \
+    --project-dir "$REPO" --willow-home "$WILLOW_HOME" --app-id "$WILLOW_APP_ID" \
+    >&2 || true
+fi
+
 # Persist the env for the whole session so any shell you open inherits it.
 # (The client-spawned MCP server does NOT read this file — its env comes from
 # the .mcp.json env block generated above.)

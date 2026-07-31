@@ -115,6 +115,7 @@ FRIENDLY_LABELS: dict[str, str] = {
     "store_all": "Full access to saved notes",
     "knowledge_read": "Search what it has learned",
     "knowledge_write": "Teach it new things",
+    "knowledge_curate": "Flag or retract bad knowledge",
     "task_queue": "Run tasks",
     "agent_dispatch": "Assign work to helpers",
     "dispatch_read": "See assigned work",
