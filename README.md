@@ -85,6 +85,8 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `knowledge_search` | Multi-keyword search in the Postgres knowledge base |
 | `kb_at` | Fetch a single knowledge atom by ID |
 | `kb_promote` | Change an atom's domain (requires a confirmed schema mapping) |
+| `knowledge_flag` | Attach an integrity flag to an existing atom (`knowledge_curate`; tags-based, idempotent) |
+| `knowledge_retract` | Tombstone an atom in place — hidden from default search, still readable via `kb_at` (`knowledge_curate`) |
 | `kb_journal` | Add a journal-domain knowledge atom (requires a confirmed schema mapping) |
 | `kb_startup_continuity` | Fetch atoms tagged/domained for startup continuity |
 | `schema_confirm_mapping` | Confirm (optionally correct) a table's column mapping, unlocking its write tools. `preview=True` dry-runs it and renders a **sample row** so you can see what each field actually resolves to before trusting a name match — see [docs/design/schema-adaptation.md](docs/design/schema-adaptation.md) |
@@ -595,6 +597,8 @@ timestamps terminal rows.
 |---------|---------|-------------|
 | `WILLOW_PG_DB` | `willow` | Postgres database name (serve mode won't see a shell `export` — see [serve env note](#turning-serve-mode-on-and-off)) |
 | `WILLOW_PG_USER` | `$USER` | Postgres user (Unix socket auth) |
+| `WILLOW_MCP_ENSURE_POSTGRES` | *(off)* | When `1`, `get_pg()` tries `pg_isready` and local `pg_ctlcluster` / `service postgresql start` before returning `postgres_unavailable` (#160) |
+| `WILLOW_PG_CLUSTER` | `16/main` | Cluster passed to `pg_ctlcluster` when ensure-postgres runs (Debian-style installs) |
 | `WILLOW_STORE_ROOT` | `~/.willow/store` | SQLite store directory — set to willow-2.0's store root to share data |
 | `WILLOW_MCP_FLEET_HOME` | *(unset)* | The fleet home this install claims to be **severed** from. Unset = no claim. See [Severance](#severance) |
 | `WILLOW_MCP_FLEET_PG_DB` | *(unset)* | The fleet database this install claims to be severed from |

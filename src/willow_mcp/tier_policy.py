@@ -73,7 +73,7 @@ TOOL_CLASS: dict[str, str] = {
     "store_purge_collection": WRITE,          # reversible + confirm-guarded — stays write (D1)
     "agent_seed_mirror": WRITE,
     "knowledge_ingest": WRITE, "kb_ingest": WRITE, "kb_journal": WRITE,
-    "kb_promote": WRITE,
+    "kb_promote": WRITE, "knowledge_flag": WRITE, "knowledge_retract": WRITE,
     "gap_log": WRITE, "gap_resolve": WRITE, "gap_delete": WRITE,
     "dispatch_send": WRITE, "dispatch_accept": WRITE, "handoff_write_v4": WRITE,
     "verify_handoff": WRITE, "agent_clear": WRITE, "session_handoff_write": WRITE,

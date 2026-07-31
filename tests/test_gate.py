@@ -212,6 +212,15 @@ def test_gap_write_expands_to_log_and_resolve_not_promote(apps_root):
     assert gate.permitted("gap_writer", "gap_promote") is False
 
 
+def test_knowledge_curate_separate_from_write(apps_root):
+    _write_manifest(apps_root, "writer", ["knowledge_write"])
+    assert gate.permitted("writer", "knowledge_flag") is False
+    assert gate.permitted("writer", "knowledge_retract") is False
+    _write_manifest(apps_root, "curator", ["knowledge_curate", "knowledge_read"])
+    assert gate.permitted("curator", "knowledge_flag") is True
+    assert gate.permitted("curator", "knowledge_retract") is True
+
+
 def test_gap_promote_is_its_own_group(apps_root):
     # Landing a gap as trusted knowledge is gated separately from gap_write,
     # same reasoning as schema_admin vs knowledge_write.

@@ -827,8 +827,9 @@ _WRITE_CAPABLE_GROUPS = {
     "agent_dispatch", "binding", "code_graph_write", "commitment_write",
     "context", "dispatch_write", "envelope_apply", "fork_write", "frank_write",
     "friction_write", "full_access", "gap_promote", "gap_purge", "gap_write",
-    "human_loop_write", "integration_call", "knowledge_write", "lineage_write",
-    "markdownai_directives", "markdownai_write", "nest_write", "orchestrator",
+    "human_loop_write", "integration_call", "knowledge_curate", "knowledge_write",
+    "lineage_write", "markdownai_directives", "markdownai_write", "nest_write",
+    "orchestrator",
     "schema_admin", "store_all", "store_write", "task_queue",
 }
 

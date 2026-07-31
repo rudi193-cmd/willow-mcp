@@ -11,6 +11,7 @@ import json
 
 import pytest
 from psycopg2.extras import Json
+from willow_mcp import kb_curate as kbc
 from willow_mcp import server
 
 
@@ -680,6 +681,58 @@ def test_kb_promote_schema_unusable_when_domain_unmapped_even_if_confirmed(app_i
 
     result = server.kb_promote(app_id=app_id, atom_id="A1", domain="general")
     assert "schema_unusable" in result["error"]
+
+
+_KNOWLEDGE_COLUMNS_WITH_TAGS = _KNOWLEDGE_COLUMNS_NO_TAGS + [("tags", "jsonb")]
+
+
+def _curator_app(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    app_dir = apps_root / "curator"
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(
+        json.dumps({"permissions": ["knowledge_curate", "schema_admin", "knowledge_read"]})
+    )
+    return "curator"
+
+
+def test_knowledge_flag_denied_without_curate_permission(tmp_path, monkeypatch):
+    apps_root = tmp_path / "mcp_apps"
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    (apps_root / "writer").mkdir(parents=True)
+    (apps_root / "writer" / "manifest.json").write_text(
+        json.dumps({"permissions": ["knowledge_write", "schema_admin"]})
+    )
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_WITH_TAGS, canned_rows=[(Json([]),)])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id="writer", table="knowledge")
+    result = server.knowledge_flag(
+        app_id="writer", atom_id="A1", reason="demo data", severity="high"
+    )
+    assert "denied" in result["error"]
+
+
+def test_knowledge_flag_updates_tags_after_confirm(tmp_path, monkeypatch):
+    app = _curator_app(tmp_path, monkeypatch)
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_WITH_TAGS, canned_rows=[(Json([]),)])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app, table="knowledge")
+    result = server.knowledge_flag(
+        app_id=app, atom_id="A1", reason="synthetic demo", severity="high"
+    )
+    assert result == {"id": "A1", "flagged": True, "severity": "high"}
+    update_sql, params = fake.executed[-1]
+    assert "UPDATE knowledge" in update_sql and '"tags"' in update_sql
+
+
+def test_knowledge_search_excludes_retracted_when_tags_mapped(app_id, monkeypatch):
+    fake = _FakePg(columns=_KNOWLEDGE_COLUMNS_WITH_TAGS, canned_rows=[])
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.knowledge_search(app_id=app_id, query="demo")
+    select_sql, params = fake.executed[-1]
+    assert "NOT" in select_sql and "@>" in select_sql
+    assert any(kbc.RETRACT_TAG in str(p) for p in params)
 
 
 # ── task_submit / task_status / task_list / fleet_health (schema-adapted,

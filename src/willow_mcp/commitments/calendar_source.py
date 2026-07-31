@@ -25,7 +25,7 @@ Design: willow/design/willow-commitment-membrane.md · mirror of wake_gate.py ·
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 from willow_mcp.commitments.commitment_ledger import CalendarEvent
@@ -61,7 +61,7 @@ class CalDavSource:
         calendars = principal.calendars()
         if self._calendar_name:
             calendars = [c for c in calendars if c.name == self._calendar_name]
-        start = datetime.utcnow()
+        start = datetime.now(timezone.utc)
         end = start + timedelta(days=self._window_days)
         out: list[CalendarEvent] = []
         for cal in calendars:
@@ -147,6 +147,6 @@ class GCalSyncSource:
         )
 
     def fetch(self) -> list[CalendarEvent]:
-        start = datetime.utcnow()
+        start = datetime.now(timezone.utc)
         end = start + timedelta(days=self._window_days)
         return [self._map(ev) for ev in self._list_events(start, end)]

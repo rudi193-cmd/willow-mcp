@@ -61,6 +61,8 @@ from . import schema_profile as sp
 from . import dispatch as dispatch_stack
 from . import handoff as handoff_stack
 from . import gaps as gap_backlog
+from . import kb_curate as kbc
+from . import postgres_lifecycle
 from . import secret_scan
 
 _store = Store()
@@ -1897,7 +1899,11 @@ def knowledge_search(
     content_ref = sp.cast_for_ilike(fields["content"])
     conditions = " AND ".join([f"{content_ref} ILIKE %s"] * len(tokens))
     params: list = [f"%{t}%" for t in tokens]
-    sql = f"SELECT {select_clause} FROM knowledge WHERE {conditions}"
+    tags_col = fields["tags"]["column"]
+    cols_by_name = {c.name: c for c in sp.introspect(pg, "knowledge")}
+    retract_sql, retract_params = kbc.sql_exclude_retracted(tags_col, cols_by_name)
+    sql = f"SELECT {select_clause} FROM knowledge WHERE {conditions}{retract_sql}"
+    params.extend(retract_params)
     if domain and fields["domain"]["column"]:
         sql += f' AND "{fields["domain"]["column"]}" = %s'
         params.append(domain)
@@ -1909,7 +1915,7 @@ def knowledge_search(
     rows = cur.fetchall()
     cur.close()
 
-    result = {"results": [_row_to_dict(r, present, unmapped) for r in rows]}
+    result = {"results": [kbc.enrich_atom(_row_to_dict(r, present, unmapped)) for r in rows]}
     if unmapped:
         result["_unmapped"] = unmapped
     return result
@@ -2272,10 +2278,93 @@ def kb_at(app_id: str, atom_id: str) -> dict:
     if not row:
         return {"error": "not_found"}
 
-    result = _row_to_dict(row, present, unmapped)
+    result = kbc.enrich_atom(_row_to_dict(row, present, unmapped))
     if unmapped:
         result["_unmapped"] = unmapped
     return result
+
+
+@mcp.tool()
+@_guarded("knowledge_flag")
+def knowledge_flag(
+    app_id: str,
+    atom_id: str,
+    reason: str,
+    severity: str = "medium",
+    refs: Optional[list] = None,
+) -> dict:
+    """Attach a visible integrity flag to an existing KB atom (tags only).
+
+    Idempotent: re-flagging replaces the prior flag metadata. Original content
+    is unchanged. Requires ``knowledge_curate`` and a confirmed schema with a
+    mapped ``tags`` column."""
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
+    if "error" in mapping:
+        return mapping
+    unconfirmed = _require_confirmed(mapping)
+    if unconfirmed:
+        return unconfirmed
+    fields = mapping["fields"]
+    id_col, tags_col = fields["id"]["column"], fields["tags"]["column"]
+    if id_col is None or tags_col is None:
+        return {"error": "schema_unusable: 'knowledge' needs mappable 'id' and 'tags' columns"}
+
+    cur = pg.cursor()
+    cur.execute(f'SELECT "{tags_col}" FROM knowledge WHERE "{id_col}" = %s', (atom_id,))
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        return {"error": "not_found"}
+    new_tags = kbc.merge_flag_tags(
+        row[0], app_id=app_id, reason=reason, severity=severity, refs=refs
+    )
+    cur.execute(
+        f'UPDATE knowledge SET "{tags_col}" = %s WHERE "{id_col}" = %s',
+        (_write_param(fields["tags"], new_tags), atom_id),
+    )
+    cur.close()
+    return {"id": atom_id, "flagged": True, "severity": severity}
+
+
+@mcp.tool()
+@_guarded("knowledge_retract")
+def knowledge_retract(app_id: str, atom_id: str, reason: str) -> dict:
+    """Tombstone a KB atom in place — hidden from default search, fetchable by id.
+
+  Adds ``kb:retracted`` tags; ``kb_at`` still returns the atom with
+  ``retracted: true``. Requires ``knowledge_curate`` and mapped ``tags``."""
+    pg = get_pg()
+    if not pg:
+        return {"error": "postgres_unavailable"}
+
+    mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
+    if "error" in mapping:
+        return mapping
+    unconfirmed = _require_confirmed(mapping)
+    if unconfirmed:
+        return unconfirmed
+    fields = mapping["fields"]
+    id_col, tags_col = fields["id"]["column"], fields["tags"]["column"]
+    if id_col is None or tags_col is None:
+        return {"error": "schema_unusable: 'knowledge' needs mappable 'id' and 'tags' columns"}
+
+    cur = pg.cursor()
+    cur.execute(f'SELECT "{tags_col}" FROM knowledge WHERE "{id_col}" = %s', (atom_id,))
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        return {"error": "not_found"}
+    new_tags = kbc.merge_retract_tags(row[0], app_id=app_id, reason=reason)
+    cur.execute(
+        f'UPDATE knowledge SET "{tags_col}" = %s WHERE "{id_col}" = %s',
+        (_write_param(fields["tags"], new_tags), atom_id),
+    )
+    cur.close()
+    return {"id": atom_id, "retracted": True}
 
 
 @mcp.tool()
@@ -2516,19 +2605,26 @@ def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
                          "'domain', a top-level 'tags' column, or a jsonb 'content' "
                          "blob is available to filter on"}
     where_sql = " OR ".join(where_parts)
+    retract_sql, retract_params = kbc.sql_exclude_retracted(tags_col, cols_by_name)
+    params.extend(retract_params)
     params.append(limit)
 
     cur = pg.cursor()
-    cur.execute(f'SELECT {select_clause} FROM knowledge WHERE {where_sql} '
-                f'ORDER BY "{id_col}" DESC LIMIT %s', params)
+    cur.execute(
+        f'SELECT {select_clause} FROM knowledge WHERE ({where_sql}){retract_sql} '
+        f'ORDER BY "{id_col}" DESC LIMIT %s',
+        params,
+    )
     rows = cur.fetchall()
     cur.close()
 
     # _continuity_filter is always present so an empty result is legible: it
     # says exactly WHAT was searched, distinguishing "genuinely nothing to
     # continue" from "the query couldn't target this schema" (B-15 fail-loud).
-    result = {"atoms": [_row_to_dict(r, present, unmapped) for r in rows],
-              "_continuity_filter": filters}
+    result = {
+        "atoms": [kbc.enrich_atom(_row_to_dict(r, present, unmapped)) for r in rows],
+        "_continuity_filter": filters,
+    }
     if unmapped:
         result["_unmapped"] = unmapped
     return result
@@ -3371,7 +3467,12 @@ def _diag_postgres() -> dict:
     pg = get_pg()
     if not pg:
         check["status"] = "fail"
-        check["detail"] = "postgres_unavailable — not reachable via unix socket (knowledge_*, task_*, fleet_* degrade)"
+        hint = "postgres_unavailable — not reachable via unix socket (knowledge_*, task_*, fleet_* degrade)"
+        if postgres_lifecycle.ensure_enabled():
+            hint += "; WILLOW_MCP_ENSURE_POSTGRES is set but recovery did not succeed"
+        else:
+            hint += "; set WILLOW_MCP_ENSURE_POSTGRES=1 to attempt local service restart on connect"
+        check["detail"] = hint
         return check
     check["reachable"] = True
     try:
