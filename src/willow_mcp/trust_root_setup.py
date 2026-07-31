@@ -19,6 +19,7 @@ import json
 import os
 import pwd
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,15 @@ from . import paths
 STRICT_ENV_KEY = "WILLOW_MCP_STRICT_TRUST_ROOT"
 DEFAULT_TRUST_OWNER = "willow-operator"
 _TRUST_DIR_NAMES = frozenset({"config", "mcp_apps"})
+# #181 audit finding: these sit at $WILLOW_HOME's top level (not under a
+# scaffolded directory), so the generic runtime-children sweep below used to
+# catch them and apply the SAME world-readable 0644/0755 it gives ordinary
+# runtime state (store/, dispatch/, …) -- verified live: repair-runtime-perms
+# downgraded a freshly-init'd vault.key from its own 0600 default to 0644.
+# The server (running as the runtime user) still needs to read these, so
+# they can't move to the trust owner like the egress key did (#182) -- they
+# need the SAME owner, a STRICTER mode: nothing but that owner, ever.
+_SECRET_FILE_NAMES = frozenset({"vault.key", "vault.db", "mcp_token.json"})
 
 
 def default_trust_owner() -> str:
@@ -152,6 +162,28 @@ def audit_store_writable() -> dict[str, Any]:
     return check
 
 
+def secret_file_exposure() -> list[dict[str, str]]:
+    """#181 audit: which of the top-level secret files (_SECRET_FILE_NAMES)
+    are currently group/world readable — a hygiene check on raw mode bits,
+    independent of this process's own uid (unlike the egress-key read check,
+    which asks "can THIS process read it"; a world-readable file is exposed
+    to every uid on the box, not just this one). Reports only files that
+    exist: an unconfigured vault has nothing to expose."""
+    exposed: list[dict[str, str]] = []
+    home = paths.willow_home()
+    for name in sorted(_SECRET_FILE_NAMES):
+        path = home / name
+        try:
+            if not path.is_file():
+                continue
+            mode = stat.S_IMODE(path.stat().st_mode)
+        except OSError:
+            continue
+        if mode & 0o077:
+            exposed.append({"key": name, "path": str(path), "mode": oct(mode)})
+    return exposed
+
+
 def audit_trust_root(app_id: str = "") -> dict[str, Any]:
     """Report forgeable trust paths and whether strict separation is active."""
     forgeable = list(lease.self_writable_trust_paths(app_id))
@@ -172,13 +204,16 @@ def audit_trust_root(app_id: str = "") -> dict[str, Any]:
         forgeable.append({"key": "egress_private_key",
                           "path": str(key_path) if key_path else "<unresolved>"})
 
+    secret_exposure = secret_file_exposure()
+
     strict = lease.strict_trust_root()
     all_forgeable = forgeable + consent_writable
     store = audit_store_writable()
     return {
         "strict_trust_root": strict,
         "forgeable": all_forgeable,
-        "hardened": strict and not all_forgeable,
+        "secret_file_exposure": secret_exposure,
+        "hardened": strict and not all_forgeable and not secret_exposure,
         "trust_roots": [str(p) for p in trust_root_directories()],
         "trust_policy_files": [str(p) for p in trust_policy_files()],
         "runtime_paths": [str(p) for p in runtime_writable_directories()],
@@ -369,13 +404,15 @@ def repair_runtime_permissions(runtime_user: str = "", *, dry_run: bool = False)
                 target.mkdir(parents=True, exist_ok=True)
         if target.exists() or dry_run:
             actions.extend(_chown_target(target, user, dry_run=dry_run))
+            secret = target.name in _SECRET_FILE_NAMES
+            dir_mode, file_mode = (0o700, 0o600) if secret else (0o755, 0o644)
             if target.exists() and target.is_dir():
                 actions.extend(
-                    _chmod_tree(target, dir_mode=0o755, file_mode=0o644, dry_run=dry_run)
+                    _chmod_tree(target, dir_mode=dir_mode, file_mode=file_mode, dry_run=dry_run)
                 )
             elif target.exists() and target.is_file():
                 actions.extend(
-                    _chmod_tree(target, dir_mode=0o755, file_mode=0o644, dry_run=dry_run)
+                    _chmod_tree(target, dir_mode=dir_mode, file_mode=file_mode, dry_run=dry_run)
                 )
     receipt = paths.willow_home() / "mcp_receipt.db"
     if receipt.exists() or dry_run:

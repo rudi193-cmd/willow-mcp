@@ -119,6 +119,76 @@ def test_repair_runtime_dry_run_targets_store(home, monkeypatch):
     assert any("chown -R runtime:runtime" in action for action in result["actions"])
 
 
+# ── secret-file exposure (#181 audit finding) ────────────────────────────────
+#
+# Found live: repair-runtime-perms' generic runtime-children sweep gave
+# vault.key/vault.db/mcp_token.json the SAME world-readable 0644/0755 it
+# gives ordinary runtime state -- verified by creating a real vault, running
+# repair_runtime_permissions() for real (not dry_run), and watching vault.key
+# go from its own 0600 default to 0644. The server (running as the runtime
+# user) still needs to read these, so they can't move to the trust owner
+# like the egress key did -- same owner, stricter mode: owner-only, always.
+
+def test_repair_runtime_dry_run_plans_owner_only_mode_for_vault_key(home, monkeypatch):
+    (home / "vault.key").write_text("fernet-key-placeholder")
+    monkeypatch.setattr(trs, "resolve_runtime_user", lambda _user: "runtime")
+    result = trs.repair_runtime_permissions(dry_run=True)
+    vault_key = str(home / "vault.key")
+    assert any(f"chmod 600 {vault_key}" in a for a in result["actions"])
+    assert not any(f"chmod 644 {vault_key}" in a for a in result["actions"])
+
+
+def test_repair_runtime_dry_run_plans_owner_only_mode_for_mcp_token(home, monkeypatch):
+    (home / "mcp_token.json").write_text("{}")
+    monkeypatch.setattr(trs, "resolve_runtime_user", lambda _user: "runtime")
+    result = trs.repair_runtime_permissions(dry_run=True)
+    token_path = str(home / "mcp_token.json")
+    assert any(f"chmod 600 {token_path}" in a for a in result["actions"])
+    assert not any(f"chmod 644 {token_path}" in a for a in result["actions"])
+
+
+def test_repair_runtime_dry_run_leaves_ordinary_files_world_readable(home, monkeypatch):
+    """The fix is scoped to the named secret files -- everything else keeps
+    the world-readable mode the gate/runtime state actually needs."""
+    hi.ensure_home_layout()
+    monkeypatch.setattr(trs, "resolve_runtime_user", lambda _user: "runtime")
+    result = trs.repair_runtime_permissions(dry_run=True)
+    assert any("chmod 644" in a for a in result["actions"])
+    assert any("chmod 755" in a for a in result["actions"])
+
+
+def test_secret_file_exposure_empty_when_nothing_present(home):
+    assert trs.secret_file_exposure() == []
+
+
+def test_secret_file_exposure_detects_world_readable_vault_key(home):
+    key = home / "vault.key"
+    key.write_text("fernet-key-placeholder")
+    key.chmod(0o644)
+    exposure = trs.secret_file_exposure()
+    assert {"vault.key"} == {e["key"] for e in exposure}
+    assert exposure[0]["mode"] == oct(0o644)
+
+
+def test_secret_file_exposure_silent_when_properly_protected(home):
+    key = home / "vault.key"
+    key.write_text("fernet-key-placeholder")
+    key.chmod(0o600)
+    assert trs.secret_file_exposure() == []
+
+
+def test_audit_trust_root_not_hardened_when_secret_file_exposed(home, monkeypatch):
+    monkeypatch.setattr(trs.lease, "self_writable_trust_paths", lambda *_: [])
+    monkeypatch.setattr(trs.lease, "path_is_self_writable_or_replaceable", lambda *_: False)
+    monkeypatch.setattr(trs.lease, "path_is_directly_writable_for_trust", lambda *_: False)
+    monkeypatch.setenv("WILLOW_MCP_STRICT_TRUST_ROOT", "1")
+    (home / "mcp_token.json").write_text("{}")
+    (home / "mcp_token.json").chmod(0o644)
+    audit = trs.audit_trust_root("hanuman")
+    assert audit["hardened"] is False
+    assert audit["secret_file_exposure"]
+
+
 # ── egress key hardening (#182) ──────────────────────────────────────────────
 #
 # egress_trust_directory() resolves via egress_setup.config_dir(), which
@@ -191,3 +261,25 @@ def test_audit_trust_root_reports_the_egress_key_when_self_readable(home, egress
 def test_operator_command_hints_mentions_sign_net_task():
     hints = trs.operator_command_hints("operator")
     assert any("sign-net-task" in h for h in hints)
+
+
+def test_doctor_cli_warns_on_secret_file_exposure(home, monkeypatch, capsys):
+    """The doctor CLI's own rendering, not just audit_trust_root()'s dict --
+    found live (this PR): the print block only fired when audit['forgeable']
+    was truthy, so a secret-file-only exposure computed hardened=False but
+    printed nothing, silently hiding it from the operator-facing output."""
+    from willow_mcp import server
+
+    (home / "mcp_token.json").write_text("{}")
+    (home / "mcp_token.json").chmod(0o644)
+    monkeypatch.setattr(server, "diagnostic_summary", lambda app_id: {"checks": {}})
+
+    class _Args:
+        app_id = "testapp"
+        project_root = ""
+
+    server._cmd_doctor(_Args())
+    out = capsys.readouterr().out
+    assert "secret_files" in out
+    assert "mcp_token.json" in out
+    assert "repair-runtime-perms" in out
