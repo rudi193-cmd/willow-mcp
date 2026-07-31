@@ -3657,10 +3657,17 @@ def _diag_net_lease(app_id: str) -> dict:
 
     `self_writable` is the part that matters. It lists the trust-root paths this
     very process can write: every one of them is a key it could mint for itself.
-    On a single-uid host that is all of them, which is exactly B-32."""
+    On a single-uid host that is all of them, which is exactly B-32.
+
+    `private_key_readable` is a distinct question (#182): the egress signing key
+    needs no forgery at all if this process can simply read it — it can sign
+    with the real authority. `self_writable` alone reported `[]` on a hardened
+    install even while the key sat world-owned by the agent's own uid; this
+    closes that gap."""
     from . import gate, lease
     holds_capability = bool(app_id) and gate.permitted(app_id, gate.NET_PERMISSION)
     forgeable = lease.self_writable_trust_paths(app_id)
+    key_exposed = lease.egress_key_readable_by_self()
     return {
         "lease_root": str(lease._leases_root()),
         "max_ttl_seconds": lease.MAX_TTL_SECONDS,
@@ -3668,12 +3675,13 @@ def _diag_net_lease(app_id: str) -> dict:
         "holds_task_net": holds_capability,
         "lease": lease.read_lease(app_id) if app_id else {"status": "none"},
         "self_writable": forgeable,
+        "private_key_readable": key_exposed,
         # A sub-check that lists the keys this process could forge and then calls
         # itself "ok" is asserting a membrane it just measured a hole in. The
         # verdict still turns on _derive_problems (a lone `warn` here would make
         # `degraded` every install's resting state, B-18) — but this field now
         # says what it found.
-        "status": "ok" if not forgeable else "warn",
+        "status": "ok" if not forgeable and not key_exposed else "warn",
     }
 
 
@@ -3703,8 +3711,12 @@ def _egress_severance(net_lease: dict | None) -> dict:
     Ed25519 verification key, so the property is finally checkable.
 
     Reuses the manifest + lease-root paths `net_lease` already measured, and adds
-    the two the `trust_root` check names in its message but never actually measures:
-    the consent switch, and the egress verification key.
+    the three the `trust_root` check names in its message but never actually
+    measures: the consent switch, the egress verification key, and — #182 — the
+    egress *signing* key itself. Reading the private key needs no forgery at all;
+    a process that holds it signs with the real authority. B-37/B-38 only ever
+    asked whether the *public* key was writable (a substitution attack); this
+    asks the more basic question first.
 
     Verdict, respecting strict mode (and B-18's no-false-positive rule):
       - strict ON, nothing forgeable, key present & protected → severed True
@@ -3716,10 +3728,17 @@ def _egress_severance(net_lease: dict | None) -> dict:
     """
     from . import consent as _consent
     from . import egress_authorization as _ea
+    from . import egress_setup as _es
     from . import lease as _lease
 
     # manifest + lease_root, already measured for the third key
     forgeable = [f["path"] for f in ((net_lease or {}).get("self_writable") or [])]
+
+    # the private signing key (#182) — a read, not a write, but it belongs in
+    # the same "keys this process could act with" list: the effect is identical.
+    if (net_lease or {}).get("private_key_readable"):
+        key_path = _es.resolve_private_key_path()
+        forgeable.append(str(key_path) if key_path else "<egress private key>")
 
     # the consent switch — the second key, named by trust_root but never measured
     consent_writable: list[str] = []

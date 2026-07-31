@@ -63,24 +63,37 @@ willow-mcp net-status
 
 If `doctor` reports missing egress keys: `willow-mcp setup-egress` (idempotent).
 
-## Trust-root hardening (B-32)
+## Trust-root hardening (B-32, B-44)
 
 When the agent and MCP server share your uid, the agent can forge egress authority
-by editing its manifest or lease files. Close the host lane:
+by editing its manifest or lease files — **or simply read the egress private key**
+(B-44/issue #182): a `chmod 600` file owned by your own uid is not protected
+from you. Close the host lane:
 
 ```bash
 sudo useradd -r -s /usr/sbin/nologin willow-operator   # once per machine
 willow-mcp harden-trust-root --project-root ~/github/willow
 ```
 
-Reload the IDE. Issue grants and consent as the trust owner:
+This chowns the manifest/lease roots **and** the egress key directory to
+`willow-operator` — the key at owner-only `0600`, stricter than the
+world-readable manifests/leases (which the gate still needs to read as an
+unprivileged process; the signing key does not).
+
+Reload the IDE. Issue grants, signed tasks, and consent as the trust owner:
 
 ```bash
 sudo -u willow-operator willow-mcp grant-net hanuman --ttl 30m --reason "push branch"
+sudo -u willow-operator willow-mcp sign-net-task hanuman --task-file /path/to/task.sh
 sudo -u willow-operator willow-mcp consent set internet true
 ```
 
 Dry-run first: `willow-mcp harden-trust-root --dry-run`
+
+Verify: `willow-mcp doctor` should report the egress key as no longer
+self-readable (`private_key_readable: false` in `net_lease`); as the agent's
+own uid, `cat ~/.config/willow-mcp/egress/private.pem` should now fail with
+`Permission denied`.
 
 If `doctor` reports the SOIL store is not writable after hardening, restore runtime
 paths (store, dispatch, sessions, …) for the MCP server user:

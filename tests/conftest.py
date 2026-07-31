@@ -56,7 +56,16 @@ def home(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _stub_egress_public_key_for_diagnostics(request, monkeypatch, tmp_path):
-    """CI has no ~/.config/willow-mcp/egress keys; most tests call _derive_problems."""
+    """CI has no ~/.config/willow-mcp/egress keys; most tests call _derive_problems.
+
+    Also stubs `resolve_private_key_path` to None (#182): the dev box running
+    this suite may have a REAL ~/.config/willow-mcp/egress/private.pem from
+    earlier manual testing, and `egress_key_readable_by_self()` reading it for
+    real (correctly!) makes trust-root/diagnostic tests fail based on an
+    accident of the host running them, not the code under test — the same
+    hermeticity problem the public-key stub above already exists to prevent,
+    now that private-key readability is also part of what gets checked.
+    """
     mod = getattr(request.module, "__name__", "")
     if "test_egress" in mod:
         return
@@ -69,3 +78,4 @@ def _stub_egress_public_key_for_diagnostics(request, monkeypatch, tmp_path):
     pub = tmp_path / "egress-stub.pub"
     pub.write_text("stub", encoding="utf-8")
     monkeypatch.setattr(egress_setup, "resolve_public_key_path", lambda: pub)
+    monkeypatch.setattr(egress_setup, "resolve_private_key_path", lambda: None)

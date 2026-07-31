@@ -362,6 +362,43 @@ def self_writable_trust_paths(app_id: str = "") -> list[dict]:
     return found
 
 
+def path_is_self_readable(path: Path) -> bool:
+    """Whether this process can read ``path`` directly (leaf only, no ancestor
+    walk — unlike a write, a read exposure isn't compounded by a writable
+    parent: renaming the file doesn't reveal its contents to a process that
+    couldn't already read it).
+
+    A distinct question from write-forgery. `self_writable_trust_paths()`
+    above answers "could this process have authored the policy" — for most
+    trust-root files (manifests, leases) that's the actual threat: an agent
+    rewrites its own grant. The egress signing key is different: a process
+    that can merely *read* it needs no forgery at all — it can sign with
+    the real authority (#182). Reports False for a path that doesn't exist
+    yet: nothing to steal is not the same as a stolen key.
+    """
+    try:
+        target = path.expanduser().resolve(strict=False)
+    except OSError:
+        target = path.expanduser().absolute()
+    if not target.is_file():
+        return False
+    try:
+        return os.access(target, os.R_OK)
+    except OSError:
+        return True  # unverifiable ⇒ cannot claim protection
+
+
+def egress_key_readable_by_self() -> bool:
+    """Whether this process can read the configured egress private signing
+    key (#182). Deferred import: lease.py has no module-level dependency on
+    egress_setup today, and this keeps it that way."""
+    from . import egress_setup
+    key_path = egress_setup.resolve_private_key_path()
+    if key_path is None:
+        return False
+    return path_is_self_readable(key_path)
+
+
 def strict_trust_root() -> bool:
     """Opt-in: refuse egress when this process can write the keys that authorize it.
 

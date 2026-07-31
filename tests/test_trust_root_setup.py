@@ -117,3 +117,77 @@ def test_repair_runtime_dry_run_targets_store(home, monkeypatch):
     assert result["runtime_user"] == "runtime"
     assert any("store" in target for target in result["targets"])
     assert any("chown -R runtime:runtime" in action for action in result["actions"])
+
+
+# ── egress key hardening (#182) ──────────────────────────────────────────────
+#
+# egress_trust_directory() resolves via egress_setup.config_dir(), which
+# defaults to ~/.config/willow-mcp/egress — NOT under $WILLOW_HOME, so `home`
+# alone does not isolate it. Every test here pins WILLOW_MCP_EGRESS_CONFIG_DIR
+# into tmp_path first, or it would chown/chmod the real host directory.
+
+@pytest.fixture
+def egress_dir(tmp_path, monkeypatch):
+    d = tmp_path / "egress-config"
+    monkeypatch.setenv("WILLOW_MCP_EGRESS_CONFIG_DIR", str(d))
+    return d
+
+
+def test_egress_trust_directory_resolves_the_isolated_config_dir(egress_dir):
+    assert trs.egress_trust_directory() == egress_dir
+
+
+def test_egress_trust_directory_is_not_one_of_trust_root_directories(home, egress_dir):
+    """The whole point of #182: this directory lives outside $WILLOW_HOME by
+    design, so the pre-existing hardening loop never touched it."""
+    hi.ensure_home_layout()
+    assert egress_dir not in trs.trust_root_directories()
+
+
+def test_apply_egress_key_hardening_reports_absent_when_never_set_up(egress_dir, monkeypatch):
+    monkeypatch.setattr(trs, "resolve_trust_owner", lambda owner: "operator")
+    result = trs.apply_egress_key_hardening("operator", dry_run=False)
+    assert result["present"] is False
+    assert result["actions"] == []
+
+
+def test_apply_egress_key_hardening_uses_owner_only_mode_not_world_readable(egress_dir, monkeypatch):
+    """The critical distinction from apply_trust_root_hardening: 0700/0600, not
+    the 0755/0644 policy files use — a readable key needs no forgery at all."""
+    egress_dir.mkdir()
+    (egress_dir / "private.pem").write_text("-----BEGIN PRIVATE KEY-----\n")
+    monkeypatch.setattr(trs, "resolve_trust_owner", lambda owner: "operator")
+    result = trs.apply_egress_key_hardening("operator", dry_run=True)
+    assert result["present"] is True
+    assert any("chown -R operator:operator" in a and str(egress_dir) in a for a in result["actions"])
+    assert any("chmod 600" in a for a in result["actions"])
+    assert any("chmod 700" in a for a in result["actions"])
+    assert not any("chmod 644" in a for a in result["actions"])
+    assert not any("chmod 755" in a for a in result["actions"])
+
+
+def test_harden_trust_root_includes_the_egress_step(home, egress_dir, monkeypatch):
+    """ensure_home_layout() already provisions a real keypair into egress_dir
+    (home_init.py calls egress_setup.ensure_keypair()) — no need to fake one."""
+    hi.ensure_home_layout()
+    monkeypatch.setattr(trs, "resolve_trust_owner", lambda owner: "operator")
+    result = trs.harden_trust_root(owner="operator", dry_run=True)
+    assert "egress" in result["filesystem"]
+    assert result["filesystem"]["egress"]["present"] is True
+    assert any("chmod 600" in a for a in result["filesystem"]["actions"])
+
+
+def test_audit_trust_root_reports_the_egress_key_when_self_readable(home, egress_dir, monkeypatch):
+    egress_dir.mkdir()
+    key = egress_dir / "private.pem"
+    key.write_text("-----BEGIN PRIVATE KEY-----\n")
+    from willow_mcp import egress_setup
+    monkeypatch.setattr(egress_setup, "resolve_private_key_path", lambda: key)
+    audit = trs.audit_trust_root("app")
+    keys = {f["key"] for f in audit["forgeable"]}
+    assert "egress_private_key" in keys
+
+
+def test_operator_command_hints_mentions_sign_net_task():
+    hints = trs.operator_command_hints("operator")
+    assert any("sign-net-task" in h for h in hints)

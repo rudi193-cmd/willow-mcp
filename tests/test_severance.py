@@ -29,8 +29,9 @@ def _pg(dbname):
     return {"status": "ok", "reachable": True, "dbname": dbname, "missing": []}
 
 
-def _lease(self_writable=()):
-    return {"self_writable": [{"key": "lease_root", "path": p} for p in self_writable]}
+def _lease(self_writable=(), private_key_readable=False):
+    return {"self_writable": [{"key": "lease_root", "path": p} for p in self_writable],
+            "private_key_readable": private_key_readable}
 
 
 @pytest.fixture
@@ -154,6 +155,40 @@ def test_egress_unprotected_verification_key_is_violated(fleet, tmp_path, monkey
         _store(tmp_path / "own" / "store"), _pg("willow_mcp"), _lease())
     assert out["surfaces"]["egress"]["severed"] is False
     assert "egress" in out["violated"]
+
+
+def test_egress_readable_private_key_is_violated(fleet, tmp_path, monkeypatch, egress_locked):
+    """#182: the fifth thing B-38 now measures. Nothing writable, the verifier
+    protected — but the process can READ the private key, so it needs no
+    forgery at all. Must violate exactly like a forgeable manifest/lease does."""
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "own" / "mcp_apps"))
+
+    out = server._diag_severance(
+        _store(tmp_path / "own" / "store"), _pg("willow_mcp"),
+        _lease(private_key_readable=True))
+    assert out["surfaces"]["egress"]["severed"] is False
+    assert "egress" in out["violated"]
+
+    problems = server._derive_problems(
+        _store(tmp_path / "own" / "store"), _pg("willow_mcp"), {"status": "ok"},
+        "stdio", severance=out)
+    egp = [p for p in problems if p["check"] == "severance" and "forge egress" in p["detail"]]
+    assert egp and egp[0]["severity"] == "error"
+    assert server._derive_verdict(problems) == "broken"
+
+
+def test_egress_private_key_not_readable_is_not_by_itself_a_violation(
+    fleet, tmp_path, monkeypatch, egress_locked
+):
+    """The inverse: everything else locked down AND the key unreadable →
+    genuinely severed. Confirms the new check doesn't false-positive when
+    #182 is actually closed."""
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "own" / "mcp_apps"))
+    out = server._diag_severance(
+        _store(tmp_path / "own" / "store"), _pg("willow_mcp"),
+        _lease(private_key_readable=False))
+    assert out["surfaces"]["egress"]["severed"] is True
+    assert "egress" not in out["violated"]
 
 
 def test_egress_strict_off_warns_not_breaks(fleet, tmp_path, monkeypatch):

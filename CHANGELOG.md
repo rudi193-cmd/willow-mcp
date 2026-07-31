@@ -101,6 +101,21 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   keys never resolving. 18 abuse tests. Also fixes a latent parser bug: the
   old `@env` regex never fed `key=`/`fallback=` to `parse_attrs`, so every
   keyed `@env` silently rendered `""`.
+- **B-44/#182: the egress private key was readable by the agent's own uid.**
+  `chmod 600` protects nothing on a single-uid host — the agent shares the
+  euid that owns the key, so it could read it directly and sign with the real
+  authority, collapsing the three-key egress gate to the two it could already
+  write. `harden-trust-root` never covered the key (it lives outside
+  `$WILLOW_HOME` by design, so it wasn't one of the chowned trust roots), and
+  the B-32/B-38 diagnostics only ever asked whether the key was *writable*,
+  not *readable* — a hardened install could report `self_writable: []` while
+  the key sat fully exposed. `harden-trust-root` now also chowns the egress
+  directory to the trust owner at owner-only `0700`/`0600` (stricter than the
+  world-readable `0755`/`0644` the manifest/lease roots use — the gate still
+  needs to read its own policy, the signing key does not); `_diag_net_lease`
+  and B-38's `_egress_severance` now measure read exposure and fold it into
+  `self_writable`/`forgeable_keys`, breaking the severance verdict under
+  strict mode exactly like a forgeable manifest does.
 
 ### Fixed
 - **B-41 follow-up: a warm container kept its pre-B-41 `.mcp.json` broken
