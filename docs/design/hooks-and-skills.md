@@ -218,6 +218,30 @@ as the 2026-07-30 allow-side pass, found by the same method, one level up:
 build the thing that goes looking, rather than trust that the last look was
 enough.
 
+**Addendum (2026-07-31):** closed the handoff's open "any `SessionStart`
+hook change?" question — no action. Two separate `SessionStart` hooks exist:
+`willow_mcp.session_start_hook` (packaged, bridges a supported client's
+native event to `session_enter()`) and this repo's own
+`.claude/hooks/session-start.sh` (dev-sandbox bootstrap only — venv,
+Postgres, a Kart worker, a generated `.mcp.json`; never calls `session_enter`).
+First read was "dogfooding gap," but `skills/session-start.md` says plainly
+"Hooks are optional; this skill is mandatory" — an agent is expected to call
+`session_enter` itself regardless of what the client's hook layer does, so
+the divergence is working as designed.
+
+The one candidate idea considered — inject a condensed hook/guard-surface
+summary into `session_enter`'s orientation, so a session doesn't have to
+re-derive "what's the current hook surface" the way this handoff's own §1
+had to — doesn't earn its place: `session_enter()` already returns
+`latest_handoff`, which delivers exactly that (this session found the
+2026-07-30 handoff by grepping `docs/handoffs/`, but `latest_handoff` would
+have surfaced the same document directly). Adding a second, hand-maintained
+path to the same information is the duplicated-source-of-truth mistake this
+doc's addenda have flagged repeatedly today — the over-determined test
+fixtures, "counts in prose," the two hook copies gated by one test. It would
+also add orientation noise to every session entering this project, not only
+ones about to touch hooks. No code change.
+
 @phase constraints
 ## Constraints
 
