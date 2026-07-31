@@ -14,9 +14,9 @@ onboarding) or when you need a durable queue the operator can scan.
 
 | Tool | Permission | Purpose |
 |------|------------|---------|
-| `human_required_enqueue` | `human_required_write` | Add item (`kind`: consent \| attestation \| review \| overload \| onboarding) |
-| `human_required_list` | `human_required_read` | List open items + stats |
-| `human_required_resolve` | `human_required_write` | Resolve / dismiss / acknowledge in place |
+| `human_required_enqueue` | `human_loop_write` | Add item (`kind`: consent \| attestation \| review \| overload \| onboarding) |
+| `human_required_list` | `human_loop_read` | List open items + stats |
+| `human_required_resolve` | `human_loop_write` | Resolve / dismiss / acknowledge in place |
 
 Rows are **updated, never deleted** — resolution records who/when/note.
 
