@@ -76,10 +76,9 @@ and enums without freezing the frontmatter. Skills in this repo already carry
 its `**From:** / **To:** / **Date:**` map to `app_id` / `reply_to` /
 `written_at`; the findings become the `## Findings` table. Its contract has its
 own schema: [`docs/schema/handoff.schema.json`](schema/handoff.schema.json).
-Note the tool's `closeout.md` does **not** yet carry an `@markdownai` header —
-so it is a rendered dispatch artifact, not a mai document today; emitting the
-header (and a `kind: closeout` frontmatter block) from the tool is what would
-make it proper mai.
+`handoff_write_v4` emits `closeout.md` with `kind: closeout` frontmatter and an
+`@markdownai v1.0` body header so mai tools can render it; `handoff.json` stays
+the structured source of truth.
 
 ---
 
