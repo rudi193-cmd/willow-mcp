@@ -1,7 +1,7 @@
 ---
 kind: doc
 name: design-productionize-kart-into-willow-mcp
-description: "Design/decision record for productionizing Kart — the willow-2.0 task-queue worker — into willow-mcp as the published `kartikeya` package; largely SHIPPED, with the stage-5 drift-window review closed and two opt-in security upgrades (scan_bash fork-bomb detection, run_shell resource caps) left as the only open items."
+description: "Design/decision record for productionizing Kart into willow-mcp as `kartikeya`; SHIPPED. Stage-5 behaviour swaps (scan_bash resource exhaustion, run_shell caps) are live in willow-mcp via kartikeya; willow-2.0/fylgja adoption remains fleet-side (#111)."
 ---
 
 @markdownai v1.0
@@ -326,6 +326,14 @@ the rlimit fallback works where no delegated cgroup parent exists. `test_kart_*`
 either can land first. Both are security *tightenings*, so the safe sequence is
 *measure the blast radius (corpus/history grep for `scan_bash`; ceiling probe for
 `run_shell`) → land behind the opt-in → then enable*.
+
+**willow-mcp (2026-07-31, issue #111):** both swaps are **already live** here —
+there is no separate willow-2.0 `core/kart_*` fork. `task_submit` calls
+`kartikeya.check_kart_task` (submit-time `scan_bash`, including
+`resource_exhaustion`); the worker drains through `kartikeya.sandbox.run_shell`
+with caps on by default (`test_pg_task_queue_caps.py`, dispatch `910391C3`).
+Remaining #111 work is **fleet-side**: upgrade willow-2.0/fylgja `scan_bash` per
+§5.x.A option 2 so IDE-native guards inherit the same patterns.
 
 @phase 6-relationship-to-other-work
 ## 6. Relationship to other work
