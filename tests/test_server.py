@@ -1050,9 +1050,31 @@ def test_task_submit_strips_caller_supplied_db_directive(tmp_path, monkeypatch):
     assert params[1] == "pytest tests/ -q"
 
 
-def test_default_kart_task_env_has_no_pg_access(monkeypatch):
+def test_default_kart_task_env_has_no_pg_access(tmp_path, monkeypatch):
     from kartikeya import sandbox as ks
 
+    # Fleet kart-sandbox.json may list PG/POSTGRES in env_prefixes unconditionally;
+    # isolate $WILLOW_HOME so this test pins kartikeya's product-default prefixes.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
+    monkeypatch.delenv("KART_SANDBOX_CONFIG", raising=False)
+    monkeypatch.setattr(
+        "kartikeya.home.willow_home", lambda package_root=None: tmp_path
+    )
+    (tmp_path / "kart-sandbox.json").write_text(
+        json.dumps(
+            {
+                "env_prefixes": [
+                    "WILLOW_",
+                    "GROVE_",
+                    "OLLAMA_",
+                    "GIT_",
+                    "ANTHROPIC_",
+                    "GROQ_",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("PGHOST", "/run/postgresql")
     monkeypatch.setenv("POSTGRES_PASSWORD", "secret")
     env = ks.kart_env(allow_db=False)
