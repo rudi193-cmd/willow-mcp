@@ -54,6 +54,19 @@ def test_check_bash_names_store_tools_for_records_table():
     assert "store_get" in reason
 
 
+def test_check_bash_blocks_on_willow_store_root_alone():
+    """The other WILLOW_STORE_ROOT fixture (above) also contains the literal
+    word 'records' — a second, independent _OWNED_MARKER_RE alternative — so
+    it stays green even if the WILLOW_STORE_ROOT branch is deleted from the
+    regex entirely (caught by tools/hook_mutation_check.py, which found this
+    gap). Isolate the marker: no 'knowledge'/'records' word, and a filename
+    that doesn't independently match the store.db/vault.db/kart.db/
+    mcp_receipt.db alternative either."""
+    reason = pre_tool_use.check_bash("sqlite3 $WILLOW_STORE_ROOT/data.db 'select 1'")
+    assert reason is not None
+    assert "willow-mcp" in reason
+
+
 # ── check_bash: allowed patterns ────────────────────────────────────────
 
 @pytest.mark.parametrize("command", [
@@ -106,11 +119,49 @@ def test_check_bash_allows_a_benign_script_via_the_cd_form(script_dir):
     assert pre_tool_use.check_bash("cd tools && python3 report.py") is None
 
 
+def test_check_bash_blocks_a_malicious_script_via_the_cd_form(script_dir):
+    """The allow-side sibling above only ever pinned that a benign script
+    survives the cd form — nothing pinned that the cd form's whole point (a
+    script that DOES reach an owned store) is still caught through it, so a
+    regex change that silently stopped resolving cwd for that form would pass
+    every existing test (found by tools/hook_mutation_check.py)."""
+    (script_dir / "tools").mkdir()
+    (script_dir / "tools" / "drop.py").write_text(
+        "import sqlite3, os\n"
+        "sqlite3.connect(os.environ['WILLOW_STORE_ROOT'] + '/records/store.db')\n"
+    )
+    reason = pre_tool_use.check_bash("cd tools && python3 drop.py")
+    assert reason is not None
+    assert "willow-mcp" in reason
+
+
 def test_check_bash_fails_open_on_an_unreadable_script(script_dir):
     """Tripwire, not a control: a script it cannot read is not a block. Named so
     a future change that makes the guard fail *closed* is a deliberate choice
     with a red test behind it, not a silent one."""
     assert pre_tool_use.check_bash("python3 does_not_exist.py") is None
+
+
+def test_check_bash_allows_a_two_level_script_chain(script_dir):
+    """The guard reads one level of indirection, deliberately, not two. A
+    script whose own body merely shells out to a *second* script that reaches
+    an owned store is not caught — helper.py itself has no DB-use token, only
+    worker.py does, and worker.py is never the invoked file on the command
+    line. See hooks/pre_tool_use.py's comment above _SCRIPT_INVOKE_RE and
+    docs/design/hooks-and-skills.md's 2026-07-31 addendum for why this is the
+    intended stopping point, not an oversight."""
+    (script_dir / "worker.py").write_text(
+        "import sqlite3, os\n"
+        "sqlite3.connect(os.environ['WILLOW_STORE_ROOT'] + '/records/store.db')\n"
+    )
+    (script_dir / "helper.py").write_text(
+        "import subprocess\n"
+        "subprocess.run(['python3', 'worker.py'])\n"
+    )
+    assert pre_tool_use.check_bash("python3 helper.py") is None
+    # Confirm worker.py would have tripped it, had it been the invoked file —
+    # otherwise this test would pass for the wrong reason (a broken fixture).
+    assert pre_tool_use.check_bash("python3 worker.py") is not None
 
 
 # ── main(): stdin/stdout contract ───────────────────────────────────────
@@ -646,6 +697,29 @@ def test_main_blocks_native_web_search():
     assert "willow_web_search" in decision["reason"]
 
 
+def test_check_native_web_blocks_webfetch():
+    """WebSearch had test_main_blocks_native_web_search; WebFetch had no
+    block-side test at all, so a bug narrowing check_native_web's WebFetch
+    branch (e.g. a stray typo in the string comparison) would pass the whole
+    suite (found by tools/hook_mutation_check.py)."""
+    routed = pre_tool_use.check_native_web("WebFetch")
+    assert routed is not None
+    assert routed[0] == "block"
+    assert "willow_web_fetch" in routed[1]
+
+
+def test_main_blocks_native_web_fetch():
+    code, stdout = _run_hook({
+        "tool_name": "WebFetch",
+        "tool_input": {"url": "https://example.com"},
+        "session_id": "s1",
+    })
+    assert code == 0
+    decision = json.loads(stdout)
+    assert decision["decision"] == "block"
+    assert "willow_web_fetch" in decision["reason"]
+
+
 # ── check_native_web: allow side ────────────────────────────────────────
 #
 # The guard redirects the IDE-native web tools to willow_web_*. Its allow side
@@ -792,3 +866,32 @@ def test_bundled_hook_is_identical_to_the_repo_copy():
     production."""
     bundled = Path(__file__).resolve().parents[1] / "src/willow_mcp/bundle/hooks/pre_tool_use.py"
     assert bundled.read_text() == _HOOK_PATH.read_text()
+
+
+# ── framing: this is a guardrail, not a control — never let that erode ──────
+
+_DESIGN_DOC_PATH = (
+    Path(__file__).resolve().parents[1] / "docs/design/hooks-and-skills.md"
+)
+
+
+def test_module_docstring_states_guardrail_not_control():
+    """The hook lives in the agent's own harness and can be bypassed with no
+    OS-level obstacle; the durable control is chown + STRICT_TRUST_ROOT (B-32).
+    A future PR could quietly drop or soften this sentence while adding a new
+    block-decision guard, making the module read like it enforces more than it
+    does. Pin the exact framing, and the control it points to, so that drift
+    fails a test instead of just a review."""
+    doc = pre_tool_use.__doc__
+    assert "guardrail, not a control" in doc
+    assert "no OS-level obstacle" in doc
+    assert "chown" in doc and "WILLOW_MCP_STRICT_TRUST_ROOT" in doc
+
+
+def test_design_doc_states_guardrail_not_control():
+    """Same framing, same reason, second copy: docs/design/hooks-and-skills.md
+    is where a human reads the rationale, and it can drift from the docstring
+    independently of it."""
+    text = _DESIGN_DOC_PATH.read_text()
+    assert "guardrail, not a control" in text
+    assert "chown" in text and "WILLOW_MCP_STRICT_TRUST_ROOT" in text

@@ -121,6 +121,15 @@ actually needs them:
   call; a hook doing the same thing adds a second place that message can
   drift from the tool's own text. Revisit if the plain error text proves
   insufficient in practice.
+
+  **Reaffirmed (2026-07-31):** checked, not just remembered. `server.py`'s
+  `_require_confirmed()` still returns exactly `"unconfirmed_schema: table
+  '<table>' has not been confirmed for this database — call
+  schema_confirm_mapping, or edit the mapping file directly, then retry"` —
+  the message and the code path are unchanged since this was written.
+  Searched the gap backlog, CHANGELOG, and every handoff for a report of an
+  agent stuck on or confused by this error; found none. Nothing has changed,
+  so the rejection stands.
 - Blocking non-Bash paths to the same databases (e.g. a Python one-liner
   tool) — `Bash` covers the common case; broadening the match surface is
   cheap to add later if a real gap shows up, not worth guessing at now.
@@ -153,6 +162,61 @@ This intentionally does not let the skill silently call
 confirming a mapping is a human decision (design doc §3.4/§8: gated more
 strictly than a single write for exactly this reason), and the skill's job
 is to make that decision well-informed, not to skip it.
+
+**Addendum (2026-07-31):** revisited whether `check_native_web`'s hard block
+(native `WebSearch`/`WebFetch`) should soften to a warn now that `willow_web_*`
+has shipped and settled — it's the only guard in the module gating a
+*capability* rather than an authority boundary, which made it worth checking
+rather than assuming. It stays a block: the native tools aren't a worse style
+of the same action, they're a different channel that skips every check the
+MCP path enforces. `willow_web_fetch`/`willow_web_search` go through
+`web_egress.egress_denial()` (the three-key gate — `web_net` + `consent.internet`
++ a live lease), and `web_fetch.fetch_url` additionally rejects private/loopback
+hosts (SSRF) and wraps fetched content in the sandwich defense against prompt
+injection. A warn would let an agent route around egress governance and SSRF
+protection with one more tool call, not merely reach for a less-preferred one.
+Recorded in `check_native_web`'s docstring so the reasoning doesn't have to be
+rediscovered next time this is questioned.
+
+**Addendum (2026-07-31):** decided the script-indirection guard's open
+depth question — one level (current) vs. recursing into a script that a
+script invokes. Staying at one level. The threat model is an agent reaching
+for a raw client out of habit, and a habit doesn't produce a two-hop
+indirection chain; writing one takes deliberate effort, which is already the
+"no OS-level obstacle" case the module's docstring disclaims — B-32 is the
+durable control for a deliberate crossing, not a deeper regex. Catching a
+second hop would also mean recursively re-running the same brittle
+command-text heuristic against the second script's source, compounding a
+regex-based guess for a case outside what a tripwire owes. Pinned by
+`test_check_bash_allows_a_two_level_script_chain`, which also asserts the
+would-be-caught case really would be caught if invoked directly — otherwise
+the test proves nothing.
+
+**Addendum (2026-07-31):** built the mutation harness §3/§4 of the
+2026-07-30 handoff asked for and that did not exist anywhere in the repo —
+`tools/hook_mutation_check.py`, running the six specific per-guard mutations
+that handoff named (not "delete the hook," the same too-coarse mistake as
+renaming a SQL trigger instead of disabling it). First run found three real
+gaps, not hypothetical ones:
+
+- `_OWNED_MARKER_RE` losing its `WILLOW_STORE_ROOT` alternative changed no
+  test's outcome, because the one fixture using it also contains the literal
+  word `records` — a second, independent marker — so the fixture was
+  over-determined the same way `test_check_bash_routing_allows_git_gh_inspect`
+  already was.
+- The `cd X && python3 y.py` script-indirection form had an allow-side test
+  (a benign script survives it) but no block-side one — nothing ever invoked
+  an actually-malicious script through that form.
+- `check_native_web` had a block-side test for `WebSearch` but none for
+  `WebFetch` — only allow-side coverage existed for it.
+
+All three closed with new tests (`test_check_bash_blocks_on_willow_store_root_alone`,
+`test_check_bash_blocks_a_malicious_script_via_the_cd_form`,
+`test_check_native_web_blocks_webfetch` + `test_main_blocks_native_web_fetch`);
+a second harness run confirms all six mutations are now caught. Same lesson
+as the 2026-07-30 allow-side pass, found by the same method, one level up:
+build the thing that goes looking, rather than trust that the last look was
+enough.
 
 @phase constraints
 ## Constraints

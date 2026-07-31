@@ -274,7 +274,19 @@ _WEB_FETCH_REDIRECT = (
 
 
 def check_native_web(tool_name: str) -> Optional[tuple[str, str]]:
-    """Block IDE-native web tools now that willow_web_* ships."""
+    """Block (not warn) IDE-native WebSearch/WebFetch now that willow_web_*
+    ships. Decided 2026-07-31, after §4's open question of whether this
+    guard — the only one gating a capability rather than an authority
+    boundary — still warrants a hard block: it does, because the native
+    tools are not a worse *style* of the same action, they are a different
+    *channel* that skips every check the MCP path enforces. willow_web_fetch/
+    willow_web_search go through web_egress.egress_denial() (the three-key
+    gate: web_net + consent.internet + a live lease), and web_fetch.fetch_url
+    additionally rejects private/loopback hosts (SSRF) and applies the
+    sandwich-defense wrap against prompt injection in fetched content. Native
+    WebFetch/WebSearch run entirely outside willow-mcp and get none of that —
+    a warn would let an agent route around egress governance and SSRF
+    protection with one more tool call, not just a less-preferred one."""
     if tool_name == "WebSearch":
         return "block", f"willow-mcp: {_WEB_SEARCH_REDIRECT}"
     if tool_name == "WebFetch":
@@ -291,6 +303,19 @@ def check_native_web(tool_name: str) -> Optional[tuple[str, str]]:
 # Still a tripwire, not a control — a path built at runtime or an imported wrapper
 # evades it; the durable control is B-32 — but it ends the "the command string was
 # clean" deniability that let a script route around the guard.
+#
+# One level, decided (2026-07-31): a script whose own body shells out to a
+# *second* script that reaches the store is not caught, and that is the
+# deliberate stopping point, not an oversight. The threat model here is an
+# agent reaching for a raw client out of habit, and a habit doesn't produce a
+# two-hop indirection chain — writing one takes deliberate effort, which is
+# already the "no OS-level obstacle" case this module's docstring disclaims;
+# the durable control for it is B-32, not a deeper regex. Catching a second
+# hop would also mean recursively re-running this same brittle heuristic
+# against the second script's source (and the third, if that shells out too),
+# compounding a regex-based guess for a case outside what a tripwire owes.
+# See docs/design/hooks-and-skills.md's 2026-07-31 addendum;
+# test_check_bash_allows_a_two_level_script_chain pins this boundary.
 _SCRIPT_INVOKE_RE = re.compile(
     r"(?:^|&&|;|\|)\s*(?:cd\s+(?P<cwd>[^\s;&|]+)\s*&&\s*)?"
     r"(?:python3?|bash|sh|zsh)\s+(?:-\S+\s+)*(?P<script>[^\s;&|]+\.(?:py|sh))\b"

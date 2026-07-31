@@ -20,6 +20,7 @@ VP=/home/user/willow-mcp/.venv/bin/python
 | **`mai_metrics.py`** | "track how the loop is converging" — records one metric per bite into SOIL, reports the new-gaps-by-learnings curve. | `$VP tools/mai_metrics.py record '<json>'` · `report` |
 | **`mai_prose_split.py`** | "judge which parts of a narrative doc are convertible" — separates PROTECTED PROSE from DIRECTIVE CANDIDATES (`@constraint`/`@phase`/`@env`/`@if consumer=`), emits a conversion PLAN (JSON), and a `prose_ratio` verdict flags story-shaped docs "do not force" instead of mangling them. | `$VP tools/mai_prose_split.py [--summary] FILE\|DIR...` |
 | **`provision_gate.py`** | "hand-edit the gate manifest JSON" — unions the builder's introspection+loop permission groups into the manifest, validating every group name against `gate.PERMISSION_GROUPS` (loud-fails on a typo instead of granting nothing). | `$VP tools/provision_gate.py [manifest]` · `--print` |
+| **`hook_mutation_check.py`** | "hand-flip a hook guard's regex and eyeball whether the suite still passes" — the six per-guard mutations named in the 2026-07-30 hooks handoff, run against `hooks/pre_tool_use.py`, reporting which test caught each one (or that none did). Refuses to run on a red baseline; never leaves a mutation in the tree. | `$VP tools/hook_mutation_check.py` |
 
 ## The wiring — hand-run job → the tool that already does it
 
