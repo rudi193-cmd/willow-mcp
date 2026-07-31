@@ -65,6 +65,7 @@ Writes markdown under `$WILLOW_HOME/handoffs/{app_id}/`.
 ```
 session_handoff_write(
   app_id="willow",
+  session_id="…",       # from session_enter's result
   narrative="…",
   summary="…",          # optional
   findings=[…],         # optional

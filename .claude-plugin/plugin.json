@@ -3,6 +3,16 @@
   "description": "Willow sovereign agent platform — SQLite store, Postgres knowledge base, Kart task queue, plus the hooks and skills that keep them used correctly.",
   "version": "2.0.0",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -m willow_mcp.session_start_hook"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
