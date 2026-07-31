@@ -120,13 +120,17 @@ Stages are **ordered**; stop at the first failure and return a **distinguishable
 |-------|------|--------|
 | 1 | `structural_invalid` | `format`, required keys, encodings, `meta` shape |
 | 2 | `expired` | `now > expires_at` (timezone-aware UTC) |
-| 3 | `signature_invalid` | Recompute MAC/sig over `canonical_signed_bytes(payload)` |
-| 4 | `ref_mismatch:<field>` | Re-derive each ref from live sources; compare to `payload` |
+| 3 | `ref_mismatch:<field>` | Re-derive each ref from live sources; compare to `payload` |
+| 4 | `signature_invalid` | Recompute MAC/sig over `canonical_signed_bytes(payload)` |
+
+Stage 3 runs **before** signature so a single-field payload edit with an unchanged
+signature byte string fails with `ref_mismatch:<field>` (AT-R1 #194), not a generic
+`signature_invalid`.
 
 Stage 4 field names match payload keys (`agent_identity_ref`, …, `ledger_entry_hash`).
 
-Freshness runs **before** signature so an expired receipt fails without verifying crypto
-(independent of whether the signature bytes are still valid).
+Freshness runs **before** ref/signature checks so an expired receipt fails without
+crypto work.
 
 ---
 

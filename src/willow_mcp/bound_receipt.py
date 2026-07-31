@@ -3,21 +3,23 @@
 Spec: docs/design/bound-receipt-schema.md
 JSON Schema: `willow_mcp/schemas/bound_receipt.v1.schema.json`
 
-This module pins wire shape, ref derivations, and canonical signing bytes.
-Writer/verifier crypto and live ref checks are #196; AT-R1 is #194.
+This module pins wire shape, ref derivations, canonical signing bytes, and the
+#196 writer/verifier. AT-R1 lives in tests/test_bound_receipt_at_r1.py.
 """
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Optional
 
 FORMAT_VERSION = "willow-bound-receipt/1"
+DEFAULT_TTL_SECONDS = 300
 
 _DIGEST_RE = re.compile(r"^[a-f0-9]{64}$")
 _DENIAL_RE = re.compile(r"^denial:[a-z0-9_]{1,64}$")
@@ -39,6 +41,51 @@ class VerificationReason(str, Enum):
     @staticmethod
     def ref_mismatch(field: str) -> str:
         return f"ref_mismatch:{field}"
+
+
+_PAYLOAD_REF_FIELDS = (
+    "agent_identity_ref",
+    "capability_token_ref",
+    "policy_or_manifest_digest",
+    "tool_call_digest",
+    "effect_ref_or_denial_code",
+    "ledger_prev",
+    "ledger_entry_hash",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiptSources:
+    """Live planes captured at tool-call time (#196)."""
+
+    agent_id: str
+    trust_level: int
+    session_id: str
+    manifest: dict
+    app_id: str
+    tool: str
+    call_nonce: str
+    ledger_prev: str
+    ledger_ts: str
+    ledger_app_id: str
+    ledger_tool: str
+    ledger_outcome: str
+    ledger_detail: Optional[str] = None
+    denied: bool = False
+    denial_code: Optional[str] = None
+    effect_outcome: Optional[str] = None
+    effect_detail: Optional[str] = None
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationResult:
+    ok: bool
+    reason: str
+    detail: str = "ok"
+
+
+class BoundReceiptError(Exception):
+    """Writer/refusal when binding prerequisites are missing."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,3 +331,137 @@ def wire_from_dict(data: dict[str, Any]) -> BoundReceiptWire:
         signature=BoundReceiptSignature(**data["signature"]),
         meta=data.get("meta"),
     )
+
+
+# ── Writer / verifier (#196) ──────────────────────────────────────────────────
+
+def supports_bound_receipt(signing_key: Optional[bytes]) -> bool:
+    """All-or-nothing: no key ⇒ do not emit a receipt that looks bound."""
+    return bool(signing_key)
+
+
+def _effect_from_sources(sources: ReceiptSources) -> str:
+    if sources.denied:
+        if not sources.denial_code:
+            raise BoundReceiptError("denied call requires denial_code")
+        return denial_code(sources.denial_code)
+    outcome = sources.effect_outcome if sources.effect_outcome is not None else sources.ledger_outcome
+    return effect_ref(outcome, sources.effect_detail)
+
+
+def expected_refs(sources: ReceiptSources) -> dict[str, str]:
+    manifest = sources.manifest
+    return {
+        "agent_identity_ref": agent_identity_ref(sources.agent_id, sources.trust_level, sources.session_id),
+        "capability_token_ref": manifest_acl_digest(manifest),
+        "policy_or_manifest_digest": manifest_policy_digest(manifest),
+        "tool_call_digest": tool_call_digest(
+            sources.session_id, sources.app_id, sources.tool, sources.call_nonce
+        ),
+        "effect_ref_or_denial_code": _effect_from_sources(sources),
+        "ledger_prev": sources.ledger_prev,
+        "ledger_entry_hash": ledger_entry_hash(
+            sources.ledger_prev,
+            sources.ledger_ts,
+            sources.ledger_app_id,
+            sources.ledger_tool,
+            sources.ledger_outcome,
+            sources.ledger_detail,
+        ),
+    }
+
+
+def _sign_hmac_sha256(signing_key: bytes, payload: dict[str, str]) -> str:
+    return hmac.new(signing_key, canonical_signed_bytes(payload), hashlib.sha256).hexdigest()
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _format_ts(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def write_receipt(
+    *,
+    sources: ReceiptSources,
+    signing_key: bytes,
+    signer_id: str,
+    ttl_seconds: int = DEFAULT_TTL_SECONDS,
+    issued_at: Optional[datetime] = None,
+    meta: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Emit one bound receipt for a tool call. Key must be outside agent reach."""
+    if not supports_bound_receipt(signing_key):
+        raise BoundReceiptError("signing_key required — refusing to emit a pseudo-bound receipt")
+    refs = expected_refs(sources)
+    now = issued_at or _utc_now()
+    expires = now + timedelta(seconds=max(1, int(ttl_seconds)))
+    payload = BoundReceiptPayload(
+        signer_id=signer_id,
+        issued_at=_format_ts(now),
+        expires_at=_format_ts(expires),
+        **refs,
+    )
+    sig_hex = _sign_hmac_sha256(signing_key, payload.to_dict())
+    wire = BoundReceiptWire(
+        payload=payload,
+        signature=BoundReceiptSignature(alg="hmac-sha256", value=sig_hex),
+        meta=meta,
+    )
+    return wire.to_dict()
+
+
+def _check_refs(wire: dict[str, Any], sources: ReceiptSources) -> Optional[VerificationResult]:
+    expected = expected_refs(sources)
+    payload = wire["payload"]
+    for field in _PAYLOAD_REF_FIELDS:
+        if payload.get(field) != expected[field]:
+            return VerificationResult(
+                ok=False,
+                reason=VerificationReason.ref_mismatch(field),
+                detail=f"expected {expected[field]!r}, got {payload.get(field)!r}",
+            )
+    return None
+
+
+def _check_signature(wire: dict[str, Any], signing_key: bytes) -> Optional[VerificationResult]:
+    sig = wire["signature"]
+    if sig.get("alg") != "hmac-sha256":
+        return VerificationResult(
+            ok=False,
+            reason=VerificationReason.SIGNATURE_INVALID.value,
+            detail="only hmac-sha256 verifier implemented",
+        )
+    expected = _sign_hmac_sha256(signing_key, wire["payload"])
+    if not hmac.compare_digest(expected, sig.get("value") or ""):
+        return VerificationResult(
+            ok=False,
+            reason=VerificationReason.SIGNATURE_INVALID.value,
+            detail="signature mismatch",
+        )
+    return None
+
+
+def verify_receipt(
+    wire: dict[str, Any],
+    *,
+    signing_key: bytes,
+    sources: ReceiptSources,
+    now: Optional[datetime] = None,
+) -> VerificationResult:
+    """Staged verify: structural → freshness → refs → signature (#194 / #196)."""
+    ok, reason, detail = validate_structure(wire)
+    if not ok:
+        return VerificationResult(ok=False, reason=reason.value, detail=detail)
+    fresh_ok, fresh_reason, fresh_detail = check_freshness(wire, now=now)
+    if not fresh_ok:
+        return VerificationResult(ok=False, reason=fresh_reason.value, detail=fresh_detail)
+    ref_fail = _check_refs(wire, sources)
+    if ref_fail is not None:
+        return ref_fail
+    sig_fail = _check_signature(wire, signing_key)
+    if sig_fail is not None:
+        return sig_fail
+    return VerificationResult(ok=True, reason=VerificationReason.OK.value, detail="ok")
