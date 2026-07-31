@@ -2319,7 +2319,7 @@ def knowledge_flag(
     mapped ``tags`` column."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
     if "error" in mapping:
@@ -2358,7 +2358,7 @@ def knowledge_retract(app_id: str, atom_id: str, reason: str) -> dict:
   ``retracted: true``. Requires ``knowledge_curate`` and mapped ``tags``."""
     pg = get_pg()
     if not pg:
-        return {"error": "postgres_unavailable"}
+        return _postgres_unavailable()
 
     mapping = sp.resolve(pg, app_id, "knowledge", _KNOWLEDGE_FIELDS)
     if "error" in mapping:
