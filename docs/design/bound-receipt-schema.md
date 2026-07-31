@@ -4,6 +4,8 @@ name: bound-receipt-schema
 description: "Canonical bound-receipt wire format (#195) — join refs, signed envelope, verification order for AT-R1 (#194) and the binding writer (#196)."
 ---
 
+@markdownai v1.0
+
 # Bound receipt schema (v1)
 
 Status: **SPEC** — machine shape ships in `willow_mcp/schemas/bound_receipt.v1.schema.json` and
