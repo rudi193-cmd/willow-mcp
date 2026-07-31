@@ -104,3 +104,19 @@ willow-mcp repair-runtime-perms
 
 This keeps `mcp_apps/` and `config/` owned by `willow-operator` while giving the
 runtime user write access to `store/` and other MCP working directories.
+
+## PGP-enforced manifests (B-45, issue #183)
+
+`mcp_apps/` ownership above stops the agent from *writing* a manifest, but on
+an install that hasn't hardened yet — or any process that reaches the file a
+different way — an unsigned manifest is still honored as-is. Set
+`WILLOW_PGP_FINGERPRINT` to close that gap outright: an unsigned, tampered,
+or wrong-signer manifest gets denied exactly like a missing one.
+
+```bash
+willow-mcp sign-manifest hanuman
+```
+
+Interactive operator terminal only (same as `sign-net-task`/`sign-db-task` —
+`gpg-agent` is unreachable inside Kart). Re-run after any manifest edit; a
+changed manifest with a stale signature is denied too.

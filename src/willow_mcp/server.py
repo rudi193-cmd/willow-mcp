@@ -5262,6 +5262,50 @@ def _cmd_sign_db_task(args) -> None:
     print(envelope)
 
 
+def _cmd_sign_manifest(args) -> None:
+    """`willow-mcp sign-manifest <app_id>` — detach-sign a manifest with the
+    operator's PGP key (#183, docs/design/pgp-and-persona.md). Operator-terminal
+    only: gpg-agent is unreachable inside the Kart bwrap sandbox (same lesson
+    as sign-net-task/sign-db-task). No effect unless WILLOW_PGP_FINGERPRINT is
+    set — signing an unenforced manifest is harmless but pointless, and a
+    clear error here is better than a signature nobody will ever check."""
+    from . import gate, pgp
+
+    if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
+        print(
+            "Error: sign-manifest requires an interactive operator terminal "
+            "outside Kart; it cannot run from an MCP tool or queued task.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not pgp.pgp_enabled():
+        print(
+            "Error: WILLOW_PGP_FINGERPRINT is not set. Manifest signing is an "
+            "opt-in hardening layer (#183) -- set it to your operator key's "
+            "fingerprint before signing; see docs/design/pgp-and-persona.md.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    try:
+        app_id = gate._validate_app_id(args.app_id)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    manifest_path = gate._apps_root() / app_id / "manifest.json"
+    if not manifest_path.is_file():
+        print(f"Error: no manifest at {manifest_path}", file=sys.stderr)
+        raise SystemExit(1)
+    ok, detail = pgp.sign_detached(manifest_path)
+    if not ok:
+        print(f"Error: {detail}", file=sys.stderr)
+        raise SystemExit(1)
+    print(f"Signed: {detail}")
+    print(
+        "Re-run this after any manifest edit -- gate._load_manifest denies a "
+        "manifest whose signature no longer matches its content."
+    )
+
+
 def _cmd_setup_egress(args) -> None:
     """`willow-mcp setup-egress` — one-time Ed25519 keypair bootstrap (local CLI only)."""
     from . import egress_setup
@@ -5995,6 +6039,13 @@ def _main():
         help="operator Ed25519 private PEM (default: setup-egress manifest or $WILLOW_MCP_EGRESS_SIGNING_KEY)",
     )
 
+    sign_manifest_p = subparsers.add_parser(
+        "sign-manifest",
+        help="Detach-sign an app manifest with the operator's PGP key (#183; "
+             "interactive operator terminal only; never an MCP tool)",
+    )
+    sign_manifest_p.add_argument("app_id", help="whose manifest to sign")
+
     setup_egress_p = subparsers.add_parser(
         "setup-egress",
         help="Create or register egress signing keys outside WILLOW_HOME (local CLI only)",
@@ -6256,6 +6307,9 @@ def _main():
         _cmd_sign_net_task(args)
     if args.command == "sign-db-task":
         _cmd_sign_db_task(args)
+        return
+    if args.command == "sign-manifest":
+        _cmd_sign_manifest(args)
         return
     if args.command == "setup-egress":
         _cmd_setup_egress(args)

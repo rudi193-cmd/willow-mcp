@@ -668,6 +668,20 @@ something as trusted knowledge is a more consequential act than logging or
 resolving a gap, the same reasoning `schema_admin` gets its own group
 instead of folding into `knowledge_write`.
 
+### PGP-enforced manifests (opt-in)
+
+By default a manifest is trusted as whatever's on disk — anyone who can write
+`mcp_apps/<app_id>/manifest.json` can grant that app any permission, or create
+a new one and become any identity (issue #183). Set `WILLOW_PGP_FINGERPRINT`
+to your operator key's fingerprint and this stops being true: `gate.py` denies
+any manifest whose `manifest.json.sig` doesn't verify against that key —
+missing, tampered, or signed by a different key are all treated exactly like
+a missing manifest. Sign one with `willow-mcp sign-manifest <app_id>`
+(interactive operator terminal only, same as `sign-net-task` — `gpg-agent` is
+unreachable inside the Kart sandbox); re-sign after every edit, since a
+changed manifest with a stale signature is denied too. See
+`docs/design/pgp-and-persona.md` for the full design.
+
 The MarkdownAI (mai) tools (registered only when `WILLOW_MCP_MARKDOWNAI=1`)
 are additionally per-app gated (#153/#161): `markdownai_read` and
 `markdownai_write` cover the file/render tools, and `markdownai_directives` —
