@@ -175,7 +175,7 @@ _BASH_ROUTING: list[tuple[re.Pattern[str], str, str]] = [
      f"knowledge_search / store_search · symbols → code_graph_search · {_TASK_SUBMIT}"),
     (re.compile(r"(?i)\bfind\s"), "warn",
      f"code_graph_search / knowledge_search · {_TASK_SUBMIT}"),
-    (_ROUTE_WEB_FETCH_RE, "block", f"willow_web_fetch (MCP) — guarded fetch, not raw {{curl,wget}}"),
+    (_ROUTE_WEB_FETCH_RE, "block", "willow_web_fetch (MCP) — guarded fetch, not raw {curl,wget}"),
     (_ROUTE_PKG_INSTALL_RE, "block", f"package install reaches the network → {_TASK_SUBMIT_NET}"),
     (_ROUTE_REMOTE_RE, "block", f"remote network access → {_TASK_SUBMIT_NET}"),
     (_ROUTE_BACKGROUND_RE, "warn",
