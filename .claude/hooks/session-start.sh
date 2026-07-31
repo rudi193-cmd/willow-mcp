@@ -103,12 +103,27 @@ if [ -f "$REPO/.mcp.json" ] \
   echo "stale env-less .mcp.json set aside as .mcp.json.stale.bak — regenerating" >&2
 fi
 if [ ! -f "$REPO/.mcp.json" ]; then
-  _orch_line=""
-  if [ "$WILLOW_APP_ID" = "willow" ]; then
-    _orch_line=',
+  if [ ! -x "$REPO/.venv/bin/python3" ]; then
+    # Step 1 (venv + install) is wrapped by `set -euo pipefail`, so a real
+    # failure there already stops the script before this point — this branch
+    # is the residual case: WILLOW_PG_BOOTSTRAP_ROLE=1 bash ... || true above
+    # swallows failures, but only ITS OWN (Postgres is optional); it does not
+    # run step 1 again, so a venv that failed earlier in the same run is
+    # still missing here. Writing a .mcp.json that names a nonexistent
+    # interpreter as "command" would just relocate that failure to the MCP
+    # handshake — silently, and much later — which is the exact footgun this
+    # hook exists to prevent (see the file header). Refuse loudly instead.
+    echo "session-start.sh: .venv/bin/python3 is not executable — refusing to" >&2
+    echo "  write .mcp.json pointing at it. Re-run 'bash scripts/sandbox-bootstrap.sh'" >&2
+    echo "  directly and read its output; the client will fail to connect until" >&2
+    echo "  a working venv exists." >&2
+  else
+    _orch_line=""
+    if [ "$WILLOW_APP_ID" = "willow" ]; then
+      _orch_line=',
         "WILLOW_HUMAN_ORCHESTRATOR": "1"'
-  fi
-  cat > "$REPO/.mcp.json" <<JSON
+    fi
+    cat > "$REPO/.mcp.json" <<JSON
 {
   "mcpServers": {
     "willow-mcp": {
@@ -126,6 +141,7 @@ if [ ! -f "$REPO/.mcp.json" ]; then
   }
 }
 JSON
+  fi
 fi
 
 # Start a fast-lane Kart worker so task_submit has a drainer from the first
