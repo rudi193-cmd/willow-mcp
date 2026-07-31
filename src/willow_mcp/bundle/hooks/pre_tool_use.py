@@ -3,8 +3,13 @@
 Five guards:
 - Bash reaching for raw psql/psycopg2/sqlite3 against a database or store
   willow-mcp owns, instead of going through the MCP tools (blocks).
-- Bash habits that duplicate MCP tools (ls/grep/git-mutation/python-heredoc) —
-  warn or block with redirect hints (trimmed from fleet mcp_routing).
+- Bash habits that duplicate MCP tools or Kart's sandboxed execution —
+  filesystem reads (ls/grep/find/cat), git/gh mutation, python heredoc,
+  raw network egress (curl/wget/pip/npm/ssh/scp), background/detached
+  processes (nohup/disown/trailing `&`), bare script/build execution
+  (python/node scripts, make), and bulk filesystem mutation (mkdir/rm/mv/
+  cp/chmod/tar) — warn or block with redirect hints (trimmed from fleet
+  mcp_routing).
 - task_submit calls that hand-embed a Kart network directive (`# allow_net`
   / `# allow_localhost`) in the task text — the server strips these (B-21),
   so it does nothing; the correct path is allow_net=True + the task_net
@@ -110,6 +115,42 @@ _ROUTE_GIT_MUT_RE = re.compile(
     r"restore|switch|clean|cherry-pick|revert|tag)\b")
 _ROUTE_GH_RE = re.compile(r"\bgh\s")
 
+# Kart (task_submit) is the sandboxed, tracked execution surface — anything
+# below reaches the network, backgrounds/detaches a process, or mutates the
+# filesystem in bulk, all outside that tracking, when run raw in this Bash
+# tool. Anchored to command position (start, or after &&/;/|) so a command
+# that merely *names* the verb — a commit message, an echo, a --reason
+# string — is not caught; only an actual invocation is.
+
+# curl/wget duplicate willow_web_fetch (the guarded, recorded fetch path) —
+# same relationship as the native WebFetch tool check_native_web blocks.
+# End-anchored on (\s|$), not \b: a bare \b also fires between a word char
+# and a following '.', so \bmake\b would match the *filename* make.py — the
+# same class of false positive ls/tree/pwd already guard against below.
+_ROUTE_WEB_FETCH_RE = re.compile(r"(?:^|&&|;|\|)\s*(curl|wget)(?:\s|$)")
+# Installing a dependency reaches the package registry over the network —
+# the same crossing as `git push`, just a different verb.
+_ROUTE_PKG_INSTALL_RE = re.compile(
+    r"(?:^|&&|;|\|)\s*(pip3?\s+install(?:\s|$)|npm\s+install(?:\s|$)|npm\s+i\s|"
+    r"yarn\s+add(?:\s|$)|poetry\s+add(?:\s|$)|uv\s+add(?:\s|$)|uv\s+pip\s+install(?:\s|$))"
+)
+_ROUTE_REMOTE_RE = re.compile(r"(?:^|&&|;|\|)\s*(ssh|scp)(?:\s|$)")
+# A process backgrounded/detached in the agent's own Bash tool is invisible
+# to everything else in the session; Kart tracks async work instead. The
+# trailing bare `&` is negative-lookbehind-guarded so `a && b` (command
+# chaining) doesn't trip it — only an actual backgrounding `&` at end-of-command.
+_ROUTE_BACKGROUND_RE = re.compile(
+    r"(?:^|&&|;|\|)\s*(nohup|setsid)(?:\s|$)|\bdisown\b|(?<!&)&\s*$"
+    r"|\bscreen\s+-dm\b|\btmux\s+new-session\s+-d\b"
+)
+_ROUTE_SCRIPT_RE = re.compile(
+    r"(?:^|&&|;|\|)\s*(?:python3?|node)\s+(?:-\S+\s+)*\S+\.(?:py|js|mjs|ts)\b"
+    r"|(?:^|&&|;|\|)\s*make(?:\s|$)"
+)
+_ROUTE_FS_MUTATE_RE = re.compile(
+    r"(?:^|&&|;|\|)\s*(mkdir|rm|mv|cp|chmod|chown|tar)(?:\s|$)"
+)
+
 # Shell habits → (decision, hint). Trimmed product port of fleet mcp_routing.BASH_TO_MCP.
 _BASH_ROUTING: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"^\s*ls(\s|$)"), "warn",
@@ -134,6 +175,13 @@ _BASH_ROUTING: list[tuple[re.Pattern[str], str, str]] = [
      f"knowledge_search / store_search · symbols → code_graph_search · {_TASK_SUBMIT}"),
     (re.compile(r"(?i)\bfind\s"), "warn",
      f"code_graph_search / knowledge_search · {_TASK_SUBMIT}"),
+    (_ROUTE_WEB_FETCH_RE, "block", f"willow_web_fetch (MCP) — guarded fetch, not raw {{curl,wget}}"),
+    (_ROUTE_PKG_INSTALL_RE, "block", f"package install reaches the network → {_TASK_SUBMIT_NET}"),
+    (_ROUTE_REMOTE_RE, "block", f"remote network access → {_TASK_SUBMIT_NET}"),
+    (_ROUTE_BACKGROUND_RE, "warn",
+     f"backgrounded/detached process is untracked outside this session → {_TASK_SUBMIT}"),
+    (_ROUTE_SCRIPT_RE, "warn", f"script/build execution → {_TASK_SUBMIT}"),
+    (_ROUTE_FS_MUTATE_RE, "warn", f"scripted/bulk filesystem change → {_TASK_SUBMIT}"),
 ]
 
 # Exactly the git/gh routing steers the orchestrator seat is exempt from.

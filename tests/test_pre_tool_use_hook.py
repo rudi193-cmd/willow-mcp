@@ -451,6 +451,76 @@ def test_main_warns_on_ls():
     assert "store_list" in decision["reason"]
 
 
+# ── check_bash_routing: Kart redirects (network / background / filesystem) ──
+
+@pytest.mark.parametrize("command, decision", [
+    ("curl https://example.com/data.json", "block"),
+    ("wget https://example.com/file", "block"),
+    ("pip install requests", "block"),
+    ("pip3 install requests", "block"),
+    ("npm install lodash", "block"),
+    ("npm i lodash", "block"),
+    ("yarn add lodash", "block"),
+    ("poetry add requests", "block"),
+    ("uv add requests", "block"),
+    ("uv pip install requests", "block"),
+    ("ssh user@host 'uptime'", "block"),
+    ("scp file.txt user@host:/tmp", "block"),
+    ("sleep 300 &", "warn"),
+    ("nohup python3 server.py &", "warn"),
+    ("setsid ./daemon.sh", "warn"),
+    ("some_job; disown", "warn"),
+    ("screen -dm ./worker.sh", "warn"),
+    ("tmux new-session -d -s work './run.sh'", "warn"),
+    ("python3 migrate.py", "warn"),
+    ("node build.js", "warn"),
+    ("make build", "warn"),
+    ("mkdir -p out/reports", "warn"),
+    ("rm -rf build/", "warn"),
+    ("mv old.txt new.txt", "warn"),
+    ("cp a.txt b.txt", "warn"),
+    ("chmod +x run.sh", "warn"),
+    ("chown user:group file.txt", "warn"),
+    ("tar xzf archive.tar.gz", "warn"),
+])
+def test_check_bash_routing_kart_redirects(command, decision):
+    routed = pre_tool_use.check_bash_routing(command)
+    assert routed is not None
+    assert routed[0] == decision
+    assert "willow-mcp" in routed[1]
+
+
+# Allow-side: a block-only suite for these patterns couldn't tell "this guard
+# fires correctly" from "this guard fires on everything" — the exact gap the
+# allow-side pass over check_bash's guards closed. Pin known-good commands
+# that share a token with a blocked pattern but aren't the crossing.
+@pytest.mark.parametrize("command", [
+    "",
+    "git status",
+    "echo 'curl and wget and rm are just words in this string'",
+    "npm init",            # 'i' without trailing space — not npm install
+    "npm info lodash",
+    "npm run build",
+    "npm test",
+    "rsync -a src/ dst/",             # no remote host — not ssh/scp
+    "echo a && echo b",               # '&&' is chaining, not a trailing '&'
+    "python3 -m pytest tests/",       # module invocation, no script file arg
+    "python3 -c 'print(1)'",          # inline, no script file
+    "make.py",                        # not the `make` build tool
+])
+def test_check_bash_routing_kart_redirects_allow_side(command):
+    assert pre_tool_use.check_bash_routing(command) is None
+
+
+def test_check_bash_routing_git_mutation_wins_over_a_prose_nohup_mention():
+    # 'nohup' appears in the -m message, not as an invocation; git mutation
+    # is still the correct (and only) match.
+    routed = pre_tool_use.check_bash_routing(
+        "git commit -m 'background the deploy with nohup later'")
+    assert routed is not None and routed[0] == "block"
+    assert "git mutation" in routed[1]
+
+
 # ── orchestrator seat: git/gh routing is lifted, the security guards are not ──
 
 def test_is_orchestrator_seat_reads_env(monkeypatch):
@@ -522,9 +592,15 @@ def test_orchestrator_git_gh_mutations_allowed(orchestrator_seat, command):
     ("ls -la src/", "warn"),
     ("psql mydb -c 'select 1'", "block"),
     ("sqlite3 /tmp/x.db 'select 1'", "block"),
+    ("curl https://example.com", "block"),
+    ("pip install requests", "block"),
+    ("rm -rf build/", "warn"),
 ])
 def test_orchestrator_still_routed_off_non_git_habits(orchestrator_seat, command, decision):
-    """The exemption is git/gh only — every other routing nudge still fires."""
+    """The exemption is git/gh only — every other routing nudge still fires,
+    including the Kart (network/background/filesystem) redirects added
+    alongside it: the orchestrator seat's repo-maintenance carve-out doesn't
+    extend to running raw curl or pip against the network."""
     routed = pre_tool_use.check_bash_routing(command)
     assert routed is not None and routed[0] == decision
 
