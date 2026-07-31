@@ -69,6 +69,21 @@ Ceiling TTL is 3h. Default 30m. Lease must name the same `app_id` as its file.
 4. Operator signed envelope: `willow-mcp sign-net-task …`
 5. Agent calls `task_submit(..., allow_net=True)` — **not** `# allow_net` in task text.
 
+### Kart task with local Postgres (`allow_db`)
+
+`allow_db` needs the `task_db` capability alone by default. When the operator sets
+`WILLOW_MCP_ENFORCE_DB_PERIMETER` (off by default), it **also** needs an
+operator-signed per-task envelope — the same authority model as egress, so a
+`task_db` holder can no longer queue arbitrary `psql`:
+
+1. Manifest holds `task_db` (operator added — **not** granted by `full_access`).
+2. Apply `docs/schema/tasks-add-db-authorization.sql` once, then reconfirm the `tasks` mapping.
+3. Operator signs the exact task: `willow-mcp sign-db-task <app_id> --task "…" --ttl 30m`
+4. Agent calls `task_submit(..., allow_db=True, db_authorization=<envelope>)`.
+
+The envelope is bound to the `database` scope, so a `sign-net-task` envelope can
+never authorize db work, and vice-versa.
+
 ---
 
 ## What agents should say
