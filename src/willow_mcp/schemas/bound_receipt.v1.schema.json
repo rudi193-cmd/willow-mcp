@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://willow.dev/schemas/bound-receipt.v1.json",
+  "title": "Willow bound receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "payload", "signature"],
+  "properties": {
+    "format": {
+      "const": "willow-bound-receipt/1"
+    },
+    "payload": {
+      "$ref": "#/$defs/payload"
+    },
+    "signature": {
+      "$ref": "#/$defs/signature"
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "digest_hex": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "effect_or_denial": {
+      "type": "string",
+      "oneOf": [
+        { "pattern": "^denial:[a-z0-9_]{1,64}$" },
+        { "pattern": "^effect:[a-f0-9]{64}$" }
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 40
+    },
+    "signer_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent_identity_ref",
+        "capability_token_ref",
+        "policy_or_manifest_digest",
+        "tool_call_digest",
+        "effect_ref_or_denial_code",
+        "ledger_prev",
+        "ledger_entry_hash",
+        "signer_id",
+        "issued_at",
+        "expires_at"
+      ],
+      "properties": {
+        "agent_identity_ref": { "$ref": "#/$defs/digest_hex" },
+        "capability_token_ref": { "$ref": "#/$defs/digest_hex" },
+        "policy_or_manifest_digest": { "$ref": "#/$defs/digest_hex" },
+        "tool_call_digest": { "$ref": "#/$defs/digest_hex" },
+        "effect_ref_or_denial_code": { "$ref": "#/$defs/effect_or_denial" },
+        "ledger_prev": { "$ref": "#/$defs/digest_hex" },
+        "ledger_entry_hash": { "$ref": "#/$defs/digest_hex" },
+        "signer_id": { "$ref": "#/$defs/signer_id" },
+        "issued_at": { "$ref": "#/$defs/timestamp" },
+        "expires_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alg", "value"],
+      "properties": {
+        "alg": { "enum": ["hmac-sha256", "ed25519"] },
+        "value": {
+          "type": "string",
+          "pattern": "^[a-f0-9]+$",
+          "minLength": 64,
+          "maxLength": 128
+        }
+      }
+    }
+  }
+}
