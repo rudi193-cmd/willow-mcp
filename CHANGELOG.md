@@ -136,6 +136,22 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   console script under a real pty: sign, tamper-after-signing, forge an
   identity, reuse one manifest's signature against another, and sign with
   the wrong key are all denied.
+- **B-46/#228: `repair-runtime-perms` downgraded `vault.key`/`mcp_token.json`
+  to world-readable.** Found auditing existing B-32 coverage for gaps of the
+  same class #182 found. Both files sit at `$WILLOW_HOME`'s top level (not
+  under a scaffolded directory), so the generic runtime-children sweep gave
+  them the same world-readable `0644` it gives ordinary runtime state —
+  verified live: a freshly-`Vault().init()`'d `vault.key` went from its own
+  `0600` default to `0644` after running the operator's own recommended
+  hardening command. Fixed: these filenames get owner-only `0700`/`0600`
+  instead, still owned by the runtime user (the running server legitimately
+  decrypts the vault, unlike the egress key). New
+  `trust_root_setup.secret_file_exposure()` folds into `audit_trust_root()`'s
+  `hardened` bool; `willow-mcp doctor` gained its own warning block (the
+  prior one only printed when `forgeable` was non-empty, so a secret-file-
+  only exposure computed `hardened: false` but printed nothing). Also adds
+  `tests/test_at_m1_kill_chain.py`, replaying the #181 kill chain's testable
+  steps against current code end to end.
 
 ### Fixed
 - **B-41 follow-up: a warm container kept its pre-B-41 `.mcp.json` broken

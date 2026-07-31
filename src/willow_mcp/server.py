@@ -5447,6 +5447,13 @@ def _cmd_doctor(args) -> None:
             hint += f" --project-root {args.project_root}"
         print(f"  fix: {hint}")
         print()
+    if audit.get("secret_file_exposure"):
+        cli = shutil.which("wmc") or shutil.which("willow-mcp") or "willow-mcp"
+        print("[warn] secret_files: group/world-readable secret file(s) (#181 audit)")
+        for item in audit["secret_file_exposure"]:
+            print(f"  {item.get('key')}: {item.get('path')} (mode {item.get('mode')})")
+        print(f"  fix: {cli} repair-runtime-perms")
+        print()
 
 
 def _cmd_run_net(args) -> None:
