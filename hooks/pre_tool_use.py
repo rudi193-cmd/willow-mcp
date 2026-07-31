@@ -1,8 +1,12 @@
 """willow-mcp Claude Code hook — PreToolUse.
 
-Six guards:
+Seven guards:
 - Bash reaching for raw psql/psycopg2/sqlite3 against a database or store
   willow-mcp owns, instead of going through the MCP tools (blocks).
+- A Write/Edit/MultiEdit whose target file *is* a willow-mcp-owned SQLite
+  store (store.db/vault.db/kart.db/mcp_receipt.db) — the non-Bash path to the
+  same crossing: no DB client is invoked at all, so the raw-client scan above
+  never sees it (blocks).
 - In Claude Code remote sessions (#164): when SessionStart recorded no live MCP
   gate, bare psql/sqlite3/curl are blocked outright (not merely redirected).
 - Bash habits that duplicate MCP tools or Kart's sandboxed execution —
@@ -65,6 +69,16 @@ _OWNED_MARKER_RE = re.compile(
     r"WILLOW_PG_DB|WILLOW_STORE_ROOT|\bknowledge\b|\brecords\b"
     r"|(?:mcp_receipt|vault|kart|store)\.db"
 )
+
+# The non-Bash path to the same crossing: a Write/Edit/MultiEdit whose target
+# file *is* one of willow-mcp's own SQLite stores. No DB client is invoked —
+# the tool overwrites the file's bytes directly — so _CLIENT_RE above, which
+# only scans command-line/script text for a client invocation, never sees
+# this at all. Matched on the filename itself (path-separator- or
+# start-anchored, so "backup_store.db" doesn't false-positive on "store.db"),
+# not a resolved real path: a relative or symlinked target is still this file
+# by the name a human/agent would recognize it under.
+_OWNED_DB_FILE_RE = re.compile(r"(?:^|[/\\])(?:mcp_receipt|vault|kart|store)\.db$")
 
 _TOOL_REDIRECTS = {
     "knowledge": "knowledge_search / kb_at / kb_startup_continuity (read) or "
@@ -652,6 +666,23 @@ def check_bash_self_grant(command: str) -> Optional[str]:
     return None
 
 
+_OWNED_DB_FILE_REASON = (
+    "willow-mcp: this writes directly to a willow-mcp-owned SQLite store file — "
+    "the non-Bash path to the same crossing a raw DB client would be (blocked one "
+    "tool deeper, same as check_bash). Use the matching MCP tool (store_*, "
+    "knowledge_*, kb_*) instead of touching the file directly."
+)
+
+
+def check_owned_db_file_write(tool_input: dict) -> Optional[str]:
+    """Block a Write/Edit/MultiEdit whose target file is a willow-mcp-owned
+    SQLite store — see _OWNED_DB_FILE_RE."""
+    path = str((tool_input or {}).get("file_path", "") or "")
+    if path and _OWNED_DB_FILE_RE.search(path):
+        return _OWNED_DB_FILE_REASON
+    return None
+
+
 def check_trust_root_write(tool_input: dict) -> Optional[str]:
     """Block a Write/Edit that mints a lease, writes an identity secret, or slips
     `task_net` into a manifest."""
@@ -715,7 +746,7 @@ def main() -> None:
                 decision, route_reason = routed
                 print(json.dumps({"decision": decision, "reason": route_reason}))
     elif _is_file_write(tool_name):
-        reason = check_trust_root_write(tool_input)
+        reason = check_owned_db_file_write(tool_input) or check_trust_root_write(tool_input)
         if reason:
             print(json.dumps({"decision": "block", "reason": reason}))
     elif _is_task_submit(tool_name):

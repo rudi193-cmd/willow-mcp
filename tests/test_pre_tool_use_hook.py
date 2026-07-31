@@ -469,6 +469,60 @@ def test_check_trust_root_write_allows_ordinary_files():
         assert pre_tool_use.check_trust_root_write({"file_path": path}) is None
 
 
+# ── check_owned_db_file_write (item B, 2026-07-31): the non-Bash path ────────
+#
+# check_bash's raw-client scan only sees a command/script that *invokes a DB
+# client* against an owned marker. A Write/Edit tool that overwrites the
+# store file's bytes directly invokes no client at all — same crossing, one
+# tool over, previously unguarded (deliberately deferred in
+# docs/design/hooks-and-skills.md §4 until a concrete case showed up).
+
+@pytest.mark.parametrize("path", [
+    "/home/x/.willow/store/store.db",
+    "/home/x/.willow/vault.db",
+    "kart.db",
+    "/home/x/.willow/mcp_receipt.db",
+])
+def test_check_owned_db_file_write_blocks_the_exact_store_files(path):
+    reason = pre_tool_use.check_owned_db_file_write({"file_path": path})
+    assert reason is not None
+    assert "non-Bash" in reason
+
+
+@pytest.mark.parametrize("path", [
+    "",
+    "/home/x/src/server.py",
+    "/home/x/.willow/store/col/restore.db",   # "store.db" substring, not the file
+    "/home/x/backups/backup_store.db",         # same substring trap, other side
+    "/home/x/.willow/store.db.bak",            # a backup copy, not the live file
+    "docs/schema/store.postgres.sql",
+])
+def test_check_owned_db_file_write_allows_unrelated_paths(path):
+    assert pre_tool_use.check_owned_db_file_write({"file_path": path}) is None
+
+
+def test_main_blocks_a_write_targeting_the_store_db_file():
+    code, stdout = _run_hook({
+        "tool_name": "Write",
+        "tool_input": {"file_path": "/home/x/.willow/store/store.db", "content": "junk"},
+        "session_id": "s1",
+    })
+    assert code == 0
+    decision = json.loads(stdout)
+    assert decision["decision"] == "block"
+    assert "non-Bash" in decision["reason"]
+
+
+def test_main_allows_an_edit_to_an_ordinary_file():
+    code, stdout = _run_hook({
+        "tool_name": "Edit",
+        "tool_input": {"file_path": "/home/x/src/server.py", "old_string": "a", "new_string": "b"},
+        "session_id": "s1",
+    })
+    assert code == 0
+    assert stdout == ""
+
+
 def test_check_trust_root_write_reads_edit_shaped_input():
     reason = pre_tool_use.check_trust_root_write(
         {"file_path": "/home/x/.willow/mcp_apps/willow/manifest.json",

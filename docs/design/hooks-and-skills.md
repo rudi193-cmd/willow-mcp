@@ -134,6 +134,24 @@ actually needs them:
   tool) — `Bash` covers the common case; broadening the match surface is
   cheap to add later if a real gap shows up, not worth guessing at now.
 
+  **Closed (2026-07-31):** a real gap showed up, and it's a more direct
+  bypass than the one this named — a `Write`/`Edit`/`MultiEdit` targeting a
+  willow-mcp-owned SQLite store file (`store.db`/`vault.db`/`kart.db`/
+  `mcp_receipt.db`) directly needs **no DB client at all**, so `_CLIENT_RE`'s
+  command/script-text scan never sees it; every existing guard on the
+  Write/Edit path (`check_trust_root_write`) only watches lease/keystore/
+  manifest targets, not the store files themselves. Added
+  `check_owned_db_file_write()`, matched on filename (not resolved real
+  path, so a relative or symlinked target is still caught) and wired
+  alongside `check_trust_root_write` in the same `Write`/`Edit`/`MultiEdit`
+  branch. Postgres has no local file to write into, so this is SQLite-only —
+  the Bash-scoped raw-client guard is still the only coverage there, which is
+  correct: reaching Postgres without a client isn't a thing. Tests pin both
+  the block side (the four exact filenames) and the allow side (substring
+  traps like `restore.db`/`backup_store.db`/`store.db.bak`, verified this
+  doesn't regress to a bare-substring match), plus an end-to-end `main()`
+  case in each direction.
+
 @phase 5-schema-confirm-md-skill
 ## 5. `schema-confirm.md` skill
 
