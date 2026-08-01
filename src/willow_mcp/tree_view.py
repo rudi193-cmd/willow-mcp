@@ -51,7 +51,7 @@ def _rings(app_id: str) -> dict:
     """
     from . import paths
 
-    root = paths.mcp_apps_root() / app_id / "schema_maps"
+    root = paths.schema_maps_dir(app_id)
     tables = []
     if root.is_dir():
         for f in sorted(root.glob("*.json")):

@@ -84,24 +84,42 @@ in willow-2.0. Order is rough tractability.
 
 ### Security / gate follow-ups (red-team 2026-07-31 → `docs/BUGS.md`)
 
-- [ ] **B-47** — Align repo `.cursor/mcp.json` / `willow-mcp` namespace env with
-  the vault desk (`WILLOW_HOME`, PGP fingerprint, `WILLOW_MCP_ENFORCE_BINDING`).
-- [ ] **B-48** — Binding or human attestation for `dispatch_write` (not only
-  `app_id=willow` orchestrator writes). See `human_session.ORCHESTRATOR_WRITE_TOOLS`.
-- [ ] **B-49** — Policy: binding on for every fleet MCP; optional code tighten for
-  registered-agent `whoami` when switch is off.
-- [ ] **B-50** — `schema_maps/` writability for `task_submit` on hardened installs.
+- [x] **B-47** — Documented: README.md's "MCP config" section states the
+  repo's `.cursor/mcp.json` is dev-only, names the missing env vars and
+  what each absence means. Nothing to move -- this config never held
+  fleet secrets by design.
+- [x] **B-48** — Documented as a residual in `willow-gate-seam.md` D6, same
+  class as #231: `_enforce_binding_gate` already covers `dispatch_write`
+  when `WILLOW_MCP_ENFORCE_BINDING=1`, closes only once the operator also
+  registers every builder seat. Making it refuse unregistered app_ids
+  unconditionally was considered and deferred (breaking default-posture
+  change).
+- [x] **B-49** — Reconciled: already documented CLOSED in
+  `willow-gate-seam.md` D3. No code change.
+- [x] **B-50** — `schema_maps/` writability for `task_submit` on hardened
+  installs. Done: relocated `schema_maps/<app_id>/` out from under
+  `mcp_apps/<app_id>/` to its own top-level `$WILLOW_HOME` root (operator-
+  approved amendment to the LOCKED `product-layout.md`) -- `paths.py`,
+  `schema_profile.py`, `tree_view.py`, `tests/test_schema_profile.py` +
+  `tests/test_tree_view.py`.
 - [x] **B-51** — Split `verify_handoff` / `agent_clear` from builder `dispatch_write`;
   orchestrator-only verify + human attestation. Done: removed from the
   `dispatch_write` group in `gate.py`, `tests/test_gate.py` +
   `tests/test_at_m2_dispatch_lifecycle.py`.
-- [ ] **B-52** — `dispatch/` trust-root + optional signed `meta.json`.
+- [ ] **B-52** — `dispatch/` trust-root + optional signed `meta.json`. Partial:
+  `dispatch._meta_is_well_formed()` rejects hand-forged packets missing
+  required fields, in `dispatch_read`/`dispatch_list`. Full closure still
+  needs #231's uid separation.
 - [x] **B-53** — Extend `ORCHESTRATOR_WRITE_TOOLS` to `dispatch_accept` +
   `handoff_write_v4`; regression for stdio `willow` without human env. Done:
   `human_session.py` + `tests/test_human_orchestrator.py` +
   `tests/test_at_m2_dispatch_lifecycle.py`.
-- [ ] **B-54** — Packet-party ACL on `dispatch_read` / `handoff_read`.
-- [ ] **B-55** — Assignment integrity (signed hash or operator-owned dispatch tree).
+- [x] **B-54** — Packet-party ACL on `dispatch_read` / `handoff_read`. Done:
+  `dispatch.is_dispatch_party()`, checked in both `server.py` wrappers,
+  `tests/test_dispatch_stack.py` + `tests/test_at_m2_dispatch_lifecycle.py`.
+- [x] **B-55** — Assignment integrity (signed hash or operator-owned dispatch tree).
+  Done (hash leg): `assignment_sha256` in `meta.json`, verified on
+  `dispatch_read`; `dispatch_accept`/`handoff_write_v4` inherit it for free.
 - [ ] **B-56** — Host egress key custody (#182) on operator workstations.
 - [ ] **`intake_*`** (4) — KB-tier routing; needs jeles/binder/opus targets first.
 - [ ] **`skill_*`, `index_*` / `cmb_*`, `cbm_*`, `mem_binder_*` / `mem_ratify_*`**

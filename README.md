@@ -455,6 +455,19 @@ works unmodified on any clone once the venv above exists):
 Point `WILLOW_PG_DB` / `WILLOW_STORE_ROOT` at your host fleet store when you
 need Postgres knowledge or shared SOIL data.
 
+**This config is dev-only — never point it at fleet secrets.** No `WILLOW_HOME`
+override means it defaults to `~/.willow`; no `WILLOW_PGP_FINGERPRINT` means
+manifests are honored unsigned (#183 is opt-in); no `WILLOW_MCP_ENFORCE_BINDING`
+means stdio `app_id` is trusted as claimed. A 2026-07-31 red-team pass found
+exactly this gap live (issue #235, B-47): this project-repo desk and an
+operator's separately-configured, hardened `~/.cursor/mcp.json` fleet desk are
+two different trust postures under the same product, and it's easy to "test
+green" on the unhardened one while believing you've verified the hardened
+one. If you need PGP enforcement or binding while developing this repo, set
+those env vars in this file's `env` block yourself — willow-mcp intentionally
+ships no default here, so an unconfigured clone fails closed on capability
+grants rather than silently inheriting someone else's fleet trust.
+
 **Version line.** willow-mcp is the **current substrate** the fleet consumes. It
 sits at the head of a lineage of *distinct machines* — each its own spec, not
 rebadges of one another:

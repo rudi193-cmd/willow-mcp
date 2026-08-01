@@ -43,7 +43,10 @@ def home(tmp_path, monkeypatch):
 
 
 def _write_schema_map(tmp_path, app_id, table, confirmed, schema_drift=False):
-    root = tmp_path / "mcp_apps" / app_id / "schema_maps"
+    # B-50/#238: schema_maps/ moved to a top-level WILLOW_HOME dir, sibling
+    # to mcp_apps/, so it can never collide with mcp_apps/ being trust-root
+    # hardened to the operator uid.
+    root = tmp_path / "schema_maps" / app_id
     root.mkdir(parents=True, exist_ok=True)
     record = {"table": table, "confirmed": confirmed, "schema_drift": schema_drift,
               "discovered_at": "2026-01-01T00:00:00+00:00"}
@@ -110,7 +113,7 @@ def test_rings_surfaces_schema_drift(home):
 
 
 def test_rings_ignores_malformed_files(home):
-    root = home / "mcp_apps" / "testapp" / "schema_maps"
+    root = home / "schema_maps" / "testapp"
     root.mkdir(parents=True)
     (root / "garbage.json").write_text("{not json")
     assert tree_view._rings("testapp") == {"tables": [], "confirmed": 0, "total": 0}

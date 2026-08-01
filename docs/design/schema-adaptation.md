@@ -121,8 +121,8 @@ This rules out both options considered earlier in the conversation:
                  └──────────┬───────────┘
                             ▼
                  ┌─────────────────────┐
-                 │  mapping artifact    │   $WILLOW_HOME/mcp_apps/<app_id>/
-                 │  (reviewable JSON)   │   schema_maps/<db_fingerprint>.json
+                 │  mapping artifact    │   $WILLOW_HOME/schema_maps/<app_id>/
+                 │  (reviewable JSON)   │   <db_fingerprint>.json
                  └──────────┬───────────┘
                             ▼
                  ┌─────────────────────┐
@@ -154,7 +154,10 @@ A small module (`schema_profile.py`) responsible for:
 
 ### 3.2 Mapping artifact
 
-Stored at `$WILLOW_HOME/mcp_apps/<app_id>/schema_maps/<db_fingerprint>__<table>.json`:
+Stored at `$WILLOW_HOME/schema_maps/<app_id>/<db_fingerprint>__<table>.json`
+(moved 2026-08-01, B-50/#238, out from under `mcp_apps/<app_id>/` — that tree is
+trust-root-hardened to the operator uid, and the runtime process must be able
+to write these; see `product-layout.md`'s amendment note):
 
 ```json
 {
@@ -435,7 +438,7 @@ The 4 points, and where each lands:
    `confirmed: true`) — it can only allow-list fields the schema already
    knows about; see point 4. Concretely, this becomes a second artifact type
    alongside the mapping file:
-   `$WILLOW_HOME/mcp_apps/<app_id>/schema_maps/<db_fingerprint>__<table>__projection__<purpose>.json`,
+   `$WILLOW_HOME/schema_maps/<app_id>/<db_fingerprint>__<table>__projection__<purpose>.json`,
    `{schema_version, fields: {field: "full"|"<transform-name>"|"DROP"}, destination, purpose}`.
    Read/write tools in §§3.3–3.4 operate against the `SCHEMA`; anything that
    *leaves* willow-mcp's boundary (a future export, a federation grant, a

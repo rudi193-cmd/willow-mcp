@@ -2786,8 +2786,18 @@ def dispatch_read(app_id: str, dispatch_id: str) -> dict:
     """Read one dispatch packet by ID: its meta (from/to app, role, phase,
     priority), current status, and the full assignment.md body. Read-only —
     how a specialist sees its brief before calling dispatch_accept. Returns
-    {error: not_found} for an unknown dispatch_id."""
-    return dispatch_stack.dispatch_read(dispatch_id)
+    {error: not_found} for an unknown dispatch_id, or {error:
+    not_party_to_dispatch} if app_id is neither from_app, to_app, reply_to,
+    nor the orchestrator (B-54, issue #242 -- dispatch_read permission alone
+    used to let any holder read any dispatch_id's full content)."""
+    pkt = dispatch_stack.dispatch_read(dispatch_id)
+    if pkt.get("error"):
+        return pkt
+    from .human_session import is_orchestrator_app
+
+    if not is_orchestrator_app(app_id) and not dispatch_stack.is_dispatch_party(app_id, pkt["meta"]):
+        return {"error": "not_party_to_dispatch", "dispatch_id": dispatch_id}
+    return pkt
 
 
 @mcp.tool()
@@ -2855,7 +2865,16 @@ def handoff_read(app_id: str, dispatch_id: str) -> dict:
     """Read the closeout of a completed dispatch: the structured handoff.json
     findings plus the closeout.md narrative. What the orchestrator reads
     before verify_handoff, and what a successor agent reads to pick up the
-    thread. Read-only."""
+    thread. Read-only. Returns {error: not_party_to_dispatch} if app_id is
+    neither from_app, to_app, reply_to, nor the orchestrator (B-54, issue
+    #242 -- same packet-party check as dispatch_read)."""
+    pkt = dispatch_stack.dispatch_read(dispatch_id)
+    if pkt.get("error"):
+        return pkt
+    from .human_session import is_orchestrator_app
+
+    if not is_orchestrator_app(app_id) and not dispatch_stack.is_dispatch_party(app_id, pkt["meta"]):
+        return {"error": "not_party_to_dispatch", "dispatch_id": dispatch_id}
     return handoff_stack.handoff_read(dispatch_id)
 
 

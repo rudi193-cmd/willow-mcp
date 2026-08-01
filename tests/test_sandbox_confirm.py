@@ -146,6 +146,10 @@ def apps_root(tmp_path, monkeypatch):
     (root / "testapp" / "manifest.json").write_text(
         json.dumps({"permissions": ["task_queue"]})
     )
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/) -- isolating WILLOW_MCP_APPS_ROOT alone no
+    # longer isolates schema-map state between tests reusing "testapp".
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(root))
     return root
 

@@ -38,18 +38,6 @@ class _FakeConn:
         return {"host": self._host, "dbname": self._dbname}
 
 
-@pytest.fixture
-def home(tmp_path, monkeypatch):
-    """schema_profile._apps_root() checks WILLOW_MCP_APPS_ROOT before
-    WILLOW_HOME (same precedence as gate.py) — conftest.py sets
-    WILLOW_MCP_APPS_ROOT once for the whole session, so setting only
-    WILLOW_HOME here would NOT isolate mapping artifacts between tests.
-    Both must be pinned to this test's own tmp_path."""
-    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
-    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "mcp_apps"))
-    return tmp_path
-
-
 KNOWLEDGE_LIKE_COLUMNS = {
     "id": "text",
     "title": "text",
@@ -766,3 +754,37 @@ def test_preview_bad_override_reports_table(home):
 def test_preview_table_not_found():
     conn = _DataConn({}, [])
     assert sp.preview(conn, "app", "ghost", CANONICAL) == {"error": "table_not_found", "table": "ghost"}
+
+
+# ── B-50/#238: schema_maps/ must never live under mcp_apps/ ─────────────────
+
+def test_schema_maps_dir_is_not_under_mcp_apps_root(home):
+    from willow_mcp import paths
+
+    schema_maps = paths.schema_maps_dir("testapp").resolve()
+    mcp_apps = paths.mcp_apps_root().resolve()
+    assert mcp_apps not in schema_maps.parents
+
+
+def test_mapping_path_never_touches_mcp_apps_root(home):
+    """The actual bug: schema_maps/ used to live under mcp_apps/<app_id>/,
+    which trust-root hardening chowns to the operator at 0755 -- on a
+    uid-separated install the runtime process could never create it there,
+    parent-directory permissions block that regardless of what's excluded
+    from any chown sweep. A chmod-based proof can't demonstrate this in a
+    test process running as root (root ignores DAC permission bits, so a
+    read-only mcp_apps/ wouldn't actually block a regression here) -- so
+    the structural proof instead: mcp_apps_root() doesn't exist before the
+    call, and mapping_path() must not create it as a side effect, on any
+    uid, because it no longer touches that tree at all."""
+    from willow_mcp import paths
+
+    apps_root = paths.mcp_apps_root()
+    assert not apps_root.exists()
+
+    path = sp.mapping_path("testapp", "deadbeef", "knowledge")
+    path.write_text("{}")
+
+    assert path.exists()
+    assert not apps_root.exists(), "mapping_path() must never create mcp_apps_root()"
+    assert path.parent == paths.schema_maps_dir("testapp")
