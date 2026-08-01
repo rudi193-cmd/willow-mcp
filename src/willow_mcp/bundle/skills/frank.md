@@ -30,9 +30,10 @@ After sensitive writes elsewhere, `frank_verify` confirms the chain still links.
 
 ## Metering note (B-35)
 
-Envelope `max_count` limits in `envelopes/pre-approved.json` expect FRANK
-`envelope_citation` entries to be appended at use time. That writer path is still
-**cross-repo / incomplete** — do not assume counts enforce until B-35 closes.
+Envelope `max_count` limits in `$WILLOW_HOME/constitutional/pre-approved.json`
+expect FRANK `envelope_citation` entries to be appended at use time. That
+writer path is still **incomplete** — do not assume counts enforce until
+B-35 closes.
 
 ## Constraints
 

@@ -71,9 +71,9 @@ If a call is gate-denied, note it and continue (`degraded` is acceptable).
 
 **Step 4 — grants and collection map (read files)**
 
-- `envelopes/pre-approved.json` — active grants
-- `AGENT_SERVICES.md` — seat obligations
-- `soil/manifest.json` — collection map
+- `$WILLOW_HOME/constitutional/pre-approved.json` — active grants (local to this willow-mcp install; no longer in the governance repo)
+- `AGENT_SERVICES.md` — seat obligations (governance repo)
+- `soil/manifest.json` — collection map (governance repo)
 
 Charter depth (flags, fleet read, `next_bite` writeback): `ORIENT.md` steps 4–6 in the governance repo.
 

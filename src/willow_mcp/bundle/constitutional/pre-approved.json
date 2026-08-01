@@ -1,0 +1,34 @@
+{
+  "schema": "envelope-registry/v1.1",
+  "description": "Pre-Approved Scope (Article III.2) \u2014 standing filesystem and network grants agents may invoke without a fresh Operator Key envelope. Starter shape shipped by willow-mcp; empty until the operator issues real grants.",
+  "constitutional_ref": "CONST-III-2",
+  "envelope_schema": {
+    "version": "0.1",
+    "status": "draft",
+    "description": "Shape of an entry in active[]. An active envelope is a capability: root opened it once; each use is checked mechanically and cited in FRANK. proposals[] entries use the same shape with status=proposed and no force.",
+    "fields": {
+      "id": "env-{verb}-{slug} \u2014 stable, citable, never reused",
+      "verb_id": "int \u2014 row id in syscall-table.json",
+      "verb": "string \u2014 must equal the table row's verb name; mismatch with verb_id is a registry integrity fault, not a judgment call",
+      "grantee": "agent id from fleet.json (or list) \u2014 the process(es) holding the fd",
+      "bounds": "object \u2014 keys MUST be exactly the verb's bounds signature from the table: no missing keys, no extra keys. The checker validates call args field-by-field against these values. A bounds object that does not match its verb's signature makes the envelope VOID, not loosely interpretable.",
+      "issued_by": "root \u2014 always; envelope.issue is not grantable",
+      "issued_at": "UTC date",
+      "ratified_via": "how root's act is evidenced: pgp | in-session statement recorded in FRANK ledger entry <id> | commit signature",
+      "expires_at": "UTC date or null \u2014 null means until revoked, not forever",
+      "max_count": "int or null \u2014 null means unmetered",
+      "use_count_source": "always 'frank' \u2014 the count is DERIVED by counting envelope_citation entries in the ledger, never stored here; a stored counter is mutable state an agent could touch, a derived count is not",
+      "revoked": "object or absent \u2014 {at, by, reason}; revocation appends, never deletes (register discipline)",
+      "status": "active | proposed | expired | exhausted | revoked",
+      "notes": "human context \u2014 NEVER read by the checker"
+    },
+    "citation": {
+      "description": "Every application writes a FRANK entry before the action executes.",
+      "event_type": "envelope_citation",
+      "content": "{envelope_id, verb, call_args, outcome: granted|errno, session}"
+    }
+  },
+  "pre_approved": [],
+  "active": [],
+  "proposals": []
+}

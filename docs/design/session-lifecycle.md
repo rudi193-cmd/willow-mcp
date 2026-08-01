@@ -31,7 +31,7 @@ description: "Draft 0.3 (2026-07-09, unratified) — session lifecycle design fo
 | Layer | Repo | What it owns |
 |-------|------|--------------|
 | **Product** | `willow-mcp` | MCP tools, manifest ACL, Kart worker, dispatch packet I/O, session state, optional pre-tool hook |
-| **Constitution** | `~/github/willow` | `CONSTITUTION.md`, `ORIENT.md`, `envelopes/` — law and grants; willow-mcp **enforces**, does not author |
+| **Constitution** | `~/github/willow` | `CONSTITUTION.md`, `ORIENT.md` — law; willow-mcp **enforces**, does not author. `envelopes/` **no longer lives here** — the registry moved to `$WILLOW_HOME/constitutional/` (below), because a live registry is operator-instance data, not something a charter repo should carry in git. |
 | **Fleet muscle** | `willow-2.0` | Optional upstream; same tool names when wired, but not required for this design |
 
 willow-mcp ships with: `store_*`, `knowledge_*`, `task_*`, `agent_route`, `agent_dispatch_result`, `fleet_*`, `context_*`, `receipts_tail`, `diagnostic_summary`.
@@ -48,7 +48,7 @@ willow-mcp ships with: `store_*`, `knowledge_*`, `task_*`, `agent_route`, `agent
 | **Orchestrator** | `willow` | DAG, dispatch, verify, clear, report | `willow orient` — desk state, pending dispatches |
 | **Specialist** | `loki`, `hanuman`, `jeles`, `ada`, … | Execute one packet; handoff; wait for clear | **Packet is the boot** — no ceremony |
 
-Manifest at `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json` defines permissions + optional `store_scope`. Role envelopes (tool allow/deny) live in manifest or referenced `envelopes/pre-approved.json` — see §6.
+Manifest at `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json` defines permissions + optional `store_scope`. Role envelopes (tool allow/deny) live in manifest or referenced `$WILLOW_HOME/constitutional/pre-approved.json` — see §6.
 
 ---
 
@@ -232,7 +232,7 @@ Narrative mirror optional in `closeout.md` for desk reading.
 }
 ```
 
-**Role envelope** — tool allow/deny per role (Nest packet § `envelopes/pre-approved.json`). Enforced in `gate.py` when `role` is set:
+**Role envelope** — tool allow/deny per role (Nest packet § `$WILLOW_HOME/constitutional/pre-approved.json`). Enforced in `gate.py` when `role` is set:
 
 | Role | allow (sketch) | deny (sketch) |
 |------|----------------|---------------|
@@ -242,7 +242,7 @@ Narrative mirror optional in `closeout.md` for desk reading.
 | loki | read, knowledge_read, handoff_write_v4 | write, task_submit, knowledge_ingest |
 | ada | read, knowledge_read, fleet_read | write, task_submit |
 
-Constitutional grants (`~/github/willow/envelopes/pre-approved.json`) overlay manifest for governance seat — optional mount via `WILLOW_HOME`.
+Constitutional grants (`$WILLOW_HOME/constitutional/pre-approved.json`) overlay manifest for the governance seat. Previously an optional mount pointed at a sibling `willow` repo; now this **is** the default — `WILLOW_ENVELOPE_REGISTRY` still overrides it for anyone who wants a different location.
 
 ### Canonical roles (fleet law — overrides Nest packet errors)
 
@@ -328,8 +328,13 @@ Plan (DAG) → dispatch_send → monitor → verify_handoff → agent_clear → 
 | Path | Relationship |
 |------|----------------|
 | `CONSTITUTION.md` | Supreme law; willow-mcp enforces via gate + envelopes |
-| `envelopes/pre-approved.json` | Authority grants (optional bind) |
 | `design/session-startup-closeout.md` | **Deprecated** — pointer to this doc |
+
+Authority grants (`envelopes/pre-approved.json`) **moved out of this repo** —
+see `$WILLOW_HOME/constitutional/pre-approved.json` in the willow-mcp table
+above. They were never really "law" in the same sense as the constitution
+text; they're the operator's own instance data, so they don't belong in a
+"law only" repo's git history any more than a vault does.
 
 ---
 

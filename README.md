@@ -211,10 +211,15 @@ idempotently inserts or updates charter rows; unknown database rows are reported
 as contested and preserved, never silently deleted.
 
 Constitutional envelopes are loaded read-only from
-`envelopes/pre-approved.json` and checked against `syscall-table.json`.
-`envelope_apply` validates issuer, grantee, verb, exact bounds shape, revocation,
-expiry, and FRANK-derived quota. Both grants and faults append an
-`envelope_citation` to the existing `frank_ledger` before authority is returned.
+`$WILLOW_HOME/constitutional/pre-approved.json` and checked against
+`syscall-table.json` in the same directory (`WILLOW_ENVELOPE_REGISTRY` /
+`WILLOW_SYSCALL_TABLE` override either). `willow-mcp-init` seeds an empty
+starter registry and a real syscall table there on first run — the registry
+starts empty on purpose; it's the operator's own ratified grants to issue,
+never shippable content. `envelope_apply` validates issuer, grantee, verb,
+exact bounds shape, revocation, expiry, and FRANK-derived quota. Both grants
+and faults append an `envelope_citation` to the existing `frank_ledger`
+before authority is returned.
 
 #### `gates` — every gate, on/off, egress-lease shaped
 
@@ -650,7 +655,7 @@ timestamps terminal rows.
 | `WILLOW_SEARCH_PROVIDER_ORDER` | `ddg_html` | Comma-separated web-search provider chain order |
 | `WILLOW_SOIL_HEARTBEAT_INTERVAL` | *(subsystem default)* | SOIL watchman heartbeat interval, seconds. Per-watchman override: `WILLOW_SOIL_HEARTBEAT_INTERVAL_<KEY>` |
 | `WILLOW_CODE_GRAPH_DB` | `$WILLOW_HOME/code_graph/graph.db` | Symbol/code-graph SQLite DB path |
-| `WILLOW_ENVELOPE_REGISTRY` | `<project>/envelopes/pre-approved.json` | Pre-approved envelope registry path |
+| `WILLOW_ENVELOPE_REGISTRY` | `$WILLOW_HOME/constitutional/pre-approved.json` | Pre-approved envelope registry path |
 | `WILLOW_SYSCALL_TABLE` | *(sibling of registry)* | `syscall-table.json` path |
 | `WILLOW_FLEET_ROSTER` | *(derived)* | `fleet.json` roster path |
 | `WILLOW_MCP_GROVE_RINGS` | `$WILLOW_HOME/grove/rings.json` | Grove ring-state store path |

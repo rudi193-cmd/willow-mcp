@@ -16,7 +16,18 @@ A 2026-07-31 red-team pass found that once `mcp_apps/` is actually trust-root-ha
 operator uid (the whole point of B-45/#183's manifest-forgery fix), the runtime process legitimately
 writing schema maps can never create that subdirectory — the parent directory's own permissions
 block it regardless of what's excluded from any chown sweep. Nesting it there was correct before
-hardening was real; it stopped being correct once hardening was.*
+hardening was real; it stopped being correct once hardening was.*  
+*Amendment 2026-08-01 (operator-approved; no tracked issue — decided in-session, recorded here
+rather than left implicit): `constitutional/pre-approved.json` and `constitutional/syscall-table.json`
+are no longer an "optional charter mount" — they are product-owned and seeded by `willow-mcp-init`
+(empty starter registry; real syscall table, since its content is generic mechanism, not a secret).
+Previously the registry's *default* location was a sibling `willow` charter repo
+(`~/github/willow/envelopes/pre-approved.json`), which was two separate problems wearing one
+fact: willow-mcp had a hard dependency on a second repo existing, and an operator's live,
+ratified grants (real paths, real dates) were committed to that repo's git history — the same
+"repo is blueprint, not data" problem this document's own vault treatment already avoids
+elsewhere, just not yet applied here. `WILLOW_ENVELOPE_REGISTRY` / `WILLOW_SYSCALL_TABLE` still
+override unconditionally for an operator who wants a different location.*
 
 **willow-mcp is a standalone product.** `pip install willow-mcp` + `willow-mcp-init` materializes
 `$WILLOW_HOME`. No clone of willow-2.0 or the charter repo is required.
@@ -87,7 +98,7 @@ $WILLOW_HOME/
 │   ├── settings.global.json        # consent.internet, cloud_llm, …
 │   ├── consent.json                # mirror / legacy (see consent.py)
 │   ├── agent_roster.json           # named agents + default app_id
-│   ├── persona_envelopes.json      # role → tool allow/deny (NOT charter grants)
+│   ├── persona_envelopes.json      # role → tool allow/deny (NOT the Article III.2 registry — see constitutional/)
 │   └── rotation.json               # optional free-API key pool (ops)
 │
 ├── dispatch/{dispatch_id}/           # work packets (packet = boot)
@@ -134,7 +145,9 @@ $WILLOW_HOME/
 │
 ├── resources/                      # operator uploads, attachments
 ├── constitutional/
-│   └── review_queue.json           # Article XI queue (optional charter mount)
+│   ├── review_queue.json           # Article XI queue (optional charter mount)
+│   ├── pre-approved.json           # envelope registry — product-owned, seeded empty
+│   └── syscall-table.json          # envelope verb table — product-owned, seeded real
 ├── logs/
 │   └── {YYYY-MM-DD}.log
 │
@@ -194,7 +207,7 @@ Release maintainer syncs from repo root `skills/`, `hooks/`, `docs/templates/` i
 | Repo | Relationship to willow-mcp |
 |------|----------------------------|
 | **willow-mcp** | **The product.** Owns layout, init, MCP tools, Kart worker. |
-| **willow** (charter) | Optional. Mount or symlink `CONSTITUTION.md` / grants into `constitutional/`; not required. |
+| **willow** (charter) | Optional. Mount or symlink `CONSTITUTION.md` into `constitutional/`; not required. Grants (`pre-approved.json`) are no longer a charter mount — see the 2026-08-01 amendment above. |
 | **willow-2.0** (fleet) | Optional host. Shares `$WILLOW_HOME`; adds Grove, FRANK, fylgja, unified MCP. |
 
 ---
@@ -206,7 +219,7 @@ Release maintainer syncs from repo root `skills/`, `hooks/`, `docs/templates/` i
 |---------------------|------------------|
 | Charter `ORIENT.md` | **Spike** — stays in charter repo; do not overwrite with product copy |
 | Charter `AGENTS.md` | `docs/AGENTS.md` (participant-neutral; seat sections) |
-| Charter `envelopes/pre-approved.json` | **Not** `config/persona_envelopes.json` — different semantics |
+| `constitutional/pre-approved.json` | **Not** `config/persona_envelopes.json` — different semantics. No longer a charter path (see amendment above); the "Nest / charter name" column is historical for this row. |
 
 ---
 

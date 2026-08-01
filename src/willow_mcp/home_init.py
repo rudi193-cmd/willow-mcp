@@ -18,6 +18,7 @@ from .paths import (
     agent_roster_path,
     all_layout_dirs,
     bundle_dir,
+    envelope_registry_path,
     exposure_config_path,
     layout_version_path,
     persona_envelopes_path,
@@ -25,6 +26,7 @@ from .paths import (
     rotation_path,
     seeds_dir,
     settings_global_path,
+    syscall_table_path,
     willow_home,
 )
 from .exposure import default_exposure_config
@@ -157,6 +159,19 @@ def ensure_home_layout(home: Path | None = None) -> dict[str, Any]:
     if _write_json_if_missing(review_q, {"format": "review_queue_v1", "items": []}):
         config_created.append(str(review_q.relative_to(willow_home())))
 
+    # The Article III.2 envelope registry and its companion syscall table.
+    # Copied (not inlined like _DEFAULT_ROSTER etc.) because they're real
+    # bundled JSON documents, not small Python dict literals. The registry
+    # seed is an empty-but-valid starter shape — this is operator-instance
+    # data (real grants an operator ratifies), never shipped with real
+    # content. The syscall table seed IS real content: it's generic verb
+    # mechanism data, not a secret, so there's nothing to start empty.
+    constitutional_seeded: list[str] = []
+    if _copy_bundle_file_if_missing(bundle_dir() / "constitutional" / "pre-approved.json", envelope_registry_path()):
+        constitutional_seeded.append(str(envelope_registry_path().relative_to(willow_home())))
+    if _copy_bundle_file_if_missing(bundle_dir() / "constitutional" / "syscall-table.json", syscall_table_path()):
+        constitutional_seeded.append(str(syscall_table_path().relative_to(willow_home())))
+
     registry_result = _materialize_registry()
 
     egress_result: dict[str, Any] = {"action": "skipped"}
@@ -176,6 +191,7 @@ def ensure_home_layout(home: Path | None = None) -> dict[str, Any]:
         "templates": _copy_bundle_tree("templates", willow_home() / "templates"),
         "skills": _copy_bundle_tree("skills", willow_home() / "skills"),
         "hooks": _copy_bundle_tree("hooks", willow_home() / "hooks"),
+        "constitutional": constitutional_seeded,
     }
 
     layout_version_path().write_text(f"{LAYOUT_VERSION}\n", encoding="utf-8")
