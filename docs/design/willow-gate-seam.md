@@ -354,12 +354,24 @@ that owns `$WILLOW_HOME`):
   `announce`) is stdlib-only; willow-gate's PGP-encrypted announcement ledger is
   left as a pluggable `announce.set_sink()` an operator can wire, so the base
   never takes on `python-gnupg`. The base stays dependency-free.
-- **D6 — `dispatch_write` trust (open, B-48):** Orchestrator writes
-  (`dispatch_send` for `app_id=willow`) are human-attested (+ PGP session file
-  when enabled). Builder seats with `dispatch_write` are manifest-gated only —
-  stdio can inject fleet packets without per-call binding. Red-team 2026-07-31
-  demonstrated live packet creation. Fork: extend binding to `dispatch_write`,
-  narrow the group, or move dispatch creation to operator CLI only.
+- **D6 — `dispatch_write` trust (residual, B-48, issue #236):** Orchestrator
+  writes (`dispatch_send` for `app_id=willow`) are human-attested (+ PGP
+  session file when enabled). Builder seats with `dispatch_write` are
+  manifest-gated only — stdio can inject fleet packets without per-call
+  binding. Red-team 2026-07-31 demonstrated live packet creation. Traced
+  2026-08-01: `_enforce_binding_gate` already applies uniformly to
+  `dispatch_write` when `WILLOW_MCP_ENFORCE_BINDING=1` is on (`_gate` calls
+  it for every tool, no `dispatch_write`-specific carve-out) — but it's a
+  no-op for any **unregistered** app_id, by design (D3: an un-instrumented
+  client must fail closed rather than be silently forced onto a signing
+  protocol it never opted into). So this closes today only when the
+  operator both flips the switch *and* runs `register-agent` for every
+  builder seat — the same two-step deployment gap as #231's uid separation,
+  not a code bug. Making `dispatch_write` refuse an unregistered app_id
+  unconditionally (skipping the manifest-only fallback) was considered and
+  deliberately deferred: it would deny `dispatch_send` on every install that
+  hasn't registered its builder agents yet, a breaking default-posture
+  change bigger than this one finding warrants on its own.
 
 ## A phased path (each phase is independently shippable)
 1. **friction_floor watcher** — orthogonal, no auth-path risk; net-new signal.

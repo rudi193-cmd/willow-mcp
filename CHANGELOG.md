@@ -259,6 +259,20 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   design, so there was nothing to move; documented instead — README.md's
   "MCP config" section states plainly this config is dev-only, names the
   missing env vars and what each absence means.
+- **B-48/#236: `dispatch_write` is not binding-gated and not human-attested.**
+  Any stdio caller passing `app_id=hanuman` (or any manifest with
+  `dispatch_write`) can `dispatch_send` with no per-call credential —
+  demonstrated live, `dispatch_id=7BE854FD`. Traced rather than assumed:
+  `_enforce_binding_gate` already applies uniformly to `dispatch_write` when
+  `WILLOW_MCP_ENFORCE_BINDING=1` — it's a no-op for an unregistered app_id
+  by design (fail-closed for an un-instrumented client, not a silent
+  bypass). Closes today only when the operator both enables binding and
+  registers every builder seat — the same two-step deployment gap as #231's
+  uid separation, not a code bug. Making `dispatch_write` refuse
+  unregistered app_ids unconditionally was considered and deferred: a
+  breaking default-posture change for any install with unregistered
+  builder agents, bigger than this one finding warrants alone. Documented
+  as a residual in `docs/design/willow-gate-seam.md` D6.
 
 ### Fixed
 - **B-41 follow-up: a warm container kept its pre-B-41 `.mcp.json` broken

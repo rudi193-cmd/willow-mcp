@@ -88,8 +88,12 @@ in willow-2.0. Order is rough tractability.
   repo's `.cursor/mcp.json` is dev-only, names the missing env vars and
   what each absence means. Nothing to move -- this config never held
   fleet secrets by design.
-- [ ] **B-48** — Binding or human attestation for `dispatch_write` (not only
-  `app_id=willow` orchestrator writes). See `human_session.ORCHESTRATOR_WRITE_TOOLS`.
+- [x] **B-48** — Documented as a residual in `willow-gate-seam.md` D6, same
+  class as #231: `_enforce_binding_gate` already covers `dispatch_write`
+  when `WILLOW_MCP_ENFORCE_BINDING=1`, closes only once the operator also
+  registers every builder seat. Making it refuse unregistered app_ids
+  unconditionally was considered and deferred (breaking default-posture
+  change).
 - [x] **B-49** — Reconciled: already documented CLOSED in
   `willow-gate-seam.md` D3. No code change.
 - [x] **B-50** — `schema_maps/` writability for `task_submit` on hardened
