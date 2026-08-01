@@ -287,6 +287,17 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   had a test that actually exercised the failing case, only the passing one.
   All 13 are now closed with tests naming the exact scenario each guard
   exists to refuse; the harness reports all 17 guards caught.
+- **#233/L-CMD-01: reconciled, not a new gap.** `SECURITY_AUDIT.md` still
+  marked the Kart scanner's `find / -delete` / raw-device-write coverage OPEN,
+  but its own L-DOS-02 entry directly above already named both patterns as
+  DONE — the fix landed for both findings together in `kartikeya`, and
+  L-CMD-01 was just never flipped. Re-verified live against `kartikeya` HEAD
+  and the installed `kartikeya==0.0.7` this repo pins: both patterns are
+  blocked, and `kartikeya`'s own `test_task_scan.py` already covers them
+  (commented as the exact L-DOS-02/L-CMD-01 regression test). No code change
+  in either repo; `test_task_submit_scans_at_submit_time` extended with both
+  patterns to pin the fix through willow's own submit-time wiring, not just
+  kartikeya's suite. `SECURITY_AUDIT.md` corrected to RESOLVED.
 
 ### Fixed
 - **B-41 follow-up: a warm container kept its pre-B-41 `.mcp.json` broken

@@ -376,16 +376,24 @@ so a scanner-refused task is denied before it ever occupies a queue slot (the
 worker still re-scans at execution). Verified live: a fork bomb is refused at
 submit and creates no queue row.
 
-#### P3: L-CMD-01 — Kart scanner destructive-class gaps — OPEN (fix at source)
+#### P3: L-CMD-01 — Kart scanner destructive-class gaps — RESOLVED (reconciled, not a new gap)
 
-`find / -delete` and `cat /dev/zero > /dev/sda` **pass** the scanner despite being
-equivalent to `rm -rf /` / a disk wipe (both of which *are* caught). In this
-configuration bwrap's ephemeral filesystem, read-only trust-root binds, and
-absent device nodes contain them (verified: a sandboxed write to the ACL manifest
-returns `Read-only file system`), so they are not exploitable against the host —
-but the scanner should not depend solely on the sandbox for the destructive class.
-Same location/remediation as L-DOS-02. Tracked as
-[issue #233](https://github.com/rudi193-cmd/willow-mcp/issues/233).
+`find / -delete` and `cat /dev/zero > /dev/sda` were originally observed to
+**pass** the scanner despite being equivalent to `rm -rf /` / a disk wipe (both
+of which *are* caught). This finding shares its remediation with L-DOS-02
+directly above — and L-DOS-02's own "DONE" already names both patterns
+(`find / -delete` / raw-device write) as part of that fix. This entry was left
+marked OPEN when that landed and [issue #233](https://github.com/rudi193-cmd/willow-mcp/issues/233)
+was later filed against the stale wording, not a live gap.
+
+Re-verified live 2026-08-01 against both `kartikeya` HEAD and the installed
+`kartikeya==0.0.7` wheel this repo pins (`pyproject.toml`: `kartikeya>=0.0.7,<0.1.0`):
+`check_kart_task("find / -delete")` and `check_kart_task("cat /dev/zero > /dev/sda")`
+both return a blocking `destructive`-category error. `kartikeya`'s own
+`tests/test_task_scan.py::test_destructive_gaps_are_blocked` covers this exact
+pair (plus `find / -exec rm -rf {} +` and a raw NVMe write), explicitly
+commented as the L-DOS-02/L-CMD-01 live-audit regression test. No code change
+needed in either repo; #233 closed with this evidence.
 
 #### ~~P3: L-DOS-03 — No record-size limit on the SOIL store~~ — RETRACTED (false finding)
 
@@ -402,8 +410,7 @@ No record-size gap exists.
 **Assessment:** the security architecture held under live fire — fail-closed
 gating, parameterized SQL, sandbox network+filesystem isolation, read-only ACL
 trust roots, three-key egress, and rate limiting all confirmed against the
-running server. The only real gap is coverage in the sandboxed executor's static
-scanner (L-DOS-02 / L-CMD-01), which is contained for the filesystem class by the
-sandbox and localized to the `kartikeya` dependency.
+running server. The sandboxed executor's static scanner gap (L-DOS-02 /
+L-CMD-01) is resolved — both landed together in `kartikeya`, verified live.
 
 *ΔΣ=43*
