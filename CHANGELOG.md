@@ -273,6 +273,20 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   breaking default-posture change for any install with unregistered
   builder agents, bigger than this one finding warrants alone. Documented
   as a residual in `docs/design/willow-gate-seam.md` D6.
+- **PR #248's own "Out of scope" note: no mutation-style proof the envelope
+  authority gates can fail.** `tests/test_governance_continuity.py` had
+  ordinary pytest assertions on `EnvelopeAuthority.check()`, unlike the
+  mutation harness `safe-app-store/apps/jarvis` runs. New
+  `tools/envelope_mutation_check.py` (per-guard mutation testing, same
+  convention as `tools/hook_mutation_check.py`) ran against the real suite
+  and reported 13 of 17 guards as GAP on its first run — issuer/revoked/
+  inactive/grantee/verb checks, the bounds-signature check, malformed
+  `max_count`, the untrusted-meter check, both quota/expiry boundary edges,
+  `_bound_matches`'s list-must-match-every-item and scalar-equality
+  fallback, and `_deadline`'s non-string-`expires_at` refusal — none of them
+  had a test that actually exercised the failing case, only the passing one.
+  All 13 are now closed with tests naming the exact scenario each guard
+  exists to refuse; the harness reports all 17 guards caught.
 
 ### Fixed
 - **B-41 follow-up: a warm container kept its pre-B-41 `.mcp.json` broken

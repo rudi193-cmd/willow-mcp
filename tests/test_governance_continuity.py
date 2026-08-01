@@ -125,6 +125,135 @@ def test_atomic_meter_can_refuse_racing_final_use(monkeypatch, tmp_path):
     assert result["errno"] == "EDQUOT"
 
 
+# ── EnvelopeAuthority.check() — per-guard coverage ───────────────────────────
+# Found by tools/envelope_mutation_check.py: every case below reported GAP
+# (the guard's own mutation survived) until the test naming it was added. The
+# harness is not part of pytest -- it is slow because it reruns this file
+# once per guard -- so these are the tests it found missing, not the harness
+# itself.
+
+def _check_with(tmp_path, monkeypatch, overrides=None, *, call_args=None,
+                 actor="willow", verb="dispatch"):
+    registry, syscalls = _charter(tmp_path)
+    data = json.loads(registry.read_text())
+    if overrides:
+        data["active"][0].update(overrides)
+    registry.write_text(json.dumps(data))
+    monkeypatch.setenv("WILLOW_ENVELOPE_REGISTRY", str(registry))
+    monkeypatch.setenv("WILLOW_SYSCALL_TABLE", str(syscalls))
+    return envelopes.EnvelopeAuthority(_Ledger()).check(
+        "env-dispatch", actor=actor, verb=verb,
+        call_args=call_args if call_args is not None
+        else {"to_agents": "hanuman", "task_class": "build"},
+    )
+
+
+def test_check_refuses_duplicate_envelope_id(monkeypatch, tmp_path):
+    """Two active rows sharing one id must not silently resolve to the
+    first -- that is exactly as forgeable as a missing envelope."""
+    registry, syscalls = _charter(tmp_path)
+    data = json.loads(registry.read_text())
+    data["active"].append(dict(data["active"][0]))
+    registry.write_text(json.dumps(data))
+    monkeypatch.setenv("WILLOW_ENVELOPE_REGISTRY", str(registry))
+    monkeypatch.setenv("WILLOW_SYSCALL_TABLE", str(syscalls))
+    result = envelopes.EnvelopeAuthority(_Ledger()).check(
+        "env-dispatch", actor="willow", verb="dispatch",
+        call_args={"to_agents": "hanuman", "task_class": "build"},
+    )
+    assert result["ok"] is False
+    assert result["errno"] == "ENOENT"
+
+
+def test_check_refuses_issuer_not_root(monkeypatch, tmp_path):
+    result = _check_with(tmp_path, monkeypatch, {"issued_by": "agent"})
+    assert result == {"ok": False, "errno": "EACCES", "reason": "issuer mismatch"}
+
+
+def test_check_refuses_revoked_envelope(monkeypatch, tmp_path):
+    result = _check_with(tmp_path, monkeypatch, {"revoked": True})
+    assert result == {"ok": False, "errno": "EACCES", "reason": "envelope revoked"}
+
+
+def test_check_refuses_inactive_status(monkeypatch, tmp_path):
+    result = _check_with(tmp_path, monkeypatch, {"status": "pending"})
+    assert result == {"ok": False, "errno": "ENOENT", "reason": "envelope inactive"}
+
+
+def test_check_refuses_actor_outside_grantee(monkeypatch, tmp_path):
+    result = _check_with(tmp_path, monkeypatch, actor="mallory")
+    assert result == {"ok": False, "errno": "EACCES", "reason": "grantee mismatch"}
+
+
+def test_check_refuses_verb_not_matching_envelope(monkeypatch, tmp_path):
+    result = _check_with(tmp_path, monkeypatch, verb="not_dispatch")
+    assert result["ok"] is False
+    assert result["errno"] == "EAMBIG"
+    assert result["reason"] == "verb mismatch"
+
+
+def test_check_refuses_non_dict_bounds(monkeypatch, tmp_path):
+    result = _check_with(tmp_path, monkeypatch, {"bounds": ["not", "a", "dict"]})
+    assert result == {"ok": False, "errno": "EAMBIG", "reason": "malformed bounds"}
+
+
+def test_check_refuses_bounds_signature_mismatch(monkeypatch, tmp_path):
+    # drops task_class from the granted bounds -- no longer matches the
+    # syscall table's declared {to_agents, task_class} signature.
+    result = _check_with(tmp_path, monkeypatch, {"bounds": {"to_agents": ["hanuman"]}})
+    assert result["ok"] is False
+    assert result["errno"] == "EAMBIG"
+    assert result["reason"] == "bounds signature mismatch"
+
+
+def test_check_refuses_malformed_max_count(monkeypatch, tmp_path):
+    for bad in (-1, True, "3"):
+        result = _check_with(tmp_path, monkeypatch, {"max_count": bad})
+        assert result == {"ok": False, "errno": "EAMBIG", "reason": "invalid max_count"}, bad
+
+
+def test_check_refuses_untrusted_meter_source(monkeypatch, tmp_path):
+    result = _check_with(tmp_path, monkeypatch, {"use_count_source": "self_reported"})
+    assert result == {"ok": False, "errno": "EAMBIG", "reason": "untrusted meter"}
+
+
+def test_bound_matches_requires_every_item_in_a_list_call_arg(monkeypatch, tmp_path):
+    # Grant covers hanuman and opus; a call naming a third, ungranted agent
+    # alongside a granted one must still fail closed -- one matching item is
+    # not enough when the call itself names more than one recipient.
+    result = _check_with(
+        tmp_path, monkeypatch,
+        {"bounds": {"to_agents": ["hanuman", "opus"], "task_class": ["build"]}},
+        call_args={"to_agents": ["hanuman", "mallory"], "task_class": "build"},
+    )
+    assert result["ok"] is False
+    assert result["errno"] == "EAMBIG"
+    assert "to_agents" in result.get("fields", [])
+
+
+def test_bound_matches_scalar_grant_requires_exact_equality(monkeypatch, tmp_path):
+    scalar_bounds = {"bounds": {"to_agents": ["hanuman"], "task_class": "build"}}
+    granted = _check_with(
+        tmp_path, monkeypatch, scalar_bounds,
+        call_args={"to_agents": "hanuman", "task_class": "build"},
+    )
+    assert granted["ok"] is True
+
+    denied = _check_with(
+        tmp_path, monkeypatch, scalar_bounds,
+        call_args={"to_agents": "hanuman", "task_class": "refactor"},
+    )
+    assert denied["ok"] is False
+    assert denied["errno"] == "EAMBIG"
+    assert "task_class" in denied.get("fields", [])
+
+
+def test_deadline_refuses_non_string_expires_at_instead_of_crashing(monkeypatch, tmp_path):
+    result = _check_with(tmp_path, monkeypatch, {"expires_at": 20270101})
+    assert result["ok"] is False
+    assert result["errno"] == "EAMBIG"
+
+
 def test_consent_admin_atomically_reconciles_and_audits(monkeypatch, tmp_path):
     monkeypatch.setattr(consent_admin, "_require_operator_terminal", lambda: None)
     tmp_path.chmod(0o700)
