@@ -250,6 +250,15 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   its own explicit "CLOSED" section — the accepted trusted-host stdio model,
   same posture as every other tool in this gate. Closed with a pointer to
   the existing doc section, no code change.
+- **B-47/#235: two MCP desks, two trust models.** The repo's committed
+  `.cursor/mcp.json` spawns `willow-mcp` with implicit `~/.willow` and no
+  PGP/binding env, while an operator's separately-configured, hardened
+  global Cursor desk is a different trust posture under the same product —
+  easy to "test green" on the unhardened repo desk while believing the
+  hardened one was verified. This config never held fleet secrets by
+  design, so there was nothing to move; documented instead — README.md's
+  "MCP config" section states plainly this config is dev-only, names the
+  missing env vars and what each absence means.
 
 ### Fixed
 - **B-41 follow-up: a warm container kept its pre-B-41 `.mcp.json` broken

@@ -84,8 +84,10 @@ in willow-2.0. Order is rough tractability.
 
 ### Security / gate follow-ups (red-team 2026-07-31 → `docs/BUGS.md`)
 
-- [ ] **B-47** — Align repo `.cursor/mcp.json` / `willow-mcp` namespace env with
-  the vault desk (`WILLOW_HOME`, PGP fingerprint, `WILLOW_MCP_ENFORCE_BINDING`).
+- [x] **B-47** — Documented: README.md's "MCP config" section states the
+  repo's `.cursor/mcp.json` is dev-only, names the missing env vars and
+  what each absence means. Nothing to move -- this config never held
+  fleet secrets by design.
 - [ ] **B-48** — Binding or human attestation for `dispatch_write` (not only
   `app_id=willow` orchestrator writes). See `human_session.ORCHESTRATOR_WRITE_TOOLS`.
 - [x] **B-49** — Reconciled: already documented CLOSED in
