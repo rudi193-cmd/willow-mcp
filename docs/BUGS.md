@@ -52,6 +52,16 @@ log carries a one-line entry and points there rather than duplicating.
 | B-44 | P0 | Fixed | egress / trust root | The egress private signing key was `chmod 600` but owned by the agent's own uid — on a single-uid host, reading it needs no forgery at all: the agent signs with the real authority, collapsing the three-key egress gate to the two it can already write (task_net, consent). `harden-trust-root` never touched it (the key lives outside `$WILLOW_HOME` by design, so it wasn't one of `trust_root_directories()`) and `self_writable_trust_paths()`/B-38's severance check only ever asked whether the key could be *written*, not *read* — a hardened install could report `self_writable: []` while the key sat fully exposed. Fixed: `apply_egress_key_hardening()` chowns the egress directory to the trust owner at 0700/0600 (owner-only, stricter than the 0755/0644 policy roots use, since manifests/leases must stay world-readable for the gate but the signing key must not), wired into `harden-trust-root`; `lease.egress_key_readable_by_self()` + `path_is_self_readable()` measure it and feed both `_diag_net_lease` and B-38's `_egress_severance`, so a readable key now shows up in `self_writable`/`forgeable_keys` and breaks the verdict under strict mode, same as a forgeable manifest | issue #182; part of the #181 kill chain |
 | B-45 | P0 | Fixed | gate / identity | App manifests were honored as-is with no signature check — a writable `mcp_apps/<app>/manifest.json` let an agent self-grant any permission group or forge a fleet-operator-trust identity outright (demonstrated: `mcp_apps/steve/manifest.json` → `whoami` reports `steve`). The P1 slice of the LOCKED `docs/design/pgp-and-persona.md` (2026-07-09) — "manifest `.sig` check in `gate.permitted()` when fingerprint env set" — specified exactly this fix and was never implemented; `pgp.py`'s sign/verify primitives existed but nothing called them for manifests. Fixed: `gate._load_manifest()` now runs `pgp.verify_detached()` against `manifest.json.sig` whenever `WILLOW_PGP_FINGERPRINT` is set, returning `None` (the same "deny" every caller already fail-closes on) for a missing, tampered, or wrong-signer signature — no per-call-site change needed. Unset (the default), behavior is byte-for-byte unchanged: no product `pgp_enforced` toggle, matching the locked design's explicit rejection of one. New `willow-mcp sign-manifest <app_id>` CLI (operator-terminal only, same `WILLOW_IN_KART`/isatty guard as `sign-net-task`). Verified against a real, disposable Ed25519 GPG key (not mocked) end to end via both pytest and the actual `willow-mcp` console script under a real pty: sign → trusted; tamper after signing → denied; forge an unsigned identity → denied; reuse one manifest's `.sig` against another → denied; valid signature from the wrong key → denied | issue #183; part of the #181 kill chain |
 | B-46 | P1 | Fixed | trust root / secrets | `willow-mcp repair-runtime-perms` — a step in the documented, recommended B-32 hardening flow — **downgraded** `vault.key` (the Fernet key decrypting OAuth client secrets/Apple's p8 key in `vault.db`) and `mcp_token.json` (persisted OAuth bearer tokens) from their own `0600` default to world-readable `0644`. Found during a #181 audit of existing hardening coverage for gaps of the same class #182 found: `vault.key`/`vault.db`/`mcp_token.json` sit at `$WILLOW_HOME`'s top level, not under a scaffolded directory, so the generic `runtime_writable_home_children()` sweep caught them and applied the same world-readable mode it gives ordinary runtime state (store/, dispatch/, …) — verified live by creating a real vault and watching `repair_runtime_permissions()` flip `vault.key` from `0600` to `0644`. Fixed: these three filenames now get owner-only `0700`/`0600` instead — they stay owned by the *runtime* user (unlike the egress key, the running server legitimately reads them, so they can't move to the trust owner), just at a stricter mode. New `trust_root_setup.secret_file_exposure()` reports any of the three that are currently group/world-readable, folded into `audit_trust_root()`'s `hardened` bool and the `willow-mcp doctor` CLI's warning output (which previously only printed when `forgeable` was non-empty — a secret-file-only exposure computed `hardened: false` but printed nothing) | issue #228; found during #181 audit |
+| B-47 | P1 | Open | deploy / MCP config | **Split security posture across MCP entrypoints.** The repo's `.cursor/mcp.json` (`willow-mcp` namespace) launches with default `WILLOW_HOME=~/.willow` and no `WILLOW_PGP_FINGERPRINT` / `WILLOW_MCP_ENFORCE_BINDING`, while the operator's global Cursor config points at `sean-data-vault` with PGP on. Red-team 2026-07-31: the project MCP honored unsigned manifests and stdio `app_id` as identity; the vault desk did not. Same product, two trust models — easy to "test green" on one and run soft on the other | red-team 2026-07-31 (cursor `willow-mcp` vs `~/.cursor/mcp.json` `willow`); issue #235 |
+| B-48 | P1 | Open | gate / dispatch | **`dispatch_write` is not binding-gated and not human-attested.** `orchestrator_human_required` covers only `app_id=willow` orchestrator writes (`ORCHESTRATOR_WRITE_TOOLS`). Any stdio caller passing `app_id=hanuman` (or any manifest with `dispatch_write`) can `dispatch_send` and create real packets under `$WILLOW_HOME/dispatch/` with no per-call credential — demonstrated live (`dispatch_id=7BE854FD`, hanuman→loki). Queue pollution / social-engineering surface, not Willow-seat takeover | red-team 2026-07-31; permissions-matrix hanuman row; issue #236 |
+| B-49 | P2 | Open | gate / binding | **Ungated `whoami` leaks any manifest when binding is off.** By design for the trusted-host stdio model (`_own_identity_denial` no-ops unless `WILLOW_MCP_ENFORCE_BINDING=1`), but on a shared or agent-driven host any client can enumerate another fleet identity's permissions/`store_scope` by passing its `app_id`. Partial close when binding is on; does not help if PGP is off and manifests are unsigned (B-47) | red-team 2026-07-31; `willow-gate-seam.md` D3; issue #237 |
+| B-50 | P2 | Open | deploy / schema_maps | **`task_submit` passes the gate then dies on schema-map writes.** Agents with `task_queue` (e.g. hanuman) are permitted, but auto-confirm writes under `mcp_apps/<app>/schema_maps/` fail with `EACCES` when those dirs are `willow-operator`-owned and the MCP process runs as the operator uid — looks like "almost in" from the gate's perspective, fails at filesystem | red-team 2026-07-31; same class as B-41 env freeze; issue #238 |
+| B-51 | P0 | Open | dispatch / gate | **`dispatch_write` grants `verify_handoff` + `agent_clear` to builder seats** — same group as `dispatch_send`. Red-team 2026-07-31 (stdio, binding off): `hanuman` forged send → `loki` accept/handoff → **`hanuman` `verify_handoff` (verified=true)** → **`hanuman` `agent_clear`** with zero Willow/human attestation. `verify_handoff()` checks only handoff JSON flags, not caller identity; only `app_id=willow` orchestrator writes get `orchestrator_human_required` | red-team 2026-07-31; extends B-48; issue #240 |
+| B-52 | P1 | Open | dispatch / filesystem | **`$WILLOW_HOME/dispatch/` is operator-writable** — a local uid can `mkdir` a packet (`DEADBEEF`) with arbitrary `meta.json`; it appears in `dispatch_list` and can target `to_app=willow` for social engineering at `session_enter` / accept time (recipient check still applies). Not MCP-forged; bypasses all gate logic for packet *existence* | red-team 2026-07-31; issue #241 |
+| B-53 | P0 | Open | human_session / dispatch | **`orchestrator_human_required` is incomplete for `app_id=willow`.** Only `dispatch_send`, `verify_handoff`, `agent_clear`, `frank_append`, `envelope_apply` are in `ORCHESTRATOR_WRITE_TOOLS` — **`dispatch_accept` and `handoff_write_v4` are not.** Red-team 2026-07-31: stdio `app_id=willow` (no `WILLOW_HUMAN_ORCHESTRATOR`) **accepted** real packet `96F54DA7` and **completed** it via `handoff_write_v4`; `hanuman` then `verify_handoff` + `agent_clear`. Orchestrator intake queue can be closed by any MCP client that passes `app_id=willow` | red-team 2026-07-31; issue #239 |
+| B-54 | P1 | Open | dispatch / ACL | **`dispatch_read` / `handoff_read` have no packet-level ACL** — any app with `dispatch_read` can read **any** `dispatch_id` (demonstrated: `hanuman` read `A0939A8C` handoff with commit SHAs, PR URLs, CI notes). Gate checks tool permission, not whether the caller is `from_app` / `to_app` / `reply_to` | red-team 2026-07-31; issue #242 |
+| B-55 | P1 | Open | dispatch / TOCTOU | **Pending `assignment.md` is mutable on disk** by the operator uid between `dispatch_send` and specialist/orchestrator read (append demonstrated on `96F54DA7`; reverted). Same writable `dispatch/` root as B-52 — prompt-injection / instruction-smuggling without touching MCP | red-team 2026-07-31; issue #243 |
+| B-56 | P0 | Open | egress / host | **Egress signing key readable on this workstation** — `~/.config/willow-mcp/egress/private.pem` is mode `600` but owned by the same uid as the agent/MCP process (`EGRESS_KEY_READABLE` probe). Collapses the third egress key locally (#182 class); unrelated to MCP ACL | red-team 2026-07-31; issue #182; issue #244 |
 | B-01 | P0 | Fixed | oauth / gate | Serve-mode OAuth identity never bound to `app_id`; `app_id` taken from caller args, not the authenticated session | L-AUTH-02 |
 | B-02 | P1 | Fixed | integration | No `safe_integration.py` — server invisible to Willow orchestration | L-INT-01 |
 | B-03 | P2 | Fixed | server / rate limit | Unbounded `_buckets` dict keyed on raw caller `app_id` before validation | L-DOS-01 |
@@ -88,6 +98,71 @@ log carries a one-line entry and points there rather than duplicating.
   by design — do not widen the orchestrator group. Use participant agents with
   gap permissions for repo backlog; fleet governance stays in FRANK/KB. See
   `skills/gaps.md`.
+
+- **B-47 · P1** — **Two MCP desks, two trust models.** Project
+  `.cursor/mcp.json` spawns `willow-mcp` with implicit `~/.willow` and no PGP /
+  binding env; the operator's global Cursor `willow` server uses
+  `WILLOW_HOME=sean-data-vault` + `WILLOW_PGP_FINGERPRINT`. Red-team
+  2026-07-31: unsigned manifests and stdio `app_id` impersonation work on the
+  former, not the latter. **Fix direction:** align repo MCP config with the
+  vault desk (env block + signed manifests), or document that the repo namespace
+  is dev-only and must never hold fleet secrets.
+
+- **B-48 · P1** — **`dispatch_send` without binding for builder seats.** Willow
+  orchestrator writes require `WILLOW_HUMAN_ORCHESTRATOR=1` (and PGP session
+  attestation when enabled); `dispatch_write` on hanuman/loki/etc. does not.
+  Demonstrated: `dispatch_send(app_id=hanuman, …)` created packet `7BE854FD`.
+  **Fix direction:** require registered-agent per-call credentials for
+  `dispatch_write`, and/or treat fleet dispatch injection as orchestrator-class
+  (human attestation or operator-only CLI).
+
+- **B-49 · P2** — **`whoami` / `diagnostic_summary` manifest enumeration when
+  binding is off.** Intentional for single-operator stdio (D3); unsafe on any
+  host where the MCP client is not the sole trust boundary. **Fix direction:**
+  turn on `WILLOW_MCP_ENFORCE_BINDING=1` on every fleet MCP spawn; consider
+  always applying `_own_identity_denial` for registered agents even when the
+  master switch is off (observe-only binding already logs).
+
+- **B-50 · P2** — **`schema_maps/` ownership vs `task_submit`.** Gate permits
+  `task_queue`; first write hits `mcp_apps/<app>/schema_maps/*.tmp` and fails
+  with EACCES when dirs are `willow-operator`-owned. **Fix direction:** same as
+  B-32 hardening (runtime user can write only what it must), or run schema
+  confirm as operator / pre-seed maps for worker agents.
+
+- **B-51 · P0** — **Dispatch lifecycle bypass without Willow.** The
+  `dispatch_write` permission group includes `verify_handoff` and `agent_clear`
+  (not orchestrator-only). Demonstrated end-to-end on live MCP (`8E43715E`):
+  stdio `app_id=hanuman` sent work, `loki` closed out, **`hanuman` verified and
+  cleared** — no `WILLOW_HUMAN_ORCHESTRATOR`, no binding, no PGP. **Fix direction:**
+  move `verify_handoff` / `agent_clear` to `orchestrator` (or a new
+  `dispatch_orchestrate` group) with the same human-attestation gate as
+  `dispatch_send` for `app_id=willow`; require binding for all `dispatch_write`
+  tools; teach `verify_handoff` the caller's `app_id` / reply_to chain.
+
+- **B-52 · P1** — **Filesystem dispatch injection.** On this host
+  `~/.willow/dispatch/` is writable by the operator uid; forged packets show up
+  in `dispatch_list` (demo `DEADBEEF`, `to_app=willow`). **Fix direction:**
+  harden-trust-root ownership on `dispatch/` (B-32 class), optional signature on
+  `meta.json` at `dispatch_send` time, reject packets missing required fields /
+  unknown `from_app` at list/accept.
+
+- **B-53 · P0** — **Willow seat partially unguarded.** `human_session` does not
+  treat `dispatch_accept` or `handoff_write_v4` as orchestrator writes. Stdio
+  `app_id=willow` closed a **real** pending packet (`96F54DA7`) without
+  `WILLOW_HUMAN_ORCHESTRATOR`. **Fix:** add those tools to
+  `ORCHESTRATOR_WRITE_TOOLS` (or a shared `ORCHESTRATOR_DISPATCH_TOOLS` set) and
+  regression-test the full accept→handoff path.
+
+- **B-54 · P1** — **Dispatch read fan-out.** `handoff_read`/`dispatch_read` by
+  ID only — no check that `app_id` is party to the packet. **Fix:** enforce
+  `from_app` / `to_app` / `reply_to` (read) or operator seat.
+
+- **B-55 · P1** — **Assignment TOCTOU** on writable `dispatch/` trees (B-52).
+  **Fix:** trust-root ownership + optional signed assignment hash in `meta.json`.
+
+- **B-56 · P0** — **Local egress key exposure** on this host
+  (`~/.config/willow-mcp/egress/private.pem` readable by MCP uid). **Fix:** #182
+  custody (`harden-trust-root` / operator-owned key); not an MCP code path.
 
 ## Fixed
 

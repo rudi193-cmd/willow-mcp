@@ -354,6 +354,12 @@ that owns `$WILLOW_HOME`):
   `announce`) is stdlib-only; willow-gate's PGP-encrypted announcement ledger is
   left as a pluggable `announce.set_sink()` an operator can wire, so the base
   never takes on `python-gnupg`. The base stays dependency-free.
+- **D6 — `dispatch_write` trust (open, B-48):** Orchestrator writes
+  (`dispatch_send` for `app_id=willow`) are human-attested (+ PGP session file
+  when enabled). Builder seats with `dispatch_write` are manifest-gated only —
+  stdio can inject fleet packets without per-call binding. Red-team 2026-07-31
+  demonstrated live packet creation. Fork: extend binding to `dispatch_write`,
+  narrow the group, or move dispatch creation to operator CLI only.
 
 ## A phased path (each phase is independently shippable)
 1. **friction_floor watcher** — orthogonal, no auth-path risk; net-new signal.
