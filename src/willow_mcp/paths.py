@@ -288,6 +288,31 @@ def review_queue_path() -> Path:
     return constitutional_dir() / "review_queue.json"
 
 
+def envelope_registry_path() -> Path:
+    """Default location of the Article III.2 pre-approved envelope registry.
+
+    Previously this lived in a sibling ``willow`` charter repo
+    (``~/github/willow/envelopes/pre-approved.json``) — a hard dependency on a
+    second repo existing at all. It is operator-instance data (real grants,
+    real paths, real dates), not shippable package content, so it belongs
+    under $WILLOW_HOME next to `review_queue_path()`, not inside the
+    installed package tree. `envelopes.py`'s `registry_path()` still honors
+    `WILLOW_ENVELOPE_REGISTRY` first; this is only the default when that is
+    unset.
+    """
+    return constitutional_dir() / "pre-approved.json"
+
+
+def syscall_table_path() -> Path:
+    """Default location of the envelope syscall table — see `envelope_registry_path()`.
+
+    Unlike the registry, this table's *content* is generic mechanism data
+    (verb definitions), not operator secrets, so willow-mcp ships a real
+    starting copy under bundle/constitutional/ rather than an empty shape.
+    """
+    return constitutional_dir() / "syscall-table.json"
+
+
 def logs_dir() -> Path:
     return willow_home() / "logs"
 

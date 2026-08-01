@@ -8,23 +8,33 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .governance_ledger import GovernanceLedger
-from .paths import trusted_read
+from .paths import envelope_registry_path, syscall_table_path, trusted_read
 
 
 def registry_path() -> Path:
+    """Resolve the active envelope registry.
+
+    `WILLOW_ENVELOPE_REGISTRY` always wins when set. Otherwise this used to
+    fall back to a sibling `willow` charter repo (`WILLOW_PROJECT_ROOT`, or
+    `~/github/willow` by default) — a hard dependency on a second repo
+    existing. The default is now `$WILLOW_HOME/constitutional/pre-approved.json`
+    (see `paths.envelope_registry_path`), seeded on `willow-mcp-init` with an
+    empty starter shape and populated by the operator from there. There is no
+    `WILLOW_PROJECT_ROOT` fallback anymore: an install with neither the env
+    var nor a seeded file fails closed, the same as any other missing
+    governance input.
+    """
     configured = os.environ.get("WILLOW_ENVELOPE_REGISTRY", "").strip()
     if configured:
         return Path(configured).expanduser()
-    project = os.environ.get("WILLOW_PROJECT_ROOT", "").strip()
-    root = Path(project).expanduser() if project else Path.home() / "github" / "willow"
-    return root / "envelopes" / "pre-approved.json"
+    return envelope_registry_path()
 
 
 def syscall_path() -> Path:
     configured = os.environ.get("WILLOW_SYSCALL_TABLE", "").strip()
     if configured:
         return Path(configured).expanduser()
-    return registry_path().with_name("syscall-table.json")
+    return registry_path().with_name(syscall_table_path().name)
 
 
 def _load(path: Path) -> dict:

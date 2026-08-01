@@ -1,0 +1,260 @@
+{
+  "schema": "syscall-table/v1",
+  "version": "0.1",
+  "status": "draft",
+  "description": "The fleet's privileged verb set. An envelope grants capability over verbs from this table, never over prose. A verb absent from this table is unexpressible: it cannot be granted, denied, or argued \u2014 it traps to console (ENOSYS). Matching is mechanical, field-by-field against each verb's bounds signature; ambiguity is a non-match.",
+  "constitutional_ref": [
+    "CONST-0-3",
+    "CONST-0-6",
+    "CONST-III-2"
+  ],
+  "companion": {
+    "registry": "pre-approved.json",
+    "roster": "fleet.json",
+    "charter": "PROTECTED_AGENTS.md"
+  },
+  "updated": "2026-07-06",
+  "invariants": [
+    "Envelopes cite verbs by id; free text never appears on the checking path.",
+    "The check is field-by-field validation of call args against envelope bounds. No interpretation. A near-miss is a fault (EAMBIG), not a stretch.",
+    "Editing this table is itself verb 11 (envelope.issue): root-only, operator-key gated, FRANK-recorded.",
+    "Every call \u2014 granted or faulted \u2014 writes a FRANK ledger entry: verb, args, envelope_id or errno. Grants and denials get the same ink.",
+    "enforcement=soft is a standing project to become hard. The table tracks which walls are real so a policy is never mistaken for a wall."
+  ],
+  "rings": {
+    "root": "The operator at the console. Sole issuer of envelopes and editor of this table. Not an agent.",
+    "OPERATOR": "ring 1 \u2014 fleet-facing coordination agents (see fleet.json)",
+    "ENGINEER": "ring 2 \u2014 build and infrastructure agents",
+    "WORKER": "ring 3 \u2014 scoped task agents"
+  },
+  "unprivileged_floor": {
+    "description": "Ring-3 operations that never cross the syscall boundary. No envelope, no trap, no per-call ledger entry. Explicitly enumerated so the trap path stays quiet enough to be taken seriously.",
+    "operations": [
+      "read: file reads, git log/diff/status, ledger_read, kb_search/kb_get, soil_get/soil_list/soil_search, handoff_latest, grove_get_history/grove_inbox",
+      "status: willow_status, fleet_status, dream_check, env_check, diagnostic_summary",
+      "compute: local inference that produces no side effect outside the session (infer_*, embedding, rendering)",
+      "own-namespace session state: handoff drafts, scratchpad writes, session anchors"
+    ],
+    "note": "Anything not listed here and not in the table is ENOSYS, not implicitly unprivileged."
+  },
+  "errno": {
+    "ENOSYS": {
+      "meaning": "Verb not in the table at all.",
+      "route": "trap_to_console",
+      "note": "This is how the table learns it is incomplete. Request attached verbatim."
+    },
+    "ENOENT": {
+      "meaning": "Verb exists; no envelope covers this call.",
+      "route": "trap_to_console",
+      "note": "Proposed action enqueued via human_required queue with the call args attached."
+    },
+    "EACCES": {
+      "meaning": "A covering envelope exists but grantee or ring does not match.",
+      "route": "deny_and_log",
+      "note": "No trap. A wrong-ring request does not bother the console; the FRANK entry is the alarm."
+    },
+    "EDQUOT": {
+      "meaning": "Envelope matched but max_count exhausted.",
+      "route": "trap_with_renewal",
+      "note": "Intent was previously ratified; trap carries a pre-drafted renewal for one-decision remedy."
+    },
+    "EEXPIRED": {
+      "meaning": "Envelope matched but past expires_at.",
+      "route": "trap_with_renewal",
+      "note": "Same one-decision remedy as EDQUOT."
+    },
+    "EAMBIG": {
+      "meaning": "Near-miss: nearest envelope matches on verb and grantee but fails one or more bound fields.",
+      "route": "trap_with_diff",
+      "note": "Trap carries the field-level diff between the call and the nearest envelope. The remedy is the operator widening the envelope once \u2014 never the checker stretching it."
+    }
+  },
+  "verbs": [
+    {
+      "id": 1,
+      "verb": "fs.write",
+      "summary": "Write access to a filesystem scope.",
+      "bounds": {
+        "paths": "list[path] \u2014 {{HOME}}-relative templates allowed",
+        "mode": "rw | ro-break-glass"
+      },
+      "enforcement": "hard",
+      "enforced_by": "bwrap sandbox binds \u2014 willow-2.0/willow/fylgja/config/kart-sandbox.json",
+      "min_ring": "WORKER",
+      "note": "The MMU. Existing reach grants in pre-approved.json are envelopes over this verb."
+    },
+    {
+      "id": 2,
+      "verb": "git.commit",
+      "summary": "Create commits in a repository's local history.",
+      "bounds": {
+        "repo": "path or org/name",
+        "branches": "list[branch-glob] \u2014 e.g. feature/*, never a protected branch by glob accident"
+      },
+      "enforcement": "soft",
+      "enforced_by": null,
+      "min_ring": "ENGINEER",
+      "note": "Local history only; leaving the machine is verb 3."
+    },
+    {
+      "id": 3,
+      "verb": "git.push",
+      "summary": "Publish local history to a remote.",
+      "bounds": {
+        "repo": "path or org/name",
+        "branches": "list[branch-glob]",
+        "remote": "remote name or URL pattern",
+        "force": "boolean \u2014 force-push must be granted explicitly, default false"
+      },
+      "enforcement": "soft",
+      "enforced_by": null,
+      "min_ring": "ENGINEER",
+      "note": "First verb that leaves the box. Hard-enforcement path: org rulesets + machine identities after the GitHub-org migration."
+    },
+    {
+      "id": 4,
+      "verb": "pr.open",
+      "summary": "Open a pull request.",
+      "bounds": {
+        "repo": "org/name",
+        "base_branches": "list[branch]"
+      },
+      "enforcement": "soft",
+      "enforced_by": null,
+      "min_ring": "ENGINEER",
+      "note": "Cheap and reversible; bounds exist mainly so pr.open cannot target foreign repos."
+    },
+    {
+      "id": 5,
+      "verb": "pr.merge",
+      "summary": "Merge a pull request into a base branch.",
+      "bounds": {
+        "repo": "org/name",
+        "base_branch": "branch",
+        "requires_ci": "boolean \u2014 green CI as a precondition, checked not asserted",
+        "max_count": "int",
+        "expires_at": "date"
+      },
+      "enforcement": "soft",
+      "enforced_by": null,
+      "min_ring": "ENGINEER",
+      "note": "The flagship case: Dual Commit's second signature. Hard path: org ruleset requiring the envelope id in the merge commit message."
+    },
+    {
+      "id": 6,
+      "verb": "shell.exec",
+      "summary": "Execute shell work in a sandbox profile.",
+      "bounds": {
+        "sandbox_profile": "profile id \u2014 binds, net, credentials are properties of the profile, not the call"
+      },
+      "enforcement": "hard",
+      "enforced_by": "Kart daemon + bwrap \u2014 all agent shell is already mediated",
+      "min_ring": "WORKER",
+      "note": "allow_net / allow_localhost / detached are profile dimensions. An unsandboxed shell is not a wider bound; it is ENOSYS."
+    },
+    {
+      "id": 7,
+      "verb": "net.fetch",
+      "summary": "Outbound read-only network retrieval.",
+      "bounds": {
+        "domains": "list[domain-glob]",
+        "read_only": "always true \u2014 a writing request is verb 8 or ENOSYS"
+      },
+      "enforcement": "soft",
+      "enforced_by": "partially \u2014 Kart allow_net gate exists but is binary, not domain-scoped",
+      "min_ring": "WORKER",
+      "note": "Hard path: domain allowlist in the sandbox network namespace."
+    },
+    {
+      "id": 8,
+      "verb": "msg.post",
+      "summary": "Post to an internal fleet channel.",
+      "bounds": {
+        "channels": "list[channel] \u2014 Grove channels, dispatch inboxes"
+      },
+      "enforcement": "soft",
+      "enforced_by": null,
+      "min_ring": "WORKER",
+      "note": "Internal only. Pull channel history before posting remains law regardless of envelope."
+    },
+    {
+      "id": 9,
+      "verb": "msg.external",
+      "summary": "Send anything to a human-facing or third-party surface: email, Discord to humans, issue comments on foreign repos, any publish.",
+      "bounds": {
+        "medium": "email | discord | github-comment | other-named",
+        "recipients": "list[address/handle/repo]",
+        "max_count": "int",
+        "expires_at": "date"
+      },
+      "enforcement": "soft",
+      "enforced_by": null,
+      "min_ring": "OPERATOR",
+      "note": "Top ring. Outward-facing words are unrecallable; published content may be cached or indexed even if deleted. Renewal never auto-drafts wider recipients."
+    },
+    {
+      "id": 10,
+      "verb": "store.write",
+      "summary": "Write to shared persistent stores: SOIL collections, KB ingest, Postgres knowledge.",
+      "bounds": {
+        "namespaces": "list[collection-glob] \u2014 own namespace is floor-level; SHARED namespaces need the envelope"
+      },
+      "enforcement": "semi",
+      "enforced_by": "namespace convention enforced in MCP verbs; archive-not-delete is invariant",
+      "min_ring": "WORKER",
+      "note": "Own-namespace writes sit on the unprivileged floor. Cross-namespace writes and archive operations cross the boundary. Delete is not in this table \u2014 archive-with-record only, per PROTECTED_AGENTS register discipline."
+    },
+    {
+      "id": 11,
+      "verb": "dispatch",
+      "summary": "Route work to another agent.",
+      "bounds": {
+        "to_agents": "list[agent-id] \u2014 from fleet.json",
+        "task_class": "named class, not free text"
+      },
+      "enforcement": "soft",
+      "enforced_by": "partially \u2014 dispatch_tasks.from_agent identity is enforced",
+      "min_ring": "OPERATOR",
+      "note": "Delegation transmits authority; a dispatched task carries the citing envelope with it, and the receiving agent's calls check against that same envelope. Authority does not widen in transit."
+    },
+    {
+      "id": 12,
+      "verb": "envelope.issue",
+      "summary": "Create, widen, renew, or revoke an envelope; edit this table.",
+      "bounds": {},
+      "enforcement": "hard",
+      "enforced_by": "root only \u2014 operator key (gate_mode: pgp_enforced), FRANK-recorded, git history",
+      "min_ring": "root",
+      "note": "Not grantable to any agent at any ring, ever. An agent editing this file or pre-approved.json is a named attack class (table rootkit), not a misconfiguration. Agents MAY draft proposals into pre-approved.json#proposals; a proposal has no force until root moves it to active."
+    },
+    {
+      "id": 13,
+      "verb": "envelope.apply",
+      "summary": "The magistrate's own act: match a call against the registry, cite the envelope, record the outcome.",
+      "bounds": {
+        "registry_path": "envelopes/pre-approved.json"
+      },
+      "enforcement": "soft",
+      "enforced_by": null,
+      "min_ring": "OPERATOR",
+      "note": "Self-grounding: the orchestrator seat's license to check at all is itself an envelope over this verb \u2014 the planting. The magistrate matches against the table; it never answers 'does this need a human' (CONST-0-3/CONST-0-6)."
+    },
+    {
+      "id": 14,
+      "verb": "agent.lifecycle",
+      "summary": "Create an agent, retire an agent, or change an agent's ring.",
+      "bounds": {
+        "action": "create | retire | tier_change",
+        "agent_id": "id (roster entry for retire/tier_change; new id for create)",
+        "record_required": "always true \u2014 not a grantable field"
+      },
+      "enforcement": "soft",
+      "enforced_by": "PROTECTED_AGENTS.md is this verb's law; roster fleet.json is /etc/passwd",
+      "min_ring": "root",
+      "note": "tier_change is privilege escalation by definition. There is no userdel in this system: retirement-with-record only (PROTECTED_AGENTS \u00a77); deletion-without-record is not a denied call, it is unexpressible. agent_create exists today as a live MCP verb with no envelope discipline \u2014 this row puts it under law."
+    }
+  ],
+  "lineage": {
+    "note": "Drafted 2026-07-06 in session e2b05d0a (Willow, orchestrator-seat design). Operator ratified thirteen verbs (twelve drafted + agent.lifecycle). This draft carries fourteen rows: pr.open (id 4) was added during drafting as the cheap reversible sibling of pr.merge, so that opening a PR against a foreign repo is expressible-and-boundable rather than falling to ENOSYS. Operator ratified fourteen 2026-07-06 ('keep it at 14'), with notice that the schema will change \u2014 that is what draft status is for."
+  }
+}
