@@ -173,6 +173,34 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   behavior is unchanged. Verified against a real, disposable Ed25519 GPG key
   through pytest: unattested, tampered-after-attesting, and never-entered
   sessions are all denied; a validly attested one is allowed.
+- **B-53/#239: `orchestrator_human_required` was incomplete for
+  `app_id=willow` — `dispatch_accept` and `handoff_write_v4` were never in
+  `ORCHESTRATOR_WRITE_TOOLS`.** `session_enter` refuses a dispatch_id for
+  `app_id=willow` up front, but that guard lived only in `session_enter` —
+  calling either tool directly bypassed it entirely. Found by a 2026-07-31
+  red-team pass against the live MCP: stdio `app_id=willow` with no
+  `WILLOW_HUMAN_ORCHESTRATOR` accepted and completed a real dispatch packet.
+  Fixed: both tools added to `ORCHESTRATOR_WRITE_TOOLS`; the denial message
+  now names whichever tool was actually called instead of a fixed three-tool
+  list, so it can't silently drift again as the set grows.
+- **B-51/#240: the `dispatch_write` permission group granted `verify_handoff`
+  and `agent_clear` to builder seats.** Same group as `dispatch_send`, so any
+  manifest with `dispatch_write` (hanuman, loki, jeles, ada) could verify and
+  clear its own dispatch with zero orchestrator/human involvement —
+  self-certifying work the design always meant the orchestrator to check
+  (`handoff_write_v4`'s own docstring: "the orchestrator checks both in
+  verify_handoff before releasing you via agent_clear"). Same red-team pass
+  demonstrated it live end to end: a builder seat forged its own send, accept,
+  handoff, verify, and clear with no attestation at any step. Fixed:
+  `verify_handoff`/`agent_clear` removed from the `dispatch_write` group in
+  `gate.py` — reachable only via `orchestrator`, already human-attestation-
+  gated; `dispatch_write` keeps the send/accept/close-out lifecycle a builder
+  legitimately needs over its own work. Both B-51 and B-53 verified end to
+  end through the real MCP tool wrappers in new
+  `tests/test_at_m2_dispatch_lifecycle.py`, replaying the red-team scenario
+  and asserting refusal at each broken step, plus unit coverage in
+  `tests/test_gate.py` and
+  `tests/test_human_orchestrator.py`.
 
 ### Fixed
 - **B-41 follow-up: a warm container kept its pre-B-41 `.mcp.json` broken

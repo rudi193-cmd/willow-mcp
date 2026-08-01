@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 
 from willow_mcp import dispatch as ds
 from willow_mcp import human_session as hs
@@ -50,6 +51,33 @@ def test_orchestrator_write_allowed_with_human_env(home, monkeypatch):
 
 def test_specialist_write_not_human_gated(home):
     assert hs.orchestrator_write_denial("hanuman", "dispatch_send", serve_mode=False) is None
+
+
+# ── B-53/#239: dispatch_accept and handoff_write_v4 must be human-gated too ──
+#
+# session_enter refuses a dispatch_id for app_id=willow up front, but that
+# guard lives only in session_enter -- calling dispatch_accept or
+# handoff_write_v4 directly bypassed it entirely. Red-team 2026-07-31
+# demonstrated stdio app_id=willow (no WILLOW_HUMAN_ORCHESTRATOR) accepting
+# and completing a real packet.
+
+@pytest.mark.parametrize("tool_name", ["dispatch_accept", "handoff_write_v4"])
+def test_orchestrator_dispatch_lifecycle_write_denied_without_human_env(tool_name, home):
+    reason = hs.orchestrator_write_denial("willow", tool_name, serve_mode=False)
+    assert reason is not None
+    assert "WILLOW_HUMAN_ORCHESTRATOR" in reason
+    assert tool_name in reason
+
+
+@pytest.mark.parametrize("tool_name", ["dispatch_accept", "handoff_write_v4"])
+def test_orchestrator_dispatch_lifecycle_write_allowed_with_human_env(tool_name, home, monkeypatch):
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    assert hs.orchestrator_write_denial("willow", tool_name, serve_mode=False) is None
+
+
+@pytest.mark.parametrize("tool_name", ["dispatch_accept", "handoff_write_v4"])
+def test_specialist_dispatch_lifecycle_write_not_human_gated(tool_name, home):
+    assert hs.orchestrator_write_denial("hanuman", tool_name, serve_mode=False) is None
 
 
 # ── by_human_attested: the seat claim vs. the seat ───────────────────────────

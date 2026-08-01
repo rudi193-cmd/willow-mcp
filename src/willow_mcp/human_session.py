@@ -26,8 +26,17 @@ ORCHESTRATOR_APP_ID = "willow"
 # so a prompt-injected agent forging the willow seat cannot append or cite as the
 # orchestrator (Loki B5FB7E2B §4.2). A non-willow app still reaches them only
 # through its own capability grant; this boundary blocks the willow-seat bypass.
+#
+# dispatch_accept and handoff_write_v4 (#186 B-53, issue #239): session_enter
+# refuses a dispatch_id for app_id=willow up front (human-only, never dispatch
+# entry), but that guard lived only in session_enter -- calling either tool
+# directly, bypassing session_enter, let a stdio caller with no
+# WILLOW_HUMAN_ORCHESTRATOR accept and complete a real packet as willow.
+# Red-team 2026-07-31 demonstrated this live against packet 96F54DA7.
 ORCHESTRATOR_WRITE_TOOLS = frozenset({
     "dispatch_send",
+    "dispatch_accept",
+    "handoff_write_v4",
     "verify_handoff",
     "agent_clear",
     "frank_append",
@@ -128,9 +137,9 @@ def orchestrator_write_denial(
         return None
     if not human_orchestrator_attested():
         return (
-            "orchestrator_human_required: dispatch_send, verify_handoff, and agent_clear "
-            "for app_id=willow require a human orchestrator host "
-            "(WILLOW_HUMAN_ORCHESTRATOR=1 on the MCP server env). Agents cannot run Willow."
+            f"orchestrator_human_required: {tool_name} for app_id=willow requires a "
+            "human orchestrator host (WILLOW_HUMAN_ORCHESTRATOR=1 on the MCP server "
+            "env). Agents cannot run Willow."
         )
 
     # P2 (#186): once PGP is enabled, env attestation alone is no longer enough —

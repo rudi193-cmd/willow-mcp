@@ -21,7 +21,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 1. **Allow** — manifest `permissions` expands via `PERMISSION_GROUPS` in `gate.py` (groups and literal tool names).
 2. **Deny** — manifest `deny_tools` is an overlay that wins over allows (defense in depth).
 3. **Scope** — manifest `store_scope` confines SOIL collections (`prefix*` wildcards).
-4. **Orchestrator writes** — `dispatch_send`, `verify_handoff`, `agent_clear`, `frank_append`, `envelope_apply` for `app_id=willow` additionally require `WILLOW_HUMAN_ORCHESTRATOR=1` (stdio) or OAuth binding (serve). (See `ORCHESTRATOR_WRITE_TOOLS` in `human_session.py`.)
+4. **Orchestrator writes** — `dispatch_send`, `dispatch_accept`, `handoff_write_v4`, `verify_handoff`, `agent_clear`, `frank_append`, `envelope_apply` for `app_id=willow` additionally require `WILLOW_HUMAN_ORCHESTRATOR=1` (stdio) or OAuth binding (serve). (See `ORCHESTRATOR_WRITE_TOOLS` in `human_session.py`.)
 5. **Egress** — `task_net` is never implied by `task_queue` or `full_access`; must be explicit on the manifest line.
 
 **Compile:** edit registry → `willow-mcp compile-agents` (or `willow-mcp-init` on first scaffold).
@@ -39,7 +39,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 | `knowledge_write` | knowledge_ingest, kb_ingest, kb_journal, kb_promote |
 | `task_queue` | task_submit, task_status, task_list |
 | `dispatch_read` | dispatch_read, dispatch_list, handoff_read, session_read, session_enter |
-| `dispatch_write` | dispatch_send, dispatch_accept, handoff_write_v4, verify_handoff, agent_clear, session_handoff_write |
+| `dispatch_write` | dispatch_send, dispatch_accept, handoff_write_v4, session_handoff_write — deliberately excludes verify_handoff/agent_clear (B-51, #240): those are the orchestrator's quality-gate step, reachable only via `orchestrator` |
 | `orchestrator` | Desk + dispatch + context + fleet read + limited store/kb read |
 | `fleet_read` | fleet_status, fleet_health |
 | `context` | context_save, context_get, context_list, context_expire |

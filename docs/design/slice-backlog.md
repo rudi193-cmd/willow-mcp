@@ -91,11 +91,15 @@ in willow-2.0. Order is rough tractability.
 - [ ] **B-49** — Policy: binding on for every fleet MCP; optional code tighten for
   registered-agent `whoami` when switch is off.
 - [ ] **B-50** — `schema_maps/` writability for `task_submit` on hardened installs.
-- [ ] **B-51** — Split `verify_handoff` / `agent_clear` from builder `dispatch_write`;
-  orchestrator-only verify + human attestation.
+- [x] **B-51** — Split `verify_handoff` / `agent_clear` from builder `dispatch_write`;
+  orchestrator-only verify + human attestation. Done: removed from the
+  `dispatch_write` group in `gate.py`, `tests/test_gate.py` +
+  `tests/test_at_m2_dispatch_lifecycle.py`.
 - [ ] **B-52** — `dispatch/` trust-root + optional signed `meta.json`.
-- [ ] **B-53** — Extend `ORCHESTRATOR_WRITE_TOOLS` to `dispatch_accept` +
-  `handoff_write_v4`; regression for stdio `willow` without human env.
+- [x] **B-53** — Extend `ORCHESTRATOR_WRITE_TOOLS` to `dispatch_accept` +
+  `handoff_write_v4`; regression for stdio `willow` without human env. Done:
+  `human_session.py` + `tests/test_human_orchestrator.py` +
+  `tests/test_at_m2_dispatch_lifecycle.py`.
 - [ ] **B-54** — Packet-party ACL on `dispatch_read` / `handoff_read`.
 - [ ] **B-55** — Assignment integrity (signed hash or operator-owned dispatch tree).
 - [ ] **B-56** — Host egress key custody (#182) on operator workstations.
