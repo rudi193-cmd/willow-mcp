@@ -108,8 +108,17 @@ def require_operator_terminal() -> None:
         )
 
 
-def orchestrator_write_denial(app_id: str, tool_name: str, *, serve_mode: bool) -> str | None:
-    """Return denial reason if this orchestrator write must be blocked, else None."""
+def orchestrator_write_denial(
+    app_id: str, tool_name: str, *, serve_mode: bool, session_id: str = ""
+) -> str | None:
+    """Return denial reason if this orchestrator write must be blocked, else None.
+
+    `session_id` is the process's *currently entered* orchestrator session (set
+    by session_enter, threaded in from server._current_orchestrator_session() —
+    see #186 P2) — not a caller-supplied argument, since most orchestrator write
+    tools don't carry a session_id of their own. Stdio only: serve mode's OAuth
+    binding is trusted on its own, same as before this slice.
+    """
     if not is_orchestrator_app(app_id):
         return None
     if tool_name not in ORCHESTRATOR_WRITE_TOOLS:
@@ -117,10 +126,36 @@ def orchestrator_write_denial(app_id: str, tool_name: str, *, serve_mode: bool) 
     if serve_mode:
         # OAuth identity binding to willow implies a human signed in and confirmed.
         return None
-    if human_orchestrator_attested():
+    if not human_orchestrator_attested():
+        return (
+            "orchestrator_human_required: dispatch_send, verify_handoff, and agent_clear "
+            "for app_id=willow require a human orchestrator host "
+            "(WILLOW_HUMAN_ORCHESTRATOR=1 on the MCP server env). Agents cannot run Willow."
+        )
+
+    # P2 (#186): once PGP is enabled, env attestation alone is no longer enough —
+    # the current session must also carry a valid signature over its session file.
+    # No-op (interim env-only) until WILLOW_PGP_FINGERPRINT is set, same opt-in
+    # gate as manifest signing (#183).
+    from . import pgp
+
+    if not pgp.pgp_enabled():
         return None
-    return (
-        "orchestrator_human_required: dispatch_send, verify_handoff, and agent_clear "
-        "for app_id=willow require a human orchestrator host "
-        "(WILLOW_HUMAN_ORCHESTRATOR=1 on the MCP server env). Agents cannot run Willow."
-    )
+
+    from .paths import session_path
+
+    if not session_id:
+        return (
+            "orchestrator_session_attestation_required: no active orchestrator "
+            "session on record for this process — call "
+            "session_enter(app_id='willow', session_id=...) first, then "
+            "`willow-mcp attest-session <session_id>` from the operator terminal."
+        )
+    ok, detail = pgp.verify_detached(session_path(ORCHESTRATOR_APP_ID, session_id))
+    if not ok:
+        return (
+            f"orchestrator_session_attestation_required: session {session_id!r} "
+            f"is not PGP-attested ({detail}) — run "
+            f"`willow-mcp attest-session {session_id}` from the operator terminal."
+        )
+    return None

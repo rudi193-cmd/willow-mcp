@@ -60,7 +60,7 @@ port `dev_bypass` / `_DEV_SAFE_ROOT`.
 3. Valid PGP attestation on `sessions/willow-{session_id}.json` (when PGP enabled)
 4. Manifest `.sig` verifies (when PGP enabled)
 
-Env-only (slice shipped today) is **interim** until P2 attestation lands.
+Env-only was interim until P2 landed (issue #186); checks 1-2 are still required underneath, PGP session attestation (3) layers on top of them once `WILLOW_PGP_FINGERPRINT` is set. Manifest `.sig` (4) already enforces uniformly via `gate._load_manifest` (#183).
 
 ### Signing stays host-side
 
@@ -183,8 +183,8 @@ $WILLOW_HOME/
 |-------|-------------|--------|
 | P1 | `pgp.py` — verify only, fail closed, port from fleet gate | Shipped |
 | P1 | Manifest `.sig` check in `gate.permitted()` when fingerprint env set | **Shipped 2026-07-31 (B-45, issue #183)** — landed in `gate._load_manifest()` rather than `permitted()` directly, so every caller of `_load_manifest` (`authorized`, `store_scope`, `permitted`, …) denies uniformly, not just the one this slice named. `willow-mcp sign-manifest` CLI added alongside. |
-| P2 | `attest_session` CLI + session file `.sig` | Not started |
-| P2 | Orchestrator write gate checks attestation | Not started |
+| P2 | `attest_session` CLI + session file `.sig` | **Shipped 2026-08-01 (issue #186)** — `willow-mcp attest-session <session_id>` detach-signs the live `sessions/willow-{session_id}.json` written by `session_enter`/`session_bind`; operator-terminal only, same Kart/tty guard as `sign-manifest`. |
+| P2 | Orchestrator write gate checks attestation | **Shipped 2026-08-01 (issue #186)** — `human_session.orchestrator_write_denial` now also requires a valid signature on the *current* orchestrator session's file once `WILLOW_PGP_FINGERPRINT` is set (stdio only; serve mode keeps trusting the confirmed OAuth binding, unchanged). Orchestrator write tools don't all carry a `session_id` argument, so the session the check verifies against is server-process state set by `session_enter(app_id='willow', ...)` (`server._set_orchestrator_session` / `_current_orchestrator_session`, read back in `_gate`) rather than a per-call parameter — no tool signature changed. Env-only attestation (`WILLOW_HUMAN_ORCHESTRATOR=1`) stays required underneath; this layers on top of it, not instead of it. |
 | P3 | `dispatch` meta `.sig` on send | Not started |
 | Persona | Document contract; charter hook reads project + user rosters | Not started |
 | Persona | `meta.json` persona fields on `dispatch_send` | Not started |

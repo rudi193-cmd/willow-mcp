@@ -599,7 +599,12 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
 
     from .human_session import orchestrator_write_denial
 
-    human_denial = orchestrator_write_denial(effective, tool_name, serve_mode=_serve_mode())
+    human_denial = orchestrator_write_denial(
+        effective,
+        tool_name,
+        serve_mode=_serve_mode(),
+        session_id=_current_orchestrator_session(),
+    )
     if human_denial:
         return None, {"error": human_denial}
 
@@ -780,6 +785,31 @@ def _sanitize(kwargs: dict) -> tuple[dict, Optional[str]]:
                     return kwargs, f"'{key}' item exceeds max {_MAX_TAG_LEN} chars"
 
     return kwargs, None
+
+
+# ── Current orchestrator session (P2, #186) ──────────────────────────────────
+# The human-orchestrator write gate (human_session.orchestrator_write_denial)
+# checks PGP attestation on `sessions/willow-{session_id}.json` when PGP is
+# enabled. Orchestrator write tools (dispatch_send, verify_handoff, ...) don't
+# all carry a session_id argument, so per-call attestation can't be checked
+# from call_kwargs alone -- instead session_enter (the documented FIRST CALL
+# of every session) records the session_id it bound as app_id=willow here, and
+# _gate reads it back for every subsequent orchestrator-write check in this
+# process. In-process/single-operator, matching _buckets below.
+
+_orchestrator_session_lock = threading.Lock()
+_orchestrator_session_id: str = ""
+
+
+def _set_orchestrator_session(session_id: str) -> None:
+    global _orchestrator_session_id
+    with _orchestrator_session_lock:
+        _orchestrator_session_id = session_id or ""
+
+
+def _current_orchestrator_session() -> str:
+    with _orchestrator_session_lock:
+        return _orchestrator_session_id
 
 
 # ── Rate limiter (Phase 4b) ──────────────────────────────────────────────────
@@ -2888,6 +2918,11 @@ def session_enter(
     )
     if result.get("error"):
         return result
+
+    from .human_session import is_orchestrator_app
+    if is_orchestrator_app(app_id):
+        _set_orchestrator_session(session_id)
+
     from . import gate
 
     project_info = result.get("project") or {}
@@ -5306,6 +5341,57 @@ def _cmd_sign_manifest(args) -> None:
     )
 
 
+def _cmd_attest_session(args) -> None:
+    """`willow-mcp attest-session <session_id>` — detach-sign the human
+    orchestrator's session binding file (#186 P2, docs/design/pgp-and-persona.md).
+    Operator-terminal only, same Kart/tty guard as sign-manifest/sign-seed.
+    Requires session_enter(app_id='willow', session_id=...) to already have run
+    for this session_id -- this signs the file as it stands, it does not create
+    or mutate it. human_session.orchestrator_write_denial then requires this
+    signature to verify before dispatch_send/verify_handoff/agent_clear/
+    frank_append/envelope_apply run as app_id=willow, whenever
+    WILLOW_PGP_FINGERPRINT is set."""
+    from . import pgp
+
+    if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
+        print(
+            "Error: attest-session requires an interactive operator terminal "
+            "outside Kart; it cannot run from an MCP tool or queued task.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not pgp.pgp_enabled():
+        print(
+            "Error: WILLOW_PGP_FINGERPRINT is not set. Session attestation is "
+            "an opt-in hardening layer (#186) -- set it to your operator key's "
+            "fingerprint before attesting; see docs/design/pgp-and-persona.md.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    session_id = (args.session_id or "").strip()
+    if not session_id:
+        print("Error: session_id is required", file=sys.stderr)
+        raise SystemExit(1)
+    session_file = paths.session_path("willow", session_id)
+    if not session_file.is_file():
+        print(
+            f"Error: no session file at {session_file} -- run "
+            "session_enter(app_id='willow', session_id=...) first.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    ok, detail = pgp.sign_detached(session_file)
+    if not ok:
+        print(f"Error: {detail}", file=sys.stderr)
+        raise SystemExit(1)
+    print(f"Attested: {detail}")
+    print(
+        "Re-run this if the session file changes (e.g. another session_enter "
+        "call rebinds it) -- orchestrator_write_denial denies a session whose "
+        "signature no longer matches its content."
+    )
+
+
 def _cmd_setup_egress(args) -> None:
     """`willow-mcp setup-egress` — one-time Ed25519 keypair bootstrap (local CLI only)."""
     from . import egress_setup
@@ -6053,6 +6139,15 @@ def _main():
     )
     sign_manifest_p.add_argument("app_id", help="whose manifest to sign")
 
+    attest_session_p = subparsers.add_parser(
+        "attest-session",
+        help="Detach-sign the human orchestrator's session file with the operator's "
+             "PGP key (#186; interactive operator terminal only; never an MCP tool)",
+    )
+    attest_session_p.add_argument(
+        "session_id", help="session_id passed to session_enter(app_id='willow', ...)"
+    )
+
     setup_egress_p = subparsers.add_parser(
         "setup-egress",
         help="Create or register egress signing keys outside WILLOW_HOME (local CLI only)",
@@ -6317,6 +6412,9 @@ def _main():
         return
     if args.command == "sign-manifest":
         _cmd_sign_manifest(args)
+        return
+    if args.command == "attest-session":
+        _cmd_attest_session(args)
         return
     if args.command == "setup-egress":
         _cmd_setup_egress(args)

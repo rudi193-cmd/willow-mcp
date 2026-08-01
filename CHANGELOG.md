@@ -152,6 +152,27 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   only exposure computed `hardened: false` but printed nothing). Also adds
   `tests/test_at_m1_kill_chain.py`, replaying the #181 kill chain's testable
   steps against current code end to end.
+- **#186 (P2): orchestrator write gate now checks PGP session attestation, not
+  just an env var.** `docs/design/pgp-and-persona.md`'s locked P2 slice —
+  `attest_session` CLI + session file `.sig`, and the write gate checking it —
+  was the last unstarted layer of the orchestrator write gate. Env-only
+  (`WILLOW_HUMAN_ORCHESTRATOR=1`) proves the *host* was configured as the
+  orchestrator seat, not that *this session* was ever reviewed by the
+  operator. New `willow-mcp attest-session <session_id>` CLI (same
+  operator-terminal/Kart guard as `sign-manifest`) detach-signs the live
+  `sessions/willow-{session_id}.json` `session_enter`/`session_bind` already
+  write. `human_session.orchestrator_write_denial` now also requires that
+  signature to verify, once `WILLOW_PGP_FINGERPRINT` is set — layered on top
+  of, not instead of, the existing env check (stdio only; serve mode keeps
+  trusting the confirmed OAuth binding). `dispatch_send`, `verify_handoff`,
+  `frank_append`, and `envelope_apply` don't carry a `session_id` argument at
+  all, so the check can't read one from the call — `session_enter(app_id=
+  'willow', ...)` now records the session it bound as server-process state,
+  which `_gate` reads back for every subsequent orchestrator-write call in
+  that process; no tool's public signature changed. Unset (the default),
+  behavior is unchanged. Verified against a real, disposable Ed25519 GPG key
+  through pytest: unattested, tampered-after-attesting, and never-entered
+  sessions are all denied; a validly attested one is allowed.
 
 ### Fixed
 - **B-41 follow-up: a warm container kept its pre-B-41 `.mcp.json` broken
