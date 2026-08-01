@@ -185,3 +185,19 @@ def test_session_handoff_write_human_closeout(home):
     assert Path(out["handoff_path"]).exists()
     sess = ds.session_read("hanuman", "sess-close")
     assert sess["status"] == "idle"
+
+
+# ── B-54/#242: is_dispatch_party ──────────────────────────────────────────
+
+def test_is_dispatch_party_true_for_from_to_and_reply_to():
+    meta = {"from_app": "hanuman", "to_app": "loki", "reply_to": "willow"}
+    assert ds.is_dispatch_party("hanuman", meta) is True
+    assert ds.is_dispatch_party("loki", meta) is True
+    assert ds.is_dispatch_party("willow", meta) is True
+    assert ds.is_dispatch_party("HANUMAN", meta) is True  # case-insensitive
+
+
+def test_is_dispatch_party_false_for_unrelated_app():
+    meta = {"from_app": "hanuman", "to_app": "loki", "reply_to": "willow"}
+    assert ds.is_dispatch_party("jeles", meta) is False
+    assert ds.is_dispatch_party("", meta) is False

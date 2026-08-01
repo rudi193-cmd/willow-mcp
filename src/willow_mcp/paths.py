@@ -244,6 +244,25 @@ def store_root() -> Path:
     return willow_home() / "store"
 
 
+def schema_maps_dir(app_id: str) -> Path:
+    """Per-app schema mapping artifacts (B-50, issue #238) -- a top-level
+    runtime-writable root, deliberately NOT under mcp_apps/<app_id>/.
+
+    Was originally documented and shipped under mcp_apps/<app_id>/
+    schema_maps/ (docs/design/schema-adaptation.md's original §3.2), but that
+    conflicts with mcp_apps/ being the trust-root-hardened, operator-owned
+    directory #183/#186 depend on: on a uid-separated install, the runtime
+    process legitimately writing schema maps can never create a subdirectory
+    under an operator-owned, 0755 mcp_apps/<app_id>/ -- the parent directory's
+    own permissions block it regardless of what's excluded from any chown
+    sweep. Relocated here (a sibling of store_root()/dispatch_root(), same
+    "runtime state, not policy" class) so the conflict can't happen at all.
+    """
+    if not _APP_ID_RE.match(app_id or ""):
+        raise ValueError(f"invalid app_id: {app_id!r}")
+    return willow_home() / "schema_maps" / app_id
+
+
 # ── ledgers / resources / constitutional / logs ───────────────────────────────
 
 def ledgers_dir() -> Path:

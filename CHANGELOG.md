@@ -201,6 +201,55 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   and asserting refusal at each broken step, plus unit coverage in
   `tests/test_gate.py` and
   `tests/test_human_orchestrator.py`.
+- **B-54/#242: `dispatch_read`/`handoff_read` had no packet-level ACL.** Any
+  app with `dispatch_read` permission could read any `dispatch_id`'s full
+  content, not just packets it was `from_app`/`to_app`/`reply_to` on —
+  demonstrated live against a real packet's handoff (commit SHAs, PR URLs,
+  CI notes). Fixed: new `dispatch.is_dispatch_party()`, checked in
+  `server.py`'s `dispatch_read`/`handoff_read` wrappers with an orchestrator
+  bypass; the denial (`not_party_to_dispatch`) carries no packet content.
+- **B-55/#243: pending `assignment.md` was mutable on disk** between
+  `dispatch_send` and specialist/orchestrator read — same operator-writable
+  `dispatch/` root as B-52, demonstrated live (append, reverted). Fixed:
+  `dispatch_send` now records a sha256 of `assignment.md` in `meta.json`;
+  `dispatch_read` verifies it and returns `assignment_tampered` on mismatch,
+  inherited for free by `dispatch_accept`/`handoff_write_v4` since both call
+  `dispatch_read` internally. Not full closure — `dispatch/` is still
+  operator-writable, same residual as B-52 — but tampering is now detected
+  and refused instead of silently trusted.
+- **B-52/#241 (partial): filesystem dispatch packet injection under
+  `dispatch/`.** A local uid could `mkdir` a fake packet directory with an
+  arbitrary `meta.json` and it showed up in `dispatch_list`/`dispatch_read`
+  with no relationship to `dispatch_send` at all. New
+  `dispatch._meta_is_well_formed()` rejects a packet missing the
+  `startup_packet_meta_v1` format marker or `dispatch_id`/`from_app`/`to_app`,
+  refusing the trivial hand-forged-mkdir case at zero cost to real packets.
+  Not cryptographic and not full closure — real closure needs the same uid
+  separation as #231.
+- **B-50/#238: `schema_maps/` writes EACCES'd once `mcp_apps/` was actually
+  trust-root-hardened.** `schema_maps/<app_id>/` was documented and shipped
+  under `mcp_apps/<app_id>/` (`schema-adaptation.md` §3.2 original) — a
+  deliberate placement, not an oversight, that simply conflicted with
+  `mcp_apps/` also being the trust-root-hardened, operator-owned directory
+  B-45/#183 depends on: the runtime process legitimately writing schema maps
+  can never create a subdirectory under a `0755`, operator-owned parent,
+  regardless of what's excluded from any chown sweep. Fixed (operator-
+  approved amendment to the LOCKED `product-layout.md`):
+  `schema_maps/<app_id>/` relocated to its own top-level `$WILLOW_HOME`
+  root, sibling to `store/` — never under `mcp_apps/` at all, so the
+  conflict can't recur.
+  Also fixed a latent test-isolation gap this surfaced: several
+  `test_server.py`/`test_sandbox_confirm.py` fixtures isolated
+  `WILLOW_MCP_APPS_ROOT` but never `WILLOW_HOME` — harmless while
+  `schema_maps` lived under the isolated apps root, but once it moved to
+  depend on `WILLOW_HOME` directly those fixtures were silently sharing
+  conftest's one session-wide default, so a mapping confirmed in one test
+  bled into the next test reusing the same app_id.
+- **B-49/#237: reconciled, not a new gap.** `docs/design/willow-gate-seam.md`
+  D3 already covers "ungated `whoami` leaks manifest when binding is off" in
+  its own explicit "CLOSED" section — the accepted trusted-host stdio model,
+  same posture as every other tool in this gate. Closed with a pointer to
+  the existing doc section, no code change.
 
 ### Fixed
 - **B-41 follow-up: a warm container kept its pre-B-41 `.mcp.json` broken

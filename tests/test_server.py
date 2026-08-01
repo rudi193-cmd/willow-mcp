@@ -28,6 +28,13 @@ def _fresh_rate_buckets():
 def app_id(tmp_path, monkeypatch):
 
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / "testapp"
     app_dir.mkdir(parents=True)
@@ -158,6 +165,13 @@ def test_store_delete_is_durable_through_store_put(app_id):
 
 def test_guarded_denies_unpermitted_app_id(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / "readonly"
     app_dir.mkdir(parents=True)
@@ -180,6 +194,13 @@ def test_guarded_gate_precedes_sanitize(tmp_path, monkeypatch):
     collection here would trip _sanitize; the unpermitted app would trip _gate.
     Gate runs first, so the denial wins."""
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / "readonly"
     app_dir.mkdir(parents=True)
@@ -208,6 +229,13 @@ def test_guarded_sanitize_runs_after_gate_for_permitted_app(app_id):
 @pytest.fixture
 def scoped_app_id(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / "scopedapp"
     app_dir.mkdir(parents=True)
@@ -422,6 +450,13 @@ def test_knowledge_search_skips_domain_filter_when_domain_unmapped(app_id, monke
 
 def test_knowledge_search_denied_without_permission(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / "writeonly"
     app_dir.mkdir(parents=True)
@@ -605,6 +640,13 @@ def test_schema_confirm_mapping_preview_does_not_confirm(app_id, monkeypatch):
 
 def test_schema_confirm_mapping_denied_without_schema_admin(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / "writer_only"
     app_dir.mkdir(parents=True)
@@ -706,6 +748,13 @@ _KNOWLEDGE_COLUMNS_WITH_TAGS = _KNOWLEDGE_COLUMNS_NO_TAGS + [("tags", "jsonb")]
 
 def _curator_app(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / "curator"
     app_dir.mkdir(parents=True)
@@ -717,6 +766,13 @@ def _curator_app(tmp_path, monkeypatch):
 
 def test_knowledge_flag_denied_without_curate_permission(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     (apps_root / "writer").mkdir(parents=True)
     (apps_root / "writer" / "manifest.json").write_text(
@@ -1487,6 +1543,13 @@ def test_fleet_health_table_not_found(app_id, monkeypatch):
 
 def test_gap_log_denied_without_permission(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / "reader_only"
     app_dir.mkdir(parents=True)
@@ -1596,6 +1659,13 @@ def test_gap_promote_already_promoted_gap_errors(app_id, monkeypatch):
 
 def test_gap_promote_denied_without_gap_promote_permission(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / "writer_only"
     app_dir.mkdir(parents=True)
@@ -1658,6 +1728,13 @@ def test_egress_leaves_clean_records_untouched(app_id):
 @pytest.fixture
 def exempt_app_id(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / "oauthapp"
     app_dir.mkdir(parents=True)
@@ -1704,6 +1781,13 @@ def _write_app(apps_root, name, manifest):
 
 def test_store_collections_lists_scoped_collections(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app = _write_app(apps_root, "sc_app",
                      {"permissions": ["full_access"], "store_scope": ["sc_uniq_*"]})
@@ -1720,6 +1804,13 @@ def test_store_collections_lists_scoped_collections(tmp_path, monkeypatch):
 
 def test_store_collections_requires_store_read(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app = _write_app(apps_root, "noread", {"permissions": ["knowledge_read"]})
     result = server.store_collections(app_id=app)
@@ -1728,6 +1819,13 @@ def test_store_collections_requires_store_read(tmp_path, monkeypatch):
 
 def test_whoami_reports_effective_permissions(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app = _write_app(apps_root, "wapp", {
         "permissions": ["store_read"],
@@ -1761,6 +1859,13 @@ def test_whoami_requires_an_app_id():
 
 def test_store_purge_collection_soft_deletes_all(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app = _write_app(apps_root, "purgeapp",
                      {"permissions": ["full_access"], "store_scope": ["purge_uniq_*"]})
@@ -1777,6 +1882,13 @@ def test_store_purge_collection_soft_deletes_all(tmp_path, monkeypatch):
 
 def test_store_purge_collection_requires_confirm(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app = _write_app(apps_root, "purgeapp2",
                      {"permissions": ["full_access"], "store_scope": ["pc_*"]})
@@ -1789,6 +1901,13 @@ def test_store_purge_collection_requires_confirm(tmp_path, monkeypatch):
 
 def test_store_purge_collection_denied_outside_scope(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app = _write_app(apps_root, "purgeapp3",
                      {"permissions": ["full_access"], "store_scope": ["mine_*"]})
@@ -1809,6 +1928,13 @@ def test_full_access_grants_specialist_reads():
 
 def test_store_stats_counts_live_records(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app = _write_app(apps_root, "statapp",
                      {"permissions": ["full_access"], "store_scope": ["st_uniq_*"]})
@@ -1829,6 +1955,13 @@ def test_store_stats_counts_live_records(tmp_path, monkeypatch):
 
 def test_store_stats_requires_store_read(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app = _write_app(apps_root, "noread2", {"permissions": ["knowledge_read"]})
     result = server.store_stats(app_id=app)
@@ -1854,6 +1987,13 @@ def test_gap_delete_not_found(app_id):
 
 def test_gap_delete_requires_gap_write(tmp_path, monkeypatch):
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app = _write_app(apps_root, "gapreader", {"permissions": ["gap_read"]})
     res = server.gap_delete(app_id=app, gap_id="whatever")
@@ -1892,6 +2032,13 @@ def test_gap_purge_topic_needs_its_own_group_not_gap_write(tmp_path, monkeypatch
     assert "gap_purge_topic" in gate.PERMISSION_GROUPS["full_access"]
 
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     # an app with everyday gap_write can no longer bulk-purge
     writer = _write_app(apps_root, "gapwriter", {"permissions": ["gap_write"]})
@@ -1934,6 +2081,13 @@ _TASKS_COLUMNS_DB = _TASKS_COLUMNS + [("db_authorization", "text")]
 def db_app(tmp_path, monkeypatch):
     """An app that holds task_db — full_access does NOT grant it."""
     apps_root = tmp_path / "mcp_apps"
+    # B-50/#238: schema_maps/ now lives under WILLOW_HOME directly (no longer
+    # nested under mcp_apps/), so isolating WILLOW_MCP_APPS_ROOT alone is not
+    # enough to isolate it between tests -- without this, every test using
+    # this fixture wrote/read schema maps from conftest.py's one session-wide
+    # default WILLOW_HOME, so a mapping confirmed in one test bled into the
+    # next test reusing the same app_id.
+    monkeypatch.setenv("WILLOW_HOME", str(tmp_path))
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     app_dir = apps_root / "dbapp"
     app_dir.mkdir(parents=True)

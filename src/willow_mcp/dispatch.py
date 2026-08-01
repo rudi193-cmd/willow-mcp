@@ -206,6 +206,7 @@ def dispatch_send(
 
     role = (role or to_app).lower()
     rel_assignment = f"dispatch/{did}/assignment.md"
+    assignment_text = assignment_md.strip() + "\n"
     meta = {
         "format": "startup_packet_meta_v1",
         "version": 1,
@@ -218,6 +219,12 @@ def dispatch_send(
         "priority": priority,
         "closeout": dict(DISPATCH_CLOSEOUT),
         "assignment_path": rel_assignment,
+        # B-55/#243: recorded at send time so dispatch_read can detect the
+        # assignment being edited on disk between send and read/accept --
+        # dispatch/ is operator-writable (B-52/#241's own residual), so
+        # nothing else stops that edit; this at least makes it detectable
+        # rather than silently trusted.
+        "assignment_sha256": hashlib.sha256(assignment_text.encode("utf-8")).hexdigest(),
         "context_refs": list(context_refs or []),
         "summary": (summary or "").strip() or _first_line(assignment_md),
         "created_at": _utc_now(),
@@ -233,7 +240,7 @@ def dispatch_send(
 
     root.mkdir(parents=True, exist_ok=False)
     _write_json(root / "meta.json", meta)
-    (root / "assignment.md").write_text(assignment_md.strip() + "\n", encoding="utf-8")
+    (root / "assignment.md").write_text(assignment_text, encoding="utf-8")
     _write_json(root / "status.json", status)
     _pg_mirror_upsert(meta)  # best-effort fleet mirror; filesystem is canonical
 
@@ -255,21 +262,69 @@ def _first_line(md: str) -> str:
     return "dispatch assignment"
 
 
+_REQUIRED_META_FIELDS = ("dispatch_id", "from_app", "to_app")
+
+
+def _meta_is_well_formed(meta: dict) -> bool:
+    """A packet dispatch_send actually wrote always carries the
+    startup_packet_meta_v1 format marker and dispatch_id/from_app/to_app
+    (B-52, issue #241). A packet mkdir'd directly under the operator-
+    writable dispatch/ tree, bypassing dispatch_send entirely, is unlikely
+    to replicate this exactly unless deliberately spoofed. Not
+    cryptographic -- full closure needs the same uid separation as #231 --
+    but it does refuse the trivial "mkdir + bare {}" case the red-team
+    demonstrated, at zero cost to any packet dispatch_send actually wrote."""
+    if meta.get("format") != "startup_packet_meta_v1":
+        return False
+    return all((meta.get(f) or "").strip() for f in _REQUIRED_META_FIELDS)
+
+
 def dispatch_read(dispatch_id: str) -> dict:
     root = dispatch_dir(dispatch_id)
     meta = _read_json(root / "meta.json")
     if not meta:
         return {"error": "not_found", "dispatch_id": dispatch_id}
+    if not _meta_is_well_formed(meta):
+        return {"error": "malformed_packet", "dispatch_id": dispatch_id}
     status = _read_json(root / "status.json") or {}
     assignment_path = root / "assignment.md"
     assignment = ""
     if assignment_path.exists():
         assignment = assignment_path.read_text(encoding="utf-8")
+    # B-55/#243: the assignment on disk must still match what dispatch_send
+    # actually wrote -- dispatch/ is operator-writable, so nothing else
+    # stops an in-place edit between send and read/accept.
+    expected_hash = meta.get("assignment_sha256")
+    if expected_hash:
+        actual_hash = hashlib.sha256(assignment.encode("utf-8")).hexdigest()
+        if actual_hash != expected_hash:
+            return {"error": "assignment_tampered", "dispatch_id": dispatch_id}
     return {
         "dispatch_id": dispatch_id,
         "meta": meta,
         "status": status,
         "assignment": assignment,
+    }
+
+
+def is_dispatch_party(app_id: str, meta: dict) -> bool:
+    """Whether app_id is from_app, to_app, or reply_to on this packet's own
+    meta.json -- the three identities a dispatch names as involved (B-54,
+    issue #242). Read-side check, deliberately broader than dispatch_accept's
+    to_app-only write check above: the sender should be able to read status
+    on its own dispatch, and reply_to is who verifies the handoff -- neither
+    of those is "accepting" the packet, but both are legitimately a party
+    to it. Server.py's dispatch_read/handoff_read wrappers use this to deny
+    a caller who has dispatch_read permission but no relationship to this
+    specific packet (previously: any dispatch_read holder could read any
+    dispatch_id's full assignment/handoff content)."""
+    who = (app_id or "").strip().lower()
+    if not who:
+        return False
+    return who in {
+        (meta.get("from_app") or "").strip().lower(),
+        (meta.get("to_app") or "").strip().lower(),
+        (meta.get("reply_to") or "").strip().lower(),
     }
 
 
@@ -290,7 +345,7 @@ def dispatch_list(
             continue
         meta = _read_json(child / "meta.json")
         st = _read_json(child / "status.json") or {}
-        if not meta:
+        if not meta or not _meta_is_well_formed(meta):
             continue
         if to_app and meta.get("to_app", "").lower() != to_app.lower():
             continue

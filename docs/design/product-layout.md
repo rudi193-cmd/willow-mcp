@@ -9,7 +9,14 @@ description: "Locked v1.0 spec for the willow-mcp product layout: repo structure
 # Product layout — willow-mcp (LOCKED)
 
 *Status: **LOCKED** draft 1.0 — 2026-07-09*  
-*Supersedes: Nest single-repo tree as implementation spec; aligns with `session-lifecycle.md`.*
+*Supersedes: Nest single-repo tree as implementation spec; aligns with `session-lifecycle.md`.*  
+*Amendment 2026-08-01 (B-50, issue #238, operator-approved): `schema_maps/{app_id}/` moved
+from under `mcp_apps/{app_id}/` to its own top-level `$WILLOW_HOME` root, sibling to `store/`.
+A 2026-07-31 red-team pass found that once `mcp_apps/` is actually trust-root-hardened to the
+operator uid (the whole point of B-45/#183's manifest-forgery fix), the runtime process legitimately
+writing schema maps can never create that subdirectory — the parent directory's own permissions
+block it regardless of what's excluded from any chown sweep. Nesting it there was correct before
+hardening was real; it stopped being correct once hardening was.*
 
 **willow-mcp is a standalone product.** `pip install willow-mcp` + `willow-mcp-init` materializes
 `$WILLOW_HOME`. No clone of willow-2.0 or the charter repo is required.
@@ -114,10 +121,13 @@ $WILLOW_HOME/
 │
 ├── mcp_apps/{app_id}/
 │   ├── manifest.json               # tool ACL for this app_id
-│   ├── schema_maps/                # per-table mapping artifacts
 │   ├── _identity_bindings/         # OAuth subject → app_id (sibling dir under mcp_apps/)
 │   └── _net_leases/                # egress lease artifacts
 │
+├── schema_maps/{app_id}/           # per-table mapping artifacts (B-50, issue #238) --
+│                                    # NOT under mcp_apps/: that tree is trust-root-
+│                                    # hardened to the operator uid, and the runtime
+│                                    # process must be able to write these
 ├── store/                          # SOIL SQLite (WILLOW_STORE_ROOT may override path)
 ├── ledgers/
 │   └── entries/{hash}.json         # lightweight receipt chain (product; not full FRANK)

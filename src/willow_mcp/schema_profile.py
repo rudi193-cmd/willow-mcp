@@ -29,6 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from . import paths
+
 SCHEMA_VERSION = 1
 
 # Hint tuning (docs/design/schema-adaptation.md §3.2 extension). A data-shape
@@ -591,11 +593,6 @@ def db_fingerprint(conn) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
-def _apps_root() -> Path:
-    home = Path(os.environ.get("WILLOW_HOME", Path.home() / ".willow"))
-    return Path(os.environ.get("WILLOW_MCP_APPS_ROOT", home / "mcp_apps"))
-
-
 def _validate_table(table: str) -> str:
     if not table or not _COLLECTION_SAFE_RE.match(table):
         raise ValueError(f"invalid table name: {table!r}")
@@ -604,7 +601,10 @@ def _validate_table(table: str) -> str:
 
 def mapping_path(app_id: str, fingerprint: str, table: str) -> Path:
     _validate_table(table)
-    root = _apps_root() / app_id / "schema_maps"
+    # B-50/#238: schema_maps/ lives outside mcp_apps/<app_id>/ specifically
+    # so this mkdir can never collide with mcp_apps/ being trust-root-
+    # hardened to the operator uid -- see paths.schema_maps_dir's docstring.
+    root = paths.schema_maps_dir(app_id)
     root.mkdir(parents=True, exist_ok=True)
     return root / f"{fingerprint}__{table}.json"
 
