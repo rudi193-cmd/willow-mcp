@@ -89,8 +89,8 @@ the ability to knock on the egress gate.
 
 `WILLOW_MCP_STRICT_TRUST_ROOT` applies unchanged: when the process can write
 the keys that authorize it and strict mode is on, integration egress is refused
-exactly as task egress is. The B-32 residual is shared by both lanes; it is not
-re-litigated here.
+exactly as task egress is. The B-32 residual (tracked as issues #231/#232) is shared by both
+lanes; it is not re-litigated here.
 
 @phase 5-credentials
 ## 5. Credentials
