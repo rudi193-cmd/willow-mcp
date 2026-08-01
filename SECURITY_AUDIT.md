@@ -256,7 +256,7 @@ This inverts the **sudo invariant** (FRANK `90e52ab7`): *the model may REQUEST e
 4. **The residual is reported, never implied away.** `diagnostic_summary.checks.net_lease.self_writable` lists exactly which authorizing keys the running process could forge. `WILLOW_MCP_STRICT_TRUST_ROOT=1` turns that into a refusal (`trust_root_denied`).
 5. **The PreToolUse hook blocks the crossing** — `grant-net`, a write under `_net_leases/`, or an edit adding `task_net` to a manifest. A hook is a guardrail in the agent's own harness, not a control; it makes the boundary visible where it would be crossed.
 
-**Not closed.** On a single-uid host the agent can still write the lease. It must now forge a *third* artifact, with a clock, under audit — but the operating system is not stopping it. **Strict mode is off by default**, because enabling it before uid separation exists would deny egress on every current install. The genuine fix is ownership: `chown` `mcp_apps/` and `mcp_apps/_net_leases/` to a uid the agent's process does not run as, then set `WILLOW_MCP_STRICT_TRUST_ROOT=1`. That is a deployment step this repo can support and check but cannot perform. Tracked as B-32 in `docs/BUGS.md`.
+**Not closed.** On a single-uid host the agent can still write the lease. It must now forge a *third* artifact, with a clock, under audit — but the operating system is not stopping it. **Strict mode is off by default**, because enabling it before uid separation exists would deny egress on every current install. The genuine fix is ownership: `chown` `mcp_apps/` and `mcp_apps/_net_leases/` to a uid the agent's process does not run as, then set `WILLOW_MCP_STRICT_TRUST_ROOT=1`. That is a deployment step this repo can support and check but cannot perform. Tracked as B-32 in `docs/BUGS.md`, and as [issue #231](https://github.com/rudi193-cmd/willow-mcp/issues/231) (dedicated low-privilege agent uid) and [#232](https://github.com/rudi193-cmd/willow-mcp/issues/232) (store `.db` OS-level permission enforcement, which depends on it).
 
 ---
 
@@ -384,7 +384,8 @@ configuration bwrap's ephemeral filesystem, read-only trust-root binds, and
 absent device nodes contain them (verified: a sandboxed write to the ACL manifest
 returns `Read-only file system`), so they are not exploitable against the host —
 but the scanner should not depend solely on the sandbox for the destructive class.
-Same location/remediation as L-DOS-02.
+Same location/remediation as L-DOS-02. Tracked as
+[issue #233](https://github.com/rudi193-cmd/willow-mcp/issues/233).
 
 #### ~~P3: L-DOS-03 — No record-size limit on the SOIL store~~ — RETRACTED (false finding)
 

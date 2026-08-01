@@ -326,8 +326,11 @@ $ export WILLOW_MCP_STRICT_TRUST_ROOT=1   # refuse egress when the keys are self
 
 Strict mode is **off by default** because turning it on before that separation
 exists would deny egress on every current install. This is tracked as B-32 in
-`docs/BUGS.md`; requesting egress and confirming it are separate authorities, and
-until the filesystem says so, only convention does.
+`docs/BUGS.md`, and as [issue #231](https://github.com/rudi193-cmd/willow-mcp/issues/231)
+(dedicated low-privilege agent uid) and [#232](https://github.com/rudi193-cmd/willow-mcp/issues/232)
+(store `.db` OS-level permission enforcement, which depends on it); requesting
+egress and confirming it are separate authorities, and until the filesystem
+says so, only convention does.
 
 ### Integrations (outbound adapters)
 
