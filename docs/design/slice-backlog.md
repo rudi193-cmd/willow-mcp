@@ -81,6 +81,24 @@ in willow-2.0. Order is rough tractability.
   `function` → default `agent_id`, and walk a multi-step plan. Design exists
   (S6), tools absent (verified). Earn-first: no consumer today — the orchestrator
   dispatches explicitly. Build when a multi-step orchestration flow needs it.
+
+### Security / gate follow-ups (red-team 2026-07-31 → `docs/BUGS.md`)
+
+- [ ] **B-47** — Align repo `.cursor/mcp.json` / `willow-mcp` namespace env with
+  the vault desk (`WILLOW_HOME`, PGP fingerprint, `WILLOW_MCP_ENFORCE_BINDING`).
+- [ ] **B-48** — Binding or human attestation for `dispatch_write` (not only
+  `app_id=willow` orchestrator writes). See `human_session.ORCHESTRATOR_WRITE_TOOLS`.
+- [ ] **B-49** — Policy: binding on for every fleet MCP; optional code tighten for
+  registered-agent `whoami` when switch is off.
+- [ ] **B-50** — `schema_maps/` writability for `task_submit` on hardened installs.
+- [ ] **B-51** — Split `verify_handoff` / `agent_clear` from builder `dispatch_write`;
+  orchestrator-only verify + human attestation.
+- [ ] **B-52** — `dispatch/` trust-root + optional signed `meta.json`.
+- [ ] **B-53** — Extend `ORCHESTRATOR_WRITE_TOOLS` to `dispatch_accept` +
+  `handoff_write_v4`; regression for stdio `willow` without human env.
+- [ ] **B-54** — Packet-party ACL on `dispatch_read` / `handoff_read`.
+- [ ] **B-55** — Assignment integrity (signed hash or operator-owned dispatch tree).
+- [ ] **B-56** — Host egress key custody (#182) on operator workstations.
 - [ ] **`intake_*`** (4) — KB-tier routing; needs jeles/binder/opus targets first.
 - [ ] **`skill_*`, `index_*` / `cmb_*`, `cbm_*`, `mem_binder_*` / `mem_ratify_*`**
   — registries and extra KB sub-stores mirroring existing store patterns.
