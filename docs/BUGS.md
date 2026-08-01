@@ -499,6 +499,12 @@ log carries a one-line entry and points there rather than duplicating.
   sees everything, same as before. Flipping the default to isolate-by-default
   would be a breaking change requiring every existing manifest to be migrated
   and is left as a follow-up decision, not bundled into this fix.
+  **Independent verification (2026-08-01, Felipe Castro Quiles):** pulled from
+  GitHub, ran `sandbox-bootstrap` in SOIL-only mode (clean, degraded behavior
+  worked as expected), then separately attempted to bypass `store_scope` with
+  cross-app reads "a few different ways" — blocked every time. B-24/B-25
+  holding under live testing outside this repo's own suite, not just its
+  own tests.
 
 - **B-22 · P1 (this session)** — willow-mcp shipped **no Kart executor**: the
   package advertised a "Kart task queue" and exposed `task_submit`/`task_status`/
