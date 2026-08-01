@@ -56,9 +56,9 @@ log carries a one-line entry and points there rather than duplicating.
 | B-48 | P1 | Open | gate / dispatch | **`dispatch_write` is not binding-gated and not human-attested.** `orchestrator_human_required` covers only `app_id=willow` orchestrator writes (`ORCHESTRATOR_WRITE_TOOLS`). Any stdio caller passing `app_id=hanuman` (or any manifest with `dispatch_write`) can `dispatch_send` and create real packets under `$WILLOW_HOME/dispatch/` with no per-call credential — demonstrated live (`dispatch_id=7BE854FD`, hanuman→loki). Queue pollution / social-engineering surface, not Willow-seat takeover | red-team 2026-07-31; permissions-matrix hanuman row; issue #236 |
 | B-49 | P2 | Open | gate / binding | **Ungated `whoami` leaks any manifest when binding is off.** By design for the trusted-host stdio model (`_own_identity_denial` no-ops unless `WILLOW_MCP_ENFORCE_BINDING=1`), but on a shared or agent-driven host any client can enumerate another fleet identity's permissions/`store_scope` by passing its `app_id`. Partial close when binding is on; does not help if PGP is off and manifests are unsigned (B-47) | red-team 2026-07-31; `willow-gate-seam.md` D3; issue #237 |
 | B-50 | P2 | Open | deploy / schema_maps | **`task_submit` passes the gate then dies on schema-map writes.** Agents with `task_queue` (e.g. hanuman) are permitted, but auto-confirm writes under `mcp_apps/<app>/schema_maps/` fail with `EACCES` when those dirs are `willow-operator`-owned and the MCP process runs as the operator uid — looks like "almost in" from the gate's perspective, fails at filesystem | red-team 2026-07-31; same class as B-41 env freeze; issue #238 |
-| B-51 | P0 | Open | dispatch / gate | **`dispatch_write` grants `verify_handoff` + `agent_clear` to builder seats** — same group as `dispatch_send`. Red-team 2026-07-31 (stdio, binding off): `hanuman` forged send → `loki` accept/handoff → **`hanuman` `verify_handoff` (verified=true)** → **`hanuman` `agent_clear`** with zero Willow/human attestation. `verify_handoff()` checks only handoff JSON flags, not caller identity; only `app_id=willow` orchestrator writes get `orchestrator_human_required` | red-team 2026-07-31; extends B-48; issue #240 |
+| B-51 | P0 | Fixed | dispatch / gate | `dispatch_write` granted `verify_handoff` + `agent_clear` to builder seats — same group as `dispatch_send`, so any manifest with `dispatch_write` could self-verify and self-clear its own dispatch with zero orchestrator/human involvement (demonstrated live: `hanuman` forged send → `loki` accept/handoff → `hanuman` `verify_handoff`+`agent_clear`, no `WILLOW_HUMAN_ORCHESTRATOR`, no binding, no PGP). Fixed: `verify_handoff`/`agent_clear` removed from the `dispatch_write` group in `gate.py` — they remain reachable only via `orchestrator`, which is human-attestation-gated (`ORCHESTRATOR_WRITE_TOOLS`). `dispatch_write` still grants `dispatch_send`/`dispatch_accept`/`handoff_write_v4`/`session_handoff_write`, the send/accept/close-out lifecycle a builder legitimately needs over its own work | red-team 2026-07-31; extends B-48; issue #240 |
 | B-52 | P1 | Open | dispatch / filesystem | **`$WILLOW_HOME/dispatch/` is operator-writable** — a local uid can `mkdir` a packet (`DEADBEEF`) with arbitrary `meta.json`; it appears in `dispatch_list` and can target `to_app=willow` for social engineering at `session_enter` / accept time (recipient check still applies). Not MCP-forged; bypasses all gate logic for packet *existence* | red-team 2026-07-31; issue #241 |
-| B-53 | P0 | Open | human_session / dispatch | **`orchestrator_human_required` is incomplete for `app_id=willow`.** Only `dispatch_send`, `verify_handoff`, `agent_clear`, `frank_append`, `envelope_apply` are in `ORCHESTRATOR_WRITE_TOOLS` — **`dispatch_accept` and `handoff_write_v4` are not.** Red-team 2026-07-31: stdio `app_id=willow` (no `WILLOW_HUMAN_ORCHESTRATOR`) **accepted** real packet `96F54DA7` and **completed** it via `handoff_write_v4`; `hanuman` then `verify_handoff` + `agent_clear`. Orchestrator intake queue can be closed by any MCP client that passes `app_id=willow` | red-team 2026-07-31; issue #239 |
+| B-53 | P0 | Fixed | human_session / dispatch | `orchestrator_human_required` was incomplete for `app_id=willow`: only `dispatch_send`, `verify_handoff`, `agent_clear`, `frank_append`, `envelope_apply` were in `ORCHESTRATOR_WRITE_TOOLS` — `dispatch_accept` and `handoff_write_v4` were not, even though `session_enter` itself refuses a dispatch_id for `app_id=willow` up front (that guard lived only there). Demonstrated live: stdio `app_id=willow` (no `WILLOW_HUMAN_ORCHESTRATOR`) accepted real packet `96F54DA7` and completed it via `handoff_write_v4`. Fixed: both added to `ORCHESTRATOR_WRITE_TOOLS`; the denial message now names whichever tool was actually called instead of a fixed three-tool list, so it can't drift again as the set grows | red-team 2026-07-31; issue #239 |
 | B-54 | P1 | Open | dispatch / ACL | **`dispatch_read` / `handoff_read` have no packet-level ACL** — any app with `dispatch_read` can read **any** `dispatch_id` (demonstrated: `hanuman` read `A0939A8C` handoff with commit SHAs, PR URLs, CI notes). Gate checks tool permission, not whether the caller is `from_app` / `to_app` / `reply_to` | red-team 2026-07-31; issue #242 |
 | B-55 | P1 | Open | dispatch / TOCTOU | **Pending `assignment.md` is mutable on disk** by the operator uid between `dispatch_send` and specialist/orchestrator read (append demonstrated on `96F54DA7`; reverted). Same writable `dispatch/` root as B-52 — prompt-injection / instruction-smuggling without touching MCP | red-team 2026-07-31; issue #243 |
 | B-56 | P0 | Open | egress / host | **Egress signing key readable on this workstation** — `~/.config/willow-mcp/egress/private.pem` is mode `600` but owned by the same uid as the agent/MCP process (`EGRESS_KEY_READABLE` probe). Collapses the third egress key locally (#182 class); unrelated to MCP ACL | red-team 2026-07-31; issue #182; issue #244 |
@@ -129,29 +129,12 @@ log carries a one-line entry and points there rather than duplicating.
   B-32 hardening (runtime user can write only what it must), or run schema
   confirm as operator / pre-seed maps for worker agents.
 
-- **B-51 · P0** — **Dispatch lifecycle bypass without Willow.** The
-  `dispatch_write` permission group includes `verify_handoff` and `agent_clear`
-  (not orchestrator-only). Demonstrated end-to-end on live MCP (`8E43715E`):
-  stdio `app_id=hanuman` sent work, `loki` closed out, **`hanuman` verified and
-  cleared** — no `WILLOW_HUMAN_ORCHESTRATOR`, no binding, no PGP. **Fix direction:**
-  move `verify_handoff` / `agent_clear` to `orchestrator` (or a new
-  `dispatch_orchestrate` group) with the same human-attestation gate as
-  `dispatch_send` for `app_id=willow`; require binding for all `dispatch_write`
-  tools; teach `verify_handoff` the caller's `app_id` / reply_to chain.
-
 - **B-52 · P1** — **Filesystem dispatch injection.** On this host
   `~/.willow/dispatch/` is writable by the operator uid; forged packets show up
   in `dispatch_list` (demo `DEADBEEF`, `to_app=willow`). **Fix direction:**
   harden-trust-root ownership on `dispatch/` (B-32 class), optional signature on
   `meta.json` at `dispatch_send` time, reject packets missing required fields /
   unknown `from_app` at list/accept.
-
-- **B-53 · P0** — **Willow seat partially unguarded.** `human_session` does not
-  treat `dispatch_accept` or `handoff_write_v4` as orchestrator writes. Stdio
-  `app_id=willow` closed a **real** pending packet (`96F54DA7`) without
-  `WILLOW_HUMAN_ORCHESTRATOR`. **Fix:** add those tools to
-  `ORCHESTRATOR_WRITE_TOOLS` (or a shared `ORCHESTRATOR_DISPATCH_TOOLS` set) and
-  regression-test the full accept→handoff path.
 
 - **B-54 · P1** — **Dispatch read fan-out.** `handoff_read`/`dispatch_read` by
   ID only — no check that `app_id` is party to the packet. **Fix:** enforce
@@ -213,6 +196,36 @@ log carries a one-line entry and points there rather than duplicating.
   unmocked `Vault().init()` proving the actual before/after mode change) and
   `tests/test_at_m1_kill_chain.py`, a new acceptance suite replaying the
   #181 kill chain's testable steps against current code end to end.
+
+- **B-53 · P0 (2026-08-01)** — **`orchestrator_human_required` was incomplete
+  for `app_id=willow`** (issue #239, red-team 2026-07-31). `dispatch_accept`
+  and `handoff_write_v4` were missing from `ORCHESTRATOR_WRITE_TOOLS`, so
+  stdio `app_id=willow` with no `WILLOW_HUMAN_ORCHESTRATOR` could accept and
+  complete a real dispatch packet — `session_enter`'s own "human-only, never
+  dispatch entry" refusal only covered `session_enter`, not the two tools
+  called directly. Fixed: both added; the denial message now names the actual
+  tool rather than a fixed list, so it can't silently drift again as the set
+  grows. Tested: `tests/test_human_orchestrator.py` (unit), a new
+  `tests/test_at_m2_dispatch_lifecycle.py` replaying the red-team scenario
+  end to end through the real MCP tool wrappers.
+
+- **B-51 · P0 (2026-08-01)** — **`dispatch_write` granted `verify_handoff` +
+  `agent_clear` to builder seats** (issue #240, red-team 2026-07-31, extends
+  B-48). Same permission group as `dispatch_send`, so any manifest with
+  `dispatch_write` (hanuman, loki, jeles, ada) could verify and clear its own
+  dispatch with zero orchestrator/human involvement — self-certifying work
+  the design always meant the orchestrator to check (`handoff_write_v4`'s own
+  docstring: "the orchestrator checks both in verify_handoff before releasing
+  you via agent_clear"). Demonstrated live: `hanuman` forged send → `loki`
+  accept/handoff → `hanuman` `verify_handoff` (verified=true) → `hanuman`
+  `agent_clear`. Fixed: `verify_handoff`/`agent_clear` removed from the
+  `dispatch_write` group in `gate.py`; still reachable only via `orchestrator`
+  (already human-attestation-gated). `dispatch_write` keeps
+  `dispatch_send`/`dispatch_accept`/`handoff_write_v4`/`session_handoff_write`
+  — the lifecycle a builder legitimately needs over its own work. Tested:
+  `tests/test_gate.py` (permission-group split),
+  `tests/test_at_m2_dispatch_lifecycle.py` (a builder self-verifying/
+  self-clearing is denied; the orchestrator still can with attestation).
 
 - **B-40 · P1 (2026-07-23)** — **the worker could not start on a clean install.**
   The f1e8c9b guard (refuse a production lane on an unobservable sandbox policy)

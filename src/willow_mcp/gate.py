@@ -86,9 +86,20 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         "specialist_list", "specialist_get", "agent_seed_mirror",
         "exposure_config_get", "exposure_slice",
     }),
+    # verify_handoff and agent_clear are deliberately NOT here (B-51, issue
+    # #240): they are the orchestrator's own quality-gate step over a
+    # specialist's work ("the orchestrator checks both in verify_handoff
+    # before releasing you via agent_clear" -- handoff_write_v4's own
+    # docstring), not something a builder should be able to run over its own
+    # or a peer's dispatch. Red-team 2026-07-31 demonstrated a builder seat
+    # (hanuman) verifying and clearing its own forged lifecycle end to end
+    # with zero orchestrator/human involvement, because this group granted
+    # both tools to every dispatch_write holder. They remain reachable only
+    # via the `orchestrator` group, which is human-attestation-gated
+    # (ORCHESTRATOR_WRITE_TOOLS, human_session.py).
     "dispatch_write": frozenset({
         "dispatch_send", "dispatch_accept", "handoff_write_v4",
-        "verify_handoff", "agent_clear", "session_handoff_write",
+        "session_handoff_write",
     }),
     "orchestrator": frozenset({
         "dispatch_send", "dispatch_read", "dispatch_list", "dispatch_accept",

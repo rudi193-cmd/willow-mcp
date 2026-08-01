@@ -229,6 +229,28 @@ def test_gap_promote_is_its_own_group(apps_root):
     assert gate.permitted("gap_promoter", "gap_log") is False
 
 
+def test_dispatch_write_excludes_verify_handoff_and_agent_clear(apps_root):
+    """B-51/#240: dispatch_write is the builder grant (send/accept/close-out
+    your own work), never a self-verify/self-clear one -- those are the
+    orchestrator's quality-gate step over a specialist's work, reachable only
+    via the orchestrator group. Red-team 2026-07-31 found a builder seat
+    (hanuman, dispatch_write only) could verify_handoff and agent_clear its
+    own forged lifecycle with zero orchestrator/human involvement."""
+    _write_manifest(apps_root, "builder", ["dispatch_write"])
+    assert gate.permitted("builder", "dispatch_send") is True
+    assert gate.permitted("builder", "dispatch_accept") is True
+    assert gate.permitted("builder", "handoff_write_v4") is True
+    assert gate.permitted("builder", "session_handoff_write") is True
+    assert gate.permitted("builder", "verify_handoff") is False
+    assert gate.permitted("builder", "agent_clear") is False
+
+
+def test_orchestrator_group_still_grants_verify_and_clear(apps_root):
+    _write_manifest(apps_root, "orch", ["orchestrator"])
+    assert gate.permitted("orch", "verify_handoff") is True
+    assert gate.permitted("orch", "agent_clear") is True
+
+
 def test_gap_tools_included_in_full_access(apps_root):
     _write_manifest(apps_root, "admin", ["full_access"])
     for tool in ("gap_log", "gap_list", "gap_resolve", "gap_promote"):
