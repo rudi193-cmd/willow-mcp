@@ -1,10 +1,14 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "willow-mcp"
-version = "2.0.1"
+# The git tag is the single source of truth — see [tool.hatch.version]. This was
+# hardcoded at 2.0.1 while master ran 251 commits past the v2.0.1 tag, and
+# .claude-plugin/plugin.json had drifted to a different number again. A number
+# nothing checks is a number that goes stale.
+dynamic = ["version"]
 description = "Agent-neutral MCP server — SQLite store, Postgres knowledge base, Kart task queue"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -78,6 +82,20 @@ Homepage = "https://github.com/rudi193-cmd/willow-mcp"
 Repository = "https://github.com/rudi193-cmd/willow-mcp"
 Issues = "https://github.com/rudi193-cmd/willow-mcp/issues"
 Changelog = "https://github.com/rudi193-cmd/willow-mcp/blob/master/CHANGELOG.md"
+
+[tool.hatch.version]
+# Derived from the git tag (hatch-vcs). At an exact tag `vX.Y.Z` the version is
+# X.Y.Z; off-tag builds get a `.devN+g<sha>` suffix that PyPI rejects, so an
+# accidental publish from an untagged commit fails loudly instead of shipping
+# something mislabelled. CI must check out with `fetch-depth: 0` — the default
+# shallow checkout carries no tags and the derived version would be wrong.
+#
+# v2.0.0 and v2.0.1 are tagged, so derivation works today. The three v1.x
+# releases on PyPI were never tagged; their version-bump commits are
+#   v1.0.0 fecb0c0   v1.1.0 6ad4a4e   v1.2.0 61c49e2
+# Tagging them is archaeology only — `skip-existing` in release.yml keeps the
+# resulting workflow runs from failing on versions PyPI already holds.
+source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/willow_mcp"]

@@ -19,6 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # hatch-vcs derives the version from the git tag, so the tags must be
+          # present. The default shallow checkout fetches none of them and the
+          # build would silently produce a wrong (much older) version.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v7
         with:
@@ -28,6 +33,33 @@ jobs:
         run: |
           python -m pip install --upgrade build
           python -m build
+
+      - name: Assert the tag matches the built version
+        # kartikeya shipped a v0.0.8 tag whose build produced 0.0.7, and nothing
+        # caught it until PyPI refused the duplicate upload. Fail here instead,
+        # where the error says what is actually wrong.
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          built="$(ls dist/*.tar.gz | sed -E 's|.*/willow_mcp-(.+)\.tar\.gz|\1|')"
+          echo "tag=${tag}  built=${built}"
+          if [ "$tag" != "$built" ]; then
+            echo "::error::tag v${tag} builds version ${built} — refusing to publish"
+            exit 1
+          fi
+
+      - name: Assert the plugin manifest matches the tag
+        # .claude-plugin/plugin.json carries its own version string that nothing
+        # derived it from; it had drifted to 2.0.0 while the package was 2.0.1.
+        # Checked at release time rather than on every dev run, because off-tag
+        # builds legitimately carry a .devN suffix.
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          plugin="$(python -c 'import json;print(json.load(open(".claude-plugin/plugin.json"))["version"])')"
+          echo "tag=${tag}  plugin.json=${plugin}"
+          if [ "$tag" != "$plugin" ]; then
+            echo "::error::.claude-plugin/plugin.json says ${plugin}, tag is v${tag} — bump it"
+            exit 1
+          fi
 
       - name: Check metadata
         run: |
@@ -53,3 +85,9 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # This repo had no tags at all, so the already-published releases
+          # (v1.0.0 … v2.0.1) still need tagging retroactively. Pushing those
+          # tags fires this workflow against versions PyPI already holds;
+          # skip-existing makes that a no-op instead of five red runs.
+          skip-existing: true
