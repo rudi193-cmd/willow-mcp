@@ -4,11 +4,20 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — 2026-07-23
+## [Unreleased]
+
+## [2.1.0] — 2026-08-02
 
 The web-sandbox season: make a cold Claude Code container boot the full stack
 unattended, close the #161 mai security hole, and consolidate every open
 branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`).
+
+Then the enforcement season on top of it: PGP-backed attestation and manifest
+signing, the bound-receipt contract behind the kill-chain suites, fail-closed
+remote enforcement, and the port onto MCP Python SDK 2.0.
+
+251 commits since `v2.0.1`. Additive throughout — 134 tools, up from 130, with
+nothing removed or renamed.
 
 ### Security
 - **`Store.put` no longer resurrects soft-deleted records.** `put` used
@@ -405,6 +414,46 @@ branch (PRs #172, #173, plus follow-up commits on `claude/sandbox-setup-cmayov`)
   content (byte-identical to blob `a99374d`; wired in `__main__.py`), with the
   `telemetry` exposure preset and an `observability` extra.
 - **Gates panel** friendly labels for the three MarkdownAI groups.
+- **KB curate tools and opt-in Postgres auto-recovery** (#159, #160):
+  `knowledge_flag` and `knowledge_retract` under a separate
+  `knowledge_curate` permission, with tombstones and flags stored in tags and
+  surfaced through `kb_at`/search/continuity. Local Postgres start is retried
+  when `WILLOW_MCP_ENSURE_POSTGRES=1`.
+- **Bound receipts** (#195, #196) — `write_receipt`/`verify_receipt` with
+  staged checks, on a canonical schema pinning wire format, ref derivations,
+  signing bytes and structural validation. Ref is checked *before* signature,
+  so a single-field tamper reports `ref_mismatch` rather than a signature
+  failure. AT-R1 (#194) drives it as table tests.
+- **Fail-closed remote enforcement when the gate is absent** (#164):
+  SessionStart records posture via `diagnostic_summary`, and PreToolUse blocks
+  bare `psql`/`sqlite3`/`curl` in CCR when the marker says the gate is not
+  live. This closes the hole diagnosed in the 2026-07-23 handoff — the
+  enforcement stack existed but was dormant in remote/hosted sessions, so an
+  agent could bypass MCP entirely.
+
+### Changed
+- **Ported to MCP Python SDK 2.0** — `mcp>=2.0.0,<3.0.0`, up from
+  `mcp>=1.28.1,<2.0.0`. **This is a dependency floor change: willow-mcp can no
+  longer be installed alongside anything requiring SDK 1.x.**
+
+  `FastMCP` does not exist in SDK 2.0 — no compat shim, zero occurrences. The
+  migration is nonetheless small, because `MCPServer` kept the surface this
+  project uses (`tool`, `custom_route`, `run`, `auth_server_provider`):
+  `mcp.server.fastmcp` → `mcp.server.mcpserver` (16 references); host and port
+  move off the constructor onto `run(transport=, host=, port=)`, making "where
+  this instance listens" a property of the run rather than of the server;
+  `mcp.settings.host`/`port` are gone, so there is no second copy to assert
+  against; and `call_tool()` returns a `CallToolResult` instead of a
+  `(content_blocks, structured)` tuple.
+
+  All tools register unchanged. Deliberately left blocked:
+  `mcp.server.lowlevel.server.request_ctx` is gone in SDK 2.0, which keeps
+  exactly one `ContextVar` (`auth_context_var`).
+- **The version is now derived from the git tag** (`hatch-vcs`) rather than
+  hardcoded in `pyproject.toml`, and `willow_mcp.__version__` reads it back
+  from installed package metadata. `.claude-plugin/plugin.json` had drifted to
+  2.0.0 against the package's 2.0.1; `release.yml` now asserts both the built
+  version and the plugin manifest match the tag before publishing.
 
 ### CI
 - **mai-lint runs before the test matrix** (#158): deterministic guard for the
@@ -1014,6 +1063,8 @@ authorization-gated, agent-neutral platform with an HTTP OAuth serve mode.
 - Initial release: agent-neutral MCP server with a SQLite store (SOIL),
   Postgres knowledge base, and Kart task queue (11 tools).
 
+[2.1.0]: https://pypi.org/project/willow-mcp/2.1.0/
+[2.0.1]: https://pypi.org/project/willow-mcp/2.0.1/
 [2.0.0]: https://github.com/rudi193-cmd/willow-mcp/releases
 [1.2.0]: https://pypi.org/project/willow-mcp/1.2.0/
 [1.1.0]: https://pypi.org/project/willow-mcp/1.1.0/
