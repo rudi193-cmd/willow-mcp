@@ -1,0 +1,105 @@
+name: PR title
+
+# The PR title is a release-controlling artifact in this fleet, and that is not
+# obvious. We merge with merge commits rather than squashing, and GitHub writes
+# the PR *title* into the merge commit body:
+#
+#     Merge pull request #257 from rudi193-cmd/...
+#
+#     fix(ci): pin the release tag format, and check it instead of trusting it
+#
+# release-please parses that merge commit alongside the individual commits, so
+# the most release-y type across either one wins. willow-mcp v2.1.1 was tagged
+# and published to PyPI for CI-only changes exactly this way: the commit had
+# been corrected to `ci:` and the PR title still said `fix(ci):`. The commit
+# that was fixed is not the one that controlled the outcome.
+#
+# So: a title may not cut a release that its commits would not. The set of
+# release-cutting types is read from release-please-config.json rather than
+# restated here, so hiding or un-hiding a type moves this check with it.
+#
+# `on: pull_request` with `edited` included — a title can change after opening,
+# and the version that matters is whichever one is there at merge.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: A title may not cut a release its commits would not
+        env:
+          # Through `env:`, never interpolated into the shell. A PR title is
+          # attacker-controlled text, and `${{ ... }}` inside a `run:` block is
+          # a script-injection vector; inside a quoted heredoc read from
+          # os.environ it is inert data.
+          TITLE: ${{ github.event.pull_request.title }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json, os, re, subprocess, sys
+
+          CONVENTIONAL = re.compile(r"^([a-z]+)(\([^)]*\))?(!)?:")
+
+          def kind(message: str):
+              """(type, breaking) for a conventional-commit subject, or (None, False)."""
+              m = CONVENTIONAL.match(message.strip())
+              return (m.group(1), bool(m.group(3))) if m else (None, False)
+
+          cfg = json.load(open("release-please-config.json"))["packages"]["."]
+          releasing = {s["type"] for s in cfg["changelog-sections"]
+                       if not s.get("hidden")}
+
+          title = os.environ["TITLE"]
+          out = subprocess.run(
+              ["gh", "pr", "view", os.environ["PR"], "--repo", os.environ["REPO"],
+               "--json", "commits", "--jq", "[.commits[].messageHeadline]"],
+              capture_output=True, text=True, check=True).stdout
+          commits = json.loads(out)
+
+          t_type, t_breaking = kind(title)
+          c_kinds = [kind(c) for c in commits]
+
+          title_releases = t_breaking or t_type in releasing
+          commit_releases = any(b or ty in releasing for ty, b in c_kinds)
+
+          print(f"title:  {title!r}")
+          print(f"  type={t_type!r} breaking={t_breaking} -> releases={title_releases}")
+          print(f"commits ({len(commits)}):")
+          for c, (ty, b) in zip(commits, c_kinds):
+              flag = "releases" if (b or ty in releasing) else "hidden/ignored"
+              print(f"  [{flag:>14}] {c[:70]}")
+          print(f"release-cutting types here: {sorted(releasing)}")
+
+          if title_releases and not commit_releases:
+              print()
+              print(f"::error::PR title starts with '{t_type}', which cuts a release, "
+                    f"but no commit in this PR does.")
+              print("Because this repo merges with merge commits, GitHub puts the PR")
+              print("title into the merge commit body and release-please reads it —")
+              print("so this title alone would tag a version and publish to PyPI.")
+              print("Retitle it with a type that matches what the commits change")
+              print(f"(hidden here: docs, test, ci, chore), or make the commits say")
+              print("what they really are.")
+              sys.exit(1)
+
+          if title_releases:
+              print("\nOK — title cuts a release, and so do the commits.")
+          else:
+              print("\nOK — title does not cut a release on its own.")
+          PY
