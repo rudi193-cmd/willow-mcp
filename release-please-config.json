@@ -5,6 +5,7 @@
       "release-type": "simple",
       "package-name": "willow-mcp",
       "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": false,
       "extra-files": [
         {
           "type": "json",
@@ -27,6 +28,8 @@
       ]
     }
   },
+
+  "$comment-tag-format": "include-component-in-tag MUST stay false, and it is the setting most likely to be dropped when copying this file: nothing about it looks load-bearing. With it absent, release-please defaults to true and names the tag `willow-mcp-v2.2.0` instead of `v2.2.0`. That breaks two things at once and both fail silently — release.yml triggers on `v*`, which `willow-mcp-v2.2.0` does not match, so nothing publishes; and release-please stops recognising the existing `v2.1.0` as its own previous release, so it walks the whole history and proposes everything already shipped as new. Both were observed on PR #256 before this was set. tests/test_release_wiring.py checks the produced tag against the workflow trigger, because a comment did not stop it happening once.",
 
   "$comment-versioning": "release-type 'simple' maintains CHANGELOG.md and the tag and edits no Python version file — correct here because hatch-vcs derives the version from the tag (see [tool.hatch.version]), so there is no second copy to drift. Note what is NOT set: jeles carries bump-minor-pre-major because it is below 1.0. This package is at 2.x, so ordinary semver applies — feat is a minor, fix is a patch, and a breaking change is a major. Setting the pre-major flags here would silently cap every breaking change at a minor bump.",
 
