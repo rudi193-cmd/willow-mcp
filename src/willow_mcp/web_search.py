@@ -514,9 +514,12 @@ class CircuitBreaker:
     cooldown that doubles each time a half-open probe fails (capped at
     `max_cooldown`). A success resets it fully.
 
-    HALF_OPEN admits **one** request. That is the whole point of the state — it
+    HALF_OPEN admits **one caller**. That is the whole point of the state — it
     asks "has the provider recovered?" with a single probe rather than with the
-    whole backlog. `allow()` used to return True unconditionally in HALF_OPEN
+    whole backlog. (One caller, not one HTTP request: `_with_retry` sits inside
+    the probe, so a probe against a timing-out provider is still up to
+    `WILLOW_SEARCH_MAX_ATTEMPTS` requests. The breaker bounds concurrency here,
+    not total traffic.) `allow()` used to return True unconditionally in HALF_OPEN
     while the comment beside it said "allow the single probe": measured, 50 of
     50 callers were let through. So the moment a dead provider's cooldown
     elapsed, every waiting caller hit it at once — a thundering herd aimed at
