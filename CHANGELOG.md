@@ -20,6 +20,13 @@ are hidden, along with every fleet-local prefix (`hooks:`, `gate:`, `skills:`,
 the next release rather than cutting one of their own — see
 `release-please-config.json` for why, and for the cost.
 
+## [2.1.1](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.0...v2.1.1) (2026-08-03)
+
+
+### Fixed
+
+* **ci:** pin the release tag format, and check it instead of trusting it ([c8e700c](https://github.com/rudi193-cmd/willow-mcp/commit/c8e700c27828b2e6642370e4ce5660b10c00bab1))
+
 ## [2.1.0] — 2026-08-02
 
 The web-sandbox season: make a cold Claude Code container boot the full stack
