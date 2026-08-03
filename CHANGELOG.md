@@ -20,6 +20,109 @@ are hidden, along with every fleet-local prefix (`hooks:`, `gate:`, `skills:`,
 the next release rather than cutting one of their own — see
 `release-please-config.json` for why, and for the cost.
 
+## [2.2.0](https://github.com/rudi193-cmd/willow-mcp/compare/willow-mcp-v2.1.0...willow-mcp-v2.2.0) (2026-08-03)
+
+
+### Added
+
+* bound receipt writer/verifier ([#196](https://github.com/rudi193-cmd/willow-mcp/issues/196)) and AT-R1 ([#194](https://github.com/rudi193-cmd/willow-mcp/issues/194)) ([b089f48](https://github.com/rudi193-cmd/willow-mcp/commit/b089f48e232860ccf8680127ca21d1bcc2357fc0))
+* canonical bound-receipt schema for kill-chain [#195](https://github.com/rudi193-cmd/willow-mcp/issues/195) ([35d9dac](https://github.com/rudi193-cmd/willow-mcp/commit/35d9dac3e086708a9c0c7a241e4c7d4056043c46))
+* **commitments:** Jarvis commitment/calendar membrane (WO-2) ([2437a30](https://github.com/rudi193-cmd/willow-mcp/commit/2437a308458ce607dc13a69b0324ca5a3a690e0b))
+* **commitments:** Jarvis commitment/calendar membrane (WO-2) ([a58ff64](https://github.com/rudi193-cmd/willow-mcp/commit/a58ff6441e6a5bbac5008a132fda05a7bfcfa0ac))
+* migration S2-S4 — consent, worktree, handoff, Bash redirects ([082137a](https://github.com/rudi193-cmd/willow-mcp/commit/082137ab2d8d099ac7c5f94a46e488e4084c6398))
+* port willow_web_search and willow_web_fetch ([086ad1a](https://github.com/rudi193-cmd/willow-mcp/commit/086ad1a535ecf42eb98ceb7cbd9b834cd70f8574))
+* **skills:** add S6 persona overlays for specialists ([48dce2f](https://github.com/rudi193-cmd/willow-mcp/commit/48dce2f2e6a848a0e7556133dc81f2d0c741255d))
+* **skills:** port S5 discipline skills ([37334bb](https://github.com/rudi193-cmd/willow-mcp/commit/37334bb9e2812e78d44a4adce25ecb91576b6ab7))
+* **skills:** port S5 discipline skills to bundle ([8095a0c](https://github.com/rudi193-cmd/willow-mcp/commit/8095a0c361ca6f793d930a31c35e9929eff806f1))
+* **skills:** S6 persona overlays ([4c72635](https://github.com/rudi193-cmd/willow-mcp/commit/4c72635a70443f9ba80430e2352760616ae3f61a))
+* UTETY egress adapter + July design docs ([22560fe](https://github.com/rudi193-cmd/willow-mcp/commit/22560fedffb5ab6f565c40f3a80e67dffd622aea))
+* **voice,commitments:** complete pending WO-1/2 stack stages ([def5f57](https://github.com/rudi193-cmd/willow-mcp/commit/def5f57d953ff8f6c528d2d943f3de2369aab343))
+* **voice,commitments:** complete pending WO-1/2 stack stages ([19418b1](https://github.com/rudi193-cmd/willow-mcp/commit/19418b18187f20e64e4a15b537cdb07f86b26deb))
+* **voice:** add live ingress daemon and systemd installer ([d5dfcfd](https://github.com/rudi193-cmd/willow-mcp/commit/d5dfcfd699b85dee2708e043cd94d1ad78dbb212))
+* **voice:** Jarvis voice ingress membrane (WO-1) ([e96c793](https://github.com/rudi193-cmd/willow-mcp/commit/e96c793e29589a1545b633e4ca9ec5160220e07b))
+* **voice:** Jarvis voice ingress membrane (WO-1) ([3db2b25](https://github.com/rudi193-cmd/willow-mcp/commit/3db2b25d9efc253e1b77827bed6f50e151bb595c))
+* **voice:** live ingress daemon + systemd installer ([a1569e7](https://github.com/rudi193-cmd/willow-mcp/commit/a1569e79479c493f83ef95379462a141689251a2))
+* **voice:** WO-1 Step 5 SAFE dispatch gate + FRANK bridge ([bbe4b6f](https://github.com/rudi193-cmd/willow-mcp/commit/bbe4b6f6d528d5b6ef6f8db0e6d5a8dc59bc1bfc))
+* **voice:** WO-1 Step 5 SAFE dispatch gate + FRANK bridge ([5ddb6ab](https://github.com/rudi193-cmd/willow-mcp/commit/5ddb6ab2fb1069e2640e8ae9bcbed9e355bc0d86))
+* **voice:** WO-1 Step 6 Kokoro SPEAK + barge-in ([9cc6924](https://github.com/rudi193-cmd/willow-mcp/commit/9cc692401034825673638f62b559bee7bf1e8e8d))
+* **voice:** WO-1 Step 6 Kokoro SPEAK + barge-in adapters ([a520070](https://github.com/rudi193-cmd/willow-mcp/commit/a520070e8fbe8e58d1bc1fbad857d5631f97fde3))
+* Willow session-start skill and orchestrator read grants ([a4dfee7](https://github.com/rudi193-cmd/willow-mcp/commit/a4dfee79620d14bb87702cbc81ec3da7d24a7b38))
+* **worker:** lane-instanced systemd unit + willow-serve worker-* verbs ([4a11eb0](https://github.com/rudi193-cmd/willow-mcp/commit/4a11eb0d17a275602963854256e9a37ab23cf3b7))
+
+
+### Fixed
+
+* **B-32:** add harden-trust-root operator CLI ([0c99621](https://github.com/rudi193-cmd/willow-mcp/commit/0c99621ee5aced9526a66973dfe8170573284a2c))
+* **B-32:** harden-trust-root operator CLI ([faf9bb1](https://github.com/rudi193-cmd/willow-mcp/commit/faf9bb12a389d3e3edeec4a301aa45eff623f773))
+* **B-32:** run chmod via sudo after chown in harden-trust-root ([07df1e5](https://github.com/rudi193-cmd/willow-mcp/commit/07df1e56bad9b28b3719a498c920e2a55428993c))
+* **B-32:** sudo chmod in harden-trust-root ([2127a5e](https://github.com/rudi193-cmd/willow-mcp/commit/2127a5e8829626f58b0847f1b837f9542884ceca))
+* **bootstrap:** catch a pin bump the pip-check freshness guard misses on warm containers ([a44fb93](https://github.com/rudi193-cmd/willow-mcp/commit/a44fb9303d14ef7f9abeb432d08813fd1ab76463))
+* **bootstrap:** restore comment-rule padding; document mode-proof invocation ([ee06ad3](https://github.com/rudi193-cmd/willow-mcp/commit/ee06ad3558b6c05baecad1ce3c5eb736ec403871))
+* **ci:** stop path_guard failing on the code that enforces its own rule ([fa79c69](https://github.com/rudi193-cmd/willow-mcp/commit/fa79c69b7a2014de7972e6c0dcd6858515ed2a02))
+* derive by_human from the attested seat, not the app_id string ([ac8a18d](https://github.com/rudi193-cmd/willow-mcp/commit/ac8a18d42edc93f4fa9846afb49a39c9767196a0))
+* drop the tombstone refusal, keep the upsert ([1f0970d](https://github.com/rudi193-cmd/willow-mcp/commit/1f0970dcfd6ee3d95f6aed54cd80108334af3a81))
+* **egress:** deny net replay on reclaimed terminal task rows ([f130c56](https://github.com/rudi193-cmd/willow-mcp/commit/f130c5622ff25561129d10669ddf8adb8f60ec34))
+* **egress:** deny net replay on reclaimed terminal task rows ([3d119d4](https://github.com/rudi193-cmd/willow-mcp/commit/3d119d43a9430d1da352edd83fe386e5a25c82c0))
+* **hooks:** cover every write-capable permission group in the seat guard ([1a961c3](https://github.com/rudi193-cmd/willow-mcp/commit/1a961c331b5417294fadeecb7cd9f6ef532f1cf9))
+* **hooks:** drop f-string prefix with no placeholder (ruff F541) ([afd7748](https://github.com/rudi193-cmd/willow-mcp/commit/afd7748ea84507b6549a47d10a8f278312c67d90))
+* **hooks:** invoke SessionStart hook via bash, not the exec bit ([bfeae96](https://github.com/rudi193-cmd/willow-mcp/commit/bfeae96ddc017e6d8d6c45f213ba9ad18e447e6c))
+* **mai:** parser bug + security cluster — [#156](https://github.com/rudi193-cmd/willow-mcp/issues/156), [#157](https://github.com/rudi193-cmd/willow-mcp/issues/157), [#161](https://github.com/rudi193-cmd/willow-mcp/issues/161), [#162](https://github.com/rudi193-cmd/willow-mcp/issues/162) ([d51d624](https://github.com/rudi193-cmd/willow-mcp/commit/d51d624d73eabc43ab1e9b4a97b1208d7ca3f9a0))
+* **mai:** parser bug + security cluster — [#156](https://github.com/rudi193-cmd/willow-mcp/issues/156), [#157](https://github.com/rudi193-cmd/willow-mcp/issues/157), [#161](https://github.com/rudi193-cmd/willow-mcp/issues/161), [#162](https://github.com/rudi193-cmd/willow-mcp/issues/162) ([4b2c375](https://github.com/rudi193-cmd/willow-mcp/commit/4b2c375d6b88a48f1127b9f278da7cf7c1e4e786))
+* make a warm Claude Code container boot willow-mcp cleanly ([c306d7f](https://github.com/rudi193-cmd/willow-mcp/commit/c306d7f956b7dddaacbb6e7b685fd054d85481a9))
+* make the store tombstone durable — put no longer resurrects a delete ([c27497d](https://github.com/rudi193-cmd/willow-mcp/commit/c27497d9a7bb0ce6cf0952f96511133bb7401180))
+* re-sync vendored friction_floor + cross-repo drift-guard (A8) ([1688ddb](https://github.com/rudi193-cmd/willow-mcp/commit/1688ddbab885c422230fc7c5f23bd4fbb253b997))
+* re-sync vendored friction_floor with willow-gate's stance signal (A8) ([353bca7](https://github.com/rudi193-cmd/willow-mcp/commit/353bca7b09ea298a20291ada2488980d23ec7b57))
+* repair-runtime-perms for MCP store write access ([92eda40](https://github.com/rudi193-cmd/willow-mcp/commit/92eda40fd03470612aec891ae5df9a666380baa7))
+* repair-runtime-perms for store after trust-root hardening ([119f50a](https://github.com/rudi193-cmd/willow-mcp/commit/119f50acfc8eff9ff63497e075717fab66e56327))
+* restore the per-call credential channel on SDK 2.0 ([841edec](https://github.com/rudi193-cmd/willow-mcp/commit/841edec1cecc888b9e1bd8ab6ac1eae508588534))
+* restore the per-call credential channel on SDK 2.0 ([cef8244](https://github.com/rudi193-cmd/willow-mcp/commit/cef82440bbe8e86fb0d3c9271e1833ee0a9d410c))
+* **sandbox:** make the web sandbox actually boot the MCP server and worker ([e125c64](https://github.com/rudi193-cmd/willow-mcp/commit/e125c643ec575c16dd20b06ec2123c1777d93cf7))
+* **sandbox:** unstrand warm-container auto-confirm; exempt orchestrator seat from git routing ([f8ca103](https://github.com/rudi193-cmd/willow-mcp/commit/f8ca10351744347aca18e176634b9c50bc133a10))
+* strict trust direct writability check ([b86382e](https://github.com/rudi193-cmd/willow-mcp/commit/b86382e67cf324243e28150d495a59fdb7cb3f2f))
+* strict trust uses direct writability for forgeable keys ([971b8ab](https://github.com/rudi193-cmd/willow-mcp/commit/971b8ab87b915a3ad60b421dbe4c45dedc3ffa7d))
+* **tests:** drop unused pytest import in test_enforcement_posture.py ([3e9270b](https://github.com/rudi193-cmd/willow-mcp/commit/3e9270bddcefcae8ce3c797ab2b6797e8f800405))
+* the receipt chain breaks under two concurrent processes ([145c7da](https://github.com/rudi193-cmd/willow-mcp/commit/145c7da4ed1d01953a120dc0b938980614f621a5))
+* the two verified P0s — by_human forgery, and delete not being durable ([9e435f8](https://github.com/rudi193-cmd/willow-mcp/commit/9e435f8c0824f98d1eb9b30ed038a98456c93060))
+* **worker:** drop stray empty docstring appended in previous commit ([dc369d4](https://github.com/rudi193-cmd/willow-mcp/commit/dc369d4f05b34db3279d0eed9ae2f251f528e331))
+* **worker:** harden willow-serve worker-install ([#206](https://github.com/rudi193-cmd/willow-mcp/issues/206) follow-up) ([20c84a4](https://github.com/rudi193-cmd/willow-mcp/commit/20c84a49fa515b5f907afc017799ecd3a4f9317e))
+* **worker:** harden willow-serve worker-install after [#206](https://github.com/rudi193-cmd/willow-mcp/issues/206) smoke test ([0a8aec6](https://github.com/rudi193-cmd/willow-mcp/commit/0a8aec67ea8d818acff9c18f26ebec12fbc792f1))
+* **worker:** skip venv refresh when .venv is absent ([423cbb1](https://github.com/rudi193-cmd/willow-mcp/commit/423cbb17c75d5b38862491155d20109033944a8c))
+
+
+### Security
+
+* close the whoami / diagnostic_summary cross-identity disclosure ([b741c45](https://github.com/rudi193-cmd/willow-mcp/commit/b741c453ad1f1d60220fcd5b508e9e74f36c3035))
+* cover id + project in the frank_ledger hash (A7) ([e368abb](https://github.com/rudi193-cmd/willow-mcp/commit/e368abb66cec594e8fd2fe2d2b57066a84084c04))
+* enforce signed per-task network authorization ([ecad0ed](https://github.com/rudi193-cmd/willow-mcp/commit/ecad0ed16991add4f6c741d1ca8b64011b871c8b))
+* harden egress authorization replay + trust roots ([50ec74c](https://github.com/rudi193-cmd/willow-mcp/commit/50ec74c6e1463b6b5bde73645cef2c4184c8f5ad))
+* harden the willow-gate seam from adversarial review ([5a07399](https://github.com/rudi193-cmd/willow-mcp/commit/5a07399173c5e8e7729a0912e91fd4b30fec49c5))
+* hash-chain the receipt log (B12) + stop the no-op consent panel claims (B11) ([d215364](https://github.com/rudi193-cmd/willow-mcp/commit/d21536430886210af627ceddafa539877e46c492))
+* **mai:** add markdownai_read/_write/_directives permission groups — [#161](https://github.com/rudi193-cmd/willow-mcp/issues/161) ([ac2e6e5](https://github.com/rudi193-cmd/willow-mcp/commit/ac2e6e5cbcdeeefbf599bb57f2740015b7cd15e0))
+* **mai:** app_id threading on all ten tools + abuse tests — [#161](https://github.com/rudi193-cmd/willow-mcp/issues/161) (final) ([e6b66c4](https://github.com/rudi193-cmd/willow-mcp/commit/e6b66c45a3b262cbae771013a19a3f1e70b813b0))
+* **mai:** app_id-threaded tools, panel labels, abuse tests — [#161](https://github.com/rudi193-cmd/willow-mcp/issues/161) (final) ([9643cb2](https://github.com/rudi193-cmd/willow-mcp/commit/9643cb2baa9d1e58a0460c0b697f9f9bdef6865d))
+* **mai:** gate groups, tool app_id threading, panel labels — [#161](https://github.com/rudi193-cmd/willow-mcp/issues/161) (part 2) ([fbfb3c4](https://github.com/rudi193-cmd/willow-mcp/commit/fbfb3c424d2d27f12e18e636813a2907f9b2e4af))
+* **mai:** thread the gate through the mai surface — [#161](https://github.com/rudi193-cmd/willow-mcp/issues/161) ([8ca77a4](https://github.com/rudi193-cmd/willow-mcp/commit/8ca77a4d62789226d201c79a05a6730a6e4cef25))
+* operator-signed envelope perimeter for allow_db (B2) ([aeb5c5a](https://github.com/rudi193-cmd/willow-mcp/commit/aeb5c5a08d962801aaaa9bf3b01a81c2def55c8d))
+* starlette 1.x, workflow token scoped, dependabot ([81e1277](https://github.com/rudi193-cmd/willow-mcp/commit/81e127789527ed33a136408518715da3c5e3285d))
+
+
+### Changed
+
+* **oauth:** the upstream provider is `idp`, not `iss` ([556b03a](https://github.com/rudi193-cmd/willow-mcp/commit/556b03aff927ef7b924e1a99f8129339f6dbe2cc))
+* **oauth:** the upstream provider is `idp`, not `iss` ([a916084](https://github.com/rudi193-cmd/willow-mcp/commit/a9160846a13c2bb21926efc4f619f31487894ca3))
+
+
+### Build
+
+* **deps:** Bump actions/setup-python from 6 to 7 ([d13058b](https://github.com/rudi193-cmd/willow-mcp/commit/d13058b22e86da5e1f4fdc94334f7d8d807c691d))
+* **deps:** Bump actions/setup-python from 6 to 7 ([0c84725](https://github.com/rudi193-cmd/willow-mcp/commit/0c84725da4c964611cd16f126c6b36c19c114731))
+* **deps:** bump actions/upload-artifact from 4 to 7 ([b63714a](https://github.com/rudi193-cmd/willow-mcp/commit/b63714aa2dcba9dad7de292195f5f2e62d0d9ed2))
+* **deps:** bump actions/upload-artifact from 4 to 7 ([fdd91b0](https://github.com/rudi193-cmd/willow-mcp/commit/fdd91b0fe9ba732d434ef9969349152e622d8b37))
+* derive the version from the git tag ([691b517](https://github.com/rudi193-cmd/willow-mcp/commit/691b517af37a8abf7a5b6d372a72e97526254a6c))
+* port to MCP Python SDK 2.0 ([5a88460](https://github.com/rudi193-cmd/willow-mcp/commit/5a884606c188bf161d072ce35e576c7ac8088adb))
+* require kartikeya&gt;=0.0.3 for the network-authorizer seam ([5b846e0](https://github.com/rudi193-cmd/willow-mcp/commit/5b846e08023dc61c3bcfc33a9d7c859573f02f72))
+* tag-derived version, and close out the changelog for 2.1.0 ([8b87e6d](https://github.com/rudi193-cmd/willow-mcp/commit/8b87e6dafaf94c03faaa952955d7fa4ee14c0b06))
+
 ## [2.1.0] — 2026-08-02
 
 The web-sandbox season: make a cold Claude Code container boot the full stack
