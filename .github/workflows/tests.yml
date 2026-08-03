@@ -104,7 +104,11 @@ jobs:
         run: |
           # PyPI kartikeya lags merged master (allow_db, cgroup caps) — drop once 0.0.7 ships.
           pip install "git+https://github.com/rudi193-cmd/kartikeya@master"
-          pip install -e "." pytest pytest-timeout coverage
+          # pyyaml is declared here, not left to the mai_lint step that also
+          # installs it: tests/test_release_wiring.py importorskips on it, so a
+          # reordering of that step would turn the release-wiring checks into a
+          # silent skip — which is the failure mode those checks exist to catch.
+          pip install -e "." pytest pytest-timeout coverage pyyaml
 
       - name: Run tests (under coverage)
         # --timeout-method=thread: dumps every thread's stack and exits even
