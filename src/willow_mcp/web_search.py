@@ -177,16 +177,36 @@ _HARD_BLOCK_STATUS = frozenset({403, 407})
 
 
 def _parse_ddg_html(text: str, max_results: int) -> list[dict[str, Any]]:
-    """Parse DuckDuckGo HTML into result dicts."""
-    links = _LINK_RE.findall(text)
-    snippets = _SNIP_RE.findall(text)
+    """Parse DuckDuckGo HTML into result dicts.
+
+    Links and snippets are matched to each other **by position in the
+    document**, not by index into two independent lists. The previous version
+    did `snippets[idx]` against `links[idx]`, which silently assumed every
+    result carries a `result__snippet`. When one does not — DDG omits it for
+    ad, video and news-module blocks, and for results whose description is
+    empty — every later snippet shifts up by one and is attributed to the wrong
+    URL. Demonstrated on a two-result page where the first had no snippet: the
+    second result's description came back attached to the first result's link.
+
+    That is a wrong answer rather than a missing one, and it is handed to a
+    model as the description of a page it can go and fetch.
+    """
+    body = text or ""
+    links = list(_LINK_RE.finditer(body))
+    snippets = [(m.start(), m.group(1)) for m in _SNIP_RE.finditer(body)]
     hits: list[dict[str, Any]] = []
-    for idx, (href, title_html) in enumerate(links[: max_results + 4]):
-        url = _unwrap_ddg(href)
+    for idx, match in enumerate(links[: max_results + 4]):
+        url = _unwrap_ddg(match.group(1))
         if not url or "duckduckgo.com" in url:
             continue
-        title = _strip_tags(title_html) or url
-        snippet = _strip_tags(snippets[idx]) if idx < len(snippets) else ""
+        title = _strip_tags(match.group(2)) or url
+        # This result owns the span from its link up to the next link; a result
+        # with no snippet in that span gets "" and takes nothing from anyone.
+        span_end = links[idx + 1].start() if idx + 1 < len(links) else len(body)
+        raw_snippet = next(
+            (s for pos, s in snippets if match.end() <= pos < span_end), ""
+        )
+        snippet = _strip_tags(raw_snippet)
         host = _hostname(url)
         hits.append(
             {
@@ -240,7 +260,10 @@ def _ddg_fetch(query: str, max_results: int = 8) -> list[dict[str, Any]]:
             _DDG_URL,
             data={"q": q, "b": "", "kl": "us-en"},
             headers={"User-Agent": _USER_AGENT},
-            timeout=12,
+            # This is the one thing bounding how far a single attempt can
+            # overrun the retry budget (see `_with_retry`), so it is a knob
+            # rather than a literal.
+            timeout=_env_float("WILLOW_SEARCH_HTTP_TIMEOUT", 12.0),
         )
     except requests.Timeout as exc:
         raise TransientSearchError(f"timeout: {exc}") from exc
@@ -434,9 +457,32 @@ def _with_retry(
 ):
     """Call `fn`, retrying on TransientSearchError with exponential backoff.
 
-    Backoff is jittered (delay in [d, 2d] where d = base * 2**(attempt-1)) and
-    the whole sequence is capped by a total time budget. HardBlockError and any
-    other exception propagate immediately — only transient errors are retried.
+    Backoff is jittered (delay in [d, 2d] where d = base * 2**(attempt-1)).
+    HardBlockError and any other exception propagate immediately — only
+    transient errors are retried.
+
+    **The budget bounds when a new attempt may start, not total elapsed time.**
+    This docstring used to say "the whole sequence is capped by a total time
+    budget", and that was not true in the case the budget exists for. The only
+    check was against the *sleep*, so an attempt that itself ran long was free
+    to start and then overrun without limit. Measured with the defaults (15s
+    budget, 3 attempts) against a provider that times out at 12s: two attempts,
+    25.2s elapsed. Nothing logged, because nothing had gone wrong by the code's
+    own reckoning.
+
+    The bound it can actually offer is `budget + one attempt`, and the attempt
+    is bounded by the provider's own HTTP timeout (`WILLOW_SEARCH_HTTP_TIMEOUT`,
+    12s) — so ~27s worst case with the defaults, pinned by a test. That knob
+    exists so the overrun is an operator's to bound; it used to be the literal
+    `timeout=12` in `_ddg_fetch`.
+
+    The check below is in the right place and no extra guard belongs beside it:
+    a pre-attempt "is the budget already spent?" test cannot fire, because
+    reaching attempt N at all required attempt N-1 to pass `elapsed + delay <=
+    budget` and then sleep exactly `delay`. One was written here and removed
+    again for that reason. Making the budget a hard wall needs the remaining
+    time threaded down into the request timeout, which means putting it on the
+    `SearchProvider` protocol — a seam change, not something to smuggle in.
     """
     cfg = _retry_config()
     max_attempts = int(cfg["max_attempts"] if max_attempts is None else max_attempts)
@@ -812,7 +858,11 @@ def search_web(
             _log_search_event(query_hash=_query_hash(query), provider="cache",
                               status="ok", result_count=len(cached), latency_ms=0.0,
                               cache_hit=True, attempt=0)
-            return list(cached)
+            # Copy the dicts, not just the list. `list(cached)` handed every
+            # caller the cache's own dict objects, so one caller annotating a
+            # hit in place rewrote what the next caller read back — verified by
+            # setting a title on one result and seeing it on the next call.
+            return [dict(h) for h in cached]
 
     hits: list[dict[str, Any]] = []
     if include_handoffs:
@@ -820,6 +870,12 @@ def search_web(
 
     raw = _search_providers(query, max_results, providers)
     if trusted_only:
+        # The handoffs go through the same filter. They were exempt, so
+        # `trusted_only=True` returned google.com and duckduckgo.com — and the
+        # tool's own description promises "keep verified institutional domain
+        # suffixes only", with the handoffs mixed into one flat `results` list
+        # that gives a model no way to tell which is which.
+        hits = [h for h in hits if _trusted_host(h.get("hostname", ""))]
         raw = [h for h in raw if _trusted_host(h.get("hostname", ""))]
 
     seen = {h["url"] for h in hits if h.get("url")}
@@ -834,5 +890,7 @@ def search_web(
     # failed or was filtered out, and pinning that for the TTL would mask recovery.
     if key is not None and raw:
         ttl = cfg["ttl_news"] if _is_current_events(query) else cfg["ttl"]
-        _SEARCH_CACHE.set(key, list(result), ttl)
+        # Copies on the way in too — `result` is what this caller is about to
+        # be handed, so storing those same objects would let them mutate it.
+        _SEARCH_CACHE.set(key, [dict(h) for h in result], ttl)
     return result

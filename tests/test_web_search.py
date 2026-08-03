@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
+
+import pytest
 
 from willow_mcp import web_search
 
@@ -218,3 +221,174 @@ def test_a_closed_breaker_is_never_gated():
     cb.record_failure()
     assert cb.state == "CLOSED"
     assert all(cb.allow() for _ in range(50))
+
+
+# ── snippets were attributed to the wrong result ─────────────────────────────
+#
+# `_parse_ddg_html` ran two independent regexes over the whole document and
+# then paired them by list index: `snippets[idx]` against `links[idx]`. That
+# holds only if every result carries a `result__snippet`. DDG omits it for ad,
+# video and news-module blocks, and for results with an empty description — and
+# one omission shifts every later snippet onto the wrong URL.
+
+
+_ONE_RESULT_HAS_NO_SNIPPET = '''
+<div class="result results_links">
+  <a class="result__a" href="https://first.example/page">First result</a>
+</div>
+<div class="result results_links">
+  <a class="result__a" href="https://second.example/page">Second result</a>
+  <td class="result__snippet">This text describes the SECOND result.</td>
+</div>
+'''
+
+
+def test_a_result_with_no_snippet_does_not_steal_the_next_ones():
+    """The wrong-answer half. Before: the second result's description came back
+    attached to the first result's URL — which is what a model is then told
+    that page contains."""
+    hits = web_search._parse_ddg_html(_ONE_RESULT_HAS_NO_SNIPPET, max_results=5)
+    by_url = {h["url"]: h["snippet"] for h in hits}
+    assert by_url["https://first.example/page"] == ""
+    assert by_url["https://second.example/page"] == "This text describes the SECOND result."
+
+
+def test_snippets_still_land_on_the_right_result_in_the_ordinary_case():
+    """The regression half — positional matching must not break the normal page
+    where every result does have a snippet."""
+    html = "".join(
+        f'<div class="result"><a class="result__a" href="https://s{i}.example/">T{i}</a>'
+        f'<td class="result__snippet">snippet {i}</td></div>'
+        for i in range(5)
+    )
+    hits = web_search._parse_ddg_html(html, max_results=5)
+    assert [h["snippet"] for h in hits] == [f"snippet {i}" for i in range(5)]
+    assert [h["url"] for h in hits] == [f"https://s{i}.example/" for i in range(5)]
+
+
+def test_a_trailing_snippet_belongs_to_the_last_result():
+    """The final result's span runs to the end of the document, not to a next
+    link that isn't there."""
+    html = ('<a class="result__a" href="https://only.example/">Only</a>'
+            '<td class="result__snippet">the only snippet</td>')
+    hits = web_search._parse_ddg_html(html, max_results=5)
+    assert hits[0]["snippet"] == "the only snippet"
+
+
+# ── trusted_only leaked untrusted hosts, and the cache leaked its own dicts ───
+
+
+def _fake_hit(host="arxiv.org"):
+    return {"title": "T", "url": f"https://{host}/x", "snippet": "", "source": host,
+            "source_id": "web", "date": "", "hostname": host}
+
+
+def test_trusted_only_also_filters_the_handoffs():
+    """`willow_web_search`'s own description promises "keep verified
+    institutional domain suffixes only", and the handoffs bypassed the filter —
+    so `trusted_only=True` returned google.com and duckduckgo.com. They arrive
+    in one flat `results` list with nothing marking them as synthetic, so a
+    model has no way to tell them from a filtered hit."""
+    web_search.reset_search_cache()
+    with patch.object(web_search, "_search_providers", return_value=[_fake_hit()]):
+        hits = web_search.search_web("pizza near me", trusted_only=True,
+                                     include_handoffs=True, cache=False)
+    hosts = [h["hostname"] for h in hits]
+    assert "google.com" not in hosts and "duckduckgo.com" not in hosts, hosts
+    # openstreetmap.org is on the trusted list and legitimately survives.
+    assert hosts == ["openstreetmap.org", "arxiv.org"], hosts
+
+
+def test_untrusted_handoffs_still_come_through_when_not_filtering():
+    """The other direction: with `trusted_only=False` the handoffs are the
+    whole point and must all still be there."""
+    web_search.reset_search_cache()
+    with patch.object(web_search, "_search_providers", return_value=[]):
+        hits = web_search.search_web("pizza near me", include_handoffs=True, cache=False)
+    assert [h["hostname"] for h in hits] == [
+        "openstreetmap.org", "google.com", "duckduckgo.com"]
+
+
+def test_a_caller_cannot_mutate_what_the_next_caller_reads():
+    """`return list(cached)` copied the list and shared every dict in it, so
+    annotating a result in place rewrote the cache for everyone after."""
+    web_search.reset_search_cache()
+    with patch.object(web_search, "_search_providers", return_value=[_fake_hit()]):
+        first = web_search.search_web("same query", cache=True)
+    first[0]["title"] = "MUTATED BY CALLER"
+
+    # No provider this time — a hit here can only have come from the cache.
+    with patch.object(web_search, "_search_providers", return_value=[]) as never:
+        second = web_search.search_web("same query", cache=True)
+    assert never.call_count == 0, "expected a cache hit"
+    assert second[0]["title"] == "T", second[0]["title"]
+
+    second[0]["title"] = "MUTATED AGAIN"
+    with patch.object(web_search, "_search_providers", return_value=[]):
+        third = web_search.search_web("same query", cache=True)
+    assert third[0]["title"] == "T", third[0]["title"]
+
+
+# ── the retry budget does not bound total time, whatever it said ─────────────
+
+
+def test_the_retry_budget_bounds_a_new_attempt_not_total_elapsed():
+    """`_with_retry`'s docstring claimed "the whole sequence is capped by a
+    total time budget". It is not: the only check is against the *sleep*, so an
+    attempt that runs long starts freely and then overruns.
+
+    This pins the real behaviour and the real bound — `budget + one attempt` —
+    so that a future change either keeps it or has to come here and say why."""
+    budget, attempt_cost = 15.0, 12.0     # the defaults: budget, HTTP timeout
+    now = [0.0]
+    starts = []
+
+    def clock():
+        return now[0]
+
+    def sleep(d):
+        now[0] += d
+
+    def slow_failure():
+        starts.append(now[0])
+        now[0] += attempt_cost
+        raise web_search.TransientSearchError("timeout")
+
+    with pytest.raises(web_search.SearchError):
+        web_search._with_retry(slow_failure, max_attempts=3, budget=budget,
+                               base_backoff=1.0, sleep=sleep, clock=clock)
+
+    assert now[0] > budget, "if this ever fails the budget became a real wall"
+    assert now[0] <= budget + attempt_cost, (
+        f"elapsed {now[0]:.1f}s exceeds the documented bound of "
+        f"budget + one attempt ({budget + attempt_cost}s)"
+    )
+    assert all(s < budget for s in starts), (
+        f"an attempt started after the budget was spent: {starts}")
+
+
+def test_the_http_timeout_is_a_knob_because_it_bounds_the_overrun():
+    """It was the literal `timeout=12`. Since it is the only thing bounding how
+    far one attempt can overrun the retry budget, an operator has to be able to
+    move it."""
+    import requests
+
+    captured = {}
+
+    class _Resp:
+        status_code = 200
+        text = ""
+
+    def fake_post(url, **kwargs):
+        captured.update(kwargs)
+        return _Resp()
+
+    with patch.object(requests, "post", fake_post):
+        with patch.dict("os.environ", {"WILLOW_SEARCH_HTTP_TIMEOUT": "3.5"}):
+            web_search._ddg_fetch("q")
+        assert captured["timeout"] == 3.5
+        captured.clear()
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("WILLOW_SEARCH_HTTP_TIMEOUT", None)
+            web_search._ddg_fetch("q")
+        assert captured["timeout"] == 12.0
