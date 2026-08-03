@@ -17,6 +17,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -27,6 +31,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install lint tools
         run: pip install ruff==0.15.0 bandit
@@ -98,15 +104,26 @@ jobs:
         run: |
           # PyPI kartikeya lags merged master (allow_db, cgroup caps) — drop once 0.0.7 ships.
           pip install "git+https://github.com/rudi193-cmd/kartikeya@master"
-          pip install -e "." pytest
+          pip install -e "." pytest pytest-timeout
 
       - name: Run tests
-        run: python -m pytest tests/ -q
+        # --timeout-method=thread: dumps every thread's stack and exits even
+        # when the main thread is blocked in C (libpq), where the default
+        # signal method never fires. Ported from willow-2.0's hang forensics.
+        run: python -m pytest tests/ -q --timeout=120 --timeout-method=thread
         env:
           PGHOST: localhost
           PGPORT: 5432
           PGUSER: postgres
           PGPASSWORD: postgres
+          # willow-2.0's recurring ~59% hang: a SELECT blocked on a Postgres
+          # lock sits in libpq's C poll loop, uninterruptible by signal-based
+          # timeouts — the job eats its full timeout-minutes with no
+          # traceback. Server-side timeouts name the error fast instead.
+          PGOPTIONS: >-
+            -c statement_timeout=90s
+            -c lock_timeout=60s
+            -c idle_in_transaction_session_timeout=120s
 
       - name: CLI smoke test — gates / tree / permissions
         # Exercises the actual `willow-mcp` console-script entry point end to

@@ -10,22 +10,24 @@ permissions:
   contents: write
   pull-requests: write
 
+# Deliberately NO `gh pr update-branch` anywhere in this workflow: pushes made
+# with GITHUB_TOKEN do not trigger workflow runs, so a token-made update
+# strands the PR on a head commit that CI will never report on — auto-merge
+# then waits forever. Arming auto-merge is sufficient: when branch protection
+# has "require branches to be up to date", GitHub updates the branch
+# server-side, and THAT update runs CI normally.
+
 jobs:
   dependabot-pr:
     if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Fetch Dependabot metadata
         id: metadata
         uses: dependabot/fetch-metadata@v3
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update branch with base
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: gh pr update-branch "$PR_NUMBER" --repo "${{ github.repository }}"
 
       - name: Enable auto-merge
         if: |
@@ -41,15 +43,15 @@ jobs:
   refresh-stale-dependabot-prs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Refresh open Dependabot PRs after master moves
+      - name: Re-arm auto-merge on open Dependabot PRs after the base moves
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mapfile -t prs < <(gh pr list --repo "${{ github.repository }}" --state open --author app/dependabot --json number --jq '.[].number')
           for pr in "${prs[@]}"; do
-            echo "Updating Dependabot PR #${pr}"
-            gh pr update-branch "$pr" --repo "${{ github.repository }}" || true
+            echo "Re-arming auto-merge on Dependabot PR #${pr}"
             gh pr merge --auto --merge "$pr" --repo "${{ github.repository }}" || true
           done
