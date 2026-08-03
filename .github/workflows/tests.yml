@@ -266,10 +266,36 @@ jobs:
 
   # Aggregate gate: branch protection requires a check named exactly "test".
   # The matrix legs report as "test-matrix (3.11)" / "test-matrix (3.12)";
-  # this job carries the required name and only runs when every leg passed
-  # (a failed or skipped leg leaves it un-run, keeping the merge blocked).
+  # this job carries the required name.
+  #
+  # `if: always()` is load-bearing. The comment here used to say a failed or
+  # skipped leg "leaves it un-run, keeping the merge blocked" — that is exactly
+  # backwards. Un-run means *skipped*, a skipped job reports the "skipped"
+  # conclusion, and a required check that never reports a failure does not
+  # block anything. The one check branch protection is configured to trust went
+  # quiet precisely when a leg failed, and quiet reads as fine.
+  #
+  # It matters more now than it did: release-please arms auto-merge on the
+  # release PR, so this check is what stands between a red build and an
+  # unattended PyPI publish.
+  #
+  # `vendor-sync` stays out of `needs` on purpose — see its own comment; it
+  # soft-skips when an upstream is unreachable, so it must not gate a merge.
   test:
     needs: [test-matrix, lint]
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Assert every dependency actually succeeded
+        # skipped and cancelled count as failures: a leg that did not run has
+        # told us nothing, and this gate speaks for all of them.
+        if: ${{ contains(needs.*.result, 'failure')
+                || contains(needs.*.result, 'cancelled')
+                || contains(needs.*.result, 'skipped') }}
+        run: |
+          echo "lint=${{ needs.lint.result }}"
+          echo "test-matrix=${{ needs.test-matrix.result }}"
+          echo "::error::a required job did not succeed — see the results above"
+          exit 1
+
       - run: echo "all matrix legs and lint green"

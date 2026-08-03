@@ -4,7 +4,21 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+Entries through 2.1.0 were written by hand. From the next release onward this
+file is maintained by release-please, which builds each entry from the
+conventional-commit prefixes on `master` — so it cannot go stale between
+releases the way a hand-kept changelog can.
+
+There is deliberately no `[Unreleased]` section any more: the open
+`chore: release X.Y.Z` pull request *is* the unreleased section, and it is
+regenerated from the commits rather than remembered. A hand-kept one beside it
+would be a second copy to drift, which is the thing this repo keeps finding.
+
+Note what release-please will not list: `docs:`, `test:`, `ci:` and `chore:`
+are hidden, along with every fleet-local prefix (`hooks:`, `gate:`, `skills:`,
+`server:`, `envelopes:`) which it ignores entirely. Those commits ship inside
+the next release rather than cutting one of their own — see
+`release-please-config.json` for why, and for the cost.
 
 ## [2.1.0] — 2026-08-02
 
