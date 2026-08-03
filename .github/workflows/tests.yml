@@ -104,13 +104,16 @@ jobs:
         run: |
           # PyPI kartikeya lags merged master (allow_db, cgroup caps) — drop once 0.0.7 ships.
           pip install "git+https://github.com/rudi193-cmd/kartikeya@master"
-          pip install -e "." pytest pytest-timeout
+          pip install -e "." pytest pytest-timeout coverage
 
-      - name: Run tests
+      - name: Run tests (under coverage)
         # --timeout-method=thread: dumps every thread's stack and exits even
         # when the main thread is blocked in C (libpq), where the default
         # signal method never fires. Ported from willow-2.0's hang forensics.
-        run: python -m pytest tests/ -q --timeout=120 --timeout-method=thread
+        run: |
+          coverage run --include='src/willow_mcp/*' -m pytest tests/ -q --timeout=120 --timeout-method=thread
+          # Floor, not target: measured 75.1% on master. Ratchet up, never down.
+          coverage report --fail-under=70
         env:
           PGHOST: localhost
           PGPORT: 5432
