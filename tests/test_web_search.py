@@ -95,3 +95,126 @@ def test_restricted_registries_stay_broadly_trusted():
 def test_an_empty_or_junk_host_is_not_trusted():
     for host in ("", None, ".", "www.", "localhost"):
         assert web_search._trusted_host(host) is False, host
+
+
+# ── HALF_OPEN admitted everyone ──────────────────────────────────────────────
+#
+# `allow()` ended with:
+#
+#     return True  # HALF_OPEN — allow the single probe
+#
+# and the comment was the only thing enforcing "single". Every caller arriving
+# in HALF_OPEN was let through, so the instant a dead provider's cooldown
+# elapsed the whole waiting backlog hit it at once — a thundering herd pointed
+# at the one service already known to be failing.
+
+
+class _Clock:
+    """Manual monotonic clock. Time only moves when a test says so."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _tripped(clock, **kw):
+    """A breaker sitting in OPEN, one cooldown ago — the next `allow()` moves
+    it to HALF_OPEN."""
+    cb = web_search.CircuitBreaker(fail_threshold=2, base_cooldown=30.0,
+                                   max_cooldown=300.0, clock=clock, **kw)
+    cb.record_failure()
+    cb.record_failure()
+    assert cb.state == "OPEN"
+    clock.advance(30.0)
+    return cb
+
+
+def test_half_open_admits_one_probe_not_the_whole_backlog():
+    clock = _Clock()
+    cb = _tripped(clock)
+
+    admitted = sum(cb.allow() for _ in range(50))
+
+    assert cb.state == "HALF_OPEN"
+    assert admitted == 1, f"{admitted} of 50 callers got through (was 50 of 50)"
+
+
+def test_the_probe_reports_back_and_the_breaker_moves():
+    """A probe is only useful if its verdict lands. Success closes the breaker;
+    failure reopens it with the doubled cooldown."""
+    clock = _Clock()
+    cb = _tripped(clock)
+    assert cb.allow() is True
+    cb.record_success()
+    assert cb.state == "CLOSED"
+    assert cb.allow() is True
+
+    clock = _Clock()
+    cb = _tripped(clock)
+    assert cb.allow() is True
+    cb.record_failure()
+    assert cb.state == "OPEN"
+    # Doubled: 30 -> 60. Still shut at 30s, open for a probe at 60s.
+    clock.advance(30.0)
+    assert cb.allow() is False
+    clock.advance(30.0)
+    assert cb.allow() is True
+
+
+def test_a_second_probe_follows_the_first_once_it_reports():
+    """Refusal is per outstanding probe, not per state. A failed probe reopens
+    and a later one is admitted; the flag does not accumulate."""
+    clock = _Clock()
+    cb = _tripped(clock)
+    for round_ in range(3):
+        assert cb.allow() is True, f"round {round_}: no probe admitted"
+        assert cb.allow() is False, f"round {round_}: a second probe got out"
+        cb.record_failure()
+        clock.advance(cb._cooldown)
+
+
+def test_a_lost_probe_does_not_wedge_the_breaker_forever():
+    """The failure mode this fix could have introduced, and the reason there is
+    a deadline. `_search_providers` reports every probe back from
+    `except Exception` — which a BaseException walks straight past, returning
+    no verdict. A probe with no expiry would then hold this provider at
+    "refused" for the life of the process, silently.
+
+    So an unreported probe is treated as lost after one cooldown."""
+    clock = _Clock()
+    cb = _tripped(clock)
+    assert cb.allow() is True          # handed out, and never reported back
+
+    clock.advance(29.0)
+    assert cb.allow() is False, "a live probe should still hold the door"
+
+    clock.advance(1.0)
+    assert cb.allow() is True, "a lost probe wedged the breaker permanently"
+    assert cb.state == "HALF_OPEN"
+
+
+def test_the_transition_out_of_open_spends_the_probe():
+    """The caller that trips OPEN -> HALF_OPEN *is* the probe. If that
+    transition did not claim it, the first arrival would take one and the
+    second would take another."""
+    clock = _Clock()
+    cb = _tripped(clock)
+    assert cb.state == "OPEN"
+    assert cb.allow() is True
+    assert cb.state == "HALF_OPEN"
+    assert cb.allow() is False
+
+
+def test_a_closed_breaker_is_never_gated():
+    """The probe bookkeeping must not leak into the healthy path."""
+    clock = _Clock()
+    cb = web_search.CircuitBreaker(fail_threshold=2, base_cooldown=30.0, clock=clock)
+    assert all(cb.allow() for _ in range(50))
+    cb.record_failure()
+    assert cb.state == "CLOSED"
+    assert all(cb.allow() for _ in range(50))

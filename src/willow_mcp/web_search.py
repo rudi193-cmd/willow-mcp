@@ -9,6 +9,7 @@ import logging
 import os
 import random
 import re
+import threading
 import time
 from collections import OrderedDict
 from typing import Any, Protocol, runtime_checkable
@@ -466,6 +467,26 @@ class CircuitBreaker:
     Trips OPEN after `fail_threshold` consecutive failures and fast-fails for a
     cooldown that doubles each time a half-open probe fails (capped at
     `max_cooldown`). A success resets it fully.
+
+    HALF_OPEN admits **one** request. That is the whole point of the state — it
+    asks "has the provider recovered?" with a single probe rather than with the
+    whole backlog. `allow()` used to return True unconditionally in HALF_OPEN
+    while the comment beside it said "allow the single probe": measured, 50 of
+    50 callers were let through. So the moment a dead provider's cooldown
+    elapsed, every waiting caller hit it at once — a thundering herd aimed at
+    the one service already known to be failing, which is close to the opposite
+    of what a breaker is for.
+
+    Withholding permission needs an expiry, or the fix is worse than the bug.
+    `_search_providers` reports every probe back via `record_success` /
+    `record_failure`, but it does so from `except Exception`, so a BaseException
+    — SystemExit, or a cancellation delivered into the worker thread — returns
+    no verdict. Without a deadline that would pin this provider at "refused",
+    permanently and silently, for the life of the process; the only way out
+    would be `reset_circuit_breakers()`. So a probe that has not reported back
+    within one cooldown is treated as lost and another is issued. Worst case
+    that leaks one request per cooldown, which is the same rate OPEN already
+    allows itself, and it self-heals the moment any probe does report.
     """
 
     def __init__(
@@ -483,25 +504,35 @@ class CircuitBreaker:
         self._failures = 0
         self._opened_at: float | None = None
         self._cooldown = base_cooldown
+        # When the outstanding half-open probe was handed out; None = none out.
+        self._probe_at: float | None = None
 
     def allow(self) -> bool:
         """Whether a request may proceed now."""
+        now = self._clock()
         if self.state == "CLOSED":
             return True
         if self.state == "OPEN":
-            if self._opened_at is not None and (self._clock() - self._opened_at) >= self._cooldown:
+            if self._opened_at is not None and (now - self._opened_at) >= self._cooldown:
                 self.state = "HALF_OPEN"
+                self._probe_at = now
                 return True
             return False
-        return True  # HALF_OPEN — allow the single probe
+        # HALF_OPEN — one probe at a time, until it reports back or times out.
+        if self._probe_at is not None and (now - self._probe_at) < self._cooldown:
+            return False
+        self._probe_at = now
+        return True
 
     def record_success(self) -> None:
         self.state = "CLOSED"
         self._failures = 0
         self._opened_at = None
         self._cooldown = self._base_cooldown
+        self._probe_at = None
 
     def record_failure(self) -> None:
+        self._probe_at = None
         if self.state == "HALF_OPEN":
             # Probe failed — reopen with a longer cooldown.
             self._cooldown = min(self._cooldown * 2, self._max_cooldown)
@@ -677,41 +708,65 @@ def _cache_key(
 
 
 class _TTLCache:
-    """Bounded LRU cache with per-entry TTL.
+    """Bounded LRU cache with per-entry TTL, guarded by a lock.
 
-    Not thread-safe by design — Willow's MCP server services search calls
-    serially per session, so a lock would only add contention. Eviction is
-    least-recently-used once `maxsize` is exceeded; expired entries are dropped
-    lazily on access.
+    Eviction is least-recently-used once `maxsize` is exceeded; expired entries
+    are dropped lazily on access.
+
+    This used to say "not thread-safe by design — Willow's MCP server services
+    search calls serially per session, so a lock would only add contention."
+    Both halves of that were wrong. `_SEARCH_CACHE` is one module-level object
+    shared by every session, so a per-session guarantee would not cover it even
+    if there were one; and there is not, because `willow_web_search` is a `def`
+    rather than an `async def`, and the MCP SDK hands sync tools to
+    `anyio.to_thread.run_sync`. Under `streamable-http` (server.py's transport)
+    two concurrent searches are therefore two OS threads in this dict.
+
+    What that exposes is small and real: `get` reads an entry, then `del`s it
+    if expired, and two threads arriving together can both pass the check and
+    the second `del` raises KeyError; `move_to_end` can likewise race a
+    concurrent `set`'s eviction of the same key. Both windows are a bytecode or
+    two wide, and neither reproduced — 300 rounds of 16 threads on a barrier
+    produced zero errors, because the GIL rarely switches there. So this is a
+    correction to reasoning that was false, not a fix for a failure anyone saw.
+
+    The lock is here because the argument for omitting it was the contention
+    cost, and that cost is roughly 50ns on a path whose alternative outcome is
+    an HTTP request. There is nothing to trade.
     """
 
     def __init__(self, maxsize: int = 256, clock=time.monotonic) -> None:
         self._maxsize = max(1, maxsize)
         self._clock = clock
         self._data: OrderedDict[str, tuple[float, Any]] = OrderedDict()
+        self._lock = threading.Lock()
 
     def get(self, key: str) -> Any | None:
-        entry = self._data.get(key)
-        if entry is None:
-            return None
-        expires_at, value = entry
-        if self._clock() >= expires_at:
-            del self._data[key]
-            return None
-        self._data.move_to_end(key)
-        return value
+        with self._lock:
+            entry = self._data.get(key)
+            if entry is None:
+                return None
+            expires_at, value = entry
+            if self._clock() >= expires_at:
+                self._data.pop(key, None)
+                return None
+            self._data.move_to_end(key)
+            return value
 
     def set(self, key: str, value: Any, ttl: float) -> None:
-        self._data[key] = (self._clock() + ttl, value)
-        self._data.move_to_end(key)
-        while len(self._data) > self._maxsize:
-            self._data.popitem(last=False)
+        with self._lock:
+            self._data[key] = (self._clock() + ttl, value)
+            self._data.move_to_end(key)
+            while len(self._data) > self._maxsize:
+                self._data.popitem(last=False)
 
     def clear(self) -> None:
-        self._data.clear()
+        with self._lock:
+            self._data.clear()
 
     def __len__(self) -> int:
-        return len(self._data)
+        with self._lock:
+            return len(self._data)
 
 
 _SEARCH_CACHE = _TTLCache(maxsize=_env_int("WILLOW_SEARCH_CACHE_SIZE", 256))
