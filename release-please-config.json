@@ -1,0 +1,40 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "willow-mcp",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": ".claude-plugin/plugin.json",
+          "jsonpath": "$.version"
+        }
+      ],
+      "changelog-sections": [
+        { "type": "feat", "section": "Added" },
+        { "type": "fix", "section": "Fixed" },
+        { "type": "security", "section": "Security" },
+        { "type": "perf", "section": "Performance" },
+        { "type": "refactor", "section": "Changed" },
+        { "type": "build", "section": "Build" },
+        { "type": "deps", "section": "Build" },
+        { "type": "docs", "section": "Docs", "hidden": true },
+        { "type": "test", "section": "Tests", "hidden": true },
+        { "type": "ci", "section": "CI", "hidden": true },
+        { "type": "chore", "section": "Chores", "hidden": true }
+      ]
+    }
+  },
+
+  "$comment-versioning": "release-type 'simple' maintains CHANGELOG.md and the tag and edits no Python version file — correct here because hatch-vcs derives the version from the tag (see [tool.hatch.version]), so there is no second copy to drift. Note what is NOT set: jeles carries bump-minor-pre-major because it is below 1.0. This package is at 2.x, so ordinary semver applies — feat is a minor, fix is a patch, and a breaking change is a major. Setting the pre-major flags here would silently cap every breaking change at a minor bump.",
+
+  "$comment-extra-files": ".claude-plugin/plugin.json is the one version string in this repo that hatch-vcs does not derive, and release.yml refuses to publish when it disagrees with the tag — it had already drifted to 2.0.0 while the package was 2.0.1. extra-files makes release-please bump it inside the release PR, so the assertion passes for the right reason instead of needing a human to remember. If that file ever moves or its key is renamed, the release PR will keep passing while the publish fails at the assertion; the check is deliberately at release time, so that failure is loud rather than silent.",
+
+  "$comment-what-cuts-a-release": "EVERY type listed above without \"hidden\": true cuts a release on its own — not just feat and fix. jeles learned this the expensive way: v0.4.1 was tagged and published to PyPI for a single ci: commit that changed a workflow file and nothing a user installs. That is survivable while release PRs are merged by hand, because you see what is in them; release-please.yml here arms auto-merge, so an un-hidden type ships to PyPI unattended, and a PyPI version can never be reused.",
+
+  "$comment-hidden-rule": "The line is: does this commit change what someone gets from `pip install willow-mcp`? docs/test/ci do not — tests and workflows are not packaged, and a README edit only moves the PyPI page — so they are hidden and ride along with the next real release. build and deps stay visible because a dependency or packaging change genuinely alters the installed artifact, and hiding them would mean a dependency fix never reaching anyone, silently. refactor and perf stay visible because they change shipped code, and a version number is what you point at when a refactor turns out to have broken something. Hidden also means absent from CHANGELOG.md — release-please has no 'list it but do not release on it' setting, so this is a real trade, taken deliberately.",
+
+  "$comment-sections": "Section names mirror Keep a Changelog, which this CHANGELOG already follows. Commit types outside this list (the fleet also uses hooks:, gate:, skills:, server:, envelopes:) are ignored for both the changelog and the version bump — which is a larger set here than in jeles, so a run of hooks:/gate: commits produces no release at all until a feat: or fix: lands."
+}

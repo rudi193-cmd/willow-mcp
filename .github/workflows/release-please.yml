@@ -1,0 +1,127 @@
+name: Release Please
+
+# Keeps an open "chore: release X.Y.Z" pull request that accumulates every merge
+# to master — bumping the proposed version from conventional-commit prefixes,
+# appending the CHANGELOG entry, and bumping .claude-plugin/plugin.json to match
+# (see extra-files in release-please-config.json). Nothing publishes while it
+# sits there. It arms auto-merge on itself, so when CI goes green it merges, the
+# tag is created, and the tag push fires `release.yml`.
+#
+# Before this, releasing meant tagging by hand and remembering that plugin.json
+# carries its own version string — which is how it drifted to 2.0.0 while the
+# package was 2.0.1.
+#
+# WHY THE PAT, in both places below. This is the lesson jeles paid three
+# releases to learn, and it fails silently every time:
+#
+#   1. GitHub suppresses workflow runs for any event generated with
+#      GITHUB_TOKEN. Not just `push: tags` — `release: published` too. A
+#      workflow waiting on either simply never runs, with no error anywhere.
+#      jeles v0.2.0: tagged, released, absent from PyPI.
+#   2. Calling release.yml via `workflow_call` does start it, but then PyPI
+#      authenticates against `job_workflow_ref` (the callee) while the PEP 740
+#      attestation records `workflow_ref` (the caller). The two claims disagree
+#      by construction and no publisher row reconciles them. jeles v0.2.1 and
+#      v0.3.0: built fine, rejected at upload.
+#   3. A PAT is not a bot token, so the tag it pushes triggers workflows
+#      normally, and caller and callee are the same file.
+#
+#   The same applies to arming auto-merge: GitHub attributes an auto-merge to
+#   whoever armed it, so armed with GITHUB_TOKEN the release PR would merge and
+#   this workflow would never run again to cut the tag.
+#
+# SETUP — `RELEASE_PLEASE_TOKEN` must exist as a repository secret: a
+# fine-grained PAT scoped to this repo with Contents: read/write and Pull
+# requests: read/write (classic equivalent: `repo`). The first job below refuses
+# to run without it rather than falling back to GITHUB_TOKEN, because that
+# fallback produces a working-looking release PR and a publish that never
+# happens.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false   # never cancel a run that may be cutting a release
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require the release PAT
+        # jeles documents this requirement in a comment and trusts the reader.
+        # A missing secret there degrades to GITHUB_TOKEN, which still opens a
+        # release PR — so everything looks healthy right up until nothing
+        # reaches PyPI. Fail here, where the message can say what to do.
+        env:
+          TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::RELEASE_PLEASE_TOKEN is not set on this repository."
+            cat <<'MSG'
+          release-please would fall back to GITHUB_TOKEN, and the release PR
+          would look fine — but the tag it pushes would start no workflow, so
+          release.yml would never run and nothing would reach PyPI. Silently.
+
+          Add a fine-grained PAT scoped to this repo with:
+            Contents: read/write
+            Pull requests: read/write
+          as the repository secret RELEASE_PLEASE_TOKEN.
+          MSG
+            exit 1
+          fi
+          echo "RELEASE_PLEASE_TOKEN present"
+
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Arm auto-merge, so a release ships when CI goes green rather than when
+      # someone remembers the PR is open. Re-armed on every push to master,
+      # which is also the self-heal: release-please rewrites the PR as commits
+      # land, and this puts the arming back either way.
+      - name: Arm auto-merge on the release PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list --repo "$REPO" --state open --json number,headRefName \
+                 --jq '[.[] | select(.headRefName | startswith("release-please--"))]
+                       | first | .number // empty')
+          if [ -z "$pr" ]; then
+            echo "No open release PR — nothing releasable since the last tag."
+            exit 0
+          fi
+
+          echo "Arming auto-merge on release PR #${pr}"
+          if gh pr merge --auto --merge "$pr" --repo "$REPO"; then
+            exit 0
+          fi
+
+          # Do not fall back to merging directly. `--auto` is what makes the
+          # merge wait for CI; merging here instead would publish off an
+          # unverified commit, and a PyPI version can never be reused or
+          # replaced. Fail loudly and say what to fix.
+          cat <<'MSG'
+          ::error::Could not arm auto-merge on the release PR.
+
+          Both of these must hold, and GitHub declines quietly otherwise:
+            1. Settings -> General -> "Allow auto-merge" is enabled.
+            2. master's branch protection requires at least one status check
+               (this repo's is the aggregate `test` job). With no required
+               check there is nothing for auto-merge to wait on, so GitHub
+               will not arm it at all.
+
+          Releases still work — the PR is there to merge by hand.
+          MSG
+          exit 1
