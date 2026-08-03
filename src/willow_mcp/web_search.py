@@ -91,13 +91,34 @@ def _unwrap_ddg(href: str) -> str:
 
 
 def _trusted_host(hostname: str) -> bool:
-    host = (hostname or "").lower().lstrip("www.")
+    """Does this host sit at or under one of the trusted suffixes?
+
+    Match on **label boundaries only**. The bare `host.endswith(suffix)` this
+    used to also accept had no notion of a dot, so any registrable domain
+    ending in a trusted string inherited its trust — `evilnature.com`,
+    `notarxiv.org`, `myjstor.org`, `evildp.la` all came back trusted, and every
+    one of those is an open registration anyone can buy. `trusted_only=True` is
+    a parameter on the `willow_web_search` tool, so that label was being handed
+    to a model as a reason to believe a page.
+
+    (The broad TLD entries — gov, edu, museum, go.jp, ac.uk — stay, and remain
+    defensible: those registries are restricted, so `.gov` really is a claim
+    about who registered it. The spoofable ones were the open-registration
+    suffixes matched without a boundary.)
+
+    The prefix strip was `.lstrip("www.")`, which removes leading *characters*
+    from the set {w, .} rather than the prefix — so `wikipedia.org` became
+    `ikipedia.org` and `worldbank.org` became `orldbank.org`, and neither
+    matched the list they are explicitly on. The list was simultaneously too
+    permissive and too strict.
+    """
+    host = (hostname or "").strip().lower().rstrip(".")
+    if host.startswith("www."):
+        host = host[4:]
     if not host:
         return False
-    for suffix in _TRUSTED_SUFFIXES:
-        if host == suffix or host.endswith("." + suffix) or host.endswith(suffix):
-            return True
-    return False
+    return any(host == suffix or host.endswith("." + suffix)
+               for suffix in _TRUSTED_SUFFIXES)
 
 
 def navigational_handoffs(query: str) -> list[dict[str, Any]]:
