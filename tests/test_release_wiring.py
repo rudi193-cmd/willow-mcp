@@ -152,6 +152,41 @@ def test_the_changelog_is_rebuilt_before_auto_merge_is_armed():
     assert index_of("actions/checkout") < i_fix
 
 
+def test_the_release_body_is_synced_after_the_release_is_created():
+    """release-please writes the GitHub Release body from its own parse, not
+    from CHANGELOG.md, so fixing the file leaves the release *page* wrong —
+    v2.1.4's page kept the duplicate after the changelog was corrected.
+
+    Order matters twice over: after the action (the release must exist) and
+    before the auto-merge arming, so a failure here is visible rather than
+    hidden behind a merge."""
+    steps = _yaml(_RP_WF)["jobs"]["release-please"]["steps"]
+    names = [s.get("name") or str(s.get("uses", "")) for s in steps]
+
+    def index_of(needle: str) -> int:
+        hits = [i for i, n in enumerate(names) if needle in n]
+        assert hits, f"no step matching {needle!r} in {names}"
+        return hits[0]
+
+    assert (index_of("release-please-action") < index_of("Make the GitHub Release body")
+            < index_of("Arm auto-merge")), names
+
+    step = steps[index_of("Make the GitHub Release body")]
+    run = step["run"]
+    assert "--print-section" in run, "must take the body from the corrected changelog"
+    assert "gh release edit" in run
+    assert "RELEASE_PLEASE_TOKEN" in str(step.get("env"))
+    assert "GITHUB_TOKEN" not in str(step.get("env"))
+
+    # The step above can leave the tree on the release PR branch; this one must
+    # read the pushed commit regardless.
+    assert "$GITHUB_SHA" in run, "must not depend on which branch the previous step left"
+
+    # A plain diff calls the missing trailing newline a difference, which would
+    # rewrite the release body on every push to master forever.
+    assert "rstrip()" in run, "the comparison must ignore trailing whitespace"
+
+
 def test_the_changelog_tool_exists_and_the_workflow_calls_it():
     """A workflow step invoking a script nobody ships is a silent no-op — and
     this one runs on the release path, where nobody is watching."""

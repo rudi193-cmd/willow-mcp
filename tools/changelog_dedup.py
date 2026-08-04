@@ -225,13 +225,47 @@ def rebuild(text: str) -> tuple[str, str]:
     return "\n".join(out) + ("\n" if text.endswith("\n") else ""), summary
 
 
+def section_for(text: str, version: str) -> str | None:
+    """One version's section, exactly as it appears — header line included.
+
+    That shape is not arbitrary: it is what release-please puts in the GitHub
+    Release body, so this is directly comparable to it. Returns None when the
+    version has no section.
+    """
+    lines = text.splitlines()
+    start = None
+    for i, ln in enumerate(lines):
+        m = SECTION_RE.match(ln)
+        if m and m.group("version") == version:
+            start = i
+            break
+    if start is None:
+        return None
+    end = next((i for i in range(start + 1, len(lines))
+                if lines[i].startswith("## [")), len(lines))
+    return "\n".join(lines[start:end]).rstrip()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--check", action="store_true",
                     help="exit 1 if the changelog would change; write nothing")
+    ap.add_argument("--print-section", metavar="VERSION",
+                    help="print that version's section verbatim and exit; used to "
+                         "sync the GitHub Release body, which release-please "
+                         "generates from its own parse rather than from this file")
     args = ap.parse_args()
 
     text = CHANGELOG.read_text()
+
+    if args.print_section:
+        section = section_for(text, args.print_section)
+        if section is None:
+            print(f"::error::no section for version {args.print_section!r} in "
+                  f"{CHANGELOG.name}", file=sys.stderr)
+            return 2
+        print(section)
+        return 0
     try:
         new_text, summary = rebuild(text)
     except Bail as exc:
