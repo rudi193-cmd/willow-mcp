@@ -31,6 +31,14 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.2.1](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.0...v2.2.1) (2026-08-04)
+
+
+### Fixed
+
+* **web_fetch:** the SSRF guard checked one URL, one way, and resolved nothing ([8a436f0](https://github.com/rudi193-cmd/willow-mcp/commit/8a436f0b1428e132a47d6ea9336bdee21c02bab9))
+* **web_fetch:** the SSRF guard checked one URL, one way, and resolved nothing ([f6d39a3](https://github.com/rudi193-cmd/willow-mcp/commit/f6d39a3cccec397ef01b6809b04835ab91e3991d))
+
 ## [2.2.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.5...v2.2.0) (2026-08-04)
 
 
