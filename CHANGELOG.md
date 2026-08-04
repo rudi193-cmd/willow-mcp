@@ -20,20 +20,30 @@ are hidden, along with every fleet-local prefix (`hooks:`, `gate:`, `skills:`,
 the next release rather than cutting one of their own — see
 `release-please-config.json` for why, and for the cost.
 
+**Generated entries are sometimes corrected by hand, and this is why.** This
+repo merges with merge commits rather than squashing, and GitHub writes the PR
+title into the merge commit body. release-please parses that merge commit
+*alongside* the commits it merges, so one change can produce two entries — and
+because it collapses same-scope entries, a real commit can be dropped in favour
+of the merge commit that swallowed it. Both happened here: 2.1.2 listed the
+same fix twice (once from the merge, once from the commit), and 2.1.3 listed a
+merge-commit title while omitting `0073767`, a genuine fix. The version numbers
+and the tags were right; only the prose was wrong. Corrections are made in a
+`docs:` commit, which is hidden and cuts no release of its own.
+
 ## [2.1.3](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.2...v2.1.3) (2026-08-04)
 
 
 ### Fixed
 
-* **web_search:** five reproduced defects — misattributed snippets, a HALF_OPEN herd, a leaky trusted_only ([3e9af9d](https://github.com/rudi193-cmd/willow-mcp/commit/3e9af9d3908eddb88c5ff8c73ed7d0762cdc291f))
 * **web_search:** stop attributing a result's snippet to the wrong URL ([d0bd516](https://github.com/rudi193-cmd/willow-mcp/commit/d0bd516bd0a1f57f473b12c88054984ccce18eed))
+* **web_search:** admit one probe in HALF_OPEN, not the whole backlog ([0073767](https://github.com/rudi193-cmd/willow-mcp/commit/0073767))
 
 ## [2.1.2](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.1...v2.1.2) (2026-08-03)
 
 
 ### Fixed
 
-* **web_search:** stop a lookalike domain inheriting institutional trust ([eddaf85](https://github.com/rudi193-cmd/willow-mcp/commit/eddaf85d87b06990f6bbc506cc49b507ff77ba35))
 * **web_search:** stop a lookalike domain inheriting institutional trust ([49b95fe](https://github.com/rudi193-cmd/willow-mcp/commit/49b95fe20b5d764c62e7db85b80e427dbcd0a677))
 
 ## [2.1.1](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.0...v2.1.1) (2026-08-03)
