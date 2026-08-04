@@ -5,9 +5,13 @@ covers the other half: whether the versions we *consume* are bounded the way the
 packages producing them actually behave.
 
 It exists because they were not. `pyproject.toml` pinned `jeles>=0.5.0,<1.0.0`
-while jeles' `release-please-config.json` sets `bump-minor-pre-major` — which,
-as that config's own comment puts it, makes "a breaking change -> minor rather
-than 1.0.0". So the cap accepted every version jeles was capable of producing.
+while jeles' `release-please-config.json` set `bump-minor-pre-major: true` —
+which, as that config's own comment put it, made "a breaking change -> minor
+rather than 1.0.0". So the cap accepted every version jeles was capable of
+producing. jeles and kartikeya both set the flag **false** now, which is what
+made `<1.0.0` mean something; that is the fix, not a reason to drop the test —
+the flag is a line in a file someone can flip back, and this file is what
+notices.
 
 The part worth remembering is that both halves were already written down, one of
 them in *this repo* — `test_release_wiring.py`'s

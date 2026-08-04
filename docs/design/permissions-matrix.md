@@ -47,8 +47,9 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 | `gap_purge` | gap_purge_topic (bulk, fleet-shared — its own opt-in line) |
 | `schema_admin` | schema_confirm_mapping |
 | `audit` | receipts_tail |
+| `web_read` | willow_web_search, willow_web_fetch, willow_institutional_search — **three** tools on one line, not two. Granting the search tool grants the fetch tool; there is no split, so the group's ceiling is whichever of the three guards weakest. Egress-gated: also needs `web_net` + `consent.internet` + a live lease |
 | `whoami` | *(ungated — like `diagnostic_summary`, always answers about your own manifest)* |
-| `full_access` | Broad, but **not** everything. Excludes the own-line / egress groups — `integration_call`, `web_read` (`willow_web_search`/`willow_web_fetch`), and `fork_read`/`fork_write` — plus `frank_append`; the `task_net`/`integration_net`/`web_net` capability keys are never implied by any group. Includes the store/gap/specialist reads and the purge tools |
+| `full_access` | Broad, but **not** everything. Excludes the own-line / egress groups — `integration_call`, `web_read` (`willow_web_search`/`willow_web_fetch`/`willow_institutional_search`), and `fork_read`/`fork_write` — plus `frank_append`; the `task_net`/`integration_net`/`web_net` capability keys are never implied by any group. Includes the store/gap/specialist reads and the purge tools |
 
 `diagnostic_summary` is intentionally **ungated** (self-check must work when manifest is broken).
 

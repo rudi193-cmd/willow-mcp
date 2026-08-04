@@ -127,6 +127,43 @@ def test_http_honors_operator_consent(executor, monkeypatch):
     assert "consent.internet" in out["error"]
 
 
+@pytest.fixture
+def consenting(executor, monkeypatch):
+    """@http past its two gates, with no live DNS and no ambient proxy.
+
+    `web_fetch._proxy_dials_for` reads the environment and skips resolution
+    behind a proxy — by design, and it would make every resolution assertion
+    below a tautology in the container this suite runs in.
+    """
+    from willow_mcp import consent, web_fetch
+    monkeypatch.setattr(consent, "internet_permitted", lambda: True)
+    monkeypatch.setattr(web_fetch.urllib.request, "getproxies", lambda: {})
+
+    def fake(host, port=0, *a, **k):
+        if host == "evil.example":            # public name, private answer
+            return [(2, 1, 6, "", ("127.0.0.1", port or 0))]
+        if host == "feed.example":
+            return [(2, 1, 6, "", ("93.184.216.34", port or 0))]
+        raise OSError(f"unstubbed lookup of {host!r}")
+
+    monkeypatch.setattr(web_fetch.socket, "getaddrinfo", fake)
+    parser.invalidate()
+    return executor
+
+
+def _no_egress(monkeypatch):
+    """Fail loudly if anything actually reaches for a transport."""
+    import urllib.request
+
+    from willow_mcp import web_fetch
+    dialled = []
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        lambda *a, **k: dialled.append(a))
+    monkeypatch.setattr(web_fetch, "_require_requests",
+                        lambda: dialled.append("requests"))
+    return dialled
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -138,15 +175,107 @@ def test_http_honors_operator_consent(executor, monkeypatch):
         "file:///etc/passwd",
     ],
 )
-def test_http_ssrf_hosts_blocked_even_with_consent(executor, monkeypatch, url):
-    from willow_mcp import consent
-    monkeypatch.setattr(consent, "internet_permitted", lambda: True)
-    fetched = []
-    import urllib.request
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: fetched.append(a))
-    out = parser._handle_http({"url": url}, "", app_id=executor)
-    assert fetched == []
+def test_http_ssrf_hosts_blocked_even_with_consent(consenting, monkeypatch, url):
+    dialled = _no_egress(monkeypatch)
+    out = parser._handle_http({"url": url}, "", app_id=consenting)
+    assert dialled == []
     assert "refused" in out["error"]
+
+
+@pytest.mark.parametrize("url,why", [
+    ("https://evil.example/x",         "public name whose A record is 127.0.0.1"),
+    ("https://2130706433/x",           "127.0.0.1 written as a decimal integer"),
+    ("https://0177.0.0.1/x",           "127.0.0.1 written in octal"),
+    ("https://100.64.1.1/x",           "RFC6598 CGNAT — cloud and ISP internals"),
+    ("https://[::ffff:127.0.0.1]/x",   "IPv4-mapped loopback"),
+    ("https://[64:ff9b::a9fe:a9fe]/x", "NAT64-wrapped 169.254.169.254"),
+    ("ftp://169.254.169.254/creds",    "not http(s) at all"),
+])
+def test_the_hosts_the_old_regex_guard_let_through(consenting, monkeypatch, url, why):
+    """Every one of these was measured passing `_http_host_blocked`, which was a
+    bare hostname regex matched against `urlparse(url).hostname` — a string,
+    never resolved — under a docstring that said it blocked SSRF. The guard is
+    now `web_fetch.validate_fetch_url`, the same one `willow_web_fetch` uses."""
+    dialled = _no_egress(monkeypatch)
+    out = parser._handle_http({"url": url}, "", app_id=consenting)
+    assert dialled == [], f"dialled anyway: {why}"
+    assert "refused" in out["error"], why
+
+
+def test_a_public_destination_is_still_fetched(consenting, monkeypatch):
+    """The other half — a guard that refuses everything is not a guard."""
+    from fake_transport import transport
+
+    from willow_mcp import web_fetch
+    shim, adapter = transport([(200, {"Content-Type": "application/json"},
+                                b'{"ok": true}')])
+    monkeypatch.setattr(web_fetch, "_require_requests", lambda: shim)
+    out = parser._handle_http({"url": "https://feed.example/data.json"}, "",
+                              app_id=consenting)
+    assert out == {"ok": True}
+    assert adapter.dialled == [("GET", "https://feed.example/data.json")]
+
+
+def test_http_does_not_follow_a_redirect_to_a_private_host(consenting, monkeypatch):
+    """`urllib.request.urlopen(url)` on the default opener follows the chain
+    itself, so the one string the old guard checked was the only hop it ever
+    saw. Measured: a 302 from a public URL to 169.254.169.254 was followed and
+    the credentials came back as the directive's value."""
+    from fake_transport import transport
+
+    from willow_mcp import web_fetch
+    shim, adapter = transport([
+        (302, {"Location": "http://169.254.169.254/latest/meta-data/iam/"}, b""),
+        (200, {"Content-Type": "application/json"}, b'{"AccessKeyId": "AKIA"}'),
+    ])
+    monkeypatch.setattr(web_fetch, "_require_requests", lambda: shim)
+    out = parser._handle_http({"url": "https://feed.example/data.json"}, "",
+                              app_id=consenting)
+    assert "refused" in out["error"]
+    assert "169.254.169.254" in out["error"]
+    assert len(adapter.dialled) == 1
+
+
+def test_an_http_body_is_capped(consenting, monkeypatch):
+    """`resp.read()` had no bound, so a directive that fetches a JSON endpoint
+    could pull an unbounded response into the rendered document."""
+    from fake_transport import transport
+
+    from willow_mcp import web_fetch
+    shim, adapter = transport([(200, {"Content-Type": "text/plain"},
+                                50 * 1024 * 1024)])
+    monkeypatch.setattr(web_fetch, "_require_requests", lambda: shim)
+    parser._handle_http({"url": "https://feed.example/big"}, "", app_id=consenting)
+    read = adapter.raws[-1].read_bytes
+    # Absolute first — a bound stated only in terms of the constant under test
+    # moves when the constant does, and a 500MB "cap" would still pass.
+    assert read < 5 * 1024 * 1024, f"read {read} bytes for one @http directive"
+    assert read <= parser._MAX_HTTP_BYTES + web_fetch._CHUNK_BYTES
+
+
+def test_no_second_host_guard_lives_in_the_parser():
+    """The defect was not only that the regex was weak — it was that a third,
+    independent opinion about forbidden destinations existed at all, on a
+    permission line whose other tools had already been hardened. One policy, or
+    the weakest copy sets the ceiling."""
+    import ast
+    import inspect
+
+    assert not hasattr(parser, "_http_host_blocked")
+    assert not hasattr(parser, "_BLOCKED_HTTP_HOST_RE")
+
+    # ast, not a substring search: the comment block that records what used to
+    # be here quotes the old regex on purpose, and prose about a deleted guard
+    # is not a guard.
+    tree = ast.parse(inspect.getsource(parser))
+    calls = [
+        f"{ast.unparse(node.func)} (line {node.lineno})"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and ast.unparse(node.func).split(".")[-1] in ("urlopen", "build_opener",
+                                                      "install_opener")
+    ]
+    assert calls == [], f"a second egress path is back: {calls}"
 
 
 # ── @env ─────────────────────────────────────────────────────────────────────

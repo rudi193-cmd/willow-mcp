@@ -26,6 +26,29 @@ Kept deliberately separate from jeles' copy rather than shared: that one guards
 is transport-specific parsing. A shared abstraction would have to be right
 about both connectors at once, which is how the disagreement got missed the
 first time.
+
+**This module is now the single egress path for that grant, not one of three.**
+A later pass found the same permission line still bounded by weaker code:
+`web_search._ddg_fetch` posted with redirects followed inside `requests`, and
+`mai/parser._http_host_blocked` was a third, independent host guard — a bare
+hostname regex in front of `urllib.request.urlopen` on the default opener. Both
+now call `fetch_guarded` here. What is shared is the *policy* (which
+destinations are refused) and the *transport* it was written against
+(`requests`); nothing was copied. That is the same argument as the paragraph
+above, applied the other way: jeles stays separate because its connector is
+different, and these two joined because theirs is not.
+
+Two bounds that the rewrite above did not have and this one does:
+
+* **A body was never capped.** `requests.get` without `stream=True` reads the
+  whole response inside `Session.send`, so `resp.content[:max_bytes]` truncated
+  a string that was already resident. Measured: 50MB buffered against a
+  512_000-byte `max_bytes`, and a 50MB body on a *redirect* hop — one nothing
+  ever reads — buffered in full. Every request is now streamed and read through
+  `_read_capped`.
+* **The final response was never closed.** Intermediates were; the one whose
+  body is actually read was left to the collector. `_read_capped` closes in a
+  `finally`, so the connection is returned on the error paths too.
 """
 
 from __future__ import annotations
@@ -48,6 +71,9 @@ _DEFAULT_MAX_CHARS = 80_000
 #: every hop is another destination check and another resolver round trip.
 _MAX_REDIRECTS = 5
 _REDIRECT_CODES = frozenset({301, 302, 303, 307, 308})
+#: Read granularity, not a limit. Small enough that the cap overshoots by at
+#: most this much, large enough not to make a syscall per kilobyte.
+_CHUNK_BYTES = 8192
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -208,11 +234,119 @@ def validate_fetch_url(url: str) -> str | None:
     return None
 
 
-class _RefusedRedirect(Exception):
-    """A hop in the chain failed the destination check."""
+def validate_hop(previous_url: str, next_url: str) -> str | None:
+    """Why this redirect must not be taken, or None.
+
+    Everything `validate_fetch_url` refuses, plus the one rule that only exists
+    between two URLs: **https must not become http.**
+
+    That rule is here rather than in `validate_fetch_url` because it is not a
+    property of the destination — `http://example.com/` is a perfectly ordinary
+    URL for a caller to ask for, and this tool still fetches it. It stops being
+    ordinary when the caller asked for `https://` and the *responder* chose the
+    downgrade, which is the same asymmetry the whole redirect check is about:
+    the first URL comes from the operator's agent, every hop after it comes
+    from whatever answered. A downgrade hands the rest of the chain, and the
+    body that a model is about to read, to anyone on the path — including the
+    right to redirect it again.
+
+    The cost of refusing is close to nothing: canonical redirects run the other
+    way (http -> https), which stays allowed, as does http -> http, where the
+    caller already chose plaintext with their eyes open.
+    """
+    err = validate_fetch_url(next_url)
+    if err:
+        return err
+    try:
+        was = (urlparse(previous_url).scheme or "").lower()
+        now = (urlparse(next_url).scheme or "").lower()
+    except ValueError:
+        return "unparseable URL"
+    if was == "https" and now != "https":
+        return f"refusing https -> {now} downgrade"
+    return None
 
 
-def _get_checking_every_hop(requests, url: str, *, timeout: float):
+class RefusedFetch(Exception):
+    """The URL, or a hop in its redirect chain, failed the destination check."""
+
+
+def _read_capped(resp, max_bytes: int) -> bytes:
+    """At most `max_bytes` of the body, and the response closed either way.
+
+    `max_bytes` used to bound nothing at all. `requests.get` without
+    `stream=True` reads the entire body inside `Session.send`, so by the time
+    `resp.content[:max_bytes]` ran the whole thing was already in memory —
+    measured at 50MB against a 512_000-byte cap. Streaming and stopping is the
+    only version of that limit that is a limit.
+
+    The `close()` is in a `finally` because this is also where the final
+    response gets released. Intermediate responses were closed in the hop loop
+    and the one whose body is actually read was not, so a fetch that ended in an
+    external-guard block, or in a decode error, held its connection until the
+    collector got to it.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        for chunk in resp.iter_content(chunk_size=_CHUNK_BYTES):
+            if not chunk:  # keep-alive padding
+                continue
+            chunks.append(chunk)
+            total += len(chunk)
+            if total >= max_bytes:
+                break
+    finally:
+        resp.close()
+    return b"".join(chunks)[:max_bytes]
+
+
+def _method_after(method: str, code: int) -> str:
+    """The method `requests` itself would use on the next hop.
+
+    Mirrors `Session.rebuild_method`. It matters because this module now carries
+    a POST (the search scrape) as well as GETs: replaying a POST body at a 302
+    target would be both wrong and, for a redirect chosen by the responder, a
+    way to get the caller's form data delivered somewhere it never addressed.
+    """
+    m = (method or "GET").upper()
+    if code in (302, 303) and m != "HEAD":
+        return "GET"
+    if code == 301 and m == "POST":
+        return "GET"
+    return m
+
+
+def _no_redirect_session(requests):
+    """A `requests.Session` that will not compute a redirect target.
+
+    `allow_redirects=False` stops the chain being *followed*. It does not stop
+    `Session.send` from calling `resolve_redirects(..., yield_requests=True)` to
+    fill in `Response._next` — and the first thing that generator does is
+    `resp.content`, commented "Consume socket so it can be released". So the
+    body of a 3xx is read in full even under `stream=True`, for a hop nobody was
+    ever going to take: measured, 50MB resident from one redirect. Yielding
+    nothing removes the only reason that read happens.
+
+    It also means this session cannot follow a redirect even if a future caller
+    passes `allow_redirects=True` — the transport has no redirect machinery
+    left. That is the property this module wants pinned at the transport, not
+    just requested at the call site.
+
+    The class is built per call rather than cached: it is a few microseconds in
+    front of an HTTP request, and a module-level cache would have to be keyed on
+    a `Session` class the caller owns (the test transports each supply their
+    own) and would outlive it.
+    """
+    class _NoRedirectSession(requests.Session):
+        def resolve_redirects(self, *args, **kwargs):
+            return iter(())
+
+    return _NoRedirectSession()
+
+
+def _request_checking_every_hop(session, method: str, url: str, *,
+                                timeout: float, headers=None, data=None):
     """Follow the redirect chain by hand, validating each hop before taking it.
 
     `allow_redirects=True` follows the chain inside `requests.get`, where no
@@ -222,14 +356,19 @@ def _get_checking_every_hop(requests, url: str, *, timeout: float):
     body came back through the tool.
 
     Returns `(final_response, [urls followed])`. Intermediate responses are
-    closed rather than left to the collector, since only their headers are read.
+    closed rather than left to the collector, since only their headers are read;
+    with `stream=True` that now also means their bodies are never pulled off the
+    socket at all.
     """
-    headers = {"User-Agent": _USER_AGENT}
-    current = url
+    hdrs = {"User-Agent": _USER_AGENT}
+    if headers:
+        hdrs.update(headers)
+    current, current_method, current_data = url, (method or "GET").upper(), data
     followed: list[str] = []
     for _ in range(_MAX_REDIRECTS + 1):
-        resp = requests.get(current, headers=headers, timeout=timeout,
-                            allow_redirects=False)
+        resp = session.request(current_method, current, headers=hdrs,
+                               data=current_data, timeout=timeout,
+                               allow_redirects=False, stream=True)
         location = (resp.headers.get("Location") if resp.status_code
                     in _REDIRECT_CODES else None)
         if not location:
@@ -238,14 +377,59 @@ def _get_checking_every_hop(requests, url: str, *, timeout: float):
         # Relative Locations are the common case and are resolved against the
         # URL that issued them, exactly as requests would.
         nxt = urljoin(current, location)
-        err = validate_fetch_url(nxt)
+        err = validate_hop(current, nxt)
         if err:
-            raise _RefusedRedirect(
+            raise RefusedFetch(
                 f"refusing redirect from {current} — {err}")
+        nxt_method = _method_after(current_method, resp.status_code)
         followed.append(nxt)
-        current = nxt
-    raise _RefusedRedirect(
+        current, current_data = nxt, (current_data if nxt_method == current_method
+                                      else None)
+        current_method = nxt_method
+    raise RefusedFetch(
         f"more than {_MAX_REDIRECTS} redirects starting at {url}")
+
+
+def _fetch_validated(url: str, *, method: str = "GET", data=None, headers=None,
+                     timeout: float = 20.0, max_bytes: int = _DEFAULT_MAX_BYTES):
+    """`fetch_guarded` for a first URL that has already passed the guard.
+
+    One session for the whole chain, closed once the body has been read — so
+    the pooled connection is released on the refusal and error paths too, and
+    hops to the same host reuse it.
+    """
+    requests = _require_requests()
+    session = _no_redirect_session(requests)
+    try:
+        resp, followed = _request_checking_every_hop(
+            session, method, url, timeout=timeout, headers=headers, data=data)
+        return resp, _read_capped(resp, max_bytes), followed
+    finally:
+        session.close()
+
+
+def fetch_guarded(url: str, *, method: str = "GET", data=None, headers=None,
+                  timeout: float = 20.0, max_bytes: int = _DEFAULT_MAX_BYTES):
+    """The one guarded egress path behind the `web_read` grant.
+
+    Destination check on the first URL and on every redirect hop, redirects
+    never followed by the transport, body capped, response closed.
+
+    Returns `(response, body_bytes, [urls followed])`. The response comes back
+    already read and closed, so `.content` is gone; `.status_code`, `.headers`,
+    `.encoding` and `.url` are not. Raises `RefusedFetch` when the first URL or
+    any hop is refused, and `requests.RequestException` for transport failures.
+
+    `web_search` and `mai/parser` call this rather than reaching for `requests`
+    or `urllib` themselves. Each of them used to have its own idea of what a
+    forbidden destination was, and the weakest of the three set the ceiling for
+    a permission line all of them sit on.
+    """
+    err = validate_fetch_url(url)
+    if err:
+        raise RefusedFetch(err)
+    return _fetch_validated(url, method=method, data=data, headers=headers,
+                            timeout=timeout, max_bytes=max_bytes)
 
 
 def fetch_url(
@@ -256,7 +440,11 @@ def fetch_url(
     max_chars: int = _DEFAULT_MAX_CHARS,
     timeout: float = 20.0,
 ) -> dict[str, Any]:
-    """Fetch URL body with size limits, guard scan, optional sandwich wrap."""
+    """Fetch URL body with size limits, guard scan, optional sandwich wrap.
+
+    `max_bytes` bounds what is read off the socket, not just what is kept —
+    see `_read_capped`. `max_chars` still bounds the decoded text afterwards.
+    """
     from . import external_guard
 
     err = validate_fetch_url(url)
@@ -265,15 +453,15 @@ def fetch_url(
 
     requests = _require_requests()
     try:
-        resp, redirects = _get_checking_every_hop(requests, url, timeout=timeout)
-    except _RefusedRedirect as exc:
+        resp, raw, redirects = _fetch_validated(url, timeout=timeout,
+                                                max_bytes=max_bytes)
+    except RefusedFetch as exc:
         log.warning("fetch refused %s: %s", url, exc)
         return {"ok": False, "url": url, "error": str(exc)}
     except requests.RequestException as exc:
         log.warning("fetch failed %s: %s", url, exc)
         return {"ok": False, "url": url, "error": str(exc)}
 
-    raw = resp.content[:max_bytes]
     charset = resp.encoding or "utf-8"
     try:
         text = raw.decode(charset, errors="replace")

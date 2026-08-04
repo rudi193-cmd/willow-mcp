@@ -80,5 +80,43 @@ pull request with a green `test` check. Direct pushes to `master` are rejected.
   references in the public code or docs.
 - New tools that carry a footgun should ship their hook and/or skill in the same
   change, not as a later add-on.
-- Update `CHANGELOG.md` under `[Unreleased]` / the pending version for anything
-  user-visible.
+- **Do not edit `CHANGELOG.md` by hand.** release-please regenerates it from the
+  commits on `master`, and there is deliberately no `[Unreleased]` section to
+  add to — the open `chore: release X.Y.Z` pull request *is* the unreleased
+  section. A hand-added entry is a second copy that drifts, and
+  `tests/test_changelog_dedup.py` holds the generated shape in place. Say what
+  changed in the commit subject instead; that is the input the file is built
+  from. (`CHANGELOG.md`'s own header explains the exceptions, all of which are
+  corrections to what release-please emitted, not additions to it.)
+- `skills/` and `hooks/` are duplicated under `src/willow_mcp/bundle/` so the
+  installed wheel carries them. The two copies must stay **byte-identical** —
+  `tests/test_skills_sync.py` and the hook mutation check fail otherwise. Apply
+  every change twice.
+
+## Commit and PR titles decide releases
+
+This is not cosmetic and it is the easiest way to land a red PR on an otherwise
+correct change. Commit subjects are **conventional commits**, and because merges
+use merge commits, GitHub writes the **PR title** into the merge commit body —
+release-please parses both, and the most release-y type across either one wins.
+`.github/workflows/pr-title.yml` therefore checks the title in *two* directions,
+and both are blocking:
+
+1. **A title may not cut a release its commits would not.** Open a PR titled
+   `fix(ci): …` over commits that are all `ci:` and it fails — that exact
+   asymmetry tagged and published willow-mcp v2.1.1 for CI-only changes.
+2. **A commit may not cut a release that changes nothing installable.** If any
+   commit carries a releasing type, the PR must touch `src/willow_mcp/` or
+   `pyproject.toml`. `fix(ci):` over `tools/` and `.github/` cut 2.1.5, which
+   shipped nothing; a PyPI version can never be reused.
+
+The releasing types are read from `release-please-config.json`, not restated in
+the workflow, so this list moves when that file does. Today:
+
+| cuts a release | rides along (hidden) |
+|---|---|
+| `feat` `fix` `security` `perf` `refactor` `build` `deps` | `docs` `test` `ci` `chore`, plus the fleet-local prefixes `hooks:` `gate:` `skills:` `server:` `envelopes:` |
+
+`!` or a `BREAKING CHANGE:` footer cuts a major on either side. When in doubt,
+pick a hidden type: the change still ships, in the next release that has
+something installable in it.

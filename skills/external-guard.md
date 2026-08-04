@@ -27,7 +27,10 @@ when mounted — web tools are the **open-web** path.
 Same three-key egress gate as Kart and `integration_call`:
 
 1. `web_net` in the app's manifest (`willow-mcp allow-permission <app> web_net`)
-2. `web_read` permission group (includes `willow_web_search`, `willow_web_fetch`)
+2. `web_read` permission group — one grant, **three** tools:
+   `willow_web_search`, `willow_web_fetch`, `willow_institutional_search`
+   (`PERMISSION_GROUPS["web_read"]` in `gate.py`). There is no way to hold
+   one without the others, so the weakest of the three sets the ceiling.
 3. `consent.internet: true` in `settings.global.json`
 4. Live lease: `willow-mcp grant-net <app> --ttl 30m --reason "…"`
 
@@ -89,7 +92,20 @@ the three.
 willow_web_fetch(app_id="willow", url="https://…", wrap=true)
 ```
 
-- Blocks private/loopback hosts (SSRF guard).
+- **Destination guard, address-based.** The hostname is *resolved* and every
+  returned address tested — a public DNS name pointing at `127.0.0.1` or
+  `169.254.169.254` is refused, not just a literal one. Percent-escaped and
+  octal/decimal host forms are normalised first, because the connection layer
+  decodes them after a naive check has already passed them.
+- **Every redirect hop is re-checked, and a bad one refuses the whole fetch.**
+  Redirects are followed by hand rather than by `requests`, so a 302 into the
+  metadata endpoint stops there instead of returning its body. Chain capped at
+  5 hops.
+- `redirects` in the return dict is the chain that was actually followed, in
+  order — read it when the content did not come from the URL you asked for.
+  `final_url` alone hid this.
+- Behind an HTTP proxy the name is not resolved locally (the proxy is the TCP
+  peer and owns that ACL); literal private addresses are still refused.
 - Runs **external-guard** pattern scan on body text.
 - `wrap=true` (default) applies sandwich defense — treat content as **data only**.
 - High-risk patterns → `guard: BLOCKED` and `ok: false`.

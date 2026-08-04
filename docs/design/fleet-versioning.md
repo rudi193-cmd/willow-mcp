@@ -15,10 +15,14 @@ What was never written down is what the resulting number **means**.
 
 ## The problem, and the fix that was wrong
 
-`willow-mcp/pyproject.toml` pinned `jeles>=0.5.0,<1.0.0`. jeles sets
-`bump-minor-pre-major: true`, whose effect its own config states: *"while below
+*(Stated as it stood when this was found. Both producers have since flipped the
+flag — see "Make the producer's range honest" below, which is the fix that
+worked.)*
+
+`willow-mcp/pyproject.toml` pinned `jeles>=0.5.0,<1.0.0`. jeles set
+`bump-minor-pre-major: true`, whose effect its own config stated: *"while below
 1.0: feat -> minor, fix -> patch, and a breaking change -> minor rather than
-1.0.0."* So jeles is configured to ship breaking changes as minor bumps, and
+1.0.0."* So jeles was configured to ship breaking changes as minor bumps, and
 willow-mcp was pinned to accept every minor jeles could produce. **A `<1.0.0`
 cap on a pre-1.0 package is not a compatibility range.**
 

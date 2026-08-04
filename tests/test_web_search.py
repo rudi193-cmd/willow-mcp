@@ -6,8 +6,9 @@ import os
 from unittest.mock import patch
 
 import pytest
+from fake_transport import transport
 
-from willow_mcp import web_search
+from willow_mcp import web_fetch, web_search
 
 
 def test_parse_ddg_html_extracts_links():
@@ -371,19 +372,17 @@ def test_the_http_timeout_is_a_knob_because_it_bounds_the_overrun():
     """It was the literal `timeout=12`. Since it is the only thing bounding how
     far one attempt can overrun the retry budget, an operator has to be able to
     move it."""
-    import requests
-
     captured = {}
 
     class _Resp:
         status_code = 200
-        text = ""
+        encoding = "utf-8"
 
-    def fake_post(url, **kwargs):
+    def spy(url, **kwargs):
         captured.update(kwargs)
-        return _Resp()
+        return _Resp(), b"", []
 
-    with patch.object(requests, "post", fake_post):
+    with patch.object(web_search.web_fetch, "fetch_guarded", spy):
         with patch.dict("os.environ", {"WILLOW_SEARCH_HTTP_TIMEOUT": "3.5"}):
             web_search._ddg_fetch("q")
         assert captured["timeout"] == 3.5
@@ -392,3 +391,138 @@ def test_the_http_timeout_is_a_knob_because_it_bounds_the_overrun():
             os.environ.pop("WILLOW_SEARCH_HTTP_TIMEOUT", None)
             web_search._ddg_fetch("q")
         assert captured["timeout"] == 12.0
+
+
+# --------------------------------------------------------------------------- #
+# Destination guard on the scrape
+#
+# `_ddg_fetch` was a bare `requests.post` with no `allow_redirects=False` and no
+# destination check anywhere in the module, so requests followed the whole chain
+# inside `post()`. `willow_web_search` sits on the same `web_read` grant as
+# `willow_web_fetch` (gate.py), which had exactly this fixed — a grant is only
+# as strong as its weakest tool, so the scrape now enters through
+# `web_fetch.fetch_guarded` too.
+#
+# `fake_transport` is a real requests stack over a fake adapter; nothing here
+# opens a socket.
+# --------------------------------------------------------------------------- #
+
+_HTML = {"Content-Type": "text/html"}
+_RESULT = (b'<a class="result__a" href="https://arxiv.org/abs/1">A paper</a>'
+           b'<td class="result__snippet">about things</td>')
+
+
+@pytest.fixture
+def offline(monkeypatch):
+    """No live DNS and no ambient proxy — the guard must decide, not the box."""
+    monkeypatch.setattr(web_fetch.urllib.request, "getproxies", lambda: {})
+    public = {"html.duckduckgo.com": "20.43.161.105", "arxiv.org": "151.101.3.42"}
+
+    def fake(host, port=0, *a, **k):
+        if host in public:
+            return [(2, 1, 6, "", (public[host], port or 0))]
+        raise OSError(f"unstubbed lookup of {host!r}")
+
+    monkeypatch.setattr(web_fetch.socket, "getaddrinfo", fake)
+
+
+def _scrape(script, query="anything"):
+    """Drive one scrape over a scripted chain.
+
+    Both seams are routed: `web_fetch._require_requests`, which is where the
+    request goes now, and this module's own `requests` binding, which is where
+    it went before. Pointing the same script at both is what lets these tests
+    be run against the unfixed tree and fail on behaviour rather than on a
+    missing attribute.
+    """
+    shim, adapter = transport(script)
+    with patch.object(web_fetch, "_require_requests", lambda: shim), \
+         patch.object(web_search, "requests", shim):
+        try:
+            return web_search._ddg_fetch(query), adapter, None
+        except web_search.SearchError as exc:
+            return None, adapter, exc
+
+
+def test_a_redirect_from_the_search_endpoint_to_the_metadata_host_is_refused(offline):
+    """Measured against the old code: the 302 was followed and the metadata
+    endpoint's body came back through `_parse_ddg_html` as a search *result*,
+    with a title, a link and a snippet — the shape a model is meant to believe."""
+    hits, adapter, exc = _scrape([
+        (302, {"Location": "https://169.254.169.254/latest/meta-data/iam/"}, b""),
+        (200, _HTML, _RESULT),
+    ])
+    assert hits is None
+    assert "169.254.169.254" in str(exc)
+    assert len(adapter.dialled) == 1, "the redirect was taken anyway"
+
+
+def test_the_scrape_refusal_is_not_retryable(offline):
+    """A refused destination is refused every time. Raising the transient class
+    would spend the retry budget re-reaching the same address."""
+    _, _, exc = _scrape([(302, {"Location": "http://127.0.0.1:8080/"}, b"")])
+    assert isinstance(exc, web_search.SearchError)
+    assert not isinstance(exc, web_search.TransientSearchError)
+
+
+def test_a_redirect_to_a_public_host_is_still_followed_as_a_get(offline):
+    """The other half — and the POST must not be replayed at a target the
+    responder chose."""
+    hits, adapter, exc = _scrape([
+        (302, {"Location": "https://arxiv.org/html/"}, b""),
+        (200, _HTML, _RESULT),
+    ])
+    assert exc is None
+    assert [h["url"] for h in hits] == ["https://arxiv.org/abs/1"]
+    assert [m for m, _ in adapter.dialled] == ["POST", "GET"]
+
+
+def test_the_scraped_body_is_capped(offline):
+    """`resp.text` had no bound: whatever answered decided how much memory this
+    process spent. A real results page is tens of KB."""
+    _, adapter, _ = _scrape([(200, _HTML, 50 * 1024 * 1024)])
+    read = adapter.raws[-1].read_bytes
+    # An absolute bound first, and deliberately: asserting only against
+    # `_MAX_BODY_BYTES` would move with the constant, so raising the cap to
+    # 500MB would still "pass". A results page is tens of KB.
+    assert read < 5 * 1024 * 1024, f"read {read} bytes scraping a search page"
+    assert read <= web_search._MAX_BODY_BYTES + web_fetch._CHUNK_BYTES
+
+
+def test_an_ordinary_scrape_still_parses(offline):
+    """The whole point of the guard is that the normal path is unchanged."""
+    hits, adapter, exc = _scrape([(200, _HTML, _RESULT)])
+    assert exc is None
+    assert hits == [{
+        "title": "A paper", "url": "https://arxiv.org/abs/1",
+        "snippet": "about things", "source": "arxiv.org",
+        "source_id": "web", "date": "", "hostname": "arxiv.org",
+    }]
+    assert adapter.dialled == [("POST", web_search._DDG_URL)]
+
+
+def test_the_http_status_classification_survives_the_move(offline):
+    """403/429 still land in the right exception classes now that the response
+    arrives via fetch_guarded rather than requests.post."""
+    for status, cls in ((403, web_search.HardBlockError),
+                        (429, web_search.TransientSearchError),
+                        (500, web_search.SearchError)):
+        _, _, exc = _scrape([(status, _HTML, b"")])
+        assert isinstance(exc, cls), f"HTTP {status} -> {exc!r}"
+
+
+def test_the_search_module_makes_no_unguarded_network_call():
+    """The defect was one call site. This is the check that a second one cannot
+    quietly appear beside it."""
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(web_search))
+    calls = [
+        f"{node.func.value.id}.{node.func.attr} (line {node.lineno})"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in ("requests", "urllib", "http", "socket")
+    ]
+    assert calls == [], f"unguarded transport calls in web_search: {calls}"
