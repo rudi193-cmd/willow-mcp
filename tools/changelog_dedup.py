@@ -70,6 +70,12 @@ HEADING_RE = re.compile(r"^### (?P<name>.+?)\s*$")
 CONVENTIONAL_RE = re.compile(
     r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<breaking>!)?:\s*(?P<desc>.+)$"
 )
+# A real breaking-change footer starts a line and ends with a colon. The first
+# version of this was `"BREAKING CHANGE" in body`, which flagged the commit that
+# introduced this file — its message *describes* breaking-change handling. A
+# substring search cannot tell a footer from prose about footers, and the same
+# mistake had already been made once in this repo with `GITHUB_TOKEN`.
+BREAKING_FOOTER_RE = re.compile(r"^BREAKING[ -]CHANGE:", re.MULTILINE)
 
 
 class Bail(Exception):
@@ -133,7 +139,7 @@ def commits_in_range(prev_tag: str, new_tag: str) -> list[dict]:
         m = CONVENTIONAL_RE.match(subject.strip())
         if not m:
             continue                      # not conventional -> release-please ignores it
-        if m.group("breaking") or "BREAKING CHANGE" in body:
+        if m.group("breaking") or BREAKING_FOOTER_RE.search(body):
             raise Bail(
                 f"commit {sha[:7]} is a breaking change. release-please renders "
                 "those in a '⚠ BREAKING CHANGES' block this tool does not model. "

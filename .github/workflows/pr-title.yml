@@ -98,6 +98,42 @@ jobs:
               print("what they really are.")
               sys.exit(1)
 
+          # ── the other direction ────────────────────────────────────────────
+          # The check above stops a *title* inventing a release its commits do
+          # not justify. The mirror case is a commit claiming a release for a
+          # change nobody installs, and it had no guard at all: `fix(ci):
+          # rebuild the changelog section` cut 2.1.5 for edits to tools/ and
+          # .github/, neither of which is packaged. The title was `ci:` and
+          # correctly hidden, so the check above passed — it only ever looked
+          # for the opposite asymmetry.
+          #
+          # This is the third time this class has shipped a version containing
+          # nothing installable (willow-mcp v2.1.1, jeles v0.4.1, 2.1.5), and a
+          # PyPI version can never be reused. The rule is the one already
+          # written down in release-please-config.json: does this change what
+          # someone gets from `pip install willow-mcp`?
+          PACKAGED = ("src/willow_mcp/", "pyproject.toml")
+
+          if commit_releases:
+              files = json.loads(subprocess.run(
+                  ["gh", "pr", "view", os.environ["PR"], "--repo", os.environ["REPO"],
+                   "--json", "files", "--jq", "[.files[].path]"],
+                  capture_output=True, text=True, check=True).stdout)
+              touched = [f for f in files if f.startswith(PACKAGED)]
+              print(f"\npackaged files touched: {touched or 'none'}")
+              if not touched:
+                  print()
+                  print("::error::a commit in this PR cuts a release, but nothing "
+                        "installable changes.")
+                  print(f"Changed files: {files}")
+                  print("A release must alter what `pip install willow-mcp` gives "
+                        "someone. Only these count as packaged:")
+                  print(f"  {', '.join(PACKAGED)}")
+                  print("Retype the commit to a hidden prefix — ci:, test:, docs:, "
+                        "chore: — so it rides along with the next real release "
+                        "instead of cutting one of its own.")
+                  sys.exit(1)
+
           if title_releases:
               print("\nOK — title cuts a release, and so do the commits.")
           else:
