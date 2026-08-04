@@ -4737,9 +4737,11 @@ def willow_web_fetch(
 ) -> dict:
     """Fetch a URL through external-guard (not native WebFetch).
 
-    Returns text with sandwich defense when wrap=True. Blocks private/loopback
-    hosts. Use willow_web_search to discover URLs first. Requires web_net +
-    consent.internet + a live egress lease."""
+    Returns text with sandwich defense when wrap=True. Blocks private, loopback
+    and other non-public destinations — resolving names, not just matching them
+    — and re-checks every redirect hop rather than the first URL alone; the
+    chain taken comes back in `redirects`. Use willow_web_search to discover
+    URLs first. Requires web_net + consent.internet + a live egress lease."""
     from . import web_egress, web_fetch
 
     denial = web_egress.egress_denial(app_id)
