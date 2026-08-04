@@ -108,7 +108,15 @@ jobs:
           # installs it: tests/test_release_wiring.py importorskips on it, so a
           # reordering of that step would turn the release-wiring checks into a
           # silent skip — which is the failure mode those checks exist to catch.
-          pip install -e "." pytest pytest-timeout coverage pyyaml
+          # jeles for the same reason: tests/test_trusted_sources.py importorskips
+          # on jeles.sources to check _TRUSTED_SUFFIXES against the registry that
+          # list is supposed to track. Without it installed the whole drift check
+          # skips green, which is precisely the silence it was written to end.
+          # The floor is load-bearing: `registered_hosts()` and the per-source
+          # `hosts` field arrive in jeles 0.5.0, and an older jeles would make
+          # every check in that file vacuous. It fails rather than skips on an
+          # old one, so this pin is what keeps the failure from being routine.
+          pip install -e "." pytest pytest-timeout coverage pyyaml 'jeles>=0.5.0'
 
       - name: Run tests (under coverage)
         # --timeout-method=thread: dumps every thread's stack and exits even
