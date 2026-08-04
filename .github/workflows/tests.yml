@@ -2,9 +2,12 @@ name: Tests
 
 on:
   push:
-    # Master only — an unfiltered push trigger plus pull_request ran CI
-    # twice on every PR commit.
-    branches: [master]
+    # Filtered, not unfiltered — an unfiltered push trigger plus
+    # pull_request runs CI twice on every PR commit.
+    # Both names: the fleet is split between `main` and `master`, and a
+    # single-name filter turns a default-branch rename into a silently dead
+    # push trigger. Same hedge dependabot-automerge.yml already carries.
+    branches: [main, master]
   pull_request:
   schedule:
     # Daily, off the :00/:30 marks to avoid GitHub's peak-load minutes.
