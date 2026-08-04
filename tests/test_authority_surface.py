@@ -59,3 +59,43 @@ def test_egress_tools_stay_off_full_access():
     fa = gate.PERMISSION_GROUPS["full_access"]
     assert "integration_call" not in fa
     assert gate.NET_PERMISSION not in fa and gate.INTEGRATION_NET_PERMISSION not in fa
+
+
+def _capability_flags() -> dict[str, str]:
+    """The own-line capability flags, read off `gate` rather than retyped.
+
+    Retyping is how the check above went stale: it names `task_net` and
+    `integration_net` and silently omits `web_net`, which was added later and is
+    the newest of the three. Reading the constants means a fifth flag —
+    `mcp_federation`, see docs/design/federated-mcp-gating.md — is covered the
+    day it is declared, with no edit here.
+    """
+    return {
+        name: getattr(gate, name) for name in dir(gate)
+        if name.endswith("_PERMISSION") and isinstance(getattr(gate, name), str)
+    }
+
+
+def test_no_capability_flag_is_a_member_of_any_permission_group():
+    """The own-line rule, as a property rather than three named instances.
+
+    A capability flag is a privilege a manifest lists to unlock an extra
+    capability on a tool it already holds — not a tool name. Landing one inside
+    *any* group means a grant of that group silently carries it, which is what
+    `gate.py` separated `task_net` from `integration_net` from `web_net` to
+    prevent. `full_access` is the group that would hurt most, but it is not the
+    only one that would hurt: `task_queue` carrying `task_net` would be the
+    original B-19 bug wearing a smaller name.
+    """
+    flags = _capability_flags()
+    assert flags, "no *_PERMISSION constants found — has gate.py been renamed?"
+
+    leaks = {
+        f"{const}={value!r}": sorted(
+            group for group, tools in gate.PERMISSION_GROUPS.items() if value in tools)
+        for const, value in flags.items()
+    }
+    leaks = {k: v for k, v in leaks.items() if v}
+    assert not leaks, (
+        "capability flags must be granted on their own manifest line, never "
+        f"bundled into a permission group: {leaks}")
