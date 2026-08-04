@@ -20,6 +20,14 @@ are hidden, along with every fleet-local prefix (`hooks:`, `gate:`, `skills:`,
 the next release rather than cutting one of their own — see
 `release-please-config.json` for why, and for the cost.
 
+## [2.1.3](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.2...v2.1.3) (2026-08-04)
+
+
+### Fixed
+
+* **web_search:** five reproduced defects — misattributed snippets, a HALF_OPEN herd, a leaky trusted_only ([3e9af9d](https://github.com/rudi193-cmd/willow-mcp/commit/3e9af9d3908eddb88c5ff8c73ed7d0762cdc291f))
+* **web_search:** stop attributing a result's snippet to the wrong URL ([d0bd516](https://github.com/rudi193-cmd/willow-mcp/commit/d0bd516bd0a1f57f473b12c88054984ccce18eed))
+
 ## [2.1.2](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.1...v2.1.2) (2026-08-03)
 
 
