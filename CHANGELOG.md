@@ -36,7 +36,6 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 
 ### Fixed
 
-* **web_search:** make the trusted-domain list answerable to jeles' registry ([376930c](https://github.com/rudi193-cmd/willow-mcp/commit/376930cbae3598162e5f095051424b4dee3dd22c))
 * **web_search:** make the trusted-domain list answerable to jeles' registry ([4f3b6de](https://github.com/rudi193-cmd/willow-mcp/commit/4f3b6ded99e52ec7abe6f8b814c8c5ab8628f5fc))
 
 ## [2.1.3](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.2...v2.1.3) (2026-08-04)
@@ -45,7 +44,7 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 ### Fixed
 
 * **web_search:** stop attributing a result's snippet to the wrong URL ([d0bd516](https://github.com/rudi193-cmd/willow-mcp/commit/d0bd516bd0a1f57f473b12c88054984ccce18eed))
-* **web_search:** admit one probe in HALF_OPEN, not the whole backlog ([0073767](https://github.com/rudi193-cmd/willow-mcp/commit/0073767))
+* **web_search:** admit one probe in HALF_OPEN, not the whole backlog ([0073767](https://github.com/rudi193-cmd/willow-mcp/commit/00737672a79b3d422afff80fabce7e38531f18b9))
 
 ## [2.1.2](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.1...v2.1.2) (2026-08-03)
 

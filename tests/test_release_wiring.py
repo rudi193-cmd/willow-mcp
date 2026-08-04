@@ -117,6 +117,50 @@ def test_release_automation_uses_the_pat_everywhere():
     )
 
 
+def test_the_changelog_is_rebuilt_before_auto_merge_is_armed():
+    """Order is the whole point. The correction has to land on the release PR
+    *before* auto-merge can take it, or the release ships with the wrong section
+    and gets fixed afterwards — which is the thing being replaced.
+
+    Three releases in a row were wrong this way. 2.1.2 and 2.1.4 listed the same
+    fix twice (the merge commit and the commit it merged); 2.1.3 listed the merge
+    commit and dropped `0073767` entirely, leaving a shipped fix undocumented.
+    This repo merges with merge commits, and GitHub writes the PR title into the
+    merge commit body, where release-please reads it.
+    """
+    steps = _yaml(_RP_WF)["jobs"]["release-please"]["steps"]
+    names = [s.get("name") or str(s.get("uses", "")) for s in steps]
+
+    def index_of(needle: str) -> int:
+        hits = [i for i, n in enumerate(names) if needle in n]
+        assert hits, f"no step matching {needle!r} in {names}"
+        return hits[0]
+
+    i_action = index_of("release-please-action")
+    i_fix = index_of("Rebuild the changelog")
+    i_arm = index_of("Arm auto-merge")
+    assert i_action < i_fix < i_arm, (
+        f"must run release-please -> rebuild changelog -> arm auto-merge; got {names}"
+    )
+
+    # The tool derives entries from `git log <previous tag>..<this release>`, so
+    # a shallow clone or missing tags would silently change what it computes.
+    checkout = next(s for s in steps
+                    if str(s.get("uses", "")).startswith("actions/checkout"))
+    assert checkout["with"]["fetch-depth"] == 0, "needs full history for the range"
+    assert checkout["with"]["fetch-tags"] is True, "needs tags to find the previous release"
+    assert index_of("actions/checkout") < i_fix
+
+
+def test_the_changelog_tool_exists_and_the_workflow_calls_it():
+    """A workflow step invoking a script nobody ships is a silent no-op — and
+    this one runs on the release path, where nobody is watching."""
+    assert (_REPO / "tools" / "changelog_dedup.py").exists()
+    steps = _yaml(_RP_WF)["jobs"]["release-please"]["steps"]
+    runs = " ".join(str(s.get("run", "")) for s in steps)
+    assert "tools/changelog_dedup.py" in runs
+
+
 def test_only_types_that_change_the_installed_package_cut_a_release():
     """Every un-hidden type releases on its own. jeles shipped v0.4.1 to PyPI
     for a `ci:` commit that touched a workflow file, which is survivable when a
