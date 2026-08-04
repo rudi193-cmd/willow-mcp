@@ -36,7 +36,6 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 
 ### Build
 
-* **deps:** raise the jeles floor to 0.5.1, and settle what a fleet version promises ([f67f484](https://github.com/rudi193-cmd/willow-mcp/commit/f67f4841c9937197a63d8848543857a22f9737f6))
 * **deps:** raise the jeles floor to 0.5.1, where its egress guard is fixed ([041614c](https://github.com/rudi193-cmd/willow-mcp/commit/041614c1d5a15269ffb9c70bc395831d65b3d63a))
 
 ## [2.2.1](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.0...v2.2.1) (2026-08-04)
