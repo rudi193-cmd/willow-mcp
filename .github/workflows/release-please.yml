@@ -79,11 +79,73 @@ jobs:
           fi
           echo "RELEASE_PLEASE_TOKEN present"
 
+      # Needed by the changelog step below, which reads git history rather than
+      # trusting the generated text. `fetch-depth: 0` plus tags is load-bearing:
+      # the entries are derived from `git log <previous tag>..<this release>`,
+      # and a shallow clone cannot see either end of that range.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
       - uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # Correct the section release-please just wrote, on the release PR, before
+      # auto-merge is armed below — so the changelog is right when the release
+      # ships rather than fixed afterwards.
+      #
+      # This repo merges with merge commits rather than squashing, and GitHub
+      # writes the PR title into the merge commit *body*. release-please parses
+      # that body, so one change reaches it twice: once as the real commit, once
+      # as the merge commit carrying its title. 2.1.2 listed the same fix twice;
+      # 2.1.3 listed the merge commit and dropped `0073767` — a shipped fix, left
+      # undocumented, with a synthetic entry standing in for it. Both were
+      # corrected by hand, which is what this replaces.
+      #
+      # No `if:` on a release-please output — whether an open release PR exists is
+      # read from GitHub below, which is the thing actually being acted on. One
+      # less assumption about an action's output names between the check and the
+      # work.
+      - name: Rebuild the changelog section from the commits
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          branch=$(gh pr list --repo "$REPO" --state open --json number,headRefName \
+                     --jq '[.[] | select(.headRefName | startswith("release-please--"))]
+                           | first | .headRefName // empty')
+          if [ -z "$branch" ]; then
+            echo "No open release PR — nothing releasable, nothing to correct."
+            exit 0
+          fi
+
+          git fetch --tags origin "$branch"
+          git checkout "$branch"
+
+          # Exit 2 means the tool found something it does not model (a breaking
+          # change, an unreadable range). Fail the step rather than ship a
+          # section nobody checked — the release PR is still there to fix by hand.
+          python tools/changelog_dedup.py
+
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "release-please's section already matches the commits."
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "chore: rebuild the changelog section from the commits
+
+          release-please parsed the merge commits alongside the commits they
+          merge, because this repo does not squash-merge. See
+          tools/changelog_dedup.py."
+          git push origin "$branch"
 
       # Arm auto-merge, so a release ships when CI goes green rather than when
       # someone remembers the PR is open. Re-armed on every push to master,
