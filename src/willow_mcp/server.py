@@ -4708,9 +4708,13 @@ def willow_institutional_search(
         from jeles import institutional
     except ImportError:  # pragma: no cover - jeles is a declared dependency
         return {"error": (
-            "jeles_missing: institutional search needs the `jeles` package "
-            "(pip install 'jeles>=0.5.0'). It is a declared dependency, so this "
-            "means the install is broken rather than incomplete.")}
+            "jeles_missing: institutional search needs the `jeles` package. "
+            "It is a declared dependency, so this means the install is broken "
+            "rather than incomplete — reinstall with `pip install --force-"
+            "reinstall willow-mcp`. This deliberately names no version: the "
+            "floor lives in pyproject.toml, and the copy that used to be here "
+            "said `jeles>=0.5.0` after the real floor moved to 0.5.1, so it was "
+            "telling operators to install a version this package rejects.")}
 
     # Never raises by contract — a failed hop comes back as ok=False with an
     # explanation, which is why there is no try/except around it. Wrapping it
@@ -4737,9 +4741,11 @@ def willow_web_fetch(
 ) -> dict:
     """Fetch a URL through external-guard (not native WebFetch).
 
-    Returns text with sandwich defense when wrap=True. Blocks private/loopback
-    hosts. Use willow_web_search to discover URLs first. Requires web_net +
-    consent.internet + a live egress lease."""
+    Returns text with sandwich defense when wrap=True. Blocks private, loopback
+    and other non-public destinations — resolving names, not just matching them
+    — and re-checks every redirect hop rather than the first URL alone; the
+    chain taken comes back in `redirects`. Use willow_web_search to discover
+    URLs first. Requires web_net + consent.internet + a live egress lease."""
     from . import web_egress, web_fetch
 
     denial = web_egress.egress_denial(app_id)

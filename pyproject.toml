@@ -30,13 +30,33 @@ classifiers = [
 dependencies = [
     "mcp>=2.0.0,<3.0.0",
     "psycopg2-binary>=2.9,<3.0",
+    # Spans majors deliberately, unlike every other third-party pin here.
+    # cryptography's majors are near-calendar releases that mostly drop old
+    # OpenSSL and old Python rather than change the API this repo uses (Fernet,
+    # x509, hazmat primitives in signing.py/pgp.py/vault.py). Capping at the
+    # next major would mean a release-cadence bump every few months for no
+    # observed break. 50 is the next unreleased major at time of writing, i.e.
+    # "everything shipped, nothing unseen". docs/design/fleet-versioning.md
+    # Rule 1 requires this comment; it named this line as its example of a
+    # documented exception while the line had no comment at all.
     "cryptography>=42.0,<50.0",
     "starlette>=1.3.1,<2.0",
+    # Pre-1.0 and NOT capped at the next minor, unlike the two fleet packages
+    # below. Deliberate, and the exception docs/design/fleet-versioning.md
+    # Rule 1 allows for third parties: uvicorn's 0.x minors are not breaking in
+    # practice, and we do not control its bump policy either way.
     "uvicorn>=0.29,<1.0",
     # Kart task executor (the `willow-mcp worker` engine + task-queue backends).
     # Hard dependency as of B-22 close-out — kartikeya is published on PyPI, so a
     # base `pip install willow-mcp` now ships a working queue drainer.
-    "kartikeya>=0.0.7,<0.1.0",
+    #
+    # Floor raised to the published 0.0.9 rather than left two releases stale.
+    # The cap stays at the next major. A revision of this file briefly made it
+    # `<0.1.0`, on the reasoning that kartikeya ships breaking changes as minors
+    # below 1.0 — see docs/design/fleet-versioning.md Rule 1 for why that was
+    # withdrawn. Short version: kartikeya's own config says its next `feat:` is
+    # 0.1.0, so the tight cap would have expired on the next feature commit.
+    "kartikeya>=0.0.9,<1.0.0",
     # Jeles the Librarian — the ~60 named institutional and academic collections
     # behind `willow_institutional_search`. A hard dependency rather than an
     # extra because the tool is registered unconditionally: an optional import
@@ -44,9 +64,22 @@ dependencies = [
     # is worse than either shipping it or not.
     #
     # Cheap to take: jeles declares no runtime dependencies of its own (stdlib
-    # only, by design), so this adds one wheel and no tree. 0.5.0 is the floor
-    # because that is where the source-host registry lands.
-    "jeles>=0.5.0,<1.0.0",
+    # only, by design), so this adds one wheel and no tree.
+    #
+    # Floor is 0.5.1, not 0.5.0: 0.5.0 is where the source-host registry lands
+    # (what `willow_institutional_search` needs to work) but 0.5.1 is where
+    # jeles' egress guard stops following a redirect to a private address, and
+    # closes a percent-encoded-host bypass of that guard — and that tool reaches
+    # the network through jeles' guard, not this repo's.
+    #
+    # That is also why the cap is `<1.0.0` and not `<0.6.0`. This file briefly
+    # said `<0.6.0`, reasoning that jeles ships breaking changes as minors below
+    # 1.0 so a `<1.0.0` cap promises nothing. True, and the wrong fix: the cap
+    # is what carries a jeles security patch to users, and the tool it guards is
+    # the one whose SSRF defence lives in jeles. A tight cap would have frozen
+    # that defence at 0.5.x until this package cut a release of its own. See
+    # docs/design/fleet-versioning.md, Rule 1.
+    "jeles>=0.5.1,<1.0.0",
     "requests>=2.31,<3.0",
 ]
 
@@ -92,6 +125,19 @@ Homepage = "https://github.com/rudi193-cmd/willow-mcp"
 Repository = "https://github.com/rudi193-cmd/willow-mcp"
 Issues = "https://github.com/rudi193-cmd/willow-mcp/issues"
 Changelog = "https://github.com/rudi193-cmd/willow-mcp/blob/master/CHANGELOG.md"
+
+[tool.willow.fleet]
+# The packages this operator releases, and therefore the ones whose bump policy
+# we know. docs/design/fleet-versioning.md Rule 1 caps a pre-1.0 one at its next
+# minor, because below 1.0 our release configs ship breaking changes as minors.
+#
+# This list exists so `tests/test_fleet_versioning.py` has ONE place to read the
+# roster from. It used to be a hardcoded set inside that test, which meant a
+# fourth package could join with exactly the bug the test exists to prevent and
+# the test would pass — and that shrinking the set to `{"jeles"}` silently
+# disabled it. Adding a package here now forces both a correct pin and a row in
+# the doc's Rule 2 table, which is where its public surface gets decided.
+packages = ["willow-mcp", "jeles", "kartikeya"]
 
 [tool.hatch.version]
 # Derived from the git tag (hatch-vcs). At an exact tag `vX.Y.Z` the version is
