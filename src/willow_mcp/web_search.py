@@ -17,6 +17,8 @@ from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 
 import requests
 
+from . import web_fetch
+
 log = logging.getLogger("willow_mcp.web_search")
 
 _USER_AGENT = "Mozilla/5.0 (compatible; Willow-mcp/2.0; +https://github.com/rudi193-cmd/willow-mcp)"
@@ -280,6 +282,11 @@ def _parse_ddg_html(text: str, max_results: int) -> list[dict[str, Any]]:
 # of KB; a "no results"/interstitial page is small.
 _PARSER_MISS_MIN_BODY = 2000
 
+#: Cap on the scraped body. A real DDG results page is tens of KB, and this is
+#: read from whatever answered the request — `resp.text` had no bound at all,
+#: so a 50MB answer was 50MB of resident string before a regex ever ran.
+_MAX_BODY_BYTES = 2_000_000
+
 
 def _looks_like_results_page(html_text: str) -> bool:
     """Heuristic: did DDG return a substantial results-style page (vs. an empty
@@ -302,20 +309,40 @@ def _ddg_fetch(query: str, max_results: int = 8) -> list[dict[str, Any]]:
     A 200-OK results-style page that parses to 0 links is logged as a
     `parser_miss` (likely DDG HTML structure drift) — detection only; the call
     still returns [] and the chain's retry/fallback handle the empty result.
+
+    **The POST goes through `web_fetch.fetch_guarded`, not `requests` directly.**
+    It used to be a bare `requests.post` with no `allow_redirects=False` and no
+    destination check anywhere in this module, so `requests` followed the whole
+    chain inside `post()`: one 302 from the search endpoint and the body being
+    scraped came from wherever the `Location:` pointed. Reproduced against the
+    real requests stack — a redirect to `169.254.169.254` was followed and its
+    contents came back through `_parse_ddg_html` as a search result, complete
+    with a link and a snippet, which is a worse shape for this to arrive in than
+    a raw body: results are what a model is meant to believe.
+
+    `willow_web_search` sits on the same `web_read` grant as `willow_web_fetch`
+    (gate.py), which had this exact defect fixed. A grant is only as strong as
+    its weakest tool, so this now calls the same guard rather than a copy of it.
     """
     q = query.strip()
     if not q:
         return []
     try:
-        resp = requests.post(
+        resp, raw, _ = web_fetch.fetch_guarded(
             _DDG_URL,
+            method="POST",
             data={"q": q, "b": "", "kl": "us-en"},
             headers={"User-Agent": _USER_AGENT},
             # This is the one thing bounding how far a single attempt can
             # overrun the retry budget (see `_with_retry`), so it is a knob
             # rather than a literal.
             timeout=_env_float("WILLOW_SEARCH_HTTP_TIMEOUT", 12.0),
+            max_bytes=_MAX_BODY_BYTES,
         )
+    except web_fetch.RefusedFetch as exc:
+        # Not transient: retrying reaches the same refused destination. Let the
+        # chain advance to the next provider instead of hammering this one.
+        raise SearchError(f"destination refused: {exc}") from exc
     except requests.Timeout as exc:
         raise TransientSearchError(f"timeout: {exc}") from exc
     except requests.ConnectionError as exc:
@@ -323,6 +350,10 @@ def _ddg_fetch(query: str, max_results: int = 8) -> list[dict[str, Any]]:
     except requests.RequestException as exc:
         raise SearchError(f"request failed: {exc}") from exc
 
+    # `resp.text` is unavailable — the body was streamed and capped, and the
+    # response is closed. Decoding by the declared charset is what `.text` does
+    # first; its chardet fallback is not worth carrying for a scrape.
+    body = raw.decode(resp.encoding or "utf-8", errors="replace")
     status = resp.status_code
     if status in _HARD_BLOCK_STATUS:
         raise HardBlockError(f"hard block (HTTP {status})")
@@ -331,15 +362,15 @@ def _ddg_fetch(query: str, max_results: int = 8) -> list[dict[str, Any]]:
     if status >= 400:
         raise SearchError(f"HTTP {status}")
 
-    hits = _parse_ddg_html(resp.text, max_results)
-    if not hits and _looks_like_results_page(resp.text):
+    hits = _parse_ddg_html(body, max_results)
+    if not hits and _looks_like_results_page(body):
         _log_search_event(
             query_hash=_query_hash(q), provider="ddg_html", status="parser_miss",
-            result_count=0, body_bytes=len(resp.text), cache_hit=False,
+            result_count=0, body_bytes=len(body), cache_hit=False,
         )
         log.warning(
             "ddg parser miss — HTTP 200, %d-byte results-like body, 0 links parsed; "
-            "DDG HTML structure may have changed (_LINK_RE)", len(resp.text),
+            "DDG HTML structure may have changed (_LINK_RE)", len(body),
         )
     return hits
 

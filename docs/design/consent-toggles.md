@@ -318,6 +318,16 @@ only, and blocking the LAN is correct for them. They are listed because they
 show that the codebase already has a concept of "the LAN is a different place",
 implemented three times, inconsistently, with no key behind it.
 
+> **Superseded as a description of the code (2026-08-04).** The two guards this
+> section quotes no longer exist as written. `web_fetch.py` now resolves names
+> before judging them and checks every redirect hop, and `mai/parser.py` has no
+> host guard of its own at all — the regex above was deleted and `@http` calls
+> `web_fetch.fetch_guarded`, as does `web_search`. The count in the paragraph
+> above is the part that aged best: "implemented three times, inconsistently"
+> was the defect, and it is now implemented once. The observation this section
+> was making — that a destination class is being governed by ad-hoc code rather
+> than by a key — still stands, and the recommendation below is untouched.
+
 ### Recommendation: **ENFORCE**
 
 `lan` names a real destination class that three live code paths reach and that

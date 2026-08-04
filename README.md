@@ -713,7 +713,10 @@ deliberately outside `full_access` — unlocks the side-effectful
 `@db`/`@http`/`@env` directives inside `render()`. Even with that grant:
 `@db` connections must be allowlisted in the manifest's `"mai_connections"`
 list and never default to the willow database; `@http` honors the operator's
-`consent.internet` plus an SSRF host blocklist; and `@env` resolves only keys
+`consent.internet` and reaches the network only through `web_fetch`'s guarded
+path — the same destination check `willow_web_fetch` uses, which resolves names
+before judging them and re-checks every redirect hop, rather than the hostname
+blocklist it used to carry; and `@env` resolves only keys
 named in the operator's `WILLOW_MAI_ENV_ALLOW` (comma-separated, default
 deny), with credential-shaped keys never resolving at all.
 

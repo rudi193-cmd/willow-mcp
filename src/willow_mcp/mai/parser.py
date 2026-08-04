@@ -130,20 +130,38 @@ def _db_connection_allowed(app_id: str, name: str) -> bool:
     return isinstance(allowed, list) and name in allowed
 
 
-_BLOCKED_HTTP_HOST_RE = re.compile(
-    r"^(localhost|0\.0\.0\.0|127\.|10\.|169\.254\.|192\.168\.|"
-    r"172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?|metadata\b)",
-    re.I,
-)
+#: Cap on an @http body. A directive that fetches a JSON endpoint has no
+#: business pulling an unbounded response into the rendered document.
+_MAX_HTTP_BYTES = 1_000_000
 
-
-def _http_host_blocked(url: str) -> bool:
-    """Block SSRF to loopback / link-local / private / metadata hosts (#161)."""
-    from urllib.parse import urlparse
-    p = urlparse(url)
-    if p.scheme not in ("http", "https"):
-        return True
-    return bool(_BLOCKED_HTTP_HOST_RE.match(p.hostname or ""))
+# There is no host guard in this file any more, deliberately. `_handle_http`
+# calls `web_fetch.fetch_guarded`, the single guarded path behind the `web_read`
+# grant, and this is what it replaced:
+#
+#     _BLOCKED_HTTP_HOST_RE = re.compile(
+#         r"^(localhost|0\.0\.0\.0|127\.|10\.|169\.254\.|192\.168\.|"
+#         r"172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?|metadata\b)", re.I)
+#
+# matched against `urlparse(url).hostname` — a string, never resolved — under a
+# docstring that said "Block SSRF to loopback / link-local / private / metadata
+# hosts". Measured pass-throughs: a public name whose A record is `127.0.0.1`
+# (nothing was resolved, so this is the whole class), `2130706433` and
+# `0177.0.0.1` (decimal and octal loopback, which every resolver reads as
+# 127.0.0.1), `100.64.1.1` (CGNAT — where cloud and ISP internals are
+# numbered), `[::ffff:127.0.0.1]` (IPv4-mapped loopback) and
+# `[64:ff9b::a9fe:a9fe]` (NAT64-wrapped 169.254.169.254).
+#
+# Behind it, `urllib.request.urlopen(url)` on the DEFAULT opener: it follows
+# redirects itself, so the one string that was checked was the only hop the
+# guard ever saw, and its redirect filter permits `ftp:` as well as http(s).
+# Both measured — a 302 from a public URL to `169.254.169.254` was followed and
+# its body returned as the directive's value.
+#
+# Lower severity than the other two paths on this grant — @http needs
+# WILLOW_MCP_MARKDOWNAI=1, the markdownai_directives grant, and operator
+# consent.internet before it runs at all — but a docstring claiming a defence
+# it does not have is its own defect, and it read as one to everyone who
+# reviewed the gate above it.
 
 
 def _handle_env(attrs: dict[str, str], _content: str, app_id: str = "") -> str:
@@ -229,6 +247,14 @@ def _handle_render(data: Any, attrs: dict[str, str]) -> str:
 
 
 def _handle_http(attrs: dict[str, str], _content: str, app_id: str = "") -> Any:
+    """Fetch a URL named by a @http directive, through the guarded egress path.
+
+    The destination decision belongs to `web_fetch.fetch_guarded` and not to
+    this file: it resolves names before judging them, it reads the host the way
+    the transport will, it validates every redirect hop instead of only the
+    first URL, and it refuses anything that is not http(s). The comment beside
+    `_MAX_HTTP_BYTES` records what used to be here and what walked past it.
+    """
     url = _resolve_value(attrs.get("url", attrs.get("src", "")))
     if not url:
         return {"error": "no url"}
@@ -240,24 +266,24 @@ def _handle_http(attrs: dict[str, str], _content: str, app_id: str = "") -> Any:
     if not consent.internet_permitted():
         return {"error": "@http refused: operator consent.internet is not granted "
                          "(#161 / B-29)"}
-    if _http_host_blocked(url):
-        return {"error": "@http refused: host not allowed "
-                         "(loopback/link-local/private/metadata blocked — #161)"}
     cache_key = f"http:{url}"
     if cache_key in _cache:
         return _cache[cache_key]
+    from willow_mcp import web_fetch
     try:
-        import urllib.request
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            body = resp.read().decode("utf-8", errors="replace")
-        try:
-            result = json.loads(body)
-        except Exception:
-            result = body
-        _cache[cache_key] = result
-        return result
+        _resp, raw, _followed = web_fetch.fetch_guarded(
+            url, timeout=10, max_bytes=_MAX_HTTP_BYTES)
+    except web_fetch.RefusedFetch as exc:
+        return {"error": f"@http refused: {exc} (#161)"}
     except Exception as e:
         return {"error": str(e)}
+    body = raw.decode("utf-8", errors="replace")
+    try:
+        result = json.loads(body)
+    except Exception:
+        result = body
+    _cache[cache_key] = result
+    return result
 
 
 # ── Phase / Macro ─────────────────────────────────────────────────────────────
