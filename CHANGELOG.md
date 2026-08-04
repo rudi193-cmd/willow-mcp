@@ -31,6 +31,14 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.1.4](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.3...v2.1.4) (2026-08-04)
+
+
+### Fixed
+
+* **web_search:** make the trusted-domain list answerable to jeles' registry ([376930c](https://github.com/rudi193-cmd/willow-mcp/commit/376930cbae3598162e5f095051424b4dee3dd22c))
+* **web_search:** make the trusted-domain list answerable to jeles' registry ([4f3b6de](https://github.com/rudi193-cmd/willow-mcp/commit/4f3b6ded99e52ec7abe6f8b814c8c5ab8628f5fc))
+
 ## [2.1.3](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.2...v2.1.3) (2026-08-04)
 
 
