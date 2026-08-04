@@ -36,7 +36,6 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 
 ### Fixed
 
-* **egress:** close the last two unguarded paths on the web_read grant ([e9ffc4b](https://github.com/rudi193-cmd/willow-mcp/commit/e9ffc4b2e91fbf75420faf621cafbbf027e9c02b))
 * **egress:** two more unguarded paths on the same permission line, and a cap that capped nothing ([934cd60](https://github.com/rudi193-cmd/willow-mcp/commit/934cd606bbda575a9de1f9d2b378b9065c67853e))
 
 
