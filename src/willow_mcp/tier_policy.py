@@ -104,6 +104,7 @@ TOOL_CLASS: dict[str, str] = {
     "agent_route": EXECUTE, "agent_dispatch_result": EXECUTE,
     "integration_call": EXECUTE,              # export-gated (see EGRESS_TOOLS)
     "willow_web_search": EXECUTE, "willow_web_fetch": EXECUTE,
+    "willow_institutional_search": EXECUTE,   # export-gated (see EGRESS_TOOLS)
     "fork_create": WRITE, "fork_join": WRITE, "fork_log": WRITE,
     "fork_merge": WRITE, "fork_delete": WRITE,
     "envelope_apply": EXECUTE,
@@ -115,7 +116,10 @@ TOOL_CLASS: dict[str, str] = {
 # `execute` class ONLY on a non-read-only tier, and still require the manifest's
 # own-line grant (task_net / integration_call are excluded from full_access on
 # purpose). The tier is a *third* gate, never a replacement for the own-line one.
-EGRESS_TOOLS: frozenset = frozenset({"integration_call", "willow_web_search", "willow_web_fetch"})
+EGRESS_TOOLS: frozenset = frozenset({
+    "integration_call", "willow_web_search", "willow_web_fetch",
+    "willow_institutional_search",
+})
 
 # Cumulative class sets by trust level. Mirrors session_binder.TRUST_LEVELS:
 #   0 Exiled (read_only, entry denied)  1 Rookie (read_only)

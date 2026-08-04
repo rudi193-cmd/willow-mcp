@@ -105,7 +105,7 @@ def _read_call_credential() -> Optional[dict]:
     from the `ServerRequestContext` the SDK hands it. SDK 1.x had an ambient
     `mcp.server.lowlevel.server.request_ctx`; 2.0 removed it deliberately and
     injects `Context` into tool functions instead — an injection that does not
-    reach a decorator wrapping 103 tools. See willow_mcp/request_context.py for
+    reach a decorator wrapping 104 tools. See willow_mcp/request_context.py for
     why the replacement is a ContextVar we own rather than one the SDK might
     move again.
     """
@@ -4668,6 +4668,63 @@ def willow_web_search(
         include_handoffs=include_handoffs,
     )
     return {"query": query, "results": hits, "count": len(hits)}
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+@_guarded("willow_institutional_search")
+def willow_institutional_search(
+    app_id: str,
+    query: str,
+    max_results: int = 10,
+    sources: list[str] | None = None,
+    limit_per_source: int = 3,
+) -> dict:
+    """Search ~60 named institutional and academic collections — arXiv, PubMed,
+    Crossref, OpenAlex, Library of Congress, Europeana, CourtListener, the
+    Smithsonian — and return citable results.
+
+    Every hit carries `confidence: "institutional"` because a named collection
+    was actually queried, not because its hostname looked reputable. Use this
+    when a claim needs backing; use `willow_web_search` for the open web.
+
+    Read `ok` before `hits`: `ok` true with no hits means the collections had
+    nothing, `ok` false means no source completed a look. `sources_queried`,
+    `failed`, `skipped` and `timed_out` say which is which. `sources` narrows
+    the fan-out to specific registered ids.
+
+    `max_results` caps the *returned* hits; `total` is the count before that cap,
+    so a caller can tell whether there was more. `limit_per_source` is jeles'
+    own knob and is per collection, not overall — with ~60 sources the default
+    of 3 can produce far more hits than `max_results` keeps.
+
+    Requires web_net + consent.internet + a live egress lease."""
+    from . import web_egress
+
+    denial = web_egress.egress_denial(app_id)
+    if denial:
+        return denial
+
+    try:
+        from jeles import institutional
+    except ImportError:  # pragma: no cover - jeles is a declared dependency
+        return {"error": (
+            "jeles_missing: institutional search needs the `jeles` package "
+            "(pip install 'jeles>=0.5.0'). It is a declared dependency, so this "
+            "means the install is broken rather than incomplete.")}
+
+    # Never raises by contract — a failed hop comes back as ok=False with an
+    # explanation, which is why there is no try/except around it. Wrapping it
+    # would turn a legible refusal into an opaque one.
+    result = institutional.search_institutional(
+        query, sources_filter=sources, limit_per_source=limit_per_source)
+
+    # jeles' limit is per source. Truncate here so `max_results` means what it
+    # says on every other search tool, and keep `total` as jeles reported it so
+    # the truncation is visible rather than silent.
+    hits = list(result.get("hits") or [])
+    return {"query": query, **result,
+            "hits": hits[:max_results],
+            "count": min(len(hits), max_results)}
 
 
 @mcp.tool(annotations={"readOnlyHint": True})
