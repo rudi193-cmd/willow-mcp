@@ -4708,9 +4708,13 @@ def willow_institutional_search(
         from jeles import institutional
     except ImportError:  # pragma: no cover - jeles is a declared dependency
         return {"error": (
-            "jeles_missing: institutional search needs the `jeles` package "
-            "(pip install 'jeles>=0.5.0'). It is a declared dependency, so this "
-            "means the install is broken rather than incomplete.")}
+            "jeles_missing: institutional search needs the `jeles` package. "
+            "It is a declared dependency, so this means the install is broken "
+            "rather than incomplete — reinstall with `pip install --force-"
+            "reinstall willow-mcp`. This deliberately names no version: the "
+            "floor lives in pyproject.toml, and the copy that used to be here "
+            "said `jeles>=0.5.0` after the real floor moved to 0.5.1, so it was "
+            "telling operators to install a version this package rejects.")}
 
     # Never raises by contract — a failed hop comes back as ok=False with an
     # explanation, which is why there is no try/except around it. Wrapping it

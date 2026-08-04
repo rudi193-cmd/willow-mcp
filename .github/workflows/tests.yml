@@ -102,8 +102,13 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # PyPI kartikeya lags merged master (allow_db, cgroup caps) — drop once 0.0.7 ships.
-          pip install "git+https://github.com/rudi193-cmd/kartikeya@master"
+          # kartikeya comes from PyPI via `pip install -e "."`, at the version
+          # this repo's pin actually resolves. It used to be installed from git
+          # master here, with the note "PyPI kartikeya lags merged master
+          # (allow_db, cgroup caps) — drop once 0.0.7 ships". 0.0.7, 0.0.8 and
+          # 0.0.9 have all shipped, and the published 0.0.9 carries both
+          # features. Leaving it meant CI tested a version no user could get,
+          # so the pin was never exercised by anything.
           # pyyaml is declared here, not left to the mai_lint step that also
           # installs it: tests/test_release_wiring.py importorskips on it, so a
           # reordering of that step would turn the release-wiring checks into a
@@ -113,7 +118,11 @@ jobs:
           # stays named here anyway: two test files `importorskip` on it, and if
           # it ever moved back to an extra those checks would skip green rather
           # than fail — which is the silence they were written to end.
-          pip install -e "." pytest pytest-timeout coverage pyyaml 'jeles>=0.5.0'
+          # `jeles` with no version: `pip install -e "."` applies the floor and
+          # cap from pyproject.toml, and a range restated here is a second copy
+          # that goes stale silently. It did — this line still said `>=0.5.0`
+          # after the real floor moved to 0.5.1 for the egress-guard fix.
+          pip install -e "." pytest pytest-timeout coverage pyyaml jeles
 
       - name: Run tests (under coverage)
         # --timeout-method=thread: dumps every thread's stack and exits even
