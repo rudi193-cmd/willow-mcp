@@ -19,6 +19,7 @@ number-scanner (dates, ports, versions, and one-off counts in prose are not
 Add a new entry when the next live claim shows up; don't try to generalize
 ahead of a second real case.
 """
+import ast
 import re
 import sys
 from pathlib import Path
@@ -40,6 +41,25 @@ def guarded_tool_count() -> int:
     diagnostic_summary are the deliberate exceptions)."""
     text = _SERVER_PY.read_text(encoding="utf-8")
     return len(re.findall(r"(?m)^@_guarded\(", text))
+
+
+def permission_group_count() -> int:
+    """Keys in `gate.py`'s PERMISSION_GROUPS — read by parsing the module,
+    not importing it, so the lint stays runnable without the package's
+    dependencies installed.
+
+    Added after README.md said "(42 groups)" while the real count was 43:
+    `web_read` had grown a third tool and the group table a new entry, and the
+    number beside the pointer to the authoritative set was the one thing not
+    derived from it.
+    """
+    text = (_REPO / "src" / "willow_mcp" / "gate.py").read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    for node in ast.walk(tree):
+        target = getattr(node, "target", None)
+        if isinstance(node, ast.AnnAssign) and getattr(target, "id", "") == "PERMISSION_GROUPS":
+            return len(node.value.keys)
+    raise ValueError("PERMISSION_GROUPS not found in gate.py as an annotated dict literal")
 
 
 def pre_tool_use_guard_count() -> int:
@@ -86,6 +106,8 @@ _LIVE_COUNT_CLAIMS = [
      "server exposes N tools", registered_tool_count),
     ("tools/README.md", r"the (\d+) willow-mcp tools",
      "the N willow-mcp tools", registered_tool_count),
+    ("README.md", r"\((\d+) groups\)",
+     "(N groups)", permission_group_count),
 ]
 
 

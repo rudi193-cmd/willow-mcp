@@ -244,7 +244,7 @@ deliberately block or mislabel.**
 | `$OLLAMA_HOST` | `nest/embed.py:22`, `nest/llm.py:26` | ungated |
 | `$WILLOW_KOKORO_URL` | `voice/kokoro_speak.py:24` | ungated |
 | `@http` private-range block | `mai/parser.py:133-146` | blocks by **hostname regex** |
-| `willow_web_fetch` private block | `web_fetch.py:35-54` | blocks by parsed IP + `.local`/`.internal` suffix |
+| `willow_web_fetch` private block | `web_fetch.py:128-172` (`_is_blocked_host`), `:175-208` (`validate_fetch_url`), `:215-248` (`_get_checking_every_hop`) | **resolves** the name, then blocks by address — re-checked on every redirect hop |
 | `gates --serve` bind host | `gates_serve.py:166-175` | ingress, not egress — out of scope for an egress key |
 
 ### `# allow_localhost` does not mean localhost
@@ -274,7 +274,7 @@ name that says neither. It is gated by `consent.internet` — which is not wrong
 (it does reach the internet) but leaves `consent.lan` with nothing to do while
 the key it *should* own is the one the operator would reach for.
 
-### The private-range guards are name-based, not address-based
+### One private-range guard is name-based; the other stopped being
 
 `mai/parser.py:133-137`:
 
@@ -290,11 +290,28 @@ absent; `.local` mDNS is absent; and any DNS name that resolves into the LAN
 (`nas.home`, `printer`, a split-horizon record) is not matched at all. A LAN
 destination therefore reaches the network through the *internet* gate.
 
-`web_fetch.py:35-54` is the stronger of the two — it parses the host as an IP
-and rejects `is_private`/`is_loopback`/`is_link_local`/`is_reserved`/
-`is_multicast`, plus `.local` and `.internal` suffixes. Still name-based: a
-public DNS name resolving to an RFC1918 address passes, because there is no
-post-resolution check.
+`web_fetch.py` **used to be** the same shape and no longer is. Its guard was
+rewritten after an audit of jeles' sibling and now resolves before deciding:
+`_is_blocked_host` (`:128-172`) calls `getaddrinfo` on a name and tests every
+returned address, so a public record pointing at `127.0.0.1` is refused rather
+than followed. Three further gaps went with it — percent-escaped hostnames are
+decoded and checked in both views (`_dialled_hosts`, `:89-102`), the
+octal/decimal/short forms every resolver accepts are normalised through
+`inet_aton` (`_as_address`, `:69-86`), and `not addr.is_global` is ORed onto the
+explicit list so `100.64.0.0/10` and the NAT64 prefix are covered. Redirects,
+which previously bypassed the check entirely because `requests` followed the
+chain internally, are now walked by hand with `validate_fetch_url` applied to
+each hop (`_get_checking_every_hop`, `:215-248`). Behind a proxy it deliberately
+does *not* resolve (`_proxy_dials_for`, `:105-125`): the proxy is the TCP peer,
+so resolving locally would refuse legitimate split-horizon hosts for a reason
+that is not true — literal addresses are still refused on that path.
+
+Two residuals, stated rather than papered over: resolve-then-connect is two
+lookups, so a name that answers public and then private wins a race; and behind
+a proxy the destination ACL is the proxy's to enforce. Both are documented at
+`validate_fetch_url`'s docstring rather than left implied.
+
+So the LAN-blocking claim below applies to `mai/parser.py` alone.
 
 Neither of these is a `consent.lan` bug — both tools are meant to be open-web
 only, and blocking the LAN is correct for them. They are listed because they

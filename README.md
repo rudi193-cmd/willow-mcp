@@ -131,6 +131,9 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `integration_list` | The integration ledger: every outbound adapter, live or **declared stub**, with credential *source* (never the value) |
 | `integration_status` | Offline readiness readout for one adapter — live/stub, credential presence, and whether the egress gate would pass. No network call |
 | `integration_call` | Call an external API through a registered adapter — behind the three-key egress gate, keyed on `integration_net` (own line, never implied by `task_net` or `full_access`) |
+| `willow_web_search` | Open-web search with the results run through **external-guard** — the guarded replacement for a client's native web tool. `web_read` + `web_net` + `consent.internet` + a live lease |
+| `willow_web_fetch` | Fetch one URL through the destination guard: the host is **resolved** and every address tested (not just literals), every redirect hop re-checked, body scanned by external-guard and sandwich-wrapped. Returns the `redirects` chain actually followed |
+| `willow_institutional_search` | Fan a query across jeles' registered institutional/academic collections (arXiv, PubMed, Crossref, OpenAlex, …) — citable sources rather than open web. Same `web_read` line as the two above, so one grant covers all three |
 | `receipts_tail` | Read your own most-recent tool-call receipts — a self-audit trail scoped to your `app_id` |
 | `whoami` | Report your own identity and effective permissions — app_id, role, permission groups, the resolved set of tools you can call (minus `deny_tools`), and your `store_scope`. Ungated, like `diagnostic_summary` |
 | `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/worker/consent/egress-lease/env health, with a verdict and named fixes. Ungated — see below |
@@ -676,7 +679,7 @@ needs a manifest at `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json`:
 
 `permissions` is a list of group names and/or literal tool names —
 see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the authoritative set
-(42 groups). Common ones: `store_read`, `store_write`, `knowledge_read`,
+(43 groups). Common ones: `store_read`, `store_write`, `knowledge_read`,
 `knowledge_write`, `schema_admin`, `task_queue`, `agent_dispatch`,
 `dispatch_read`, `dispatch_write`, `fleet_read`, `context`, `audit`,
 `gap_read`, `gap_write`, `gap_promote`, `fork_read`, `fork_write`, `nest_read`,

@@ -387,7 +387,14 @@ marked OPEN when that landed and [issue #233](https://github.com/rudi193-cmd/wil
 was later filed against the stale wording, not a live gap.
 
 Re-verified live 2026-08-01 against both `kartikeya` HEAD and the installed
-`kartikeya==0.0.7` wheel this repo pins (`pyproject.toml`: `kartikeya>=0.0.7,<0.1.0`):
+`kartikeya==0.0.7` wheel, which is what this repo pinned at the time
+(`kartikeya>=0.0.7,<0.1.0`). The floor has since moved to
+`kartikeya>=0.0.9,<1.0.0` (`pyproject.toml`) — the cap widened because
+kartikeya set `bump-minor-pre-major: false`, so a breaking change there now cuts
+1.0.0 and `<1.0.0` is a real compatibility range rather than one that accepted
+every version the config could emit; see `docs/design/fleet-versioning.md`. The
+scan behaviour below is unchanged across 0.0.7 → 0.0.9 and its regression test
+still ships:
 `check_kart_task("find / -delete")` and `check_kart_task("cat /dev/zero > /dev/sda")`
 both return a blocking `destructive`-category error. `kartikeya`'s own
 `tests/test_task_scan.py::test_destructive_gaps_are_blocked` covers this exact
