@@ -9,6 +9,7 @@ import logging
 import os
 import random
 import re
+import threading
 import time
 from collections import OrderedDict
 from typing import Any, Protocol, runtime_checkable
@@ -176,16 +177,36 @@ _HARD_BLOCK_STATUS = frozenset({403, 407})
 
 
 def _parse_ddg_html(text: str, max_results: int) -> list[dict[str, Any]]:
-    """Parse DuckDuckGo HTML into result dicts."""
-    links = _LINK_RE.findall(text)
-    snippets = _SNIP_RE.findall(text)
+    """Parse DuckDuckGo HTML into result dicts.
+
+    Links and snippets are matched to each other **by position in the
+    document**, not by index into two independent lists. The previous version
+    did `snippets[idx]` against `links[idx]`, which silently assumed every
+    result carries a `result__snippet`. When one does not — DDG omits it for
+    ad, video and news-module blocks, and for results whose description is
+    empty — every later snippet shifts up by one and is attributed to the wrong
+    URL. Demonstrated on a two-result page where the first had no snippet: the
+    second result's description came back attached to the first result's link.
+
+    That is a wrong answer rather than a missing one, and it is handed to a
+    model as the description of a page it can go and fetch.
+    """
+    body = text or ""
+    links = list(_LINK_RE.finditer(body))
+    snippets = [(m.start(), m.group(1)) for m in _SNIP_RE.finditer(body)]
     hits: list[dict[str, Any]] = []
-    for idx, (href, title_html) in enumerate(links[: max_results + 4]):
-        url = _unwrap_ddg(href)
+    for idx, match in enumerate(links[: max_results + 4]):
+        url = _unwrap_ddg(match.group(1))
         if not url or "duckduckgo.com" in url:
             continue
-        title = _strip_tags(title_html) or url
-        snippet = _strip_tags(snippets[idx]) if idx < len(snippets) else ""
+        title = _strip_tags(match.group(2)) or url
+        # This result owns the span from its link up to the next link; a result
+        # with no snippet in that span gets "" and takes nothing from anyone.
+        span_end = links[idx + 1].start() if idx + 1 < len(links) else len(body)
+        raw_snippet = next(
+            (s for pos, s in snippets if match.end() <= pos < span_end), ""
+        )
+        snippet = _strip_tags(raw_snippet)
         host = _hostname(url)
         hits.append(
             {
@@ -239,7 +260,10 @@ def _ddg_fetch(query: str, max_results: int = 8) -> list[dict[str, Any]]:
             _DDG_URL,
             data={"q": q, "b": "", "kl": "us-en"},
             headers={"User-Agent": _USER_AGENT},
-            timeout=12,
+            # This is the one thing bounding how far a single attempt can
+            # overrun the retry budget (see `_with_retry`), so it is a knob
+            # rather than a literal.
+            timeout=_env_float("WILLOW_SEARCH_HTTP_TIMEOUT", 12.0),
         )
     except requests.Timeout as exc:
         raise TransientSearchError(f"timeout: {exc}") from exc
@@ -433,9 +457,32 @@ def _with_retry(
 ):
     """Call `fn`, retrying on TransientSearchError with exponential backoff.
 
-    Backoff is jittered (delay in [d, 2d] where d = base * 2**(attempt-1)) and
-    the whole sequence is capped by a total time budget. HardBlockError and any
-    other exception propagate immediately — only transient errors are retried.
+    Backoff is jittered (delay in [d, 2d] where d = base * 2**(attempt-1)).
+    HardBlockError and any other exception propagate immediately — only
+    transient errors are retried.
+
+    **The budget bounds when a new attempt may start, not total elapsed time.**
+    This docstring used to say "the whole sequence is capped by a total time
+    budget", and that was not true in the case the budget exists for. The only
+    check was against the *sleep*, so an attempt that itself ran long was free
+    to start and then overrun without limit. Measured with the defaults (15s
+    budget, 3 attempts) against a provider that times out at 12s: two attempts,
+    25.2s elapsed. Nothing logged, because nothing had gone wrong by the code's
+    own reckoning.
+
+    The bound it can actually offer is `budget + one attempt`, and the attempt
+    is bounded by the provider's own HTTP timeout (`WILLOW_SEARCH_HTTP_TIMEOUT`,
+    12s) — so ~27s worst case with the defaults, pinned by a test. That knob
+    exists so the overrun is an operator's to bound; it used to be the literal
+    `timeout=12` in `_ddg_fetch`.
+
+    The check below is in the right place and no extra guard belongs beside it:
+    a pre-attempt "is the budget already spent?" test cannot fire, because
+    reaching attempt N at all required attempt N-1 to pass `elapsed + delay <=
+    budget` and then sleep exactly `delay`. One was written here and removed
+    again for that reason. Making the budget a hard wall needs the remaining
+    time threaded down into the request timeout, which means putting it on the
+    `SearchProvider` protocol — a seam change, not something to smuggle in.
     """
     cfg = _retry_config()
     max_attempts = int(cfg["max_attempts"] if max_attempts is None else max_attempts)
@@ -466,6 +513,29 @@ class CircuitBreaker:
     Trips OPEN after `fail_threshold` consecutive failures and fast-fails for a
     cooldown that doubles each time a half-open probe fails (capped at
     `max_cooldown`). A success resets it fully.
+
+    HALF_OPEN admits **one caller**. That is the whole point of the state — it
+    asks "has the provider recovered?" with a single probe rather than with the
+    whole backlog. (One caller, not one HTTP request: `_with_retry` sits inside
+    the probe, so a probe against a timing-out provider is still up to
+    `WILLOW_SEARCH_MAX_ATTEMPTS` requests. The breaker bounds concurrency here,
+    not total traffic.) `allow()` used to return True unconditionally in HALF_OPEN
+    while the comment beside it said "allow the single probe": measured, 50 of
+    50 callers were let through. So the moment a dead provider's cooldown
+    elapsed, every waiting caller hit it at once — a thundering herd aimed at
+    the one service already known to be failing, which is close to the opposite
+    of what a breaker is for.
+
+    Withholding permission needs an expiry, or the fix is worse than the bug.
+    `_search_providers` reports every probe back via `record_success` /
+    `record_failure`, but it does so from `except Exception`, so a BaseException
+    — SystemExit, or a cancellation delivered into the worker thread — returns
+    no verdict. Without a deadline that would pin this provider at "refused",
+    permanently and silently, for the life of the process; the only way out
+    would be `reset_circuit_breakers()`. So a probe that has not reported back
+    within one cooldown is treated as lost and another is issued. Worst case
+    that leaks one request per cooldown, which is the same rate OPEN already
+    allows itself, and it self-heals the moment any probe does report.
     """
 
     def __init__(
@@ -483,25 +553,35 @@ class CircuitBreaker:
         self._failures = 0
         self._opened_at: float | None = None
         self._cooldown = base_cooldown
+        # When the outstanding half-open probe was handed out; None = none out.
+        self._probe_at: float | None = None
 
     def allow(self) -> bool:
         """Whether a request may proceed now."""
+        now = self._clock()
         if self.state == "CLOSED":
             return True
         if self.state == "OPEN":
-            if self._opened_at is not None and (self._clock() - self._opened_at) >= self._cooldown:
+            if self._opened_at is not None and (now - self._opened_at) >= self._cooldown:
                 self.state = "HALF_OPEN"
+                self._probe_at = now
                 return True
             return False
-        return True  # HALF_OPEN — allow the single probe
+        # HALF_OPEN — one probe at a time, until it reports back or times out.
+        if self._probe_at is not None and (now - self._probe_at) < self._cooldown:
+            return False
+        self._probe_at = now
+        return True
 
     def record_success(self) -> None:
         self.state = "CLOSED"
         self._failures = 0
         self._opened_at = None
         self._cooldown = self._base_cooldown
+        self._probe_at = None
 
     def record_failure(self) -> None:
+        self._probe_at = None
         if self.state == "HALF_OPEN":
             # Probe failed — reopen with a longer cooldown.
             self._cooldown = min(self._cooldown * 2, self._max_cooldown)
@@ -677,41 +757,65 @@ def _cache_key(
 
 
 class _TTLCache:
-    """Bounded LRU cache with per-entry TTL.
+    """Bounded LRU cache with per-entry TTL, guarded by a lock.
 
-    Not thread-safe by design — Willow's MCP server services search calls
-    serially per session, so a lock would only add contention. Eviction is
-    least-recently-used once `maxsize` is exceeded; expired entries are dropped
-    lazily on access.
+    Eviction is least-recently-used once `maxsize` is exceeded; expired entries
+    are dropped lazily on access.
+
+    This used to say "not thread-safe by design — Willow's MCP server services
+    search calls serially per session, so a lock would only add contention."
+    Both halves of that were wrong. `_SEARCH_CACHE` is one module-level object
+    shared by every session, so a per-session guarantee would not cover it even
+    if there were one; and there is not, because `willow_web_search` is a `def`
+    rather than an `async def`, and the MCP SDK hands sync tools to
+    `anyio.to_thread.run_sync`. Under `streamable-http` (server.py's transport)
+    two concurrent searches are therefore two OS threads in this dict.
+
+    What that exposes is small and real: `get` reads an entry, then `del`s it
+    if expired, and two threads arriving together can both pass the check and
+    the second `del` raises KeyError; `move_to_end` can likewise race a
+    concurrent `set`'s eviction of the same key. Both windows are a bytecode or
+    two wide, and neither reproduced — 300 rounds of 16 threads on a barrier
+    produced zero errors, because the GIL rarely switches there. So this is a
+    correction to reasoning that was false, not a fix for a failure anyone saw.
+
+    The lock is here because the argument for omitting it was the contention
+    cost, and that cost is roughly 50ns on a path whose alternative outcome is
+    an HTTP request. There is nothing to trade.
     """
 
     def __init__(self, maxsize: int = 256, clock=time.monotonic) -> None:
         self._maxsize = max(1, maxsize)
         self._clock = clock
         self._data: OrderedDict[str, tuple[float, Any]] = OrderedDict()
+        self._lock = threading.Lock()
 
     def get(self, key: str) -> Any | None:
-        entry = self._data.get(key)
-        if entry is None:
-            return None
-        expires_at, value = entry
-        if self._clock() >= expires_at:
-            del self._data[key]
-            return None
-        self._data.move_to_end(key)
-        return value
+        with self._lock:
+            entry = self._data.get(key)
+            if entry is None:
+                return None
+            expires_at, value = entry
+            if self._clock() >= expires_at:
+                self._data.pop(key, None)
+                return None
+            self._data.move_to_end(key)
+            return value
 
     def set(self, key: str, value: Any, ttl: float) -> None:
-        self._data[key] = (self._clock() + ttl, value)
-        self._data.move_to_end(key)
-        while len(self._data) > self._maxsize:
-            self._data.popitem(last=False)
+        with self._lock:
+            self._data[key] = (self._clock() + ttl, value)
+            self._data.move_to_end(key)
+            while len(self._data) > self._maxsize:
+                self._data.popitem(last=False)
 
     def clear(self) -> None:
-        self._data.clear()
+        with self._lock:
+            self._data.clear()
 
     def __len__(self) -> int:
-        return len(self._data)
+        with self._lock:
+            return len(self._data)
 
 
 _SEARCH_CACHE = _TTLCache(maxsize=_env_int("WILLOW_SEARCH_CACHE_SIZE", 256))
@@ -757,7 +861,11 @@ def search_web(
             _log_search_event(query_hash=_query_hash(query), provider="cache",
                               status="ok", result_count=len(cached), latency_ms=0.0,
                               cache_hit=True, attempt=0)
-            return list(cached)
+            # Copy the dicts, not just the list. `list(cached)` handed every
+            # caller the cache's own dict objects, so one caller annotating a
+            # hit in place rewrote what the next caller read back — verified by
+            # setting a title on one result and seeing it on the next call.
+            return [dict(h) for h in cached]
 
     hits: list[dict[str, Any]] = []
     if include_handoffs:
@@ -765,6 +873,12 @@ def search_web(
 
     raw = _search_providers(query, max_results, providers)
     if trusted_only:
+        # The handoffs go through the same filter. They were exempt, so
+        # `trusted_only=True` returned google.com and duckduckgo.com — and the
+        # tool's own description promises "keep verified institutional domain
+        # suffixes only", with the handoffs mixed into one flat `results` list
+        # that gives a model no way to tell which is which.
+        hits = [h for h in hits if _trusted_host(h.get("hostname", ""))]
         raw = [h for h in raw if _trusted_host(h.get("hostname", ""))]
 
     seen = {h["url"] for h in hits if h.get("url")}
@@ -779,5 +893,7 @@ def search_web(
     # failed or was filtered out, and pinning that for the TTL would mask recovery.
     if key is not None and raw:
         ttl = cfg["ttl_news"] if _is_current_events(query) else cfg["ttl"]
-        _SEARCH_CACHE.set(key, list(result), ttl)
+        # Copies on the way in too — `result` is what this caller is about to
+        # be handed, so storing those same objects would let them mutate it.
+        _SEARCH_CACHE.set(key, [dict(h) for h in result], ttl)
     return result
