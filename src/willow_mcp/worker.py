@@ -26,27 +26,6 @@ def _lane_from_env(default: str = "fast") -> str:
     ).strip().lower()
 
 
-def _resolve_sandbox_source_legacy() -> str:
-    """Name the sandbox-policy source on a kartikeya without the reporting API.
-
-    Mirrors kartikeya.sandbox.load_sandbox_config's search order exactly:
-    $KART_SANDBOX_CONFIG, then $WILLOW_HOME/kart-sandbox.json, then the
-    vendored product-neutral default. Returns the first existing file's path
-    as a string, or "vendored-default".
-    """
-    from pathlib import Path
-
-    env = os.environ.get("KART_SANDBOX_CONFIG", "").strip()
-    if env and Path(env).expanduser().is_file():
-        return str(Path(env).expanduser())
-    home = os.environ.get("WILLOW_HOME", "").strip()
-    if home:
-        candidate = Path(home).expanduser() / "kart-sandbox.json"
-        if candidate.is_file():
-            return str(candidate)
-    return "vendored-default"
-
-
 def check_sandbox_config(*, require_fleet_config: bool) -> str:
     """Resolve the mount policy this worker will execute under, and report it.
 
@@ -63,38 +42,38 @@ def check_sandbox_config(*, require_fleet_config: bool) -> str:
     the generic one. A unit that fails to start is visible; a unit that runs
     and fails every task is not.
 
+    kartikeya is asked to report its own resolution and is not second-guessed.
+    There used to be a fallback here for a kartikeya without the reporting API,
+    which named the source by re-implementing `load_sandbox_config`'s search
+    order locally. It is gone, on the same principle as the paragraph above.
+    Two reasons, in rising order:
+
+    * It cannot be reached by an installed kartikeya. `resolve_sandbox_config`
+      and `is_vendored_default` shipped in 0.0.8, and `pyproject.toml` floors
+      the dependency at 0.0.9.
+    * It was a second copy of another package's search order, kept in step by
+      nothing. If kartikeya's order moves, the copy names a policy that is not
+      the one bwrap is handed — a worker that reports a policy it is not running
+      under, which is the exact failure this function exists to prevent, wearing
+      a success message.
+
+    What is left to reach it is an unresolved source checkout or a vendored copy
+    on `PYTHONPATH` — a development loop, where a startup ImportError naming the
+    floor is the visible failure and the right one.
+
     Returns the resolved config source.
     """
     try:
         from kartikeya.sandbox import is_vendored_default, resolve_sandbox_config
     except ImportError as exc:
-        # No published kartikeya (<=0.0.7) ships resolve_sandbox_config yet, so
-        # a hard failure here makes the worker unstartable on a clean install.
-        # Keep the guard's actual promise — never serve a production lane on a
-        # policy we cannot name — by mirroring kartikeya's documented search
-        # order (load_sandbox_config: $KART_SANDBOX_CONFIG →
-        # $WILLOW_HOME/kart-sandbox.json → vendored default) to name the source
-        # ourselves. Production lanes still refuse anything but an explicit
-        # fleet policy file.
-        source = _resolve_sandbox_source_legacy()
-        generic = source == "vendored-default"
-        print(
-            "willow-mcp worker: installed kartikeya cannot report its resolved "
-            f"sandbox policy (needs sandbox.resolve_sandbox_config); willow-mcp "
-            f"resolved it as {source} by mirroring kartikeya's search order. "
-            "Upgrade kartikeya once a release ships the reporting API.",
-            file=sys.stderr,
-        )
-        if generic and require_fleet_config:
-            raise RuntimeError(
-                "refusing to start: resolved kartikeya's vendored default sandbox "
-                f"policy ({source}), not a fleet policy. Set KART_SANDBOX_CONFIG "
-                "in the unit's Environment= (an EnvironmentFile edit does NOT reach "
-                "an already-running process), or place the policy at "
-                "$WILLOW_HOME/kart-sandbox.json. Pass --allow-generic-sandbox to "
-                "serve on the generic policy deliberately."
-            ) from exc
-        return source
+        raise RuntimeError(
+            "refusing to start: the installed kartikeya cannot report its "
+            "resolved sandbox policy (no sandbox.resolve_sandbox_config). That "
+            "API ships in kartikeya 0.0.8+, and this package requires "
+            ">=0.0.9 — so this is a source checkout or a vendored copy ahead of "
+            "the installed wheel, not a supported install. Reinstall kartikeya "
+            "from PyPI, or update the checkout."
+        ) from exc
 
     _cfg, source = resolve_sandbox_config()
     generic = is_vendored_default(source)
