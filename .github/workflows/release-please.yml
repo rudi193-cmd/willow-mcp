@@ -127,10 +127,23 @@ jobs:
           git fetch --tags origin "$branch"
           git checkout "$branch"
 
-          # Exit 2 means the tool found something it does not model (a breaking
-          # change, an unreadable range). Fail the step rather than ship a
-          # section nobody checked — the release PR is still there to fix by hand.
+          # Exit 2 means the tool found something it does not model — a breaking
+          # change, an unreadable range. Warn and carry on rather than fail:
+          # failing here fails the job, so the auto-merge arming below never
+          # runs and the release simply does not ship. That is worse than the
+          # problem being fixed, which only ever produced a wrong *changelog*.
+          # A bail leaves release-please's own section in place — the old,
+          # survivable failure mode — and the warning says to check it by hand.
+          set +e
           python tools/changelog_dedup.py
+          status=$?
+          set -e
+          if [ "$status" = "2" ]; then
+            echo "::warning::changelog_dedup could not rebuild this section — "\
+                 "release-please's version is shipping as-is. Check it by hand."
+            exit 0
+          fi
+          [ "$status" = "0" ] || exit "$status"
 
           if git diff --quiet -- CHANGELOG.md; then
             echo "release-please's section already matches the commits."
