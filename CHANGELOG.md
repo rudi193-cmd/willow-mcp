@@ -31,6 +31,19 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.2.3](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.2...v2.2.3) (2026-08-04)
+
+
+### Fixed
+
+* **egress:** close the last two unguarded paths on the web_read grant ([e9ffc4b](https://github.com/rudi193-cmd/willow-mcp/commit/e9ffc4b2e91fbf75420faf621cafbbf027e9c02b))
+* **egress:** two more unguarded paths on the same permission line, and a cap that capped nothing ([934cd60](https://github.com/rudi193-cmd/willow-mcp/commit/934cd606bbda575a9de1f9d2b378b9065c67853e))
+
+
+### Changed
+
+* **worker:** drop the kartikeya fallback the 0.0.9 floor made dead ([0f9f492](https://github.com/rudi193-cmd/willow-mcp/commit/0f9f492804308dffd7184c28ab6ea3eef91fbe04))
+
 ## [2.2.2](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.1...v2.2.2) (2026-08-04)
 
 
