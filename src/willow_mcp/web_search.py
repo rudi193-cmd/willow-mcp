@@ -32,7 +32,25 @@ _SNIP_RE = re.compile(
 _TAG_RE = re.compile(r"<[^>]+>")
 
 # Hostname suffixes for trusted-source filtering.
-# Covers all sources registered in core/jeles_sources.py SOURCES dict.
+#
+# This said "Covers all sources registered in core/jeles_sources.py SOURCES
+# dict." Three things were wrong with that: `core/jeles_sources.py` is not a
+# file in this repository, nothing checked the claim, and the list had drifted
+# from the registry it named — missing `doi.org`, which nine registered sources
+# cite through, while carrying `www.w3.org`, which is arXiv's Atom *namespace*
+# identifier and not a source at all.
+#
+# The registry is now the authority: `jeles.sources.registered_hosts()` declares
+# the hostnames each source contacts, and `tests/test_trusted_sources.py`
+# asserts every one of them is either covered here or listed in
+# `_NOT_TRUST_EVIDENCE` below with a reason. Drift becomes a failing test
+# instead of a stale comment.
+#
+# It is still a hand-curated list, and that is deliberate rather than lazy:
+# "jeles queries this host" and "a link to this host can be believed" are
+# different claims. A generated list would have to reduce `patents.google.com`
+# to a registrable domain and trust the whole of google.com. The registry says
+# what changed; a human still says whether it counts.
 _TRUSTED_SUFFIXES = (
     # Broad TLD catches (.gov, .edu, .museum, .go.jp for NDL, .ac.uk for CORE)
     "gov", "edu", "museum", "go.jp", "ac.uk",
@@ -61,7 +79,40 @@ _TRUSTED_SUFFIXES = (
     "courtlistener.com",
     # Clinical trade press / science misc
     "psychiatrictimes.com", "improbable.com",
+    # Registered in jeles but absent here until the registry was checked against
+    # this list. `doi.org` is the notable one — nine sources (Crossref,
+    # DataCite, DOAJ, Europe PMC, INSPIRE-HEP, OpenAIRE, Semantic Scholar, USGS,
+    # Zenodo) resolve their citations through it, and it was not trusted.
+    "doi.org", "who.int", "imf.org", "worldbank.org", "legislation.gov.uk",
+    "inspirehep.net", "osf.io", "scielo.br", "patentsview.org",
+    "gdeltproject.org", "carbonintensity.org.uk", "openfoodfacts.org",
+    # Full host, not the registrable domain: `google.com` would trust every
+    # Blogspot and Google Sites page ever published.
+    "patents.google.com",
 )
+
+# Hosts jeles contacts that are deliberately NOT trust evidence, with the reason
+# kept next to the decision. `tests/test_trusted_sources.py` requires every
+# registered host to be either trusted above or excluded here, so a new source
+# in jeles fails CI until someone decides which of the two it is — rather than
+# being silently absent, which is how this list drifted in the first place.
+_NOT_TRUST_EVIDENCE = {
+    "azureedge.net":
+        "ghoapi.azureedge.net is WHO's API on a shared Azure CDN. Anyone can "
+        "host on azureedge.net, and the results themselves point at who.int, "
+        "which is trusted above.",
+    "gutendex.com":
+        "A third-party API over Project Gutenberg's catalogue, not the "
+        "publisher. Its results point at gutenberg.org, which is trusted.",
+    "frankfurter.app":
+        "Exchange-rate API. Useful, not an institution — a rate quoted here is "
+        "not a citable source in the sense trusted_only is claiming.",
+    "open-meteo.com":
+        "Weather API, same reasoning as frankfurter.app.",
+    "thesportsdb.com":
+        "Community-edited sports database on the demo tier. Explicitly not an "
+        "authority.",
+}
 
 
 def _hostname(url: str) -> str:
