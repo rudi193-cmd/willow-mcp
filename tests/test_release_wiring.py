@@ -216,3 +216,26 @@ def test_this_package_is_past_1_0_so_no_pre_major_flags():
     for flag in ("bump-minor-pre-major", "bump-patch-for-minor-pre-major"):
         assert flag not in cfg, f"{flag} is for pre-1.0 packages; this is 2.x"
     assert re.match(r"^[2-9]\.", _json(_MANIFEST)["."]), "expected a 2.x+ version"
+
+
+def test_the_checkout_uses_the_pat_so_its_pushes_are_not_gated():
+    """`actions/checkout` persists whatever credential it used, and the changelog
+    step's `git push` then uses it. `env: GH_TOKEN` only reaches the `gh` CLI.
+
+    With the default GITHUB_TOKEN the commit is pushed as github-actions[bot],
+    and the release PR's CI run comes back `action_required` — created, but held
+    awaiting manual approval — so auto-merge waits on a check that never
+    reports. Observed on the 2.2.0 release PR, which needed CI started by hand;
+    release-please's own commit on the same branch was not gated, because it
+    pushes with the PAT.
+
+    This is the fourth way this fleet has been bitten by token attribution, so
+    it gets a test rather than a comment."""
+    steps = _yaml(_RP_WF)["jobs"]["release-please"]["steps"]
+    checkout = next(s for s in steps
+                    if str(s.get("uses", "")).startswith("actions/checkout"))
+    token = str((checkout.get("with") or {}).get("token", ""))
+    assert "RELEASE_PLEASE_TOKEN" in token, (
+        "checkout must use the PAT — its credential is what the changelog "
+        f"step pushes with. Got: {token!r}")
+    assert "GITHUB_TOKEN" not in token

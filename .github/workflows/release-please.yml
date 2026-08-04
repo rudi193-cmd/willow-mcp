@@ -87,6 +87,18 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          # The PAT, not the default GITHUB_TOKEN — and this is about the *push*
+          # in the changelog step below, not about reading.
+          #
+          # checkout persists whatever credential it used, and `git push` then
+          # uses it. `env: GH_TOKEN` only reaches the `gh` CLI. With the default,
+          # the commit was pushed as github-actions[bot], so the release PR's CI
+          # run came back `action_required` — created but held awaiting manual
+          # approval — and auto-merge sat waiting on a check that would never
+          # report. Observed on the 2.2.0 release PR, which needed CI started by
+          # hand. release-please's own commit on the same branch was not gated,
+          # because it pushes with this token.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
 
       - uses: googleapis/release-please-action@v4
         with:
