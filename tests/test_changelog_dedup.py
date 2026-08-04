@@ -140,6 +140,35 @@ def test_it_refuses_a_section_it_cannot_regenerate():
         changelog_dedup.rebuild(text)
 
 
+def test_print_section_emits_exactly_what_a_release_body_should_be():
+    """`--print-section` feeds the GitHub Release body, which release-please
+    generates from its own parse rather than from CHANGELOG.md — so correcting
+    the file leaves the release *page* still wrong. v2.1.4's page carried the
+    duplicate entry after the changelog had been fixed.
+
+    The shape matters: release-please's body starts with the `## [x.y.z](…)`
+    header, so the extracted section must include it or every release would be
+    'updated' to something structurally different."""
+    text = (_REPO / "CHANGELOG.md").read_text()
+    section = changelog_dedup.section_for(text, "2.1.4")
+    assert section is not None
+    lines = section.splitlines()
+    assert lines[0].startswith("## [2.1.4]("), lines[0]
+    assert "### Fixed" in section
+    assert "4f3b6de" in section
+    assert "376930c" not in section, "the merge commit is back in the changelog"
+    # Stops at the next release, rather than swallowing the rest of the file.
+    assert "## [2.1.3]" not in section
+    assert not section.endswith("\n"), "trailing whitespace is stripped for comparison"
+
+
+def test_print_section_is_none_for_a_version_that_has_no_section():
+    """The workflow warns and leaves the release alone in this case rather than
+    writing an empty body."""
+    text = (_REPO / "CHANGELOG.md").read_text()
+    assert changelog_dedup.section_for(text, "99.99.99") is None
+
+
 def test_it_refuses_a_range_it_cannot_read():
     """An unknown previous tag means the range is unreadable — so the entries
     cannot be derived, and guessing is not an option."""
