@@ -177,8 +177,15 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     }),
     # Open web — DuckDuckGo search + guarded URL fetch (server-process egress).
     # Requires web_net capability + consent.internet + lease (see web_egress.py).
+    #
+    # `willow_institutional_search` sits here too, and deliberately not on a
+    # softer line: it fans out across ~60 named collections in one call, so it is
+    # the largest egress surface of the three even though every destination is a
+    # library or an academic index. One lease, sixty connections — the operator
+    # is granting more here than with a single DuckDuckGo query, and the grant
+    # should not look cheaper than it is.
     "web_read": frozenset({
-        "willow_web_search", "willow_web_fetch",
+        "willow_web_search", "willow_web_fetch", "willow_institutional_search",
     }),
     # Bounded work-units (branch + PR tracking) — SOIL-backed port of willow-2.0 forks.
     "fork_read": frozenset({

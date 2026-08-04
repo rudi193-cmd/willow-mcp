@@ -37,6 +37,16 @@ dependencies = [
     # Hard dependency as of B-22 close-out — kartikeya is published on PyPI, so a
     # base `pip install willow-mcp` now ships a working queue drainer.
     "kartikeya>=0.0.7,<0.1.0",
+    # Jeles the Librarian — the ~60 named institutional and academic collections
+    # behind `willow_institutional_search`. A hard dependency rather than an
+    # extra because the tool is registered unconditionally: an optional import
+    # would mean a tool that exists in the listing and fails when called, which
+    # is worse than either shipping it or not.
+    #
+    # Cheap to take: jeles declares no runtime dependencies of its own (stdlib
+    # only, by design), so this adds one wheel and no tree. 0.5.0 is the floor
+    # because that is where the source-host registry lands.
+    "jeles>=0.5.0,<1.0.0",
     "requests>=2.31,<3.0",
 ]
 

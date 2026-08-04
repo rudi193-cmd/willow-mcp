@@ -42,8 +42,44 @@ willow_web_search(app_id="willow", query="…", max_results=8)
 ```
 
 Options:
-- `trusted_only=true` — filter to verified institutional suffixes
+- `trusted_only=true` — filter results to a hand-kept list of institutional
+  hostname suffixes. **Prefer `willow_institutional_search` below.** This filters
+  the open web by how a hostname *looks*; it cannot tell a real collection from
+  a lookalike domain, and it is scheduled for removal.
 - `include_handoffs=true` — prepend map/search handoff links
+
+---
+
+## Institutional search
+
+For a claim that needs backing, search the collections directly rather than
+filtering the open web:
+
+```
+willow_institutional_search(app_id="willow", query="…", max_results=10)
+```
+
+Fans out across ~60 named institutional and academic collections — arXiv,
+PubMed, Crossref, OpenAlex, Library of Congress, Europeana, CourtListener, the
+Smithsonian. Every hit carries `confidence: "institutional"` because a named
+collection was actually queried, not because its hostname looked reputable.
+
+Read `ok` before `hits`:
+
+- `ok: true`, no hits → the collections had nothing.
+- `ok: false` → no source completed a look. `failed`, `skipped` and `timed_out`
+  say which, and `error` says why.
+
+Those two are not the same answer, and the tool refuses to collapse them.
+
+Options:
+- `sources=["arxiv", "pubmed"]` — narrow the fan-out to specific registered ids
+- `limit_per_source=3` — jeles' own knob, **per collection**; `max_results` caps
+  the total returned, and `total` reports the count before that cap
+
+Same three keys as the other open-web tools: `web_net` + `consent.internet` + a
+live lease. One call reaches ~60 hosts, so it is the largest egress surface of
+the three.
 
 ---
 
