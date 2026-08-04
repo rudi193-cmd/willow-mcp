@@ -20,6 +20,14 @@ are hidden, along with every fleet-local prefix (`hooks:`, `gate:`, `skills:`,
 the next release rather than cutting one of their own — see
 `release-please-config.json` for why, and for the cost.
 
+## [2.1.2](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.1...v2.1.2) (2026-08-03)
+
+
+### Fixed
+
+* **web_search:** stop a lookalike domain inheriting institutional trust ([eddaf85](https://github.com/rudi193-cmd/willow-mcp/commit/eddaf85d87b06990f6bbc506cc49b507ff77ba35))
+* **web_search:** stop a lookalike domain inheriting institutional trust ([49b95fe](https://github.com/rudi193-cmd/willow-mcp/commit/49b95fe20b5d764c62e7db85b80e427dbcd0a677))
+
 ## [2.1.1](https://github.com/rudi193-cmd/willow-mcp/compare/v2.1.0...v2.1.1) (2026-08-03)
 
 
