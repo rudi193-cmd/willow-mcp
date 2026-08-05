@@ -1,4 +1,26 @@
-"""Narrow adapter over the existing Postgres ``frank_ledger`` hash chain."""
+"""Narrow adapter over the existing Postgres ``frank_ledger`` hash chain.
+
+Threat model (#280), written down rather than implied:
+
+* The chain is tamper-EVIDENT against anyone who can write rows but cannot
+  rewrite the whole table consistently. It is NOT tamper-proof against the
+  database operator: ``rechain()`` re-hashes rows from their current content,
+  so *edit a row, run rechain()* yields a chain ``verify()`` calls valid —
+  the migration and the forgery are the same operation.
+* A hash chain vouches for every line except the newest. The close is a head
+  recorded somewhere the chain's writer cannot reach: ``verify()`` takes
+  ``expected_head`` for exactly that — hold the ``head`` value it returns in
+  a CI variable, a monitoring system, an ops runbook, anywhere outside this
+  database — and a silent relink becomes a detected one.
+* ``rechain()`` is additionally self-documenting: a run that migrated
+  anything appends a ``governance.rechain`` row recording the pre-migration
+  head and row count. That raises the cost of a QUIET relink; it does not
+  stop a determined operator (who can delete the marker and relink again) —
+  only an externally-held head does. FRANK mirroring into this table gives
+  Nestor "someone else remembers" ONLY to the extent that this someone's
+  head is anchored outside; without an anchor it degrades to "someone else
+  has a copy that will agree with whatever it now says."
+"""
 from __future__ import annotations
 
 import hashlib
@@ -135,7 +157,11 @@ class GovernanceLedger:
                 cur.execute("SELECT pg_advisory_unlock(%s)", (LOCK_KEY,))
             cur.close()
 
-    def verify(self) -> dict:
+    def verify(self, expected_head: str | None = None) -> dict:
+        """Walk the chain. ``expected_head`` is the externally-held anchor:
+        pass the ``head`` a previous verify returned (kept OUTSIDE this
+        database) and "is this the same chain it was yesterday?" gets an
+        answer, which internal consistency alone can never give (#280)."""
         cur = self.pg.cursor()
         cur.execute(
             f"SELECT id, project, event_type, content, prev_hash, hash "
@@ -154,15 +180,33 @@ class GovernanceLedger:
                 entry_hash_v2(previous, record_id, project, event_type, content) == stored_hash
                 or entry_hash(previous, event_type, content) == stored_hash)
             if not ok:
-                return {"valid": False, "broken_at": record_id, "count": len(rows)}
+                return {"valid": False, "broken_at": record_id,
+                        "count": len(rows), "head": None}
             previous = stored_hash
-        return {"valid": True, "broken_at": None, "count": len(rows)}
+        if expected_head is not None and previous != expected_head:
+            # Internally consistent but not the chain the caller anchored:
+            # exactly what an edit-plus-rechain forgery looks like from
+            # outside. broken_at stays None so the two failures are
+            # distinguishable.
+            return {"valid": False, "broken_at": None, "count": len(rows),
+                    "head": previous, "expected_head": expected_head}
+        return {"valid": True, "broken_at": None, "count": len(rows),
+                "head": previous}
 
     def rechain(self) -> dict:
         """One-time migration (box audit A7): re-hash every row under v2 so the
         ``id``/``project`` columns become tamper-evident for legacy entries too,
         re-linking prev_hash as it goes. Idempotent — a fully-v2 chain is left
-        unchanged. Must run under the same advisory lock as appends."""
+        unchanged. Must run under the same advisory lock as appends.
+
+        Self-documenting (#280): a run that migrated anything appends a
+        ``governance.rechain`` row — pre-migration head, rows migrated — so a
+        relink leaves a mark IN the chain it relinked. That makes a quiet
+        rechain loud; it does not make a malicious one impossible (the
+        operator can delete the marker and relink again), which is why
+        ``verify(expected_head=...)`` and an externally-held head remain the
+        real close. A run that migrated nothing appends nothing, so repeated
+        idempotent runs do not grow the chain."""
         cur = self.pg.cursor()
         locked = False
         try:
@@ -172,6 +216,7 @@ class GovernanceLedger:
                 f"SELECT id, project, event_type, content, hash "
                 f"FROM {TABLE} ORDER BY created_at ASC")
             rows = cur.fetchall()
+            pre_head = rows[-1][4] if rows else None
             previous, migrated = None, 0
             for record_id, project, event_type, content, stored_hash in rows:
                 digest = entry_hash_v2(previous, record_id, project, event_type, content)
@@ -181,8 +226,26 @@ class GovernanceLedger:
                         (previous, digest, record_id))
                     migrated += 1
                 previous = digest
+            if migrated:
+                # Chained onto the walk's own head, under the same lock the
+                # walk held — no re-read, no retry loop. Plain %s::jsonb so
+                # this stays runnable without psycopg2.extras (and testable
+                # against the same fake cursor as the rest of this class).
+                marker_id = str(uuid.uuid4())
+                marker = {"pre_migration_head": pre_head,
+                          "migrated": migrated, "count": len(rows)}
+                digest = entry_hash_v2(previous, marker_id, "governance",
+                                       "governance.rechain", marker)
+                cur.execute(
+                    f"INSERT INTO {TABLE} "
+                    "(id, project, event_type, content, prev_hash, hash, created_at) "
+                    "VALUES (%s, %s, %s, %s::jsonb, %s, %s, clock_timestamp())",
+                    (marker_id, "governance", "governance.rechain",
+                     json.dumps(marker), previous, digest))
+                previous = digest
             self.pg.commit()
-            return {"migrated": migrated, "count": len(rows)}
+            return {"migrated": migrated, "count": len(rows),
+                    "pre_head": pre_head, "head": previous}
         finally:
             if locked:
                 cur.execute("SELECT pg_advisory_unlock(%s)", (LOCK_KEY,))
