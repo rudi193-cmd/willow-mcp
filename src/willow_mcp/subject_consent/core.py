@@ -49,6 +49,13 @@ SCOPES: tuple[str, ...] = (
     "process_analysis",  # process/structure may be derived (corpus-lens, Nest counts)
     "kb_promotion",      # de-identified structure may cross into the shared KB
     "person_inference",  # a person-shaped claim about the subject may be made at all
+    # The subject's own account may leave the vault ATTRIBUTED — their words,
+    # under the name they gave. Deliberately not `kb_promotion`: that scope is
+    # de-identified structure crossing into a shared index, and an oral-history
+    # desk publishes the opposite ("Names Given Not Chosen" — the naming is the
+    # record). Granting one must never imply the other, so it is its own scope.
+    # Added for apps/intake-desk, the fourth consumer.
+    "testimony_publication",
 )
 
 #: How a subject relates to the owner. `self` means owner == subject (the
