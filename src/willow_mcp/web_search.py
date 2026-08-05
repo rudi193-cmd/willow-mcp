@@ -75,6 +75,12 @@ _TRUSTED_SUFFIXES = (
     "scielo.org", "europa.eu",
     # Music
     "musicbrainz.org",
+    # Film / fiction bibliographic references. IMDb is community-fed but
+    # editorially vetted and the de-facto filmography authority — the same
+    # standing wikipedia.org and musicbrainz.org already have here. ISFDb is
+    # the long-running community bibliography of speculative fiction, the
+    # dblp/openlibrary of its field.
+    "imdb.com", "isfdb.org",
     # Species / ecology / geography
     "gbif.org", "inaturalist.org", "openstreetmap.org",
     # Law
@@ -114,6 +120,10 @@ _NOT_TRUST_EVIDENCE = {
     "thesportsdb.com":
         "Community-edited sports database on the demo tier. Explicitly not an "
         "authority.",
+    "omdbapi.com":
+        "A third-party API over IMDb's data, not the publisher — the gutendex "
+        "precedent exactly. Its results point at imdb.com, which is trusted "
+        "above.",
 }
 
 
