@@ -49,6 +49,16 @@ class _FakeCursor:
                 if r["id"] == row_id:
                     r["prev_hash"], r["hash"] = prev_hash, new_hash
             return
+        if sql.startswith("INSERT"):
+            # rechain()'s self-documenting marker (#280): id, project,
+            # event_type, content-json, prev_hash, hash.
+            import json as _json
+            rid, proj, et, content, prev_hash, new_hash = params
+            self.pg.rows.append({"id": rid, "project": proj,
+                                 "event_type": et,
+                                 "content": _json.loads(content),
+                                 "prev_hash": prev_hash, "hash": new_hash})
+            return
         if "prev_hash, hash" in sql:            # verify() select
             self._result = [(r["id"], r["project"], r["event_type"], r["content"],
                              r["prev_hash"], r["hash"]) for r in self.pg.rows]
@@ -113,6 +123,9 @@ def test_rechain_upgrades_v1_to_v2_and_covers_project():
     # now project IS covered — tampering a migrated row breaks it
     pg.rows[2]["project"] = "attacker"
     assert led.verify()["valid"] is False
-    # rechain is idempotent on an already-v2 chain
-    clean = GovernanceLedger(_FakePg(_v2_chain(ENTRIES)))
+    # rechain is idempotent on an already-v2 chain — and appends NO marker
+    # then (#280), so repeated idempotent runs do not grow the chain.
+    clean_pg = _FakePg(_v2_chain(ENTRIES))
+    clean = GovernanceLedger(clean_pg)
     assert clean.rechain()["migrated"] == 0
+    assert len(clean_pg.rows) == len(ENTRIES)
