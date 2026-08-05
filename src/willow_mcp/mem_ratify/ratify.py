@@ -231,6 +231,26 @@ class Decision:
 # --------------------------------------------------------------------------- #
 # Independent-Witness accounting (IV.2 + Definitions line 95)
 # --------------------------------------------------------------------------- #
+def _norm_identity(value: object) -> str:
+    """Fold an identity string for comparison: collapse whitespace, lowercase.
+
+    Every rule this module enforces is a string comparison — the proposer
+    exclusion (§0.2, IV.2) and the same-base-model collapse (Definitions line
+    95). Compared raw, ``Claude-Opus-5`` beside ``claude-opus-5`` reads as two
+    independent witnesses and clears a Frontier quorum on its own, with
+    ``allowed=True`` and no flag raised. Folded, it is one witness, which is
+    what the charter says it is.
+
+    ``Tier.parse`` already normalises its input the same way; this carries that
+    habit to the identities, which is where it was missing.
+
+    Returns ``""`` for anything carrying no identity. Callers must treat that as
+    *cannot count* — never as *matches nothing*, which is how an unnamed
+    witness would otherwise slip past both guards.
+    """
+    return " ".join(str(value or "").split()).strip().lower()
+
+
 def _count_independent_witnesses(
     witnesses: Iterable[Witness],
     proposer_id: str,
@@ -251,16 +271,27 @@ def _count_independent_witnesses(
     counted_base_models: set[str] = set()
     count = 0
 
+    # Fold once. Notes keep the ORIGINAL strings, so an audit trail shows what
+    # the caller actually supplied rather than what this function compared.
+    proposer_norm = _norm_identity(proposer_id)
+
     for w in witnesses:
-        if w.agent_id == proposer_id:
+        agent_norm = _norm_identity(w.agent_id)
+        base_norm = _norm_identity(w.base_model)
+
+        if not agent_norm:
+            notes.append("witness with an empty agent_id; not counted - an "
+                         "unnamed hand cannot satisfy a quorum")
+            continue
+        if agent_norm == proposer_norm:
             notes.append(
                 f"witness {w.agent_id!r} is the proposer; not counted (§0.2)"
             )
             continue
-        if w.agent_id in seen_agents:
+        if agent_norm in seen_agents:
             notes.append(f"witness {w.agent_id!r} listed more than once; counted once")
             continue
-        seen_agents.add(w.agent_id)
+        seen_agents.add(agent_norm)
 
         if w.independence_evidence:
             # Presumption rebutted by recorded evidence — count separately, but
@@ -274,7 +305,14 @@ def _count_independent_witnesses(
             )
             continue
 
-        if w.base_model in counted_base_models:
+        if not base_norm:
+            notes.append(
+                f"witness {w.agent_id!r} declares no base_model; not counted - "
+                f"independence cannot be presumed for an unstated model "
+                f"(Definitions line 95, fail-closed)"
+            )
+            continue
+        if base_norm in counted_base_models:
             notes.append(
                 f"witness {w.agent_id!r} shares base_model {w.base_model!r} "
                 f"with an already-counted witness; presumed non-independent, "
@@ -282,7 +320,7 @@ def _count_independent_witnesses(
             )
             continue
 
-        counted_base_models.add(w.base_model)
+        counted_base_models.add(base_norm)
         count += 1
 
     return count, notes
@@ -408,11 +446,14 @@ def _decide_canonical(request: RatifyRequest, d: Decision, ind_count: int) -> No
 
     # Fresh-witness composition (IV.3): at least one ratifying witness must not
     # have participated in the prior Frontier promotion of the same claim.
+    _proposer = _norm_identity(request.proposer_id)
+    _prior = {_norm_identity(a) for a in request.prior_frontier_ratifiers}
     fresh = [
         w
         for w in request.witnesses
-        if w.agent_id != request.proposer_id
-        and w.agent_id not in request.prior_frontier_ratifiers
+        if _norm_identity(w.agent_id)
+        and _norm_identity(w.agent_id) != _proposer
+        and _norm_identity(w.agent_id) not in _prior
     ]
     if not fresh:
         ok = False
