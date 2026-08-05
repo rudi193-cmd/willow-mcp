@@ -420,4 +420,47 @@ trust roots, three-key egress, and rate limiting all confirmed against the
 running server. The sandboxed executor's static scanner gap (L-DOS-02 /
 L-CMD-01) is resolved — both landed together in `kartikeya`, verified live.
 
+---
+
+## Addendum — governance ledger, static review (2026-08-05)
+
+Static review of `governance_ledger.py` prompted by #280, which is resolved
+(`verify(expected_head=...)` plus a self-documenting `rechain()`). One
+observation left over from that reading, recorded rather than raised: it is not
+a forgery path and it did not warrant reopening the issue.
+
+### P3: L-LDG-01 — the chain's order comes from an unhashed column — OPEN
+
+`frank_ledger` is walked and extended by **timestamp**, not by its own links:
+`_chain_insert` takes the head with `ORDER BY created_at DESC LIMIT 1`, and both
+`verify()` and `rechain()` walk `ORDER BY created_at ASC`. The `prev_hash` links
+are *checked* against that order but never *establish* it.
+
+`created_at` is not covered by either digest — `entry_hash_v2` hashes
+`prev_hash + {id, project, event_type, content}`, and v1 hashes less. So a
+column nobody signs decides the sequence the signatures are verified in.
+
+**Why this is P3 and not higher.** It fails in the safe direction. Reordering
+rows by touching `created_at` makes each row's `prev_hash` stop matching its
+newly-preceding row, so the walk reports `valid: False` — a **false broken**,
+not a false valid. It is a way for a database operator to induce a spurious
+tamper alarm, not a way to hide an edit. Truncation and relink are separately
+covered by the #280 head anchor. There is no path here that makes a forged chain
+verify clean.
+
+Two secondary notes. `created_at` is written with `clock_timestamp()` under the
+advisory lock, so ties are very unlikely but not structurally excluded, and a
+tie leaves the walk order undefined. And a restore, a clock adjustment, or a
+manual backfill that reassigns timestamps would present as chain corruption
+rather than as what it is.
+
+**Close, if wanted.** Walk `prev_hash` from genesis instead of sorting by
+timestamp — the links already form a total order and the rows already carry it.
+No schema change, and `created_at` becomes what it reads as: metadata. The head
+read in `_chain_insert` would become "the row no other row names as `prev_hash`",
+which the `frank_ledger_no_fork` unique index already guarantees is singular.
+
+Not urgent: nothing observed depends on it, and the anchor from #280 is what
+carries the integrity claim.
+
 *ΔΣ=43*
