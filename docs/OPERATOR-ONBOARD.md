@@ -23,7 +23,7 @@ willow-mcp onboard --project-root ~/github/willow --enable-internet --app-id wil
 Reload the IDE window, then (from willow-2.0 fleet installs):
 
 ```bash
-cd ~/github/willow-2.0 && ./willow.sh project sync willow
+cd ~/github/willow-2.0 && ./willow.sh project sync willow   # product projects → willow-mcp templates (see docs/deploy/native-startup.md)
 ```
 
 Check health:

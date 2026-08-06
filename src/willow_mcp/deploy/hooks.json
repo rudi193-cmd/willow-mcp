@@ -19,6 +19,13 @@
         "command": "{{WILLOW_MCP_PYTHON}} -m willow_mcp.pre_tool_hook",
         "timeout": 5
       }
+    ],
+    "sessionEnd": [
+      {
+        "command": "{{WILLOW_MCP_PYTHON}} -m willow_mcp.session_stop_hook",
+        "timeout": 15,
+        "failClosed": false
+      }
     ]
   }
 }

@@ -6,9 +6,18 @@ import os
 import sys
 import uuid
 
+from .boot_context import build_boot_lines
+from .seed_loader import seed_corpus_corrections
+
 
 def handle(payload: dict) -> dict:
     from .server import session_enter
+
+    source = str(payload.get("source") or "startup")
+    try:
+        seed_corpus_corrections()
+    except Exception:
+        pass
 
     workspace = (
         payload.get("workspace")
@@ -19,12 +28,15 @@ def handle(payload: dict) -> dict:
     session_id = str(
         payload.get("session_id") or payload.get("conversation_id") or uuid.uuid4()
     )
+    app_id = os.environ.get("WILLOW_APP_ID", "willow")
     result = session_enter(
-        app_id=os.environ.get("WILLOW_APP_ID", "willow"),
+        app_id=app_id,
         session_id=session_id,
         project=os.environ.get("WILLOW_HANDOFF_PROJECT", ""),
         workspace=str(workspace or ""),
     )
+    boot_lines = build_boot_lines(app_id, session_id, source, result)
+    result["boot_context"] = "\n".join(boot_lines)
     return {"additional_context": json.dumps(result, sort_keys=True)}
 
 
@@ -33,9 +45,6 @@ def main() -> None:
         payload = json.load(sys.stdin)
         print(json.dumps(handle(payload if isinstance(payload, dict) else {})))
     except Exception as exc:
-        # Fail VISIBLY (Loki C303AA2F §3.3): the hook is failClosed=false so a
-        # failure must not silently drop orientation. Surface it in the session
-        # context AND on stderr so it is loud in both the transcript and logs.
         message = f"WILLOW session_enter FAILED — orientation did not run: {exc}"
         print(f"[willow.session_start] {message}", file=sys.stderr)
         print(json.dumps({"additional_context": message}))

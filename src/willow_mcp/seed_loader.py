@@ -9,12 +9,15 @@ See docs/design/agent-seed.md.
 from __future__ import annotations
 
 import json
+import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .paths import seeds_dir, willow_home
+from .paths import seeds_dir, store_root, willow_home
 from . import pgp
+from .db import Store
 
 SEED_FORMAT = "agent_seed_v1"
 _AGENT_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
@@ -139,6 +142,122 @@ def load_agent_seed(agent_id: str, *, include_full: bool = False) -> dict[str, A
     if include_full:
         block["seed"] = data
     return block
+
+
+_CORPUS_CORRECTIONS = "corpus_corrections"
+_CORPUS_PREFERENCES = "corpus_preferences"
+_CORPUS_CONFIRMATIONS = "corpus_confirmations"
+
+
+def _project_repo_name() -> str:
+    root = os.environ.get("WILLOW_PROJECT_ROOT", "").strip()
+    if root:
+        return Path(root).name.lower()
+    return Path.cwd().name.lower()
+
+
+def claude_memory_dir() -> Path | None:
+    """Resolve Claude Code project memory dir for the open repo (operator path)."""
+    projects = Path.home() / ".claude" / "projects"
+    if not projects.is_dir():
+        return None
+    repo_name = _project_repo_name()
+    for entry in sorted(projects.iterdir()):
+        if not entry.is_dir():
+            continue
+        slug = entry.name.lower().lstrip("-")
+        if repo_name.replace("-", "") in slug.replace("-", ""):
+            memory = entry / "memory"
+            if memory.is_dir():
+                return memory
+    return None
+
+
+def _corpus_store() -> Store:
+    return Store(str(store_root()))
+
+
+def seed_corpus_corrections() -> int:
+    """Idempotent feedback_*.md → corpus_corrections (operator memory dir)."""
+    memory_dir = claude_memory_dir()
+    if memory_dir is None:
+        return 0
+    store = _corpus_store()
+    seeded = 0
+    for fpath in sorted(memory_dir.glob("feedback_*.md")):
+        try:
+            text = fpath.read_text(encoding="utf-8", errors="replace")
+            body = text.split("---", 2)[-1].strip() if "---" in text else text.strip()
+            rule = ""
+            for line in body.splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and not line.startswith("@"):
+                    rule = line[:200]
+                    break
+            if not rule:
+                continue
+            record_id = fpath.stem
+            if store.get(_CORPUS_CORRECTIONS, record_id):
+                continue
+            store.put(
+                _CORPUS_CORRECTIONS,
+                {
+                    "id": record_id,
+                    "content": rule,
+                    "source": fpath.name,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                },
+                record_id=record_id,
+            )
+            seeded += 1
+        except Exception:
+            continue
+    return seeded
+
+
+def load_corpus_lanes() -> dict[str, Any]:
+    """Read operator corpus lanes for SessionStart injection."""
+    from .session_inject import (
+        CONFIRMATION_EXCERPT_CHARS,
+        CORRECTION_EXCERPT_CHARS,
+        MAX_CORRECTIONS,
+        MAX_HUMAN_CONFIRMATIONS,
+        MAX_PREFERENCES,
+        PREFERENCE_EXCERPT_CHARS,
+        excerpt_corpus,
+    )
+
+    store = _corpus_store()
+    corrs = store.all(_CORPUS_CORRECTIONS) or []
+    prefs = store.all(_CORPUS_PREFERENCES) or []
+    confs = store.all(_CORPUS_CONFIRMATIONS) or []
+    corrs.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    prefs.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    confs.sort(key=lambda r: r.get("last_seen", r.get("created_at", "")), reverse=True)
+    human_confs = [
+        r.get("content", "")
+        for r in confs
+        if r.get("content") and str(r.get("source", "")).startswith("prompt_submit")
+    ]
+    return {
+        "corrections": [
+            excerpt_corpus(r.get("content", ""), CORRECTION_EXCERPT_CHARS)
+            for r in corrs[:MAX_CORRECTIONS]
+            if r.get("content")
+        ],
+        "correction_total": len(corrs),
+        "preferences": [
+            excerpt_corpus(r.get("content", ""), PREFERENCE_EXCERPT_CHARS)
+            for r in prefs[:MAX_PREFERENCES]
+            if r.get("content")
+        ],
+        "preference_total": len(prefs),
+        "confirmations": [
+            excerpt_corpus(c, CONFIRMATION_EXCERPT_CHARS)
+            for c in human_confs[:MAX_HUMAN_CONFIRMATIONS]
+        ],
+        "confirmation_total": len(human_confs),
+    }
 
 
 def seed_context(agent_id: str, *, destination: str = "session_enter") -> dict[str, Any]:

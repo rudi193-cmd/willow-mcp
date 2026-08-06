@@ -209,6 +209,13 @@ def test_cursor_hook_uses_a_stable_available_interpreter():
     assert "python3" in cmd or "python" in cmd or "WILLOW_MCP_PYTHON" in cmd
 
 
+def test_cursor_hook_registers_session_end():
+    hooks = Path(__file__).resolve().parents[1] / "deploy" / "cursor" / "hooks.json"
+    data = json.loads(hooks.read_text())
+    assert "sessionEnd" in data["hooks"]
+    assert "session_stop_hook" in data["hooks"]["sessionEnd"][0]["command"]
+
+
 def test_session_start_hook_fails_visibly(monkeypatch, capsys):
     monkeypatch.setattr(ssh.sys, "stdin", io.StringIO("this is not json"))
     ssh.main()
