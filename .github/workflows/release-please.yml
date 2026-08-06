@@ -86,7 +86,7 @@ jobs:
       # trusting the generated text. `fetch-depth: 0` plus tags is load-bearing:
       # the entries are derived from `git log <previous tag>..<this release>`,
       # and a shallow clone cannot see either end of that range.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
