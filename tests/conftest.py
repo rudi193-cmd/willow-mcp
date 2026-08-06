@@ -37,11 +37,18 @@ os.environ["WILLOW_MCP_APPS_ROOT"] = os.path.join(_tmp, "mcp_apps")
 #   WILLOW_IN_KART — require_operator_terminal checks this BEFORE isatty, so a
 #     suite run inside the Kart sandbox refuses mutations for a different reason
 #     than the one the tests name, in different words.
+#   WILLOW_PGP_FINGERPRINT — with it set, gate._read_manifest requires a detached
+#     signature, and no manifest a test writes has one. 23 tests across
+#     test_gate.py and test_manifest_admin.py failed on an install with
+#     enforcement on, every one of them reporting an unrelated assertion about
+#     permissions or store scope. The tests that mean to exercise enforcement
+#     monkeypatch gate.pgp directly and are unaffected by this.
 #
-# A test that needs either ON sets it itself with monkeypatch.setenv, which
+# A test that needs any of these ON sets it itself with monkeypatch.setenv, which
 # overrides these — deliberate setters keep working, ambient ones stop deciding.
 os.environ.pop("WILLOW_MCP_STRICT_TRUST_ROOT", None)
 os.environ.pop("WILLOW_IN_KART", None)
+os.environ.pop("WILLOW_PGP_FINGERPRINT", None)
 
 
 @pytest.fixture

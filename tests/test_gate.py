@@ -332,6 +332,37 @@ def test_load_manifest_allows_when_pgp_enabled_and_verified(apps_root, monkeypat
     assert gate.permitted("testapp", "store_get") is True
 
 
+def test_manifest_diagnosis_separates_absent_unparseable_and_unsigned(apps_root, monkeypatch):
+    """The gate denies all three identically, and must — but the operator-facing
+    diagnostic has to say WHICH. Collapsing them into "no manifest at <path>"
+    printed a fix ("create this file") for a file that already existed, unsigned,
+    and sent an operator hunting a missing manifest that was never missing."""
+    assert gate.manifest_diagnosis("ghost")[0] == gate.MANIFEST_ABSENT
+
+    _write_manifest(apps_root, "broken", ["store_read"])
+    (apps_root / "broken" / "manifest.json").write_text("{not json", encoding="utf-8")
+    assert gate.manifest_diagnosis("broken")[0] == gate.MANIFEST_UNPARSEABLE
+
+    _write_manifest(apps_root, "testapp", ["store_read"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(gate.pgp, "verify_detached", lambda p: (False, "no signature file"))
+    reason, detail = gate.manifest_diagnosis("testapp")
+    assert reason == gate.MANIFEST_UNSIGNED
+    assert "sign-manifest testapp" in detail
+
+
+def test_manifest_diagnosis_never_leaks_through_the_gate(apps_root, monkeypatch):
+    """Diagnosis is a separate surface, not a change to enforcement: the three
+    reasons must remain a single indistinguishable denial to any caller."""
+    _write_manifest(apps_root, "testapp", ["full_access"], store_scope=["*"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(gate.pgp, "verify_detached", lambda p: (False, "tampered"))
+    assert gate.authorized("testapp") is False
+    assert gate.permitted("testapp", "store_get") is False
+    assert gate.store_scope("testapp") == []
+    assert gate._load_manifest("testapp") is None
+
+
 def test_load_manifest_pgp_denial_is_indistinguishable_from_no_manifest(apps_root, monkeypatch):
     """A PGP-denied manifest must fail exactly like a missing one everywhere
     a manifest is read, not just in permitted() — store_scope in particular,
