@@ -11,7 +11,6 @@ from .session_inject import (
     MAX_HUMAN_CONFIRMATIONS,
     MAX_PREFERENCES,
     dedup_fingerprint,
-    excerpt_corpus,
     is_continuation_source,
     minimal_continuation_block,
     record_injection,

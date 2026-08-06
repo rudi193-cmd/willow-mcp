@@ -1,7 +1,6 @@
 import json
 
 from willow_mcp import seed_loader as sl
-from willow_mcp.db import Store
 
 
 def test_seed_corpus_corrections_idempotent(tmp_path, monkeypatch):
