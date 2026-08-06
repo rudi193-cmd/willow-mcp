@@ -31,6 +31,19 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.3.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.5...v2.3.0) (2026-08-06)
+
+
+### Added
+
+* **decommission:** native SessionStart/End — stack snapshot, boot context ([7c0308d](https://github.com/rudi193-cmd/willow-mcp/commit/7c0308d3f71b70d23a9d945e208c928946ebee7b))
+* **decommission:** SessionEnd stack snapshot + SessionStart boot context (1i/1j, 1d slice) ([4a70ff3](https://github.com/rudi193-cmd/willow-mcp/commit/4a70ff34fa5b96aa531e70f0ac03a94844ec1b0d))
+
+
+### Fixed
+
+* **stack_snapshot:** scope the pending-task query to the app that submitted ([c0b9c49](https://github.com/rudi193-cmd/willow-mcp/commit/c0b9c49372dced7cf8189f4701be6eb930dcfce0))
+
 ## [2.2.5](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.4...v2.2.5) (2026-08-06)
 
 
