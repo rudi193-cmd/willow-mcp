@@ -87,7 +87,13 @@ def set_permission(app_id: str, perm: str, granted: bool) -> dict:
         perms = [p for p in perms if p != perm]
         changed = True
 
-    if not existed and not changed:
+    # Nothing to write, whether or not the file is there. The `not existed` half
+    # is the documented one above; the `existed` half matters under PGP
+    # enforcement, where falling through would rewrite identical content, discard
+    # the valid signature that content already has, and re-sign — turning
+    # `allow-permission` from an idempotent command into one that invokes gpg and
+    # *raises* on a re-grant that changes nothing.
+    if not changed:
         return manifest
 
     manifest["permissions"] = perms

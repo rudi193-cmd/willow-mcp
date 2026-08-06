@@ -106,3 +106,36 @@ def test_set_permission_preserves_other_manifest_fields(apps_root):
 def test_set_permission_rejects_invalid_app_id(apps_root):
     with pytest.raises(ValueError):
         manifest_admin.set_permission("../escape", "store_read", True)
+
+
+def test_set_permission_is_idempotent_under_pgp_enforcement(apps_root, monkeypatch):
+    """Re-granting a permission the app already has must stay a no-op.
+
+    `allow-permission` is the operator's supported edit path and runbooks re-run
+    it defensively. Before the guard covered the `existed and not changed` case,
+    a re-grant fell through to rewrite-and-re-sign: identical content, the valid
+    signature it already had discarded, gpg invoked — and on a host where signing
+    fails (no agent, key on another machine) the call *raised* for a change that
+    changed nothing. Rollback kept the file correct, so the damage was the
+    exception, not the data; an idempotent command that throws on the second run
+    is still broken.
+    """
+    manifest_admin.set_permission("app", "store_read", True)
+    path = apps_root / "app" / "manifest.json"
+    before = path.read_text()
+
+    calls: list = []
+    monkeypatch.setattr(manifest_admin.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(
+        manifest_admin.pgp, "sign_detached",
+        lambda p: (calls.append(p) or (False, "gpg-agent unreachable")),
+    )
+
+    manifest_admin.set_permission("app", "store_read", True)   # must not raise
+    assert calls == [], "a no-op re-grant must not reach the signer"
+    assert path.read_text() == before
+
+    # A revoke of something not held is the same no-op, from the other side.
+    manifest_admin.set_permission("app", "task_net", False)
+    assert calls == []
+    assert path.read_text() == before
