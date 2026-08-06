@@ -31,6 +31,19 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.2.4](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.3...v2.2.4) (2026-08-06)
+
+
+### Fixed
+
+* **manifest_admin:** keep allow-permission idempotent under PGP enforcement ([92f5ff2](https://github.com/rudi193-cmd/willow-mcp/commit/92f5ff20cc1f3e3afdd1450f06ff5ac1eb851e09))
+* **gate:** name why a manifest was refused, and re-sign after editing one ([35d7285](https://github.com/rudi193-cmd/willow-mcp/commit/35d7285858996c858de98e76e25bc50f882fa2eb))
+
+
+### Build
+
+* **deps:** update cryptography requirement ([15eaa45](https://github.com/rudi193-cmd/willow-mcp/commit/15eaa45ee59fe20542dc8355627ea01d7faa5c97))
+
 ## [2.2.3](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.2...v2.2.3) (2026-08-04)
 
 
