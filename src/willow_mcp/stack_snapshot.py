@@ -49,7 +49,10 @@ def parse_task_rows(result: Any) -> list[dict[str, Any]]:
     return [
         {
             "id": str(t.get("task_id") or t.get("id") or ""),
-            "title": (t.get("task") or t.get("title") or "")[:80],
+            # str() rather than a bare slice: the columns are discovered, so
+            # `task` is not guaranteed to be text, and a hook is the wrong place
+            # to learn that slicing an int raises.
+            "title": str(t.get("task") or t.get("title") or "")[:80],
             "status": t.get("status", "pending"),
         }
         for t in rows
@@ -58,15 +61,53 @@ def parse_task_rows(result: Any) -> list[dict[str, Any]]:
 
 
 def _fetch_pending_tasks(app_id: str, limit: int = 10) -> list[dict[str, Any]]:
+    """This app's still-pending tasks, oldest first.
+
+    Two things here are deliberate rather than incidental, and both mirror
+    `server.task_list` (the gated tool this is the hook-safe twin of):
+
+      * **The `submitted_by` filter.** The snapshot is written to a per-app
+        collection and replayed into *that* app's SessionStart INDEX, so an
+        unfiltered `WHERE status = 'pending'` would put every agent's queued
+        work in every agent's boot block. `task_submit` stores `app_id` in
+        `submitted_by` (server.py), which is the column that makes the
+        snapshot's scope match the collection's.
+      * **Going through `schema_profile.resolve`.** The `tasks` table's column
+        names are discovered per install, not assumed — that whole layer exists
+        because they differ. Hardcoding `task_id, task, status, created_at`
+        would raise `UndefinedColumn` on any install that named them otherwise,
+        and the `except` below would render that as "no open tasks" rather than
+        as "could not tell".
+
+    Fails quiet by design: a hook must not take the session down. An install
+    whose mapping has no `submitted_by` column returns nothing rather than
+    falling back to the unfiltered query — showing another agent's stack is
+    worse than showing none.
+    """
     pg = get_pg()
     if not pg:
         return []
     try:
+        from . import schema_profile as sp
+
+        mapping = sp.resolve(pg, app_id, "tasks", ["task_id", "task", "status",
+                                                   "submitted_by", "created_at"])
+        if "error" in mapping:
+            return []
+        fields = mapping["fields"]
+        cols = {name: (fields.get(name) or {}).get("column") for name in
+                ("task_id", "task", "status", "submitted_by", "created_at")}
+        if not (cols["task_id"] and cols["status"] and cols["submitted_by"]):
+            return []
+
+        order_col = cols["created_at"] or cols["task_id"]
         cur = pg.cursor()
         cur.execute(
-            "SELECT task_id, task, status FROM tasks "
-            "WHERE status = 'pending' ORDER BY created_at NULLS LAST LIMIT %s",
-            (limit,),
+            f'SELECT "{cols["task_id"]}", "{cols["task"] or cols["task_id"]}", '
+            f'"{cols["status"]}" FROM tasks '
+            f'WHERE "{cols["status"]}" = \'pending\' AND "{cols["submitted_by"]}" = %s '
+            f'ORDER BY "{order_col}" NULLS LAST LIMIT %s',
+            (app_id, limit),
         )
         rows = cur.fetchall()
         cur.close()
