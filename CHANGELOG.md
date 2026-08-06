@@ -36,9 +36,8 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 
 ### Build
 
-* **deps:** bump actions/checkout from 4 to 7 ([3c848a1](https://github.com/rudi193-cmd/willow-mcp/commit/3c848a18a596abf6ac439d8252e802af25b0581b))
 * **deps:** bump actions/checkout from 4 to 7 ([3a54a62](https://github.com/rudi193-cmd/willow-mcp/commit/3a54a62acb084de5eb33be2b4f3bb5ce5337a6ec))
-* **deps:** bump googleapis/release-please-action from 4 to 5 ([ec239c5](https://github.com/rudi193-cmd/willow-mcp/commit/ec239c5a7221510aaf6974103f9c4a7b66dd37e2))
+* **deps:** bump googleapis/release-please-action from 4 to 5 ([ab78ff9](https://github.com/rudi193-cmd/willow-mcp/commit/ab78ff94fc4c02e4d5481427ffc31fe90922b0fa))
 
 ## [2.2.4](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.3...v2.2.4) (2026-08-06)
 
