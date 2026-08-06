@@ -81,7 +81,6 @@ def render_claude_permissions(servers: list[str]) -> dict[str, Any]:
     for name in servers:
         if isinstance(name, str) and name:
             allow.append(f"mcp__{name}__*")
-    allow.append("mcp__claude_ai_Grove__*")
     seen: set[str] = set()
     deduped: list[str] = []
     for item in allow:

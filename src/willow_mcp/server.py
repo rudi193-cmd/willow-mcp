@@ -2985,6 +2985,11 @@ def session_enter(
             "path": str(root / "FRANK") if root else None,
         },
     }
+    from .stack_snapshot import read_stack_snapshot
+
+    snap = read_stack_snapshot(app_id)
+    if snap:
+        result["orientation"]["stack_snapshot"] = snap
     return result
 
 
