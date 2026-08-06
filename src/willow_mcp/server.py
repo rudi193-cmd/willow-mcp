@@ -3617,8 +3617,10 @@ def _diag_manifest(app_id: str) -> dict:
         return check
     manifest = gate._load_manifest(app_id)
     if manifest is None:
+        reason, detail = gate.manifest_diagnosis(app_id)
         check["status"] = "fail"
-        check["detail"] = f"no manifest at {gate._apps_root()}/{app_id}/manifest.json — every call is denied"
+        check["reason"] = reason
+        check["detail"] = f"{detail} — every call is denied"
         return check
     perms = manifest.get("permissions", [])
     allowed: set = set()
@@ -3934,6 +3936,7 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                      net_lease: dict | None = None, severance: dict | None = None) -> list[dict]:
     """Pure: turn raw check dicts into actionable problems. Unit-tested without
     a live DB — this is where the empty-DB footgun becomes a named diagnosis."""
+    from . import gate
     problems: list[dict] = []
     if store.get("status") == "fail":
         problems.append({"severity": "error", "check": "store",
@@ -3953,9 +3956,25 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                                     f"If your data lives in another database, WILLOW_PG_DB is wrong." + env_note),
                          "fix": f"set WILLOW_PG_DB to the database that actually holds these tables (currently '{postgres.get('dbname')}')"})
     if manifest.get("status") == "fail":
+        _mpath = f"{manifest.get('apps_root')}/{manifest.get('app_id')}/manifest.json"
+        # The fix has to match the reason. "create this file" pointed at a file
+        # that already existed, unsigned, and cost an operator weeks of looking
+        # for a missing manifest that was never missing.
+        _mfix = {
+            gate.MANIFEST_UNSIGNED: (
+                f"sign it: `willow-mcp sign-manifest {manifest.get('app_id')}` "
+                f"(the manifest is present and valid — PGP enforcement is on and it "
+                f"has no verifying signature). If {_mpath}'s directory is not writable "
+                f"by you, sign to a scratch path and install the .sig as its owner. "
+                f"To turn enforcement off instead, unset WILLOW_PGP_FINGERPRINT."
+            ),
+            gate.MANIFEST_UNPARSEABLE: f"repair the JSON in {_mpath}",
+        }.get(manifest.get("reason"),
+              f"create/populate {_mpath} with a \"permissions\" list")
         problems.append({"severity": "error", "check": "manifest",
+                         "reason": manifest.get("reason"),
                          "detail": manifest.get("detail"),
-                         "fix": f"create/populate {manifest.get('apps_root')}/{manifest.get('app_id')}/manifest.json with a \"permissions\" list"})
+                         "fix": _mfix})
     elif manifest.get("status") == "warn":
         p = {"severity": "warn", "check": "manifest", "detail": manifest.get("detail")}
         if manifest.get("reason") == "no_app_id":
@@ -4229,9 +4248,9 @@ def whoami(app_id: str = "") -> dict:
                 "detail": "no app_id supplied — pass the app_id you call willow-mcp with"}
     manifest = gate._load_manifest(app_id)
     if manifest is None:
-        return {"app_id": app_id, "error": "no_manifest",
-                "detail": f"no manifest at {gate._apps_root()}/{app_id}/manifest.json "
-                          "— every call is denied"}
+        reason, detail = gate.manifest_diagnosis(app_id)
+        return {"app_id": app_id, "error": "no_manifest", "reason": reason,
+                "detail": f"{detail} — every call is denied"}
     perms = manifest.get("permissions", []) or []
     allowed: set = set()
     for p in perms:
