@@ -369,16 +369,36 @@ INTEGRATION_NET_PERMISSION = "integration_net"
 WEB_NET_PERMISSION = "web_net"
 
 
-def _load_manifest(app_id: str) -> Optional[dict]:
+#: Why a manifest read produced no usable manifest. The gate's *behaviour* is
+#: identical for every one of these — deny, everywhere, exactly as if the file
+#: were absent (see test_load_manifest_pgp_denial_is_indistinguishable_from_no_manifest).
+#: These codes exist only for the operator-facing diagnostic surface, which runs
+#: locally as the operator and already prints the apps_root path. Collapsing them
+#: into "no manifest at <path>" sent an operator hunting for a file that was
+#: sitting right there, unsigned, for weeks. Never surface a reason on a denial
+#: returned to a *caller* — only in diagnostics.
+MANIFEST_OK = "ok"
+MANIFEST_ABSENT = "absent"
+MANIFEST_UNPARSEABLE = "unparseable"
+MANIFEST_UNSIGNED = "unsigned"
+
+
+def _read_manifest(app_id: str) -> tuple[Optional[dict], str, str]:
+    """`(manifest_or_None, reason, detail)` — the single manifest resolution path.
+
+    `_load_manifest` is the enforcement wrapper (dict or None, nothing else);
+    `manifest_diagnosis` is the operator-facing one. Both go through here so the
+    reported reason can never drift from the reason the gate actually acted on.
+    """
     root = _apps_root()
     manifest_path = root / app_id / "manifest.json"
     if not manifest_path.exists():
-        return None
+        return None, MANIFEST_ABSENT, f"no manifest at {manifest_path}"
     try:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.error("gate: manifest unreadable for %s: %s", app_id, e)
-        return None
+        return None, MANIFEST_UNPARSEABLE, f"{manifest_path} is not readable JSON: {str(e)[:160]}"
     # #183: opt-in PGP enforcement. Every caller of _load_manifest already
     # treats None as "deny" (fail-closed) -- checking here, once, means an
     # unsigned or tampered manifest is denied everywhere a manifest is read,
@@ -393,8 +413,32 @@ def _load_manifest(app_id: str) -> Optional[dict]:
                 "gate: manifest signature invalid for %s: %s — denied (PGP enforced)",
                 app_id, detail,
             )
-            return None
+            return None, MANIFEST_UNSIGNED, (
+                f"{manifest_path} exists and parses, but PGP enforcement is ON "
+                f"(WILLOW_PGP_FINGERPRINT is set) and its signature did not verify: "
+                f"{detail}. Sign it with `willow-mcp sign-manifest {app_id}`."
+            )
+    return data, MANIFEST_OK, "manifest loaded"
+
+
+def _load_manifest(app_id: str) -> Optional[dict]:
+    """The manifest, or None. Fail-closed and reason-free: every caller treats
+    None as deny, and no denial ever tells a caller *why* (that would leak
+    whether an app_id exists). Diagnostics use `manifest_diagnosis`."""
+    data, _reason, _detail = _read_manifest(app_id)
     return data
+
+
+def manifest_diagnosis(app_id: str) -> tuple[str, str]:
+    """`(reason, detail)` for the operator-facing surfaces only — `doctor`,
+    `diagnostic_summary`, `whoami`. Distinguishes absent / unparseable /
+    unsigned, which the gate itself deliberately does not."""
+    try:
+        app_id = _validate_app_id(app_id)
+    except ValueError:
+        return MANIFEST_ABSENT, f"invalid app_id {app_id!r} — names no manifest file"
+    _data, reason, detail = _read_manifest(app_id)
+    return reason, detail
 
 
 def authorized(app_id: str) -> bool:
