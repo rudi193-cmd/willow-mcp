@@ -37,7 +37,6 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 ### Added
 
 * **decommission:** native SessionStart/End — stack snapshot, boot context ([7c0308d](https://github.com/rudi193-cmd/willow-mcp/commit/7c0308d3f71b70d23a9d945e208c928946ebee7b))
-* **decommission:** SessionEnd stack snapshot + SessionStart boot context (1i/1j, 1d slice) ([4a70ff3](https://github.com/rudi193-cmd/willow-mcp/commit/4a70ff34fa5b96aa531e70f0ac03a94844ec1b0d))
 
 
 ### Fixed
