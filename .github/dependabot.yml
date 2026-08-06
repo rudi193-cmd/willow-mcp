@@ -1,11 +1,26 @@
 version: 2
 updates:
+  # Python dependencies live in pyproject.toml, which IS packaged — a bump here
+  # really does change what `pip install willow-mcp` resolves, so dependabot's
+  # default `build(deps):` is correct and should cut a release.
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
 
+  # Action versions are NOT packaged. Dependabot's default prefix is
+  # `build(deps):`, and `build` is release-cutting in release-please-config.json
+  # — so a workflow-only bump arrives claiming a release that contains nothing
+  # installable, and `pr-title.yml`'s second guard fails it. That guard is right;
+  # the prefix was wrong. `ci` is hidden, so these ride along with the next real
+  # release instead of cutting an empty one of their own.
+  #
+  # Found when #293 (actions/checkout 4 -> 7) went red on `title` with every
+  # other check green. The bump itself was legitimate — release-please.yml was
+  # the last workflow still on v4.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    commit-message:
+      prefix: "ci"

@@ -42,7 +42,9 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 
 ### Build
 
+* **deps:** bump actions/checkout from 4 to 7 ([3a54a62](https://github.com/rudi193-cmd/willow-mcp/commit/3a54a62acb084de5eb33be2b4f3bb5ce5337a6ec))
 * **deps:** update cryptography requirement ([15eaa45](https://github.com/rudi193-cmd/willow-mcp/commit/15eaa45ee59fe20542dc8355627ea01d7faa5c97))
+* **deps:** bump googleapis/release-please-action from 4 to 5 ([ab78ff9](https://github.com/rudi193-cmd/willow-mcp/commit/ab78ff94fc4c02e4d5481427ffc31fe90922b0fa))
 
 ## [2.2.3](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.2...v2.2.3) (2026-08-04)
 
