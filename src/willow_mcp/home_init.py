@@ -50,7 +50,17 @@ _DEFAULT_ENVELOPES: dict[str, Any] = {
         "orchestrator": {"allow_groups": ["orchestrator", "full_access"]},
         "builder": {"allow_groups": ["dispatch_write", "task_queue", "store_read", "knowledge_read"]},
         "auditor": {"allow_groups": ["dispatch_read", "dispatch_write", "knowledge_read"]},
-        "librarian": {"allow_groups": ["dispatch_read", "dispatch_write", "knowledge_read"]},
+        # gap_read/gap_write, and not the softer read-only line, because the
+        # librarian is the seat that *discovers* what the fleet cannot answer.
+        # `jeles` — a declared dependency of this package — forwards every
+        # corpus miss into the shared backlog via gap_log, so a librarian
+        # without gap_write makes a shipped seam fail closed and silently.
+        # gap_promote (landing a gap as trusted knowledge) and gap_purge
+        # (clearing a whole fleet-shared topic) stay off this line.
+        "librarian": {"allow_groups": [
+            "dispatch_read", "dispatch_write", "knowledge_read",
+            "gap_read", "gap_write",
+        ]},
         "operator": {"allow_groups": ["dispatch_read", "fleet_read", "knowledge_read"]},
     },
 }

@@ -60,7 +60,7 @@
       "display_name": "Jeles",
       "role": "librarian",
       "roles": ["librarian", "retrieval"],
-      "permissions": ["dispatch_read", "dispatch_write", "knowledge_read"],
+      "permissions": ["dispatch_read", "dispatch_write", "knowledge_read", "gap_read", "gap_write"],
       "deny_tools": ["task_submit", "kb_promote", "kb_journal", "knowledge_ingest"],
       "persona_path": "personas/jeles.md",
       "persona_bundle": true,

@@ -9,7 +9,7 @@
 |----------|------|-------|----------|--------------|
 | BUILD | Hanuman | builder, coordinator | dispatch_read, dispatch_write, task_queue, store_read, knowledge_read, fork_read, fork_write | `personas/hanuman.md` |
 | AUDIT | Loki | auditor | dispatch_read, dispatch_write, knowledge_read | `personas/loki.md` |
-| RESEARCH | Jeles | librarian, retrieval | dispatch_read, dispatch_write, knowledge_read | `personas/jeles.md` |
+| RESEARCH | Jeles | librarian, retrieval | dispatch_read, dispatch_write, knowledge_read, gap_read, gap_write | `personas/jeles.md` |
 | OPERATE | Ada | operator, monitor | dispatch_read, dispatch_write, fleet_read, knowledge_read | `personas/ada.md` |
 | EMISSARY | Skirnir | gate, witness | dispatch_read, context | `personas/skirnir.md` |
 | ARCHITECT | Vishwakarma | architect, safe | dispatch_read, store_read, knowledge_read | `personas/vishwakarma.md` |
