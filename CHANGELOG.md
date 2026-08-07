@@ -31,6 +31,13 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.4.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.3.0...v2.4.0) (2026-08-07)
+
+
+### Added
+
+* **fleet:** stand up willow-mcp, jeles and nestor as one wired fleet ([a23d694](https://github.com/rudi193-cmd/willow-mcp/commit/a23d694047efa2b1487563ac12cda8e22cfae2df))
+
 ## [2.3.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.5...v2.3.0) (2026-08-06)
 
 
