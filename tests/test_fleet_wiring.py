@@ -142,3 +142,74 @@ def test_fleet_standup_does_not_export_a_fleet_wide_app_id():
     assert "WILLOW_APP_ID" not in exported
     assert "WILLOW_STORE_ROOT" in exported
     assert "JELES_CORPUS_APP_ID" in exported
+
+
+# ── the CI job that runs the live seam check ────────────────────────────────
+
+_TESTS_WF = REPO / ".github" / "workflows" / "tests.yml"
+
+
+def _workflow() -> dict:
+    import pytest
+    yaml = pytest.importorskip("yaml", reason="PyYAML needed to read the workflows")
+    return yaml.safe_load(_TESTS_WF.read_text(encoding="utf-8"))
+
+
+def test_fleet_seams_job_exists_and_checks_out_both_siblings():
+    job = _workflow()["jobs"]["fleet-seams"]
+    repos = {s.get("with", {}).get("repository")
+             for s in job["steps"] if s.get("uses", "").startswith("actions/checkout")}
+    assert "rudi193-cmd/Jeles" in repos
+    assert "rudi193-cmd/Nestor" in repos
+
+
+def test_fleet_seams_checks_out_full_history():
+    """hatch-vcs takes the version from the tags, so a shallow checkout builds
+    jeles as 0.1.devN — which does not satisfy this package's own
+    `jeles>=0.5.1`. The co-install seam then fails with what reads as a bad
+    pin. Every checkout in this job must be unshallow."""
+    job = _workflow()["jobs"]["fleet-seams"]
+    for step in job["steps"]:
+        if step.get("uses", "").startswith("actions/checkout"):
+            assert step.get("with", {}).get("fetch-depth") == 0, \
+                f"shallow checkout in {step.get('name', 'checkout')}"
+
+
+def test_fleet_seams_provides_postgres():
+    """Without it the FRANK seam reports SKIP, and a job of SKIPs is not a
+    job that checked anything."""
+    assert "postgres" in _workflow()["jobs"]["fleet-seams"]["services"]
+
+
+def test_fleet_seams_runs_the_script_users_run():
+    """Not a re-implementation of the stand-up. A stand-up guarded by a
+    different code path than the documented one is a stand-up nobody checked."""
+    runs = " ".join(s.get("run", "") for s in _workflow()["jobs"]["fleet-seams"]["steps"])
+    assert "scripts/fleet-standup.sh" in runs
+    assert "scripts/fleet_seams.py" in runs
+
+
+def test_fleet_seams_does_not_gate_the_merge():
+    """Same posture as vendor-sync, for the same reason: the sibling checkouts
+    may be unreachable (private, no token), and a job that soft-skips must
+    never block a merge. The soft part is the checkout only."""
+    jobs = _workflow()["jobs"]
+    assert "fleet-seams" not in jobs["test"]["needs"]
+    for step in jobs["fleet-seams"]["steps"]:
+        if step.get("with", {}).get("repository", "").endswith(("/Jeles", "/Nestor")):
+            assert step.get("continue-on-error") is True, \
+                "a sibling checkout must be soft — it is the only soft part"
+
+
+def test_fleet_seams_fails_when_a_seam_skips_on_a_provisioned_runner():
+    """SKIP is right when a half is genuinely absent. On this runner nothing is
+    absent, so a SKIP is an environment regression — and `quiet reads as fine`
+    is the failure the `test` gate below was written to end."""
+    steps = _workflow()["jobs"]["fleet-seams"]["steps"]
+    guard = [s for s in steps if "SKIP" in (s.get("name") or "")]
+    assert guard, "no step asserts that nothing skipped"
+    assert "--json" in guard[0]["run"]
+    # It must only speak when both siblings actually landed, or it would fail
+    # every run on a fork with no token.
+    assert "steps.jeles.outcome" in guard[0]["if"]
+    assert "steps.nestor.outcome" in guard[0]["if"]

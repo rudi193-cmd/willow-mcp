@@ -213,8 +213,14 @@ echo "wrote $FLEET_ENV"
 # ── 7. does it actually join up? ─────────────────────────────────────────────
 say "seams"
 set +u; . "$FLEET_ENV"; set -u
-"$PY" "$REPO_ROOT/scripts/fleet_seams.py"
-rc=$?
+# In a condition, so `set -e` does not abort here — a failing seam check must
+# still reach the summary below and exit with its own status, rather than
+# killing the script one line before it can say anything about why.
+if "$PY" "$REPO_ROOT/scripts/fleet_seams.py"; then
+  rc=0
+else
+  rc=$?
+fi
 
 echo
 if [ $rc -eq 0 ]; then
@@ -224,5 +230,8 @@ if [ $rc -eq 0 ]; then
   echo
   echo "Server command:  $PY -m willow_mcp"
   echo "Re-check seams:  $PY $REPO_ROOT/scripts/fleet_seams.py"
+else
+  echo "A seam is broken — the fleet is NOT wired up. Detail is in the table above."
+  echo "Re-check after fixing:  $PY $REPO_ROOT/scripts/fleet_seams.py"
 fi
 exit $rc
