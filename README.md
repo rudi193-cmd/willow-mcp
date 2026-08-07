@@ -56,9 +56,42 @@ Postgres role yet.
 A fresh Postgres database needs willow-mcp's tables. On a shared fleet DB they
 already exist; on a standalone install, apply the DDL in
 [`docs/schema/`](docs/schema/) (`knowledge`, `agents`, `routing_decisions`,
-`tasks` — the four `diagnostic_summary` checks for). The bootstrap script
-applies all four for you. Each `knowledge`/`tasks` write path stays locked
-behind `schema_confirm_mapping` until you confirm the mapping once.
+`tasks` — the four `diagnostic_summary` checks for, plus `frank_ledger` for the
+FRANK governance chain). The bootstrap script applies all of them for you. Each
+`knowledge`/`tasks` write path stays locked behind `schema_confirm_mapping`
+until you confirm the mapping once.
+
+### The fleet (one command up)
+
+`sandbox-bootstrap.sh` proves this server works **alone**. Two sibling packages
+attach to it — [`jeles`](https://github.com/rudi193-cmd/Jeles), the verified-corpus
+organ this package already depends on for institutional search, and
+[`nestor`](https://github.com/rudi193-cmd/Nestor), which mirrors its hash-chained
+ledger into FRANK — and standing all three up together is a different claim:
+
+```bash
+bash scripts/fleet-standup.sh    # idempotent; ends with six seam checks
+```
+
+It runs the sandbox bootstrap, installs the `jeles` and `nestor` checkouts
+editable into that **same venv** (across two venvs their imports silently
+resolve to whatever PyPI last published), seats `nestor` in the gate, writes
+`$WILLOW_HOME/fleet.env`, and then checks that the seams actually join:
+
+| Seam | What crosses |
+|------|--------------|
+| co-install | one venv, all three resolving to the checkouts |
+| shared SOIL store | jeles' corpus and this server's `Store` on one SQLite file |
+| gap forward | a jeles corpus miss → `gap_log`, through the manifest ACL |
+| institutional search | this server's `willow_institutional_search` → jeles' ~60 collections |
+| FRANK mirror | a nestor ledger entry → `frank_append` → the hash chain |
+| nugget bridge | a jeles nugget → nestor, as a **draft** — never a seal |
+
+Point `JELES_REPO` / `NESTOR_REPO` at the checkouts if they are not siblings of
+this one. Re-check any time with `.venv/bin/python scripts/fleet_seams.py`
+(`--json` for machine output); every seam it reports as passing was exercised
+by writing real data through the real path, because a seam that is only
+imported is a seam that has not been tested.
 
 > **PATH note:** `~/.local/bin/willow-mcp` is often the **fleet** shim (`sap_mcp.py`), not this
 > product. Use the venv binary from wherever you ran `pip install willow-mcp` (or

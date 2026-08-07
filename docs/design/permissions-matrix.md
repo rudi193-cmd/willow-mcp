@@ -62,7 +62,7 @@ Companion: `specialist-registry.md` · `human-orchestrator.md` · `gate.py`
 |------|-------------|------------|-------------|-----------|
 | **hanuman** | dispatch_read, dispatch_write, task_queue, store_read, knowledge_read, fork_read, fork_write | kb_promote, knowledge_ingest | hanuman_* | Builder runs Kart; reads KB; tracks work units via fork_*; no ratification writes |
 | **loki** | dispatch_read, dispatch_write, knowledge_read | task_submit, store_put, store_update, store_delete, knowledge_ingest | loki_* | Auditor reviews and closes; never builds or mutates store/KB |
-| **jeles** | dispatch_read, dispatch_write, knowledge_read | task_submit, kb_promote, kb_journal, knowledge_ingest | jeles_* | Librarian retrieves; no shell, no KB writes |
+| **jeles** | dispatch_read, dispatch_write, knowledge_read, gap_read, gap_write | task_submit, kb_promote, kb_journal, knowledge_ingest | jeles_* | Librarian retrieves and records what it *couldn't* answer; no shell, no KB writes. gap_write is the seam the `jeles` package's `forward_gap` calls; gap_promote (gap → trusted knowledge) is deliberately NOT granted, so a librarian can fill the backlog but never ratify out of it |
 | **ada** | dispatch_read, dispatch_write, fleet_read, knowledge_read | task_submit, store_put, store_update, knowledge_ingest | ada_* | Operator monitors fleet; no execution or store mutation |
 | **skirnir** | dispatch_read, context | — | skirnir_* | Witness reads packets + session context only |
 | **vishwakarma** | dispatch_read, store_read, knowledge_read | task_submit | vishwakarma_* | Architect reads; no Kart |
