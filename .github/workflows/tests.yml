@@ -285,6 +285,147 @@ jobs:
       - name: Compare vendored Nest pipeline against upstream (A4)
         run: python scripts/check_nest_pipeline_sync.py .safe-app-store-upstream/libs/nest-pipeline/src/nest_pipeline
 
+  fleet-seams:
+    # The joins between this package and its two siblings — jeles (a declared
+    # runtime dependency) and nestor (which mirrors its ledger into FRANK).
+    #
+    # `test-matrix` already runs tests/test_fleet_wiring.py, which asserts this
+    # side of each seam: the grant exists, the DDL ships, the scripts are
+    # executable. That is the half that can run with neither sibling installed,
+    # and it is not the same claim. Three of these seams were broken while both
+    # halves read as fine — each package's own code was correct and nothing
+    # exercised the join. So this job stands the fleet up for real and writes
+    # data through the real path: the manifest ACL, the shared SQLite file, the
+    # hash chain.
+    #
+    # Deliberately NOT in `test`'s needs, for the same reason vendor-sync isn't:
+    # the sibling checkouts may be unreachable (private, no token), and a job
+    # that soft-skips must never gate a merge. The soft part is the *checkout*
+    # only — once both siblings are on disk, a broken seam fails hard.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # fetch-depth: 0 brings the tags, and the tags are load-bearing here
+          # rather than cosmetic: this package and jeles both take their version
+          # from git via hatch-vcs, so a shallow clone builds as 0.1.devN, which
+          # does not satisfy this package's own `jeles>=0.5.1`. On a shallow
+          # checkout the co-install seam fails with what reads as a bad pin.
+          fetch-depth: 0
+
+      - name: Fetch jeles (soft — needs read access)
+        id: jeles
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: rudi193-cmd/Jeles
+          path: .fleet/Jeles
+          fetch-depth: 0
+          token: ${{ secrets.FLEET_RO_TOKEN || github.token }}
+
+      - name: Fetch nestor (soft — needs read access)
+        id: nestor
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: rudi193-cmd/Nestor
+          path: .fleet/Nestor
+          fetch-depth: 0
+          token: ${{ secrets.FLEET_RO_TOKEN || github.token }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Report what landed
+        # Named, not inferred from a later failure. A sibling that did not
+        # check out turns every seam that crosses it into a SKIP, and a run
+        # that is all SKIPs must not read as a run that passed.
+        run: |
+          for repo in Jeles Nestor; do
+            if [ -d ".fleet/$repo/.git" ]; then
+              echo "$repo: $(git -C ".fleet/$repo" describe --tags --always)"
+            else
+              echo "::warning::$repo did not check out — seams crossing it will SKIP"
+            fi
+          done
+
+      - name: Stand the fleet up
+        # The script users actually run, not a re-implementation of it — a
+        # stand-up guarded by a different code path than the documented one is
+        # a stand-up nobody checked. It ends by running scripts/fleet_seams.py
+        # and exits non-zero if any seam fails.
+        run: bash scripts/fleet-standup.sh
+        env:
+          JELES_REPO: ${{ github.workspace }}/.fleet/Jeles
+          NESTOR_REPO: ${{ github.workspace }}/.fleet/Nestor
+          WILLOW_PG_DB: willow
+          WILLOW_PG_USER: postgres
+          PGHOST: localhost
+          PGPORT: 5432
+          PGPASSWORD: postgres
+          PGOPTIONS: >-
+            -c statement_timeout=90s
+            -c lock_timeout=60s
+            -c idle_in_transaction_session_timeout=120s
+
+      - name: No seam may SKIP on a runner that has everything
+        # The check the seam script itself cannot make. SKIP is the right answer
+        # when a half is genuinely absent — an unreachable seam is a smaller
+        # claim than a working one, and reporting the smaller as the larger is
+        # how a stand-up certifies a fleet that is half up. But this runner
+        # provides Postgres and both checkouts, so here a SKIP is an
+        # environment regression, and `quiet reads as fine` is exactly the
+        # failure mode the `test` gate below was written to end.
+        if: steps.jeles.outcome == 'success' && steps.nestor.outcome == 'success'
+        run: |
+          set -euo pipefail
+          . "$GITHUB_WORKSPACE/.willow/fleet.env"
+          .venv/bin/python scripts/fleet_seams.py --json > fleet-seams.json
+          python - <<'PY'
+          import json, sys
+          seams = json.load(open("fleet-seams.json"))["seams"]
+          for s in seams:
+              print(f"{s['status']:4}  {s['seam']}  —  {s['detail']}")
+          skipped = [s["seam"] for s in seams if s["status"] == "SKIP"]
+          if skipped:
+              print(f"::error::seam(s) skipped on a fully-provisioned runner: {', '.join(skipped)}")
+              sys.exit(1)
+          print(f"\n{len(seams)} seams, none skipped")
+          PY
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+
+      - name: Upload seam report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fleet-seams
+          path: fleet-seams.json
+          if-no-files-found: ignore
+
   # Aggregate gate: branch protection requires a check named exactly "test".
   # The matrix legs report as "test-matrix (3.11)" / "test-matrix (3.12)";
   # this job carries the required name.
