@@ -36,7 +36,6 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 
 ### Added
 
-* **fleet:** stand up willow-mcp, jeles and nestor as one wired fleet ([3a85a1c](https://github.com/rudi193-cmd/willow-mcp/commit/3a85a1c0c4959b1412f2afe57dd0ea80cdb89f97))
 * **fleet:** stand up willow-mcp, jeles and nestor as one wired fleet ([a23d694](https://github.com/rudi193-cmd/willow-mcp/commit/a23d694047efa2b1487563ac12cda8e22cfae2df))
 
 ## [2.3.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.2.5...v2.3.0) (2026-08-06)
