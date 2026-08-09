@@ -187,6 +187,37 @@ def test_diagnostic_summary_smoke():
     assert isinstance(rep["problems"], list)
 
 
+# ── uid_separation check (#231) — informational only, never gates verdict ────
+
+def test_diagnostic_summary_includes_uid_separation_check():
+    fn = getattr(server.diagnostic_summary, "fn", server.diagnostic_summary)
+    rep = fn(app_id="hanuman")
+    assert "uid_separation" in rep["checks"]
+    sep = rep["checks"]["uid_separation"]
+    assert "separated" in sep and "process" in sep and "targets" in sep
+
+
+def test_uid_separation_not_separated_never_added_to_problems(monkeypatch):
+    """The whole point of B-18: a check that is `False`/unsatisfied on every
+    single-uid install today must never become a new `warn`/`error` in
+    `problems`, or every existing install's resting state degrades on this
+    PR alone. uid_separation is deliberately excluded from _derive_problems;
+    assert the exclusion holds even when explicitly False."""
+    from willow_mcp import trust_root_setup
+
+    monkeypatch.setattr(
+        trust_root_setup,
+        "uid_separation_report",
+        lambda app_id="": {"separated": False, "process": {"uid": 0, "user": "root"},
+                            "targets": [], "same_owner_paths": []},
+    )
+    fn = getattr(server.diagnostic_summary, "fn", server.diagnostic_summary)
+    rep = fn(app_id="hanuman")
+    assert rep["checks"]["uid_separation"]["separated"] is False
+    checks = {p.get("check") for p in rep["problems"]}
+    assert "uid_separation" not in checks
+
+
 # ── learned-mapping tree (schema_rings) health ───────────────────────────────
 
 def test_diag_rings_reports_sapling_when_empty(tmp_path, monkeypatch):

@@ -3821,6 +3821,24 @@ def _diag_net_lease(app_id: str) -> dict:
     }
 
 
+def _diag_uid_separation(app_id: str) -> dict:
+    """B-32/#231, made legible: whose *account* actually owns the trust root,
+    named next to whose account is asking.
+
+    `net_lease.self_writable` already answers the question the verdict is
+    built on — could this process WRITE the keys. This answers the one an
+    operator asks first while following the harden-trust-root deployment
+    runbook (`docs/deploy/dedicated-uid-deployment.md`) — "did that actually
+    move the files to a different account, or did `repair-runtime-perms` just
+    chown them back to me". Purely informational: never folded into
+    `_derive_problems`/the verdict, so it cannot turn every existing
+    single-uid install's resting state into a new `warn` (B-18's rule) —
+    `strict_trust_root`/`net_lease`/`severance` already carry the
+    enforcement-relevant verdict for this surface."""
+    from . import trust_root_setup
+    return trust_root_setup.uid_separation_report(app_id)
+
+
 def _under(child: Path, parent: Path) -> bool:
     """Is `child` the same inode as `parent`, or inside it — after symlinks?
 
@@ -4396,6 +4414,7 @@ def diagnostic_summary(app_id: str = "") -> dict:
     consent = _diag_consent()
     net_lease = _diag_net_lease(eff)
     severance = _diag_severance(store, postgres, net_lease)
+    uid_separation = _diag_uid_separation(eff)
     env = _diag_env()
 
     problems = _derive_problems(store, postgres, manifest, mode, worker, consent,
@@ -4410,7 +4429,7 @@ def diagnostic_summary(app_id: str = "") -> dict:
         "checks": {"store": store, "postgres": postgres, "rings": rings,
                    "schema": schema, "manifest": manifest, "identity_bindings": bindings,
                    "worker": worker, "consent": consent, "net_lease": net_lease,
-                   "severance": severance, "env": env},
+                   "severance": severance, "uid_separation": uid_separation, "env": env},
         "problems": problems,
     }
     if redact:
@@ -5722,6 +5741,19 @@ def _cmd_doctor(args) -> None:
         print(f"  fix: {cli} repair-runtime-perms")
         print()
 
+    # #231: plain-ownership identity, next to the access-bit checks above.
+    # Informational only — never changes the verdict (see _diag_uid_separation).
+    uid_sep = audit.get("uid_separation") or {}
+    me = uid_sep.get("process") or {}
+    if uid_sep.get("separated"):
+        print(f"uid separation: OK — trust root is owned by a different account "
+              f"than this process ({me.get('user')}, uid {me.get('uid')})\n")
+    else:
+        print(f"uid separation: NOT separated — this process runs as "
+              f"{me.get('user')} (uid {me.get('uid')}), the same account that owns "
+              f"the trust root (or nothing has been hardened yet)")
+        print("  see docs/deploy/dedicated-uid-deployment.md for the full runbook\n")
+
 
 def _cmd_run_net(args) -> None:
     """`willow-mcp run-net` — operator one-shot: lease (if needed) + sign + queue."""
@@ -5911,6 +5943,20 @@ def _cmd_harden_trust_root(args) -> None:
         print("\n── Operator commands (confirm authority) ─────────────────")
         for line in result.get("operator_commands") or []:
             print(f"  {line}")
+        # #231: confirm the ownership actually moved, not just that the chown
+        # commands ran without error — a `sudo -u <owner>` that silently fell
+        # back to the caller's own uid would still print a clean action log.
+        after = (result.get("after") or {}).get("uid_separation") or {}
+        me = after.get("process") or {}
+        if after.get("separated"):
+            print(f"\nuid separation: confirmed — trust root now owned by a different "
+                  f"account than this process ({me.get('user')}, uid {me.get('uid')}).")
+        else:
+            print(f"\nuid separation: NOT yet achieved — this process (still {me.get('user')}, "
+                  f"uid {me.get('uid')}) owns the trust root it just hardened. Hardening only moves "
+                  f"the files; a genuinely separate runtime uid must actually run the MCP server "
+                  f"(or invoke this CLI) for separation to be real — see "
+                  f"docs/deploy/dedicated-uid-deployment.md.")
 
 
 def _cmd_grant_net(args) -> None:

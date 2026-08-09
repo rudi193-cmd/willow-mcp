@@ -406,6 +406,15 @@ exists would deny egress on every current install. This is tracked as B-32 in
 egress and confirming it are separate authorities, and until the filesystem
 says so, only convention does.
 
+The concrete runbook for actually standing up the separated deployment —
+including a serve-mode shape where the agent has no local account on the
+host at all — is [`docs/deploy/dedicated-uid-deployment.md`](docs/deploy/dedicated-uid-deployment.md).
+`diagnostic_summary`'s `checks.uid_separation` (and `doctor`'s `uid
+separation:` line) report the plain ownership fact — does the trust root
+belong to a different account than the one asking — next to, never instead
+of, the `self_writable`/`hardened` checks strict mode actually enforces
+against.
+
 ### Integrations (outbound adapters)
 
 `integration_call` lets the **server process** call external HTTP APIs through

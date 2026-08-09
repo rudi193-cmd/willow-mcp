@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import pytest
 
@@ -261,6 +263,155 @@ def test_audit_trust_root_reports_the_egress_key_when_self_readable(home, egress
 def test_operator_command_hints_mentions_sign_net_task():
     hints = trs.operator_command_hints("operator")
     assert any("sign-net-task" in h for h in hints)
+
+
+# ── uid-separation legibility report (#231) ──────────────────────────────────
+#
+# Distinct question from everything above: not "could this process write the
+# trust root" (self_writable_trust_paths, the functional truth the verdict is
+# built on) but "does the trust root's on-disk OWNER differ from this
+# process's own uid" — the plain fact an operator following the
+# dedicated-uid-deployment runbook checks first. This container runs single-
+# uid, so "genuinely separated" is simulated by monkeypatching path_owner()
+# to report a different uid, exactly as instructed for tests that cannot
+# create a real second unix user.
+
+def test_process_identity_reports_current_euid():
+    me = trs.process_identity()
+    assert me["uid"] == os.geteuid()
+    assert me["user"]
+
+
+def test_path_owner_none_for_missing_path(tmp_path):
+    assert trs.path_owner(tmp_path / "does-not-exist") is None
+
+
+def test_path_owner_reports_uid_and_user_for_existing_path(tmp_path):
+    f = tmp_path / "present"
+    f.write_text("x")
+    owner = trs.path_owner(f)
+    assert owner["uid"] == os.geteuid()
+    assert owner["user"]
+
+
+def test_uid_separation_false_on_fresh_single_uid_home(home):
+    """Every file this test creates is owned by the test's own uid — the
+    honest, unhardened resting state. A fresh install with nothing on disk
+    yet must also report False, not a false 'separated' from an empty list."""
+    hi.ensure_home_layout()
+    report = trs.uid_separation_report("hanuman")
+    assert report["separated"] is False
+    assert report["process"]["uid"] == os.geteuid()
+    assert report["same_owner_paths"]  # at least mcp_apps/config exist and match
+
+
+def test_uid_separation_true_when_every_target_owned_by_another_uid(home, monkeypatch):
+    """Simulates the hardened deployment (real chown to a dedicated uid is not
+    possible in this single-uid container): every existing trust-root path
+    resolves to a different uid than this process."""
+    hi.ensure_home_layout()
+    other_uid = os.geteuid() + 1
+
+    def _fake_owner(path):
+        if not Path(path).expanduser().exists():
+            return None
+        return {"uid": other_uid, "user": "willow-operator"}
+
+    monkeypatch.setattr(trs, "path_owner", _fake_owner)
+    report = trs.uid_separation_report("hanuman")
+    assert report["separated"] is True
+    assert report["same_owner_paths"] == []
+    assert all(t["owned_by_this_process"] is False for t in report["targets"] if t["owner"])
+
+
+def test_uid_separation_false_when_any_target_still_self_owned(home, monkeypatch):
+    """Partial hardening (e.g. repair-runtime-perms restored a secret file to
+    the runtime user, which happens to be this process) must not read as
+    'separated' — separation is all-or-nothing across the measured surface."""
+    hi.ensure_home_layout()
+    other_uid = os.geteuid() + 1
+    real_owner = trs.path_owner
+
+    def _mixed_owner(path):
+        owner = real_owner(path)
+        if owner is None:
+            return None
+        if str(path).endswith("mcp_apps"):
+            return owner  # left self-owned, deliberately
+        return {"uid": other_uid, "user": "willow-operator"}
+
+    monkeypatch.setattr(trs, "path_owner", _mixed_owner)
+    report = trs.uid_separation_report("hanuman")
+    assert report["separated"] is False
+    assert any(p.endswith("mcp_apps") for p in report["same_owner_paths"])
+
+
+def test_uid_separation_includes_manifest_only_when_it_exists(home):
+    hi.ensure_home_layout()
+    no_app = trs.uid_separation_report("")
+    assert not any(t["key"] == "manifest" for t in no_app["targets"])
+
+    manifest_dir = paths.mcp_apps_root() / "hanuman"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "manifest.json").write_text("{}")
+    with_app = trs.uid_separation_report("hanuman")
+    assert any(t["key"] == "manifest" for t in with_app["targets"])
+
+
+def test_audit_trust_root_includes_uid_separation(home):
+    hi.ensure_home_layout()
+    audit = trs.audit_trust_root("hanuman")
+    assert "uid_separation" in audit
+    assert audit["uid_separation"]["process"]["uid"] == os.geteuid()
+
+
+def test_doctor_cli_reports_uid_separation_not_achieved(home, capsys):
+    """Real (unmocked) audit_trust_root on the single-uid test home: the CLI's
+    informational line must say so plainly, pointing at the runbook."""
+    from willow_mcp import server
+
+    hi.ensure_home_layout()
+
+    class _Args:
+        app_id = "hanuman"
+        project_root = ""
+
+    server._cmd_doctor(_Args())
+    out = capsys.readouterr().out
+    assert "uid separation: NOT separated" in out
+    assert "dedicated-uid-deployment.md" in out
+
+
+def test_doctor_cli_confirms_uid_separation_when_simulated_separated(home, monkeypatch, capsys):
+    from willow_mcp import server, trust_root_setup
+
+    hi.ensure_home_layout()
+    other_uid = os.geteuid() + 1
+    monkeypatch.setattr(
+        trust_root_setup,
+        "path_owner",
+        lambda p: {"uid": other_uid, "user": "willow-operator"} if Path(p).expanduser().exists() else None,
+    )
+
+    class _Args:
+        app_id = "hanuman"
+        project_root = ""
+
+    server._cmd_doctor(_Args())
+    out = capsys.readouterr().out
+    assert "uid separation: OK" in out
+
+
+def test_harden_trust_root_result_carries_uid_separation_in_after(home, monkeypatch):
+    """dry_run=True (as above) rather than a real chown: this sandbox has no
+    `operator` unix user to chown to, and running for real is exactly what
+    `require_operator_terminal` gates the CLI path on anyway. `after` mirrors
+    `before` verbatim on a dry run, so this just asserts audit_trust_root()'s
+    new field survives that pass-through."""
+    hi.ensure_home_layout()
+    monkeypatch.setattr(trs, "resolve_trust_owner", lambda owner: "operator")
+    result = trs.harden_trust_root(owner="operator", dry_run=True)
+    assert "uid_separation" in result["after"]
 
 
 def test_doctor_cli_warns_on_secret_file_exposure(home, monkeypatch, capsys):
