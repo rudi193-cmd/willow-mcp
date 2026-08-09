@@ -11,15 +11,26 @@ Threat model (#280), written down rather than implied:
   recorded somewhere the chain's writer cannot reach: ``verify()`` takes
   ``expected_head`` for exactly that — hold the ``head`` value it returns in
   a CI variable, a monitoring system, an ops runbook, anywhere outside this
-  database — and a silent relink becomes a detected one.
+  database — and a silent relink becomes a detected one. ``frank_head_anchor.py``
+  gives that a concrete home (``$WILLOW_HOME/constitutional/frank_head_anchor.json``,
+  CLI-written only) and the ``frank_verify`` MCP tool reads it automatically,
+  so an operator does not have to wire ``expected_head`` through by hand.
+* ``rechain()`` reads that same anchor before migrating anything: if one is
+  present and the chain's CURRENT (pre-migration) head does not match it,
+  ``rechain()`` refuses rather than silently laundering whatever happened to
+  the chain since the anchor was last set — see its docstring. No anchor on
+  disk (the default — anchoring is opt-in) degrades to "proceed, unguarded,"
+  logged rather than silent, so an install that never opted in is not newly
+  broken.
 * ``rechain()`` is additionally self-documenting: a run that migrated
   anything appends a ``governance.rechain`` row recording the pre-migration
   head and row count. That raises the cost of a QUIET relink; it does not
-  stop a determined operator (who can delete the marker and relink again) —
-  only an externally-held head does. FRANK mirroring into this table gives
-  Nestor "someone else remembers" ONLY to the extent that this someone's
-  head is anchored outside; without an anchor it degrades to "someone else
-  has a copy that will agree with whatever it now says."
+  stop a determined operator (who can delete the marker AND the anchor file
+  and relink again) — only an externally-held head, actually anchored, does.
+  FRANK mirroring into this table gives Nestor "someone else remembers" ONLY
+  to the extent that this someone's head is anchored outside; without an
+  anchor it degrades to "someone else has a copy that will agree with
+  whatever it now says."
 """
 from __future__ import annotations
 
@@ -193,20 +204,50 @@ class GovernanceLedger:
         return {"valid": True, "broken_at": None, "count": len(rows),
                 "head": previous}
 
-    def rechain(self) -> dict:
+    def rechain(self, *, force: bool = False) -> dict:
         """One-time migration (box audit A7): re-hash every row under v2 so the
         ``id``/``project`` columns become tamper-evident for legacy entries too,
         re-linking prev_hash as it goes. Idempotent — a fully-v2 chain is left
         unchanged. Must run under the same advisory lock as appends.
 
-        Self-documenting (#280): a run that migrated anything appends a
+        Anchor-guarded (#280), fail-closed on anything but a clean absence:
+        before touching anything, the CURRENT (pre-migration) head is
+        compared against the externally-held anchor at
+        ``frank_head_anchor.read_anchor()``.
+
+        * ``status == "anchored"`` and it does not match ``pre_head`` →
+          refused. That mismatch is exactly what "edit a row, then run
+          rechain()" looks like from outside the database, and it is also
+          what an ordinary unexpected chain mutation since the last anchor
+          looks like. Either way the caller needs to look before this
+          proceeds.
+        * ``status`` is "untrusted" or "unreadable" (the anchor file EXISTS
+          but fails the trust check, or is corrupt/malformed) → also
+          refused. A file that is there but cannot be trusted is a reason to
+          stop, not a reason to fall back to "no anchor" — that fallback is
+          exactly the gap an attacker with local write access would reach
+          for (corrupt the anchor to make rechain() ignore it).
+        * ``status == "unanchored"`` (the anchor file plainly does not
+          exist) → proceeds unguarded, same as before this existed.
+          Anchoring is opt-in, not opt-out, and this is the one status that
+          unambiguously means "never configured," not "configured and now
+          broken."
+
+        ``force=True`` is the explicit operator override for every refusal
+        case above — typically: investigate, then either run
+        ``willow-mcp frank-anchor write`` to accept the current head (after
+        which a plain retry proceeds with no force needed, since the anchor
+        now matches) or pass ``force=True`` directly when a fresh anchor
+        isn't practical.
+
+        Self-documenting regardless: a run that migrated anything appends a
         ``governance.rechain`` row — pre-migration head, rows migrated — so a
         relink leaves a mark IN the chain it relinked. That makes a quiet
         rechain loud; it does not make a malicious one impossible (the
-        operator can delete the marker and relink again), which is why
-        ``verify(expected_head=...)`` and an externally-held head remain the
-        real close. A run that migrated nothing appends nothing, so repeated
-        idempotent runs do not grow the chain."""
+        operator can delete the marker AND the anchor file and relink
+        again), which is why an externally-held, actually-anchored head
+        remains the real close. A run that migrated nothing appends nothing,
+        so repeated idempotent runs do not grow the chain."""
         cur = self.pg.cursor()
         locked = False
         try:
@@ -217,6 +258,21 @@ class GovernanceLedger:
                 f"FROM {TABLE} ORDER BY created_at ASC")
             rows = cur.fetchall()
             pre_head = rows[-1][4] if rows else None
+            if not force:
+                from .frank_head_anchor import read_anchor
+                anchor = read_anchor()
+                if anchor["status"] == "anchored":
+                    if anchor["head"] != pre_head:
+                        return {"refused": True, "reason": "head_mismatch",
+                                "anchored_head": anchor["head"], "pre_head": pre_head,
+                                "migrated": 0, "count": len(rows)}
+                elif anchor["status"] != "unanchored":
+                    # An anchor file EXISTS but can't be trusted or parsed —
+                    # that is an anomaly, not "no anchor configured," so it
+                    # is not treated as equivalent to unanchored.
+                    return {"refused": True, "reason": anchor["status"],
+                            "anchored_head": None, "pre_head": pre_head,
+                            "migrated": 0, "count": len(rows)}
             previous, migrated = None, 0
             for record_id, project, event_type, content, stored_hash in rows:
                 digest = entry_hash_v2(previous, record_id, project, event_type, content)

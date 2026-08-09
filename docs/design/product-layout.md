@@ -147,7 +147,10 @@ $WILLOW_HOME/
 ├── constitutional/
 │   ├── review_queue.json           # Article XI queue (optional charter mount)
 │   ├── pre-approved.json           # envelope registry — product-owned, seeded empty
-│   └── syscall-table.json          # envelope verb table — product-owned, seeded real
+│   ├── syscall-table.json          # envelope verb table — product-owned, seeded real
+│   └── frank_head_anchor.json      # FRANK chain external head anchor (#280) —
+│                                    # absent until `willow-mcp frank-anchor write`;
+│                                    # CLI-only writer, never an MCP tool
 ├── logs/
 │   └── {YYYY-MM-DD}.log
 │

@@ -3183,15 +3183,36 @@ def frank_read(app_id: str, project: str = "", limit: int = 50) -> dict:
 def frank_verify(app_id: str) -> dict:
     """Re-hash the entire FRANK governance chain and verify every prev_hash →
     hash link, detecting tampering, edits, or gaps. Returns the verification
-    verdict, including where the chain breaks if it does. Read-only; may take
-    a moment on a long ledger."""
+    verdict, including where the chain breaks if it does.
+
+    Also checks the chain's head against the externally-held anchor at
+    `$WILLOW_HOME/constitutional/frank_head_anchor.json` when one exists
+    (#280): a chain can be internally consistent (every link valid) and
+    still not be the same chain it was yesterday — that's what an
+    edit-then-`rechain()` relink looks like from outside the database.
+    `anchor_status` reports which case applied: "anchored" (compared;
+    `valid` reflects both internal consistency AND the head match),
+    "unanchored" (no anchor file — most installs, opted out), "untrusted"
+    (anchor file failed the ownership/permission trust check), or
+    "unreadable" (missing/malformed). Only "anchored" means the head was
+    actually compared; the other three are reported explicitly rather than
+    silently treated as a pass. Use `willow-mcp frank-anchor` (CLI-only —
+    never an MCP tool, so an agent cannot mint its own anchor) to create or
+    refresh one. Read-only; may take a moment on a long ledger."""
     pg = get_pg()
     if not pg:
         return _postgres_unavailable()
     try:
+        from .frank_head_anchor import read_anchor
         from .governance_ledger import GovernanceLedger
 
-        return GovernanceLedger(pg).verify()
+        anchor = read_anchor()
+        expected_head = anchor["head"] if anchor["status"] == "anchored" else None
+        result = GovernanceLedger(pg).verify(expected_head=expected_head)
+        result["anchor_status"] = anchor["status"]
+        if anchor["status"] == "anchored":
+            result["anchor_recorded_at"] = anchor.get("anchored_at")
+        return result
     except Exception as exc:
         return {"error": f"frank_unavailable: {exc}"}
 
@@ -5375,6 +5396,59 @@ def _cmd_worker_service(args) -> None:
     print(json.dumps(result, indent=2))
 
 
+def _cmd_frank_anchor(args) -> None:
+    """Show or write the FRANK governance chain's externally-held head anchor (#280).
+
+    CLI/operator-only, mirrors agent_registry.py's sudo invariant: no MCP tool
+    writes this file, because the whole point is a value the same actor who
+    can write frank_ledger rows cannot also quietly update. `write` refuses a
+    chain that is not even internally consistent (that is a different, worse
+    problem than "unanchored" and re-anchoring over it would hide it) and
+    requires an interactive operator terminal, same boundary as `roster sync`
+    and `sign-net-task` — a Kart task must not be able to mint its own anchor.
+    """
+    from . import frank_head_anchor
+
+    if args.action == "show":
+        print(json.dumps(frank_head_anchor.read_anchor(), indent=2, default=str))
+        return
+    if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
+        print(
+            "Error: frank-anchor write requires an interactive operator terminal; "
+            "it cannot run from an MCP tool or queued task.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    pg = get_pg()
+    if not pg:
+        print("Error: Postgres unavailable", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        from .governance_ledger import GovernanceLedger
+
+        report = GovernanceLedger(pg).verify()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    if not report.get("valid"):
+        print(
+            "Error: chain is not internally consistent (broken_at="
+            f"{report.get('broken_at')!r}) -- refusing to anchor a broken chain. "
+            "Investigate before re-anchoring.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    path = frank_head_anchor.write_anchor(
+        report["head"], report["count"],
+        anchored_by=args.by or os.environ.get("USER", "operator"),
+    )
+    print(json.dumps(
+        {"anchored": True, "head": report["head"], "count": report["count"],
+         "path": str(path)},
+        indent=2,
+    ))
+
+
 def _cmd_roster(args) -> None:
     from . import fleet_roster
 
@@ -6455,6 +6529,22 @@ def _main():
         "session_id", help="session_id passed to session_enter(app_id='willow', ...)"
     )
 
+    frank_anchor_p = subparsers.add_parser(
+        "frank-anchor",
+        help="Show or write the FRANK governance chain's externally-held head "
+             "anchor (#280; write requires an interactive operator terminal, "
+             "never an MCP tool)",
+    )
+    frank_anchor_p.add_argument(
+        "action", choices=["show", "write"], nargs="?", default="show",
+        help="show: print the current anchor file (default). "
+             "write: re-anchor to the chain's CURRENT head over Postgres.",
+    )
+    frank_anchor_p.add_argument(
+        "--by", default="",
+        help="operator identity recorded as anchored_by (default: $USER)",
+    )
+
     setup_egress_p = subparsers.add_parser(
         "setup-egress",
         help="Create or register egress signing keys outside WILLOW_HOME (local CLI only)",
@@ -6737,6 +6827,9 @@ def _main():
         return
     if args.command == "attest-session":
         _cmd_attest_session(args)
+        return
+    if args.command == "frank-anchor":
+        _cmd_frank_anchor(args)
         return
     if args.command == "setup-egress":
         _cmd_setup_egress(args)
