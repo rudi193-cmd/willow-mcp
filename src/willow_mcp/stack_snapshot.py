@@ -103,7 +103,7 @@ def _fetch_pending_tasks(app_id: str, limit: int = 10) -> list[dict[str, Any]]:
         order_col = cols["created_at"] or cols["task_id"]
         cur = pg.cursor()
         cur.execute(
-            f'SELECT "{cols["task_id"]}", "{cols["task"] or cols["task_id"]}", '
+            f'SELECT "{cols["task_id"]}", "{cols["task"] or cols["task_id"]}", '  # nosec B608 - cols comes from mapping["fields"] (schema_confirm_mapping-confirmed), not request input; app_id/limit below are bound params
             f'"{cols["status"]}" FROM tasks '
             f'WHERE "{cols["status"]}" = \'pending\' AND "{cols["submitted_by"]}" = %s '
             f'ORDER BY "{order_col}" NULLS LAST LIMIT %s',

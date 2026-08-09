@@ -310,7 +310,7 @@ def _row_blocks_net_authorization(task_id: str) -> str | None:
     select = ", ".join(f'"{cols[name]}"' for name in present)
     cur = pg.cursor()
     cur.execute(
-        f'SELECT {select} FROM tasks WHERE "{cols["task_id"]}" = %s',
+        f'SELECT {select} FROM tasks WHERE "{cols["task_id"]}" = %s',  # nosec B608 - select/cols come from _task_table_columns()'s confirmed schema_profile mapping, not request input; task_id is a bound param
         (task_id,),
     )
     row = cur.fetchone()
@@ -346,7 +346,7 @@ def _consume_row_net_authorization(task_id: str) -> bool:
         completed_guard = f'AND "{cols["completed_at"]}" IS NULL '
     cur = pg.cursor()
     cur.execute(
-        f'UPDATE tasks SET "{result_col}" = jsonb_set('
+        f'UPDATE tasks SET "{result_col}" = jsonb_set('  # nosec B608 - result_col/status_col/id_col come from _task_table_columns()'s confirmed schema_profile mapping, not request input; task_id is a bound param
         f"COALESCE(\"{result_col}\", '{{}}'::jsonb), "
         f"'{{{_NET_AUTHORITY_CONSUMED_KEY}}}', 'true'::jsonb, true) "
         f'WHERE "{id_col}" = %s '

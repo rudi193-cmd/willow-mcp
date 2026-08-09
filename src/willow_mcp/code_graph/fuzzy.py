@@ -75,7 +75,7 @@ def search_symbols(
 
     def _fetch(where: str, params: list) -> list[dict]:
         sql = (
-            "SELECT name, fqn, kind, file_path, start_line, end_line, signature "
+            "SELECT name, fqn, kind, file_path, start_line, end_line, signature "  # nosec B608 - where is always one of the fixed literals passed by this module's own callers below; kind_clause is a fixed "AND kind IN (?,...)" template; all values are bound params
             f"FROM symbols WHERE {where}{kind_clause} ORDER BY name LIMIT ?"
         )
         rows = conn.execute(sql, params + kind_params + [max_results]).fetchall()

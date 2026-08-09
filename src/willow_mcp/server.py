@@ -1481,7 +1481,7 @@ def _knowledge_ingest_core(
     params = [_write_param(fields[f], v) for f, v in values.items()]
     cur = pg.cursor()
     cur.execute(
-        f"INSERT INTO knowledge ({cols}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
+        f"INSERT INTO knowledge ({cols}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",  # nosec B608 - cols come from the confirmed schema_profile field mapping, not request input; placeholders is a fixed "%s" repeat; all values are bound params
         params,
     )
     cur.close()
@@ -1951,7 +1951,7 @@ def knowledge_search(
     tags_col = fields["tags"]["column"]
     cols_by_name = {c.name: c for c in sp.introspect(pg, "knowledge")}
     retract_sql, retract_params = kbc.sql_exclude_retracted(tags_col, cols_by_name)
-    sql = f"SELECT {select_clause} FROM knowledge WHERE {conditions}{retract_sql}"
+    sql = f"SELECT {select_clause} FROM knowledge WHERE {conditions}{retract_sql}"  # nosec B608 - select_clause/retract_sql are built from the confirmed schema_profile field mapping, not request input; conditions is a fixed "X ILIKE %s" repeat; all values are bound params
     params.extend(retract_params)
     if domain and fields["domain"]["column"]:
         sql += f' AND "{fields["domain"]["column"]}" = %s'
@@ -2221,7 +2221,7 @@ def task_submit(
     placeholders = ", ".join(["%s"] * len(values))
     params = [_write_param(fields[f], v) for f, v in values.items()]
     cur = pg.cursor()
-    cur.execute(f"INSERT INTO tasks ({cols}) VALUES ({placeholders})", params)
+    cur.execute(f"INSERT INTO tasks ({cols}) VALUES ({placeholders})", params)  # nosec B608 - cols come from the confirmed schema_profile field mapping, not request input; placeholders is a fixed "%s" repeat; all values are bound params
     cur.close()
     return {"task_id": task_id, "status": "pending"}
 
@@ -2247,7 +2247,7 @@ def task_status(app_id: str, task_id: str) -> dict:
 
     select_clause, present, unmapped = _build_select(_TASK_READ_FIELDS, fields)
     cur = pg.cursor()
-    cur.execute(f'SELECT {select_clause} FROM tasks WHERE "{id_col}" = %s', (task_id,))
+    cur.execute(f'SELECT {select_clause} FROM tasks WHERE "{id_col}" = %s', (task_id,))  # nosec B608 - select_clause/id_col come from the confirmed schema_profile field mapping, not request input; task_id is a bound param
     row = cur.fetchone()
     cur.close()
     if not row:
@@ -2283,7 +2283,7 @@ def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
     select_clause, present, unmapped = _build_select(listed_fields, fields)
     cur = pg.cursor()
     cur.execute(
-        f'SELECT {select_clause} FROM tasks WHERE "{status_col}" = \'pending\' AND "{agent_col}" = %s '
+        f'SELECT {select_clause} FROM tasks WHERE "{status_col}" = \'pending\' AND "{agent_col}" = %s '  # nosec B608 - select_clause/status_col/agent_col/created_at column come from the confirmed schema_profile field mapping, not request input; agent/limit are bound params
         f'ORDER BY "{fields["created_at"]["column"] or id_col}" LIMIT %s',
         (agent, limit)
     )
@@ -2321,7 +2321,7 @@ def kb_at(app_id: str, atom_id: str) -> dict:
 
     select_clause, present, unmapped = _build_select(_KNOWLEDGE_FIELDS, fields)
     cur = pg.cursor()
-    cur.execute(f'SELECT {select_clause} FROM knowledge WHERE "{id_col}" = %s', (atom_id,))
+    cur.execute(f'SELECT {select_clause} FROM knowledge WHERE "{id_col}" = %s', (atom_id,))  # nosec B608 - select_clause/id_col come from the confirmed schema_profile field mapping, not request input; atom_id is a bound param
     row = cur.fetchone()
     cur.close()
     if not row:
@@ -2363,7 +2363,7 @@ def knowledge_flag(
         return {"error": "schema_unusable: 'knowledge' needs mappable 'id' and 'tags' columns"}
 
     cur = pg.cursor()
-    cur.execute(f'SELECT "{tags_col}" FROM knowledge WHERE "{id_col}" = %s', (atom_id,))
+    cur.execute(f'SELECT "{tags_col}" FROM knowledge WHERE "{id_col}" = %s', (atom_id,))  # nosec B608 - tags_col/id_col come from the confirmed schema_profile field mapping, not request input; atom_id is a bound param
     row = cur.fetchone()
     if not row:
         cur.close()
@@ -2372,7 +2372,7 @@ def knowledge_flag(
         row[0], app_id=app_id, reason=reason, severity=severity, refs=refs
     )
     cur.execute(
-        f'UPDATE knowledge SET "{tags_col}" = %s WHERE "{id_col}" = %s',
+        f'UPDATE knowledge SET "{tags_col}" = %s WHERE "{id_col}" = %s',  # nosec B608 - tags_col/id_col come from the confirmed schema_profile field mapping, not request input; values are bound params
         (_write_param(fields["tags"], new_tags), atom_id),
     )
     cur.close()
@@ -2402,14 +2402,14 @@ def knowledge_retract(app_id: str, atom_id: str, reason: str) -> dict:
         return {"error": "schema_unusable: 'knowledge' needs mappable 'id' and 'tags' columns"}
 
     cur = pg.cursor()
-    cur.execute(f'SELECT "{tags_col}" FROM knowledge WHERE "{id_col}" = %s', (atom_id,))
+    cur.execute(f'SELECT "{tags_col}" FROM knowledge WHERE "{id_col}" = %s', (atom_id,))  # nosec B608 - tags_col/id_col come from the confirmed schema_profile field mapping, not request input; atom_id is a bound param
     row = cur.fetchone()
     if not row:
         cur.close()
         return {"error": "not_found"}
     new_tags = kbc.merge_retract_tags(row[0], app_id=app_id, reason=reason)
     cur.execute(
-        f'UPDATE knowledge SET "{tags_col}" = %s WHERE "{id_col}" = %s',
+        f'UPDATE knowledge SET "{tags_col}" = %s WHERE "{id_col}" = %s',  # nosec B608 - tags_col/id_col come from the confirmed schema_profile field mapping, not request input; values are bound params
         (_write_param(fields["tags"], new_tags), atom_id),
     )
     cur.close()
@@ -2439,7 +2439,7 @@ def kb_promote(app_id: str, atom_id: str, domain: str) -> dict:
         return {"error": "schema_unusable: 'knowledge' table has no mappable 'id' or 'domain' column"}
 
     cur = pg.cursor()
-    cur.execute(f'UPDATE knowledge SET "{domain_col}" = %s WHERE "{id_col}" = %s', (domain, atom_id))
+    cur.execute(f'UPDATE knowledge SET "{domain_col}" = %s WHERE "{id_col}" = %s', (domain, atom_id))  # nosec B608 - domain_col/id_col come from the confirmed schema_profile field mapping, not request input; values are bound params
     updated = cur.rowcount
     cur.close()
     return {"id": atom_id, "domain": domain} if updated else {"error": "not_found"}
@@ -2487,7 +2487,7 @@ def kb_journal(
     params = [_write_param(fields[f], v) for f, v in values.items()]
     cur = pg.cursor()
     cur.execute(
-        f"INSERT INTO knowledge ({cols}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
+        f"INSERT INTO knowledge ({cols}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",  # nosec B608 - cols come from the confirmed schema_profile field mapping, not request input; placeholders is a fixed "%s" repeat; all values are bound params
         params,
     )
     cur.close()
@@ -2660,7 +2660,7 @@ def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
 
     cur = pg.cursor()
     cur.execute(
-        f'SELECT {select_clause} FROM knowledge WHERE ({where_sql}){retract_sql} '
+        f'SELECT {select_clause} FROM knowledge WHERE ({where_sql}){retract_sql} '  # nosec B608 - select_clause/where_sql/retract_sql/id_col come from the confirmed schema_profile field mapping, not request input; all values are bound params
         f'ORDER BY "{id_col}" DESC LIMIT %s',
         params,
     )
@@ -3274,7 +3274,7 @@ def fleet_health(app_id: str) -> dict:
 
     try:
         cur = pg.cursor()
-        cur.execute(f'SELECT "{status_col}", COUNT(*) FROM tasks GROUP BY "{status_col}"')
+        cur.execute(f'SELECT "{status_col}", COUNT(*) FROM tasks GROUP BY "{status_col}"')  # nosec B608 - status_col comes from the confirmed schema_profile field mapping, not request input
         rows = cur.fetchall()
         cur.close()
     except Exception as e:
@@ -3295,7 +3295,7 @@ def fleet_health(app_id: str) -> dict:
         try:
             cur = pg.cursor()
             cur.execute(
-                f'SELECT COALESCE("{lane_col}", \'fast\'), COUNT(*) FROM tasks '
+                f'SELECT COALESCE("{lane_col}", \'fast\'), COUNT(*) FROM tasks '  # nosec B608 - lane_col/status_col come from the confirmed schema_profile field mapping, not request input
                 f'WHERE "{status_col}" = \'pending\' GROUP BY 1'
             )
             pending_by_lane = {r[0]: r[1] for r in cur.fetchall()}
@@ -3682,14 +3682,14 @@ def _diag_worker(app_id: str) -> dict:
             status_col = mapping.get("fields", {}).get("status", {}).get("column")
             if "error" not in mapping and status_col:
                 cur = pg.cursor()
-                cur.execute(f'SELECT COUNT(*) FROM tasks WHERE "{status_col}" = %s', ("pending",))
+                cur.execute(f'SELECT COUNT(*) FROM tasks WHERE "{status_col}" = %s', ("pending",))  # nosec B608 - status_col comes from the confirmed schema_profile field mapping, not request input
                 check["pending"] = cur.fetchone()[0]
                 cur.close()
                 lane_col = mapping.get("fields", {}).get("lane", {}).get("column")
                 if lane_col and check["pending"]:
                     cur = pg.cursor()
                     cur.execute(
-                        f'SELECT COALESCE("{lane_col}", \'fast\'), COUNT(*) FROM tasks '
+                        f'SELECT COALESCE("{lane_col}", \'fast\'), COUNT(*) FROM tasks '  # nosec B608 - lane_col/status_col come from the confirmed schema_profile field mapping, not request input
                         f'WHERE "{status_col}" = %s GROUP BY 1', ("pending",)
                     )
                     check["pending_by_lane"] = {r[0]: r[1] for r in cur.fetchall()}

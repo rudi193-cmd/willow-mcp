@@ -95,14 +95,14 @@ class GovernanceLedger:
         from psycopg2.extras import Json
         for _ in range(5):
             cur.execute(
-                f"SELECT hash FROM {TABLE} ORDER BY created_at DESC LIMIT 1"
+                f"SELECT hash FROM {TABLE} ORDER BY created_at DESC LIMIT 1"  # nosec B608 - TABLE is the module-level constant "frank_ledger"; no user input reaches this string
             )
             row = cur.fetchone()
             previous = row[0] if row else None
             digest = entry_hash_v2(previous, record_id, project, event_type, content)
             try:
                 cur.execute(
-                    f"INSERT INTO {TABLE} "
+                    f"INSERT INTO {TABLE} "  # nosec B608 - TABLE is the module-level constant "frank_ledger"; all values below are bound params
                     "(id, project, event_type, content, prev_hash, hash, created_at) "
                     "VALUES (%s, %s, %s, %s, %s, %s, clock_timestamp())",
                     (record_id, project, event_type, Json(content), previous, digest),
@@ -141,7 +141,7 @@ class GovernanceLedger:
             locked = True
             if outcome == "granted" and max_count is not None:
                 cur.execute(
-                    f"SELECT COUNT(*) FROM {TABLE} "
+                    f"SELECT COUNT(*) FROM {TABLE} "  # nosec B608 - TABLE is the module-level constant "frank_ledger"; envelope_id is a bound param
                     "WHERE event_type='envelope_citation' "
                     "AND content->>'envelope_id'=%s "
                     "AND content->>'outcome'='granted'",
@@ -164,7 +164,7 @@ class GovernanceLedger:
         answer, which internal consistency alone can never give (#280)."""
         cur = self.pg.cursor()
         cur.execute(
-            f"SELECT id, project, event_type, content, prev_hash, hash "
+            f"SELECT id, project, event_type, content, prev_hash, hash "  # nosec B608 - TABLE is the module-level constant "frank_ledger"; no user input reaches this string
             f"FROM {TABLE} ORDER BY created_at ASC"
         )
         rows = cur.fetchall()
@@ -213,7 +213,7 @@ class GovernanceLedger:
             cur.execute("SELECT pg_advisory_lock(%s)", (LOCK_KEY,))
             locked = True
             cur.execute(
-                f"SELECT id, project, event_type, content, hash "
+                f"SELECT id, project, event_type, content, hash "  # nosec B608 - TABLE is the module-level constant "frank_ledger"; no user input reaches this string
                 f"FROM {TABLE} ORDER BY created_at ASC")
             rows = cur.fetchall()
             pre_head = rows[-1][4] if rows else None
@@ -222,7 +222,7 @@ class GovernanceLedger:
                 digest = entry_hash_v2(previous, record_id, project, event_type, content)
                 if digest != stored_hash:
                     cur.execute(
-                        f"UPDATE {TABLE} SET prev_hash = %s, hash = %s WHERE id = %s",
+                        f"UPDATE {TABLE} SET prev_hash = %s, hash = %s WHERE id = %s",  # nosec B608 - TABLE is the module-level constant "frank_ledger"; all values are bound params
                         (previous, digest, record_id))
                     migrated += 1
                 previous = digest
@@ -237,7 +237,7 @@ class GovernanceLedger:
                 digest = entry_hash_v2(previous, marker_id, "governance",
                                        "governance.rechain", marker)
                 cur.execute(
-                    f"INSERT INTO {TABLE} "
+                    f"INSERT INTO {TABLE} "  # nosec B608 - TABLE is the module-level constant "frank_ledger"; all values are bound params
                     "(id, project, event_type, content, prev_hash, hash, created_at) "
                     "VALUES (%s, %s, %s, %s::jsonb, %s, %s, clock_timestamp())",
                     (marker_id, "governance", "governance.rechain",
@@ -254,7 +254,7 @@ class GovernanceLedger:
     def citation_count(self, envelope_id: str) -> int:
         cur = self.pg.cursor()
         cur.execute(
-            f"SELECT COUNT(*) FROM {TABLE} "
+            f"SELECT COUNT(*) FROM {TABLE} "  # nosec B608 - TABLE is the module-level constant "frank_ledger"; envelope_id is a bound param
             "WHERE event_type = 'envelope_citation' "
             "AND content->>'envelope_id' = %s "
             "AND content->>'outcome' = 'granted'",
@@ -268,7 +268,7 @@ class GovernanceLedger:
         from psycopg2.extras import RealDictCursor
         cur = self.pg.cursor(cursor_factory=RealDictCursor)
         cur.execute(
-            f"SELECT * FROM {TABLE} "
+            f"SELECT * FROM {TABLE} "  # nosec B608 - TABLE is the module-level constant "frank_ledger"; envelope_id is a bound param
             "WHERE event_type = 'envelope_citation' "
             "AND content->>'envelope_id' = %s ORDER BY created_at ASC",
             (envelope_id,),

@@ -118,7 +118,7 @@ def walk(
 
                 for src in edge_sources:
                     out_edges = conn.execute(
-                        "SELECT target_fqn FROM edges WHERE source_fqn = ? AND edge_type IN ({})".format(
+                        "SELECT target_fqn FROM edges WHERE source_fqn = ? AND edge_type IN ({})".format(  # nosec B608 - .format() only builds the "?,?,..." placeholder run sized to len(edge_types); every edge_type value is bound via *edge_types below
                             ",".join("?" * len(edge_types))
                         ),
                         (src, *edge_types),

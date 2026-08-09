@@ -155,7 +155,7 @@ class PgTaskQueue(TaskQueue):
         ret = [c[field] for field in ret_fields]
         ret_cols = ", ".join(f'"{x}"' for x in ret)
         sql = (
-            f'UPDATE tasks SET {self._q("status")} = \'running\', '
+            f'UPDATE tasks SET {self._q("status")} = \'running\', '  # nosec B608 - self._q() resolves a fixed field name through self._col (schema_confirm_mapping-confirmed, never request input); values are bound params
             f'{self._q("claim_owner")} = %s, {self._q("claimed_at")} = now(), '
             f'{self._q("attempts")} = COALESCE({self._q("attempts")}, 0) + 1 '
             f'WHERE {self._q("task_id")} IN ('
@@ -191,7 +191,7 @@ class PgTaskQueue(TaskQueue):
     def mark_running(self, task_id: str) -> None:
         cur = self._pg.cursor()
         cur.execute(
-            f'UPDATE tasks SET {self._q("status")} = \'running\', '
+            f'UPDATE tasks SET {self._q("status")} = \'running\', '  # nosec B608 - self._q() resolves a fixed field name through self._col (schema_confirm_mapping-confirmed, never request input); values are bound params
             f'{self._q("claim_owner")} = %s, '
             f'{self._q("claimed_at")} = COALESCE({self._q("claimed_at")}, now()) '
             f'WHERE {self._q("task_id")} = %s AND {self._q("status")} <> \'running\'',
@@ -238,7 +238,7 @@ class PgTaskQueue(TaskQueue):
         ]
         cur = self._pg.cursor()
         cur.execute(
-            f'UPDATE tasks SET {", ".join(sets)} '
+            f'UPDATE tasks SET {", ".join(sets)} '  # nosec B608 - `sets` is built from self._q() field names (schema_confirm_mapping-confirmed, never request input); all values are bound params
             f'WHERE {self._q("task_id")} = %s '
             f'AND {self._q("status")} = \'running\' '
             f'AND {self._q("claim_owner")} = %s',
@@ -265,7 +265,7 @@ class PgTaskQueue(TaskQueue):
 
         cur = self._pg.cursor()
         cur.execute(
-            f'SELECT {self._q("task_id")}, {self._q("claim_owner")} FROM tasks '
+            f'SELECT {self._q("task_id")}, {self._q("claim_owner")} FROM tasks '  # nosec B608 - self._q() resolves fixed field names through self._col (schema_confirm_mapping-confirmed, never request input); values are bound params
             f'WHERE {self._q("status")} = \'running\' '
             f'AND {self._q("claimed_at")} < '
             f"now() - (%s * INTERVAL '1 second')",
@@ -296,7 +296,7 @@ class PgTaskQueue(TaskQueue):
 
         cur = self._pg.cursor()
         cur.execute(
-            f'UPDATE tasks SET {self._q("status")} = CASE '
+            f'UPDATE tasks SET {self._q("status")} = CASE '  # nosec B608 - self._q() resolves fixed field names through self._col (schema_confirm_mapping-confirmed, never request input); values are bound params
             f'WHEN COALESCE({self._q("attempts")}, 0) >= '
             f'COALESCE({self._q("max_attempts")}, 3) '
             f"THEN 'failed' ELSE 'pending' END, "
@@ -320,7 +320,7 @@ class PgTaskQueue(TaskQueue):
 
     def stats(self) -> QueueStats:
         cur = self._pg.cursor()
-        cur.execute(f'SELECT {self._q("status")}, COUNT(*) FROM tasks GROUP BY {self._q("status")}')
+        cur.execute(f'SELECT {self._q("status")}, COUNT(*) FROM tasks GROUP BY {self._q("status")}')  # nosec B608 - self._q() resolves fixed field names through self._col (schema_confirm_mapping-confirmed, never request input)
         rows = cur.fetchall()
         cur.close()
         by = {r[0]: r[1] for r in rows}
