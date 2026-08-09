@@ -200,8 +200,13 @@ def dispatch_send(
     if not (assignment_md or "").strip():
         return {"error": "assignment_required"}
     did = (dispatch_id or new_dispatch_id()).upper()
+    # B-52/#241: refuse to write into a redirected dispatch/ tree -- if the
+    # root itself is a symlink, mkdir would happily create the new packet
+    # wherever that symlink points instead of under dispatch/.
+    if dispatch_root().is_symlink():
+        return {"error": "dispatch_root_symlinked"}
     root = dispatch_dir(did)
-    if root.exists():
+    if root.exists() or root.is_symlink():
         return {"error": "dispatch_exists", "dispatch_id": did}
 
     role = (role or to_app).lower()
@@ -264,6 +269,30 @@ def _first_line(md: str) -> str:
 
 _REQUIRED_META_FIELDS = ("dispatch_id", "from_app", "to_app")
 
+# B-52/#241 (continued): every filename dispatch_send/handoff_write_v4 ever
+# create *as a real file* under a packet directory. dispatch/ is operator-
+# writable, so _meta_is_well_formed alone doesn't stop a same-uid attacker
+# from leaving the meta well-formed but swapping one of these names for a
+# symlink into a file elsewhere on disk (another app's data, a secret, an
+# arbitrary path) -- dispatch_read/handoff_read would then hand that file's
+# *content* back as if it were packet content, to whichever caller is a
+# party to the packet. That caller (a specialist agent) is frequently a
+# different principal from the local filesystem uid, reached only through
+# MCP -- it has no independent way to notice the substitution. Refusing a
+# symlinked packet dir or member file closes that disclosure path; it does
+# not (and cannot, same-uid) stop the packet from being forged in the first
+# place -- see _meta_is_well_formed's own docstring for that residual.
+PACKET_FILE_NAMES = ("meta.json", "assignment.md", "status.json", "handoff.json", "closeout.md")
+
+
+def packet_symlink_refused(root: Path) -> bool:
+    """True if `root` (a packet directory) or any canonical packet file inside
+    it is a symlink. Same is_symlink() doctrine as paths.trusted_read() /
+    consent_admin._trusted(); see PACKET_FILE_NAMES above for why."""
+    if root.is_symlink():
+        return True
+    return any((root / name).is_symlink() for name in PACKET_FILE_NAMES)
+
 
 def _meta_is_well_formed(meta: dict) -> bool:
     """A packet dispatch_send actually wrote always carries the
@@ -281,6 +310,12 @@ def _meta_is_well_formed(meta: dict) -> bool:
 
 def dispatch_read(dispatch_id: str) -> dict:
     root = dispatch_dir(dispatch_id)
+    # B-52/#241: refuse before ever opening a file -- a symlinked packet dir
+    # or member file could otherwise redirect this read to content outside
+    # dispatch/ entirely. Checked ahead of existence/well-formedness so a
+    # symlink can never even reach _read_json.
+    if packet_symlink_refused(root):
+        return {"error": "symlinked_packet", "dispatch_id": dispatch_id}
     meta = _read_json(root / "meta.json")
     if not meta:
         return {"error": "not_found", "dispatch_id": dispatch_id}
@@ -336,12 +371,19 @@ def dispatch_list(
     limit: int = 20,
 ) -> dict:
     disp_root = dispatch_root()
-    if not disp_root.is_dir():
+    # B-52/#241: fail closed if the dispatch root itself has been replaced by
+    # a symlink (e.g. to redirect future dispatch_send writes elsewhere) --
+    # same is_dir()-follows-symlinks trap as any individual packet dir.
+    if disp_root.is_symlink() or not disp_root.is_dir():
         return {"dispatches": [], "total": 0}
 
     rows: list[dict] = []
     for child in sorted(disp_root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-        if not child.is_dir():
+        # child.is_dir() follows a symlink, so check is_symlink() first --
+        # a symlinked entry is refused outright, not silently followed.
+        if child.is_symlink() or not child.is_dir():
+            continue
+        if packet_symlink_refused(child):
             continue
         meta = _read_json(child / "meta.json")
         st = _read_json(child / "status.json") or {}
@@ -373,6 +415,13 @@ def dispatch_set_status(dispatch_id: str, status: str, **extra: Any) -> dict:
     if status not in VALID_STATUSES:
         return {"error": "invalid_status", "status": status}
     root = dispatch_dir(dispatch_id)
+    # B-52/#241: every current caller already routes through dispatch_read
+    # first, which refuses a symlinked packet before ever reaching here --
+    # but this writes through status.json/meta.json (_write_json follows a
+    # symlink to whatever it points at), so guard independently rather than
+    # relying on call-order elsewhere never changing.
+    if packet_symlink_refused(root):
+        return {"error": "symlinked_packet", "dispatch_id": dispatch_id}
     path = root / "status.json"
     data = _read_json(path)
     if data is None:
