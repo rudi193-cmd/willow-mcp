@@ -65,6 +65,14 @@ If `doctor` reports missing egress keys: `willow-mcp setup-egress` (idempotent).
 
 ## Trust-root hardening (B-32, B-44)
 
+> **Full deployment runbook:** the steps below are the minimum-viable version
+> (agent and MCP server still share a uid; hardening narrows what that shared
+> process can write/read). For the concrete 3-role split — agent / runtime /
+> trust-owner uid, including a serve-mode deployment where the agent has no
+> local filesystem access at all — see
+> [`docs/deploy/dedicated-uid-deployment.md`](deploy/dedicated-uid-deployment.md)
+> (issue #231).
+
 When the agent and MCP server share your uid, the agent can forge egress authority
 by editing its manifest or lease files — **or simply read the egress private key**
 (B-44/issue #182): a `chmod 600` file owned by your own uid is not protected
@@ -93,7 +101,10 @@ Dry-run first: `willow-mcp harden-trust-root --dry-run`
 Verify: `willow-mcp doctor` should report the egress key as no longer
 self-readable (`private_key_readable: false` in `net_lease`); as the agent's
 own uid, `cat ~/.config/willow-mcp/egress/private.pem` should now fail with
-`Permission denied`.
+`Permission denied`. `doctor`'s output also prints a `uid separation:` line
+(`checks.uid_separation` in `diagnostic_summary`, issue #231) — the plain
+"whose account owns this vs. whose account is asking" fact, checked
+separately from (and never a substitute for) the writability check above.
 
 If `doctor` reports the SOIL store is not writable after hardening, restore runtime
 paths (store, dispatch, sessions, …) for the MCP server user:

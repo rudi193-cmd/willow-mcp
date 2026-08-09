@@ -220,6 +220,103 @@ def audit_trust_root(app_id: str = "") -> dict[str, Any]:
         "store": store,
         "trust_owner_hint": default_trust_owner(),
         "runtime_user_hint": default_runtime_user(),
+        # #231: the plain-ownership legibility check, alongside (never instead
+        # of) the access-bit truth above — see uid_separation_report().
+        "uid_separation": uid_separation_report(app_id),
+    }
+
+
+def _owner_name(uid: int) -> str:
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except (KeyError, OverflowError):
+        return f"uid={uid}"
+
+
+def path_owner(path: Path) -> dict[str, Any] | None:
+    """The uid/username that owns ``path`` on disk, or ``None`` if it does not
+    exist yet.
+
+    Distinct from every writability check above: those answer "could this
+    process act on the path" (the functional truth strict mode relies on).
+    This answers the plain identity question an operator or a red-team
+    checklist reads first — "whose file is this". A file can be owned by a
+    different uid and still be forgeable (group/world-writable — exactly
+    what B-32 hardening's 0644/0600 modes close), so ownership alone proves
+    nothing; this is a legibility aid next to `self_writable_trust_paths()`,
+    never a substitute for it.
+    """
+    try:
+        info = path.expanduser().stat()
+    except OSError:
+        return None
+    return {"uid": info.st_uid, "user": _owner_name(info.st_uid)}
+
+
+def process_identity() -> dict[str, Any]:
+    """Who this running process actually is — the other half of "owned by
+    willow-operator": an owner name means nothing without knowing whether
+    THIS process is that owner."""
+    uid = os.geteuid()
+    return {"uid": uid, "user": _owner_name(uid)}
+
+
+def uid_separation_report(app_id: str = "") -> dict[str, Any]:
+    """#231: is the trust root actually owned by a DIFFERENT account than the
+    one running this process — the plain-language version of B-32 an operator
+    can verify by eye (``stat`` the file, compare to ``id -u``), reported next
+    to, not instead of, `self_writable_trust_paths()`'s access-bit answer.
+
+    The two properties can diverge in both directions: a path can be *owned*
+    by another uid and still be forgeable if it is group/world-writable
+    (ownership is only half of `apply_trust_root_hardening` — the mode is the
+    other half); and a path can be *not self-writable* under an unusual
+    ACL/mount even while nominally owned by this same uid. So `separated`
+    here is the plain ownership fact for a human to read, while
+    `self_writable_trust_paths()` / `egress_key_readable_by_self()` remain
+    what `diagnostic_summary`'s verdict is actually built on — this function
+    changes no enforcement and is never wired into the verdict.
+
+    Reports on `trust_root_directories()`, `trust_policy_files()`, the egress
+    key directory, and the named secret files (`_SECRET_FILE_NAMES`) — the
+    same surface `audit_trust_root()` already measures for writability.
+    ``separated`` is True only when at least one such path exists on disk
+    *and* every one of them is owned by a different uid than this process —
+    a fresh install with nothing created yet reports False, not a false
+    "separated".
+    """
+    me = process_identity()
+    targets: list[dict[str, Any]] = []
+
+    def _add(key: str, target_path: Path) -> None:
+        owner = path_owner(target_path)
+        entry: dict[str, Any] = {"key": key, "path": str(target_path), "owner": owner}
+        if owner is not None:
+            entry["owned_by_this_process"] = owner["uid"] == me["uid"]
+        targets.append(entry)
+
+    for root in trust_root_directories():
+        _add("trust_root", root)
+    for policy_file in trust_policy_files():
+        _add("trust_policy_file", policy_file)
+    _add("egress_key_dir", egress_trust_directory())
+    home = paths.willow_home()
+    for name in sorted(_SECRET_FILE_NAMES):
+        _add("secret_file", home / name)
+    if app_id:
+        # Mirrors lease.self_writable_trust_paths(): a manifest that does not
+        # exist yet grants nothing, so it is not a path worth naming here.
+        manifest = paths.mcp_apps_root() / app_id / "manifest.json"
+        if manifest.exists():
+            _add("manifest", manifest)
+
+    existing = [t for t in targets if t["owner"] is not None]
+    same_owner = [t for t in existing if t["owned_by_this_process"]]
+    return {
+        "process": me,
+        "targets": targets,
+        "separated": bool(existing) and not same_owner,
+        "same_owner_paths": [t["path"] for t in same_owner],
     }
 
 

@@ -1,0 +1,273 @@
+# Dedicated low-privilege uid deployment (B-32, issue #231)
+
+> **Status:** this is the deployment runbook issue #231 asked for. It is
+> **operator topology, not a willow-mcp code change** — same framing the issue
+> opens with. The tooling it walks through (`harden-trust-root`,
+> `repair-runtime-perms`, `WILLOW_MCP_STRICT_TRUST_ROOT`, the `uid_separation`
+> diagnostic) already ships; what was missing was the concrete "do this, in
+> this order, on this kind of host" walkthrough tying them together, plus a
+> way to *verify* the separation landed rather than infer it from permission
+> bits alone.
+>
+> **This has not been exercised end-to-end on a real multi-uid host from
+> inside this repo's own dev/CI environment** — every sandbox this code has
+> been developed and tested in runs as a single uid (often root), which is
+> precisely the condition B-32 describes as *no boundary at all*. The
+> `uid_separation` check and its tests simulate a second identity by
+> monkeypatching file ownership; nothing here substitutes for an operator
+> actually running these steps on a box with a second unix account. Treat
+> this document as reviewed and internally consistent, not as validated in
+> production.
+
+## The three roles
+
+| Role | Typical account | What it may touch |
+|---|---|---|
+| **agent** | your login uid, or (serve mode) no local account at all | Nothing under `$WILLOW_HOME` directly. It talks to the MCP server over stdio or HTTP and gets back whatever the gate allows. |
+| **runtime** | the account the MCP **server process** itself runs as | Reads manifests/leases (world-readable by design — the gate is an unprivileged reader); read/writes `store/`, `dispatch/`, and other working state (`repair-runtime-perms` scopes this). Must **not** be able to write `config/`/`mcp_apps/` and must **not** be able to read the egress private key. |
+| **trust owner** (`willow-operator` by convention) | a dedicated, login-disabled system account | The only identity that may write `config/`, `mcp_apps/` (manifests, leases), and read the egress private key. Reached only via an interactive operator terminal (`sudo -u willow-operator willow-mcp grant-net …`) — never via any MCP tool call, by the same design as `confirm-binding` (`docs/design/pgp-and-persona.md`). |
+
+Two of these three roles can legitimately be the **same** account, and one
+deployment shape does exactly that:
+
+## Shape A — stdio, agent and runtime share a uid (the common case today)
+
+This is what `docs/OPERATOR-ONBOARD.md`'s existing "Trust-root hardening"
+section already documents, and what most installs run: an IDE (Cursor,
+Claude Code) spawns `willow-mcp` as a stdio subprocess under *your own login
+uid*. The **agent and runtime roles are necessarily the same process** here —
+there is no OS boundary between "the thing driving tool calls" and "the thing
+enforcing the gate", because they are the same binary invocation. This is
+the residual README.md names outright: *"the agent can write the very files
+that authorize its egress."*
+
+What hardening buys you in this shape is narrower but real: it stops that
+shared-uid process from being able to **write** `config/`/`mcp_apps/` or
+**read** the egress key, by moving those specific paths to a third account
+(`willow-operator`) that the agent/runtime process never runs as.
+
+```bash
+sudo useradd -r -s /usr/sbin/nologin willow-operator   # once per machine
+willow-mcp harden-trust-root --project-root ~/github/willow
+willow-mcp repair-runtime-perms          # restore store/dispatch write access to you
+```
+
+Reload the IDE. Grants and consent now require the operator identity:
+
+```bash
+sudo -u willow-operator willow-mcp grant-net hanuman --ttl 30m --reason "push branch"
+sudo -u willow-operator willow-mcp consent set internet true
+```
+
+**Verify, as your own (agent/runtime) login uid — not as `willow-operator`:**
+
+```bash
+willow-mcp doctor --app-id willow
+```
+
+Look for two independent lines:
+
+```
+uid separation: OK — trust root is owned by a different account than this process (you, uid 1000)
+```
+
+and, elsewhere in the same output, `trust_root` no longer listed under
+`forgeable`. Both should agree. If you ran `doctor` as `sudo -u
+willow-operator` instead, expect `uid separation: NOT separated` — that
+readout is correct, not a bug: you *are* the trust owner in that shell, so
+of course nothing is separated from you. The check that matters is what your
+own everyday account sees.
+
+**What this shape does *not* give you:** the agent/runtime process can still
+*read* everything a normal MCP server needs to read (manifests, leases,
+store — all working as designed), and nothing stops that same account from
+running arbitrary other commands on the box outside willow-mcp entirely. It
+closes the specific "self-authorize egress" and "read the signing key" holes
+B-32/#182 named; it does not turn your login account into a sandbox.
+
+## Shape B — serve mode, agent has no local account at all
+
+The stronger posture, and the one that actually satisfies #231's literal
+"agent uid: no read on `egress/private.pem`, no write on `config/`/`mcp_apps/`"
+bullets without relying on file permissions alone: the MCP server runs as a
+**persistent service** under a dedicated account, and the agent is a
+**remote OAuth-authenticated HTTP client with no shell or filesystem access
+to the host at all**. See [`HTTP serve mode (OAuth)`](../../README.md#http-serve-mode-oauth)
+for how identity binding works once a caller is authenticated — this section
+covers *who runs the server*, which the README's own `scripts/willow-serve`
+walkthrough leaves as "your own account" (a `systemd --user` unit, meant for
+local dev convenience, not uid separation).
+
+### Two ways to assign the runtime account
+
+**B1 — runtime = `willow-operator`.** Simplest: one dedicated account holds
+both the trust root and runs the server. Matches the issue's literal
+phrasing ("runtime uid — willow-operator or equivalent"). The trade-off:
+because `WILLOW_MCP_STRICT_TRUST_ROOT`'s check (`self_writable_trust_paths`)
+asks *"could the process asking this question also have written the
+policy"*, and that process is now `willow-operator` itself, strict mode
+**will always report the trust root as self-writable and deny egress** —
+correctly, since the account running the gate check genuinely can rewrite
+its own policy. Leave `WILLOW_MCP_STRICT_TRUST_ROOT` **off** for this
+process; the separation that is actually protecting you here is that the
+agent has no account on the box at all, not the file-permission check.
+
+**B2 — runtime = a fourth, separate account (`willow-runtime`), distinct from
+`willow-operator`.** More moving parts, but lets `WILLOW_MCP_STRICT_TRUST_ROOT`
+mean what it says even in serve mode: `willow-runtime` can read manifests/
+leases (world-readable) and read/write `store/`/`dispatch/`, but cannot write
+`config/`/`mcp_apps/` or read the egress key — those stay `willow-operator`'s
+alone. Turning strict mode on for the `willow-runtime` process now correctly
+reports `hardened: true`, because the account asking is genuinely not the
+account that could rewrite the policy.
+
+Pick B1 for the simplest deployment that matches the issue's wording; pick B2
+if you want the diagnostic's `strict_trust_root`/`hardened` fields to carry
+real meaning under serve mode too, not just under Shape A.
+
+### Runbook (B2 shown; drop the `willow-runtime` account and point
+`ExecStart`'s `User=` at `willow-operator` for B1)
+
+```bash
+sudo useradd -r -s /usr/sbin/nologin willow-operator
+sudo useradd -r -s /usr/sbin/nologin willow-runtime
+sudo mkdir -p /var/lib/willow-mcp
+sudo chown willow-runtime:willow-runtime /var/lib/willow-mcp   # WILLOW_HOME
+
+# Populate WILLOW_HOME as willow-runtime first (keys, manifests, layout)…
+sudo -u willow-runtime env WILLOW_HOME=/var/lib/willow-mcp willow-mcp-init
+sudo -u willow-runtime env WILLOW_HOME=/var/lib/willow-mcp willow-mcp setup-egress
+
+# …then move confirm authority to willow-operator and restore willow-runtime's
+# own working paths:
+sudo -u willow-operator env WILLOW_HOME=/var/lib/willow-mcp \
+    willow-mcp harden-trust-root --runtime-user willow-runtime
+sudo -u willow-operator env WILLOW_HOME=/var/lib/willow-mcp \
+    willow-mcp repair-runtime-perms --runtime-user willow-runtime
+```
+
+System-level (not `--user`) systemd unit, adapted from
+`deploy/willow-mcp-serve.service.template`:
+
+```ini
+# /etc/systemd/system/willow-mcp-serve.service
+[Unit]
+Description=willow-mcp OAuth HTTP serve mode (dedicated runtime uid)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=willow-runtime
+Group=willow-runtime
+WorkingDirectory=/opt/willow-mcp
+Environment=WILLOW_HOME=/var/lib/willow-mcp
+Environment=WILLOW_MCP_STRICT_TRUST_ROOT=1
+ExecStart=/opt/willow-mcp/.venv/bin/python3 -m willow_mcp --serve --port 8766 --host 127.0.0.1
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/willow-mcp/store /var/lib/willow-mcp/dispatch
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now willow-mcp-serve
+```
+
+The **agent's** machine/account only ever holds an HTTP URL and an OAuth
+credential in its own `.mcp.json` — no `$WILLOW_HOME`, no local `willow-mcp`
+install is required on the agent side at all. That is the property #231
+asks for stated as strongly as this repo can state it: not "the agent's
+read/write bits are restricted" but "the agent has nothing on this host to
+read or write in the first place."
+
+**Verify**, from the `willow-runtime` account (or by calling
+`diagnostic_summary` through the running serve endpoint as a bound identity):
+
+```bash
+sudo -u willow-runtime env WILLOW_HOME=/var/lib/willow-mcp willow-mcp doctor
+```
+
+Expect `uid separation: OK`, and — for B2 only — `strict_trust_root: true`
+with `hardened: true` in the `net_lease`/`trust_root` sections. For B1,
+expect `uid separation: NOT separated` when checked *as `willow-operator`*
+(correct — you are the trust owner and the runtime account at once) and rely
+on the network/account boundary, not the file-permission check, as your
+actual control.
+
+## How `harden-trust-root` and `WILLOW_MCP_STRICT_TRUST_ROOT` compose
+
+- `harden-trust-root` is an **idempotent filesystem operation**: it chowns
+  `config/`, `mcp_apps/`, and the egress key directory to the trust owner,
+  restores the runtime account's write access to `store/`/`dispatch/`/etc.,
+  and (optionally, via `--project-root`) writes
+  `WILLOW_MCP_STRICT_TRUST_ROOT=1` into your `.mcp.json`'s `env` block. It
+  does **not** by itself change who runs the MCP server process — that is
+  the deployment-shape decision above, made by you (spawn stdio as your own
+  login, or install a systemd unit under a chosen `User=`).
+- `WILLOW_MCP_STRICT_TRUST_ROOT` is read **once, at process start**, by
+  whichever process is asking (see `lease.strict_trust_root()`). It is not a
+  live toggle and not meaningful in the abstract — it is only ever asking
+  "can *this specific running process* write the trust root", so where you
+  set it (stdio env, or a specific systemd unit's `Environment=` line)
+  determines what it actually enforces. Setting it globally on a host running
+  multiple willow-mcp processes as different accounts enforces a different
+  thing for each of them, which is by design (see B1 vs B2 above).
+- Setting it **before** any separation exists denies egress on every call —
+  this is why it ships off by default, and this document does not change
+  that default. Nothing in this PR flips `WILLOW_MCP_STRICT_TRUST_ROOT` on
+  anywhere in the repo's own shipped config.
+
+## Verifying the split without guessing
+
+Two independent signals, deliberately kept separate:
+
+1. **`checks.net_lease.self_writable` / `checks.trust_root` (existing,
+   B-32/B-38/B-44).** The functional truth: could *this process* actually
+   write the keys that authorize egress, right now. This is what
+   `strict_trust_root` enforces against, and what the verdict/`problems`
+   list is built on.
+2. **`checks.uid_separation` (new, #231).** The plain-ownership legibility
+   check: does the account that owns the trust root on disk differ from the
+   account running this process. Purely informational — **never folded into
+   `problems` or the verdict** (a `False` here is every unhardened install's
+   honest resting state today; making it a `warn` would degrade every
+   existing single-uid install the day this shipped, the same mistake B-18
+   was about). It exists so an operator following this runbook can answer
+   "did the chown actually land on a different account" without inferring
+   it from permission-bit output.
+
+Both come back from `diagnostic_summary()` and from `willow-mcp doctor`'s
+human-readable output. They can diverge — a path can be owned by another
+account and still be group/world-writable (ownership alone proves nothing;
+`apply_trust_root_hardening`'s mode bits are the other half), and a path can
+be nominally self-owned while still not self-writable under an unusual
+ACL — so check both, and trust (1) for anything security-relevant.
+
+## Revisiting strict mode's default-off posture
+
+Not done here, and not proposed here. The issue asks this be revisited
+*"once documented and verifiable"* — this document is the "documented" half.
+"Verifiable" means an operator (or a CI job with a real second unix account,
+which this repo's own test/dev sandboxes do not have) actually running
+Shape A or B end-to-end and confirming `uid_separation.separated: true` and
+`hardened: true` hold steady. Until that has happened on at least one real
+deployment, changing the default would deny egress on every existing
+single-uid install — exactly the outcome `strict_trust_root()`'s own
+docstring says the off-default exists to avoid.
+
+## Out of scope here
+
+- **#232** (store `.db` OS-level permission enforcement) depends on this same
+  uid separation but is its own issue — not touched by this document or the
+  code changes that accompany it.
+- Real end-to-end verification on a genuine multi-uid host. Everything in
+  `checks.uid_separation`'s test coverage simulates a second account via
+  monkeypatched ownership; no automated test here creates a real second unix
+  user, because the sandboxes this suite runs in do not have the privilege
+  to do so.

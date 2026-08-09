@@ -3183,15 +3183,36 @@ def frank_read(app_id: str, project: str = "", limit: int = 50) -> dict:
 def frank_verify(app_id: str) -> dict:
     """Re-hash the entire FRANK governance chain and verify every prev_hash →
     hash link, detecting tampering, edits, or gaps. Returns the verification
-    verdict, including where the chain breaks if it does. Read-only; may take
-    a moment on a long ledger."""
+    verdict, including where the chain breaks if it does.
+
+    Also checks the chain's head against the externally-held anchor at
+    `$WILLOW_HOME/constitutional/frank_head_anchor.json` when one exists
+    (#280): a chain can be internally consistent (every link valid) and
+    still not be the same chain it was yesterday — that's what an
+    edit-then-`rechain()` relink looks like from outside the database.
+    `anchor_status` reports which case applied: "anchored" (compared;
+    `valid` reflects both internal consistency AND the head match),
+    "unanchored" (no anchor file — most installs, opted out), "untrusted"
+    (anchor file failed the ownership/permission trust check), or
+    "unreadable" (missing/malformed). Only "anchored" means the head was
+    actually compared; the other three are reported explicitly rather than
+    silently treated as a pass. Use `willow-mcp frank-anchor` (CLI-only —
+    never an MCP tool, so an agent cannot mint its own anchor) to create or
+    refresh one. Read-only; may take a moment on a long ledger."""
     pg = get_pg()
     if not pg:
         return _postgres_unavailable()
     try:
+        from .frank_head_anchor import read_anchor
         from .governance_ledger import GovernanceLedger
 
-        return GovernanceLedger(pg).verify()
+        anchor = read_anchor()
+        expected_head = anchor["head"] if anchor["status"] == "anchored" else None
+        result = GovernanceLedger(pg).verify(expected_head=expected_head)
+        result["anchor_status"] = anchor["status"]
+        if anchor["status"] == "anchored":
+            result["anchor_recorded_at"] = anchor.get("anchored_at")
+        return result
     except Exception as exc:
         return {"error": f"frank_unavailable: {exc}"}
 
@@ -3821,6 +3842,24 @@ def _diag_net_lease(app_id: str) -> dict:
     }
 
 
+def _diag_uid_separation(app_id: str) -> dict:
+    """B-32/#231, made legible: whose *account* actually owns the trust root,
+    named next to whose account is asking.
+
+    `net_lease.self_writable` already answers the question the verdict is
+    built on — could this process WRITE the keys. This answers the one an
+    operator asks first while following the harden-trust-root deployment
+    runbook (`docs/deploy/dedicated-uid-deployment.md`) — "did that actually
+    move the files to a different account, or did `repair-runtime-perms` just
+    chown them back to me". Purely informational: never folded into
+    `_derive_problems`/the verdict, so it cannot turn every existing
+    single-uid install's resting state into a new `warn` (B-18's rule) —
+    `strict_trust_root`/`net_lease`/`severance` already carry the
+    enforcement-relevant verdict for this surface."""
+    from . import trust_root_setup
+    return trust_root_setup.uid_separation_report(app_id)
+
+
 def _under(child: Path, parent: Path) -> bool:
     """Is `child` the same inode as `parent`, or inside it — after symlinks?
 
@@ -4396,6 +4435,7 @@ def diagnostic_summary(app_id: str = "") -> dict:
     consent = _diag_consent()
     net_lease = _diag_net_lease(eff)
     severance = _diag_severance(store, postgres, net_lease)
+    uid_separation = _diag_uid_separation(eff)
     env = _diag_env()
 
     problems = _derive_problems(store, postgres, manifest, mode, worker, consent,
@@ -4410,7 +4450,7 @@ def diagnostic_summary(app_id: str = "") -> dict:
         "checks": {"store": store, "postgres": postgres, "rings": rings,
                    "schema": schema, "manifest": manifest, "identity_bindings": bindings,
                    "worker": worker, "consent": consent, "net_lease": net_lease,
-                   "severance": severance, "env": env},
+                   "severance": severance, "uid_separation": uid_separation, "env": env},
         "problems": problems,
     }
     if redact:
@@ -5356,6 +5396,59 @@ def _cmd_worker_service(args) -> None:
     print(json.dumps(result, indent=2))
 
 
+def _cmd_frank_anchor(args) -> None:
+    """Show or write the FRANK governance chain's externally-held head anchor (#280).
+
+    CLI/operator-only, mirrors agent_registry.py's sudo invariant: no MCP tool
+    writes this file, because the whole point is a value the same actor who
+    can write frank_ledger rows cannot also quietly update. `write` refuses a
+    chain that is not even internally consistent (that is a different, worse
+    problem than "unanchored" and re-anchoring over it would hide it) and
+    requires an interactive operator terminal, same boundary as `roster sync`
+    and `sign-net-task` — a Kart task must not be able to mint its own anchor.
+    """
+    from . import frank_head_anchor
+
+    if args.action == "show":
+        print(json.dumps(frank_head_anchor.read_anchor(), indent=2, default=str))
+        return
+    if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
+        print(
+            "Error: frank-anchor write requires an interactive operator terminal; "
+            "it cannot run from an MCP tool or queued task.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    pg = get_pg()
+    if not pg:
+        print("Error: Postgres unavailable", file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        from .governance_ledger import GovernanceLedger
+
+        report = GovernanceLedger(pg).verify()
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    if not report.get("valid"):
+        print(
+            "Error: chain is not internally consistent (broken_at="
+            f"{report.get('broken_at')!r}) -- refusing to anchor a broken chain. "
+            "Investigate before re-anchoring.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    path = frank_head_anchor.write_anchor(
+        report["head"], report["count"],
+        anchored_by=args.by or os.environ.get("USER", "operator"),
+    )
+    print(json.dumps(
+        {"anchored": True, "head": report["head"], "count": report["count"],
+         "path": str(path)},
+        indent=2,
+    ))
+
+
 def _cmd_roster(args) -> None:
     from . import fleet_roster
 
@@ -5722,6 +5815,19 @@ def _cmd_doctor(args) -> None:
         print(f"  fix: {cli} repair-runtime-perms")
         print()
 
+    # #231: plain-ownership identity, next to the access-bit checks above.
+    # Informational only — never changes the verdict (see _diag_uid_separation).
+    uid_sep = audit.get("uid_separation") or {}
+    me = uid_sep.get("process") or {}
+    if uid_sep.get("separated"):
+        print(f"uid separation: OK — trust root is owned by a different account "
+              f"than this process ({me.get('user')}, uid {me.get('uid')})\n")
+    else:
+        print(f"uid separation: NOT separated — this process runs as "
+              f"{me.get('user')} (uid {me.get('uid')}), the same account that owns "
+              f"the trust root (or nothing has been hardened yet)")
+        print("  see docs/deploy/dedicated-uid-deployment.md for the full runbook\n")
+
 
 def _cmd_run_net(args) -> None:
     """`willow-mcp run-net` — operator one-shot: lease (if needed) + sign + queue."""
@@ -5911,6 +6017,20 @@ def _cmd_harden_trust_root(args) -> None:
         print("\n── Operator commands (confirm authority) ─────────────────")
         for line in result.get("operator_commands") or []:
             print(f"  {line}")
+        # #231: confirm the ownership actually moved, not just that the chown
+        # commands ran without error — a `sudo -u <owner>` that silently fell
+        # back to the caller's own uid would still print a clean action log.
+        after = (result.get("after") or {}).get("uid_separation") or {}
+        me = after.get("process") or {}
+        if after.get("separated"):
+            print(f"\nuid separation: confirmed — trust root now owned by a different "
+                  f"account than this process ({me.get('user')}, uid {me.get('uid')}).")
+        else:
+            print(f"\nuid separation: NOT yet achieved — this process (still {me.get('user')}, "
+                  f"uid {me.get('uid')}) owns the trust root it just hardened. Hardening only moves "
+                  f"the files; a genuinely separate runtime uid must actually run the MCP server "
+                  f"(or invoke this CLI) for separation to be real — see "
+                  f"docs/deploy/dedicated-uid-deployment.md.")
 
 
 def _cmd_grant_net(args) -> None:
@@ -6409,6 +6529,22 @@ def _main():
         "session_id", help="session_id passed to session_enter(app_id='willow', ...)"
     )
 
+    frank_anchor_p = subparsers.add_parser(
+        "frank-anchor",
+        help="Show or write the FRANK governance chain's externally-held head "
+             "anchor (#280; write requires an interactive operator terminal, "
+             "never an MCP tool)",
+    )
+    frank_anchor_p.add_argument(
+        "action", choices=["show", "write"], nargs="?", default="show",
+        help="show: print the current anchor file (default). "
+             "write: re-anchor to the chain's CURRENT head over Postgres.",
+    )
+    frank_anchor_p.add_argument(
+        "--by", default="",
+        help="operator identity recorded as anchored_by (default: $USER)",
+    )
+
     setup_egress_p = subparsers.add_parser(
         "setup-egress",
         help="Create or register egress signing keys outside WILLOW_HOME (local CLI only)",
@@ -6691,6 +6827,9 @@ def _main():
         return
     if args.command == "attest-session":
         _cmd_attest_session(args)
+        return
+    if args.command == "frank-anchor":
+        _cmd_frank_anchor(args)
         return
     if args.command == "setup-egress":
         _cmd_setup_egress(args)

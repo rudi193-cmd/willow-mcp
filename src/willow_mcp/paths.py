@@ -288,6 +288,20 @@ def review_queue_path() -> Path:
     return constitutional_dir() / "review_queue.json"
 
 
+def frank_head_anchor_path() -> Path:
+    """The FRANK governance chain's externally-held head anchor (#280).
+
+    Lives beside the other governance inputs `trusted_read()` already
+    authenticates (pre-approved.json, syscall-table.json) — same directory,
+    same ownership/permission contract. The whole point of this file is that
+    it sits OUTSIDE Postgres: whoever can write `frank_ledger` rows (the
+    database operator/credential) need not also be able to write here, so a
+    ``rechain()``-laundered relink that is internally consistent in the
+    database still disagrees with what this file remembers. See
+    `frank_head_anchor.py` and `governance_ledger.py`'s module docstring."""
+    return constitutional_dir() / "frank_head_anchor.json"
+
+
 def envelope_registry_path() -> Path:
     """Default location of the Article III.2 pre-approved envelope registry.
 
