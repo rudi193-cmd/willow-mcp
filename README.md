@@ -167,6 +167,9 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `willow_web_search` | Open-web search with the results run through **external-guard** — the guarded replacement for a client's native web tool. `web_read` + `web_net` + `consent.internet` + a live lease |
 | `willow_web_fetch` | Fetch one URL through the destination guard: the host is **resolved** and every address tested (not just literals), every redirect hop re-checked, body scanned by external-guard and sandwich-wrapped. Returns the `redirects` chain actually followed |
 | `willow_institutional_search` | Fan a query across jeles' registered institutional/academic collections (arXiv, PubMed, Crossref, OpenAlex, …) — citable sources rather than open web. Same `web_read` line as the two above, so one grant covers all three |
+| `federation_discover` | Shadow-IT scan: `.mcp.json` files not yet owned by the ratified registry. Read-only, never connects |
+| `federation_list_servers` | List every operator-ratified downstream MCP server: id, launch command, the environment-variable *names* it receives (never values) |
+| `federation_call` | Call one tool on one ratified downstream MCP server — behind the fourth egress class, `mcp_federation` (own line), a per-downstream-tool namespaced grant, and the operator's ratification ceiling |
 | `receipts_tail` | Read your own most-recent tool-call receipts — a self-audit trail scoped to your `app_id` |
 | `whoami` | Report your own identity and effective permissions — app_id, role, permission groups, the resolved set of tools you can call (minus `deny_tools`), and your `store_scope`. Ungated, like `diagnostic_summary` |
 | `diagnostic_summary` | Self-check: store/Postgres/schema/manifest/bindings/worker/consent/egress-lease/env health, with a verdict and named fixes. Ungated — see below |
@@ -429,6 +432,40 @@ $ willow-mcp-integrations list                # the ledger, live + stubs
 $ willow-mcp-integrations check github --app-id myapp   # offline: creds? keys? no network call
 $ willow-mcp-integrations set-token github   # prompted + hidden, stored in the vault
 ```
+
+### Federated MCP (willow-mcp as a client)
+
+willow-mcp can call tools on *other* MCP servers spread through the fleet —
+see [`docs/design/federated-mcp-gating.md`](docs/design/federated-mcp-gating.md)
+for the full decision record. A stdio MCP server willow-mcp spawns itself is
+`fork`/`exec` at its own uid — a fourth, strictly-more-privileged egress class
+beside the Kart sandbox, integration adapters, and open-web HTTP — so it gets
+its own capability, `mcp_federation`, and its own consent key,
+`consent.federation`, on the same three-key shape as the other three lanes.
+
+A federated call is authorized only where **two ceilings agree**: the
+caller's manifest must grant the namespaced permission
+`mcp:<server_id>:<tool>` — gated per downstream tool, never per server, so a
+grant never silently widens as a downstream server grows new tools — *and*
+the server must be in the **operator-ratified registry**. Neither alone is
+sufficient: a `full_access` manifest gains no new surface just because a
+`.mcp.json` appears on disk, and a ratified server's advertised tools do not
+themselves grant anything to a caller whose manifest never named them.
+
+```console
+$ willow-mcp allow-permission myapp mcp_federation
+$ willow-mcp allow-permission myapp 'mcp:<server_id>:<tool>'
+$ willow-mcp consent set federation true
+$ willow-mcp grant-net myapp --ttl 30m --reason "call the gazelle MCP server"
+```
+
+`federation_discover` is read-only inventory (which `.mcp.json` files exist
+that the registry does not yet own — the shadow-IT question); ratifying a
+discovered server into something `federation_call` can reach is an operator
+act, not an MCP tool, the same way an egress lease is. Every downstream tool
+listing and every call result is run through **external-guard** before it
+reaches a caller — a downstream server's tool names and descriptions are
+untrusted input, scanned at listing time as well as at call time.
 
 ### Running the task worker
 
@@ -742,7 +779,7 @@ needs a manifest at `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json`:
 
 `permissions` is a list of group names and/or literal tool names —
 see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the authoritative set
-(43 groups). Common ones: `store_read`, `store_write`, `knowledge_read`,
+(45 groups). Common ones: `store_read`, `store_write`, `knowledge_read`,
 `knowledge_write`, `schema_admin`, `task_queue`, `agent_dispatch`,
 `dispatch_read`, `dispatch_write`, `fleet_read`, `context`, `audit`,
 `gap_read`, `gap_write`, `gap_promote`, `fork_read`, `fork_write`, `nest_read`,

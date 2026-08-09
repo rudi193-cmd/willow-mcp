@@ -927,7 +927,8 @@ def test_main_stays_silent_for_the_sanctioned_web_tool():
 # outbound call has side effects the caller does not own.
 _WRITE_CAPABLE_GROUPS = {
     "agent_dispatch", "binding", "code_graph_write", "commitment_write",
-    "context", "dispatch_write", "envelope_apply", "fork_write", "frank_write",
+    "context", "dispatch_write", "envelope_apply", "federation_call", "fork_write",
+    "frank_write",
     "friction_write", "full_access", "gap_promote", "gap_purge", "gap_write",
     "human_loop_write", "integration_call", "knowledge_curate", "knowledge_write",
     "lineage_write", "markdownai_directives", "markdownai_write", "nest_write",
@@ -939,15 +940,17 @@ _WRITE_CAPABLE_GROUPS = {
 # and willow_web_search write no willow state, and the egress they front is
 # gated separately by the web_net capability (covered below), not by this group.
 _READ_ONLY_GROUPS = {
-    "audit", "code_graph_read", "commitment_read", "dispatch_read", "fleet_read",
+    "audit", "code_graph_read", "commitment_read", "dispatch_read", "federation_read",
+    "fleet_read",
     "fork_read", "friction_read", "gap_read", "human_loop_read",
     "integration_read", "knowledge_read", "lineage_read", "markdownai_read",
     "nest_read", "store_read", "web_read",
 }
 
 # Not permission groups — the capability half of the three-key egress gate, which
-# no group implies. All four are operator-only.
-_NET_CAPABILITIES = ("task_net", "task_db", "integration_net", "web_net")
+# no group implies. All are operator-only. Kept in step with gate.py's
+# *_PERMISSION capability constants by test_net_capabilities_cover_every_gate_flag.
+_NET_CAPABILITIES = ("task_net", "task_db", "integration_net", "web_net", "mcp_federation")
 
 
 def _manifest_write(permission):
@@ -989,6 +992,23 @@ def test_seat_guard_leaves_every_read_only_group_alone():
 def test_seat_guard_covers_every_egress_capability():
     for cap in _NET_CAPABILITIES:
         assert _manifest_write(cap) is not None, "%s is not blocked" % cap
+
+
+def test_net_capabilities_cover_every_gate_flag():
+    """Drift guard for capabilities, the counterpart to
+    test_seat_guard_classification_covers_every_permission_group for groups.
+    Every ``*_PERMISSION`` capability constant in gate.py must appear in
+    _NET_CAPABILITIES (and so be exercised by the test above). `mcp_federation`
+    was added to gate for the federation lane while its self-grant guard was
+    silently absent; this fails until a new capability flag is guarded, instead
+    of passing because the hard-coded list never learned about it."""
+    from willow_mcp import gate
+    gate_flags = {v for k, v in vars(gate).items()
+                  if k.endswith("_PERMISSION") and isinstance(v, str)}
+    missing = gate_flags - set(_NET_CAPABILITIES)
+    assert not missing, (
+        "gate capability flags absent from _NET_CAPABILITIES (and so unguarded "
+        "against self-grant): %s" % sorted(missing))
 
 
 def test_server_process_egress_capabilities_route_to_the_egress_reason():

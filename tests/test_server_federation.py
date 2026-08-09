@@ -1,0 +1,122 @@
+"""End-to-end tests for the three federation_* MCP tools in server.py: the
+gate, the ratified-registry ceiling, and a real downstream round trip,
+wired together the way an actual caller would exercise them.
+"""
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+from willow_mcp import gate, mcp_federation as mf, mcp_federation_client as mfc, server
+
+_FIXTURE = Path(__file__).parent / "fixtures" / "echo_mcp_server.py"
+
+
+def _manifest(home, app_id, permissions):
+    apps = home / "mcp_apps" / app_id
+    apps.mkdir(parents=True, exist_ok=True)
+    (apps / "manifest.json").write_text(json.dumps({"permissions": permissions}))
+
+
+def _ratify_echo_fixture(home):
+    spec = mf.McpServerSpec(
+        id="echo-fixture", name="echo", command=sys.executable,
+        args=(str(_FIXTURE),), env_keys=(),
+    )
+    mf.ratify(spec, ratified_by="operator", reason="test fixture")
+    return spec.id
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_client():
+    yield
+    mfc.shutdown_all()
+
+
+def test_federation_discover_denied_without_federation_read(home):
+    _manifest(home, "caller", [])
+    out = server.federation_discover(app_id="caller")
+    assert "error" in out
+
+
+def test_federation_discover_finds_an_unratified_mcp_json(home, tmp_path):
+    _manifest(home, "caller", ["federation_read"])
+    proj = tmp_path / "someproject"
+    proj.mkdir()
+    (proj / ".mcp.json").write_text(json.dumps(
+        {"mcpServers": {"svc": {"command": "true"}}}))
+    out = server.federation_discover(app_id="caller", root=str(proj))
+    assert str(proj / ".mcp.json") in out["unregistered"]
+
+
+def test_federation_list_servers_reports_the_ratified_registry(home):
+    _manifest(home, "caller", ["federation_read"])
+    server_id = _ratify_echo_fixture(home)
+    out = server.federation_list_servers(app_id="caller")
+    ids = {s["id"] for s in out["servers"]}
+    assert server_id in ids
+
+
+def test_federation_call_denied_without_any_grant(home):
+    _manifest(home, "caller", [])
+    out = server.federation_call(app_id="caller", server_id="whatever",
+                                 tool="echo", arguments={})
+    assert "error" in out
+
+
+def test_federation_call_denied_when_server_unratified_even_with_full_grants(home, monkeypatch):
+    from willow_mcp import lease
+    perm = gate.federated_tool_permission("never-ratified", "echo")
+    _manifest(home, "caller", [gate.MCP_FEDERATION_PERMISSION, perm, "federation_call"])
+    monkeypatch.setattr("willow_mcp.consent.federation_permitted", lambda: True)
+    lease.grant("caller", 1800, issuer="operator", reason="test")
+    out = server.federation_call(app_id="caller", server_id="never-ratified",
+                                 tool="echo", arguments={})
+    assert "error" in out
+    assert "server_denied" in out["error"]
+
+
+def test_federation_call_full_round_trip(home, monkeypatch):
+    """Every key held at once: manifest capability, namespaced tool grant,
+    ratified server, standing consent, live lease — a real subprocess round
+    trip through the guarded MCP tool."""
+    from willow_mcp import lease
+
+    server_id = _ratify_echo_fixture(home)
+    perm = gate.federated_tool_permission(server_id, "echo")
+    _manifest(home, "caller", [gate.MCP_FEDERATION_PERMISSION, perm, "federation_call",
+                               "receipts_tail"])
+    monkeypatch.setattr("willow_mcp.consent.federation_permitted", lambda: True)
+    lease.grant("caller", 1800, issuer="operator", reason="test")
+
+    out = server.federation_call(app_id="caller", server_id=server_id,
+                                 tool="echo", arguments={"text": "hello from a test"})
+    assert "error" not in out
+    assert out["content_text"] == "hello from a test"
+    assert out["server_id"] == server_id
+    assert out["tool"] == "echo"
+
+    receipts = server.receipts_tail(app_id="caller", limit=10)["receipts"]
+    detail_blob = " ".join(r.get("detail") or "" for r in receipts)
+    assert server_id in detail_blob and "tool=echo" in detail_blob
+
+
+def test_federation_call_grant_on_one_tool_does_not_reach_another(home, monkeypatch):
+    """Decision 1, exercised end to end: a grant for `echo` must not let the
+    same caller reach `suspicious` on the same ratified server."""
+    from willow_mcp import lease
+
+    server_id = _ratify_echo_fixture(home)
+    perm = gate.federated_tool_permission(server_id, "echo")
+    _manifest(home, "caller", [gate.MCP_FEDERATION_PERMISSION, perm, "federation_call"])
+    monkeypatch.setattr("willow_mcp.consent.federation_permitted", lambda: True)
+    lease.grant("caller", 1800, issuer="operator", reason="test")
+
+    ok = server.federation_call(app_id="caller", server_id=server_id, tool="echo",
+                                arguments={"text": "x"})
+    assert "error" not in ok
+    denied = server.federation_call(app_id="caller", server_id=server_id,
+                                    tool="suspicious", arguments={})
+    assert "error" in denied
+    assert "tool_denied" in denied["error"]

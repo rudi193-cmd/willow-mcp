@@ -59,7 +59,7 @@ from . import paths
 
 logger = logging.getLogger("willow_mcp.consent")
 
-CONSENT_KEYS = ("internet", "cloud_llm")
+CONSENT_KEYS = ("internet", "cloud_llm", "federation")
 
 #: Retired keys. Read tolerantly, never projected, never grantable.
 #:
@@ -236,6 +236,21 @@ def cloud_llm_permitted() -> bool:
     who read the panel rather than the settings file.
     """
     return permitted("cloud_llm")
+
+
+def federation_permitted() -> bool:
+    """Standing consent for willow-mcp to fork/exec a downstream MCP server.
+
+    Read by `federation_egress.egress_denial()`, alongside the
+    `mcp_federation` manifest capability and a live lease — the same
+    three-key shape `internet_permitted()` and `cloud_llm_permitted()` serve
+    their own lanes. See docs/design/federated-mcp-gating.md Decision 3: a
+    stdio MCP server is a fourth egress class, so it gets its own standing
+    switch rather than being folded into `internet_permitted()` — an operator
+    who permits open-web HTTP has not thereby agreed that this box may also
+    spawn arbitrary subprocesses at its own uid.
+    """
+    return permitted("federation")
 
 
 def retired(key: str) -> bool:

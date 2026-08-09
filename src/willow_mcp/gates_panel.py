@@ -45,6 +45,7 @@ from typing import Optional
 from . import consent, gates_html, lease, paths
 from .gate import (
     INTEGRATION_NET_PERMISSION,
+    MCP_FEDERATION_PERMISSION,
     WEB_NET_PERMISSION,
     NET_PERMISSION,
     PERMISSION_GROUPS,
@@ -156,12 +157,19 @@ FRIENDLY_LABELS: dict[str, str] = {
     "web_net": "Allow open-web search/fetch for this app",
     "task_net": "Request internet access (for tasks)",
     "integration_net": "Request internet access (for outside services)",
+    "federation_read": "See discovered and ratified MCP servers",
+    "federation_call": "Call a tool on a ratified downstream MCP server",
+    "mcp_federation": "Allow this app to spawn/call downstream MCP servers",
     "consent.internet": "Allow internet access, fleet-wide",
     # cloud_llm is enforced as of 2026-07-28 — model_egress.denial() gates the
     # Nest sinks on it. `consent.lan` was REMOVED 2026-07-29 rather than
     # enforced: it named a confinement the sandbox does not implement, so there
     # is no row for it to label. See consent._REMOVED_KEYS.
     "consent.cloud_llm": "Off-machine AI inference",
+    # consent.federation is enforced from introduction — federation_egress.py
+    # gates every federated call on it alongside mcp_federation and a live
+    # lease. See docs/design/federated-mcp-gating.md Decision 3.
+    "consent.federation": "Allow willow-mcp to fork/exec downstream MCP servers",
     "strict_trust_root": "Extra-strict security mode",
     "enforce_binding": "Require signed agent identity (registered agents)",
     "announce": "Announce actions louder for less-trusted callers",
@@ -194,7 +202,8 @@ def _category(row_id: str, label: str) -> str:
     if row_id.startswith("consent.") or row_id.startswith("lease."):
         return "egress"
     if row_id.startswith("perm."):
-        if label in (NET_PERMISSION, INTEGRATION_NET_PERMISSION, WEB_NET_PERMISSION):
+        if label in (NET_PERMISSION, INTEGRATION_NET_PERMISSION, WEB_NET_PERMISSION,
+                     MCP_FEDERATION_PERMISSION):
             return "egress"
         return "permissions"
     return "system"  # worker, strict_trust_root, severance, human_orchestrator
@@ -337,7 +346,8 @@ def _app_rows(app_id: str) -> list[GateRow]:
     manifest = _load_manifest(app_id)
     perms = set((manifest or {}).get("permissions") or [])
 
-    capability_flags = (NET_PERMISSION, INTEGRATION_NET_PERMISSION, WEB_NET_PERMISSION)
+    capability_flags = (NET_PERMISSION, INTEGRATION_NET_PERMISSION, WEB_NET_PERMISSION,
+                        MCP_FEDERATION_PERMISSION)
     for group in sorted(PERMISSION_GROUPS) + list(capability_flags):
         on = group in perms
         detail = ("capability flag — see also this app's egress lease below"

@@ -560,10 +560,14 @@ _MANIFEST_RE = re.compile(r"mcp_apps/[^/\s\"']+/manifest\.json")
 # The server-process / sandbox egress capabilities. These are NOT permission
 # groups — they are the capability half of the three-key gate (gate.py:326-341)
 # and no group implies them, which is the point: egress "must be granted on its
-# own line". `task_net` was the only one matched here; `integration_net` and
-# `web_net` authorize egress from the *server* process, which gate.py:332-337
-# identifies as the more privileged lane, and were silently absent.
-_NET_CAP_RE = re.compile(r"\b(task_net|integration_net|web_net)\b")
+# own line". `task_net` was the only one matched here; `integration_net`,
+# `web_net`, and `mcp_federation` authorize egress from the *server* process,
+# which gate.py identifies as the more privileged lane, and were silently
+# absent (mcp_federation — fork/exec of a downstream MCP server, Decision 3 —
+# added when #285 landed the federation lane). test_pre_tool_use_hook.py pins
+# every gate capability flag to this guard or the seat guard, so the next one
+# cannot go missing the same way.
+_NET_CAP_RE = re.compile(r"\b(task_net|integration_net|web_net|mcp_federation)\b")
 # Reading a lease or a manifest is not escalation — `net-status` and
 # `diagnostic_summary` both do it, and blocking `cat` would be the false-positive
 # class B-18 removed. Only a command that plausibly *writes* one is the crossing.
@@ -612,7 +616,7 @@ _KEYSTORE_REASON = (
 # neither column. Add a group there and the test tells you which column it needs.
 _SEAT_PRIV_RE = re.compile(
     r"\b(agent_dispatch|code_graph_write|commitment_write|dispatch_write|"
-    r"envelope_apply|fork_write|frank_write|friction_write|full_access|"
+    r"envelope_apply|federation_call|fork_write|frank_write|friction_write|full_access|"
     r"gap_promote|gap_purge|gap_write|human_loop_write|integration_call|"
     r"knowledge_curate|knowledge_write|lineage_write|markdownai_directives|markdownai_write|"
     r"nest_write|schema_admin|store_all|store_write|task_db|task_queue)\b"
@@ -633,7 +637,7 @@ _SEAT_ESCALATION_REASON = (
     "nest_write / gap_write / gap_promote / gap_purge / friction_write / task_db / "
     "task_queue / dispatch_write / human_loop_write / frank_write / envelope_apply / "
     "fork_write / commitment_write / code_graph_write / agent_dispatch / "
-    "integration_call / markdownai_write / markdownai_directives / orchestrator / "
+    "integration_call / federation_call / markdownai_write / markdownai_directives / orchestrator / "
     "context / binding / full_access) or widen store_scope to "
     '"*" — "retaking the seat". The SessionStart bootstrap restores every seat to '
     "read-only by default; re-granting write authority is an operator act, not a "
