@@ -203,6 +203,36 @@ $ willow-mcp net-status
 $ willow-mcp revoke-net myapp
 ```
 
+**Open-web egress** (`willow_web_search` / `willow_web_fetch` /
+`willow_institutional_search`) is the same three-key gate, keyed on `web_net`
+instead of `task_net` (`web_egress.egress_denial`). Standing it up
+for local/dev use is the same three grants — `allow-permission myapp web_net`,
+`consent set internet true`, `grant-net myapp --ttl 30m` — done separately, in
+order, each its own command. `dev-net` does the same three, in one:
+
+```console
+$ willow-mcp dev-net myapp --ttl 30m --reason "local dev"
+```
+
+It is **not a new bypass path** — it calls exactly the same operator-only
+admin functions `allow-permission` / `consent set` / `grant-net` already call,
+so there is nothing new to audit, and it stays local-CLI-only exactly like
+them: no MCP tool can reach it, and the PreToolUse self-grant guard blocks an
+agent from invoking it via `Bash` the same way it blocks a bare `grant-net`.
+Consent needs an interactive operator terminal only when it is not already
+granted — a repeat run needs no TTY at all — and the whole command refuses
+outright when `WILLOW_MCP_STRICT_TRUST_ROOT` is set (a hardened posture this
+shortcut isn't for) unless you pass `--force`. It prints the lease's expiry,
+the exact `grant-net` command to renew it, and the full four-key diagnostic
+below.
+
+`web_egress.egress_status(app_id)` is the read-only counterpart: all four
+keys — manifest permission, operator consent, egress lease, strict trust
+root — reported at once instead of stopping at the first closed lock the way
+the gate itself (`web_egress.egress_denial`) does. `dev-net` prints it after
+granting so you see every key's state in one place, not just the one you just
+fixed.
+
 Setting `consent.internet` to `false` stops network tasks submitted through
 `task_submit`, immediately, without editing a single manifest. `task_net` is a
 capability (rarely granted, deliberately excluded from `full_access`);

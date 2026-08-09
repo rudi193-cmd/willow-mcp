@@ -26,9 +26,11 @@ Seven guards:
   `WebSearch|WebFetch` matcher in deploy/claude-settings.json.
 - Any tool call that would write the keys authorizing this agent's own egress
   or re-grant its own write seat: minting a lease under `mcp_apps/_net_leases/`,
-  running `willow-mcp grant-net` (via Bash *or* smuggled into Kart task text),
-  or editing a manifest to add an egress capability (`task_net` /
-  `integration_net` / `web_net`) or any write-capable permission group (blocks).
+  running `willow-mcp grant-net` or `dev-net` (the local/dev one-command
+  convenience that grants the same three keys — #287; via Bash *or* smuggled
+  into Kart task text), or editing a manifest to add an egress capability
+  (`task_net` / `integration_net` / `web_net`) or any write-capable permission
+  group (blocks).
 
 That third guard is the sudo invariant (FRANK `90e52ab7`) enforced where the
 agent actually acts: *a model may REQUEST egress, never CONFIRM it.* It is a
@@ -548,8 +550,8 @@ _LEASE_DIR_RE = re.compile(r"mcp_apps/_net_leases\b")
 # standing, never write its own secret (D2). Reading is not blocked.
 _KEYSTORE_RE = re.compile(r"gate/(?:secrets\b|registry\.json)")
 _GRANT_CMD_RE = re.compile(
-    r"\bwillow-mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent|rotate-agent|consent\s+(?:set|reconcile)|roster\s+sync)\b"
-    r"|\bwillow_mcp\s+(?:grant-net|sign-net-task|register-agent|revoke-agent|rotate-agent)\b"
+    r"\bwillow-mcp\s+(?:grant-net|dev-net|sign-net-task|register-agent|revoke-agent|rotate-agent|consent\s+(?:set|reconcile)|roster\s+sync)\b"
+    r"|\bwillow_mcp\s+(?:grant-net|dev-net|sign-net-task|register-agent|revoke-agent|rotate-agent)\b"
     r"|\b(?:lease\.grant|sign_envelope|agent_registry\.(?:register_agent|revoke))\s*\("
     r"|\bconsent_admin\.(?:write_consent|set_key|reconcile)\s*\("
     r"|\bfleet_roster\.sync\s*\("
@@ -574,7 +576,10 @@ _SELF_GRANT_REASON = (
     "changes, and signed task envelopes are made by the operator, at their own "
     "terminal, with "
     "`willow-mcp grant-net <app_id> --ttl 30m --reason ...`, and `task_net` is "
-    "added to a manifest by the operator, not by the app that wants it. "
+    "added to a manifest by the operator, not by the app that wants it. `dev-net` "
+    "(#287) is the same operator-only grant sequence in one command — it is "
+    "friction reduction for the *sequence*, not a new path around any of these "
+    "locks, so it is refused here exactly like grant-net. "
     "Ask for the grant; do not write the file. (B-32)"
 )
 
