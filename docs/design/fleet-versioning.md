@@ -106,7 +106,7 @@ callers hold — different for all three.
 | package | the surface | not the surface |
 |---|---|---|
 | **willow-mcp** | the MCP tool contract — tool names, parameter names and meanings, documented return keys; the seven `[project.scripts]` console entry points; **and the fact that `willow_mcp` is importable and `python -m willow_mcp` runs** | the Python API — module layout, function signatures, anything under `willow_mcp.*` beyond the package importing |
-| **jeles** | the importable Python API (`jeles.institutional`, `jeles.sources`, `jeles.corpus`, `jeles.willow_mcp_client`, the shared hit key set) and `corpus_server`'s tool contract | internals prefixed `_`, including `_egress` |
+| **jeles** | the importable Python API (`jeles.institutional`, `jeles.sources`, `jeles.corpus`, `jeles.willow_mcp_client`, the shared hit key set), `corpus_server`'s tool contract, **and the host-card schema** (`jeles/cards/*.json` — the `host`/`roles`/`publisher`/`custody`/`jurisdiction`/`status`/`notes` fields and the enum values `roles` and `custody` admit) | internals prefixed `_`, including `_egress`; the `observed` field the schema never shipped |
 | **kartikeya** | the `kartikeya`/`kart` CLI and the task-queue schema on disk and in Postgres | the worker internals |
 
 The importability clause in willow-mcp's row is not decoration. Two fleet
@@ -118,6 +118,26 @@ modules were free to move because *"nothing imports `willow_mcp.web_fetch` from
 outside"* — true, and it does not support the conclusion. **willow-mcp is a
 library to the rest of the fleet whatever it is to the outside world**, and the
 dependency graph is a cycle: willow-mcp → jeles → willow-mcp.
+
+**The host-card schema joined jeles' row on 2026-08-09, later than the day the
+decision was made.** `Jeles/docs/design/host-cards.md` §6.1 (commit `6a08553`,
+2026-08-04) decided the schema is part of jeles' public surface — *"a breaking
+card change — removing a field, narrowing an enum, changing what a `role`
+means — is a jeles major, on the same line as deleting a function"* — and
+named this row as the follow-up, before any release shipped a card. jeles
+0.7.0 (2026-08-05) then actually shipped `jeles/cards/*.json` — the 84-host
+catalog — which is what turned the decision *binding*: jeles sets
+`bump-minor-pre-major: false` (Rule 1), so a schema break now cuts 1.0.0
+rather than being free to ship as a minor, the same way dropping `observed`
+from the draft schema was free only because it happened pre-release (§6.2).
+Tracked as a follow-up in #284's body and picked up here as #286. Verified
+against both the source checkout and the installed package (jeles 0.7.2, the
+version this repo's floor of `>=0.5.1` currently resolves to): `jeles/cards/`
+ships all 84 `*.json` files as package data in the wheel, and `roles` /
+`custody` are the enum fields host-cards.md §3.1/§3.2 name as consumer-visible
+— the same two fields `web_search.py`'s `_card_axis_verdict()` already reads
+(#288), pinned against the real installed catalog by
+`tests/test_host_card_trust_policy.py`.
 
 ## Rule 3 — a patch is the fallback, and that is the remaining hole
 
