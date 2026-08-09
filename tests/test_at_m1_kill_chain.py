@@ -25,8 +25,17 @@ What IS provable, and proven here:
                                      check_bash + check_owned_db_file_write),
                                      but those are client-side guardrails,
                                      not OS controls -- see module docstring
-                                     in hooks/pre_tool_use.py. Full closure
-                                     needs the same uid separation as step 1.
+                                     in hooks/pre_tool_use.py. #232 closes the
+                                     MODE half of the real OS control
+                                     (repair-runtime-perms now gives store
+                                     .db files owner-only 0700/0600, proven
+                                     below by a real chmod, not a dry-run
+                                     string assertion). Full closure still
+                                     needs the same uid separation as step 1
+                                     -- on this single-uid sandbox the
+                                     runtime user IS the agent uid, so mode
+                                     bits alone cannot refuse a same-uid read
+                                     regardless of what they are set to.
 """
 import json
 import os
@@ -177,3 +186,50 @@ def test_step6_raw_bash_client_access_is_guarded_client_side(tmp_path, monkeypat
     # earlier hooks handoff): a Write/Edit targeting the raw store file.
     reason = pre_tool_use.check_owned_db_file_write({"file_path": "/x/.willow/store/store.db"})
     assert reason is not None
+
+
+def test_step6b_store_db_files_get_real_os_mode_hardening(home, monkeypatch):
+    """The other half of step 6, and the one the hook alone could never
+    provide: #232's `repair_runtime_permissions()` now gives store `.db`
+    files (store.db per SOIL collection, kart.db, mcp_receipt.db) owner-only
+    0700/0600 instead of the world-readable 0755/0644 ordinary runtime state
+    gets -- verified here with a REAL chmod (not a dry-run action-string
+    assertion), the same method B-46 used for vault.key.
+
+    What this proves: the mode bits genuinely change on disk when hardening
+    runs, for the exact db names hooks/pre_tool_use.py's _OWNED_DB_FILE_RE
+    names. What it does NOT prove, and cannot on this host: that a different
+    uid is refused a read by those bits. This sandbox is single-uid --
+    `resolve_runtime_user` is monkeypatched to the CURRENT real account
+    below, standing in for the real "runtime user" #231's separation would
+    put in that role. See docs/deploy/dedicated-uid-deployment.md's "Store
+    .db files (#232)" section for the residual this leaves for a real
+    multi-uid host."""
+    import os
+    import pwd
+    import stat
+
+    from willow_mcp import home_init as hi
+    from willow_mcp import paths
+    from willow_mcp import trust_root_setup as trs
+
+    hi.ensure_home_layout()
+    real_user = pwd.getpwuid(os.geteuid()).pw_name
+
+    col_db = paths.store_root() / "knowledge" / "store.db"
+    col_db.parent.mkdir(parents=True, exist_ok=True)
+    col_db.write_text("sqlite-placeholder")
+    col_db.chmod(0o644)
+    receipt = home / "mcp_receipt.db"
+    receipt.write_text("sqlite-placeholder")
+    receipt.chmod(0o644)
+
+    monkeypatch.setattr(trs, "resolve_runtime_user", lambda _u: real_user)
+    trs.repair_runtime_permissions(dry_run=False)
+
+    assert stat.S_IMODE(col_db.stat().st_mode) == 0o600, (
+        "store.db must be owner-only after repair-runtime-perms, not the "
+        "world-readable mode ordinary runtime state gets"
+    )
+    assert stat.S_IMODE(receipt.stat().st_mode) == 0o600
+    assert trs.store_db_exposure() == []

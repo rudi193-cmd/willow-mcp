@@ -3860,6 +3860,36 @@ def _diag_uid_separation(app_id: str) -> dict:
     return trust_root_setup.uid_separation_report(app_id)
 
 
+def _diag_store_db_perms(app_id: str) -> dict:
+    """#232: OS-level permission posture on the store `.db` files themselves
+    -- the concrete, one-target-set-over sibling of #231's `_diag_uid_separation`,
+    and the check that answers what the client-side hook
+    (`bundle/hooks/pre_tool_use.py`'s `_OWNED_DB_FILE_RE`) never could: does
+    the OS actually refuse a same-uid-as-agent read, or only this process's
+    own harness.
+
+    `exposure` is the mode-bit hygiene fact (see
+    `trust_root_setup.store_db_exposure()`) -- independent of who is asking.
+    `enforced` folds that into one bool for convenience, but stays honestly
+    `False` on a fresh/unhardened install with no `.db` files yet (empty
+    list is not evidence of protection) as well as on any install that
+    hasn't run `repair-runtime-perms` since #232 shipped.
+
+    Purely informational, same B-18 discipline as `_diag_uid_separation`:
+    never folded into `_derive_problems`/the verdict, so a `False` here
+    cannot turn today's honest single-uid resting state into a new `warn`.
+    `app_id` is accepted (mirroring the other `_diag_*` checks' signatures)
+    but unused today -- the exposure check is per-file, not per-caller."""
+    from . import trust_root_setup
+    files = trust_root_setup.store_db_files()
+    exposure = trust_root_setup.store_db_exposure()
+    return {
+        "files": [str(p) for p in files],
+        "exposure": exposure,
+        "enforced": bool(files) and not exposure,
+    }
+
+
 def _under(child: Path, parent: Path) -> bool:
     """Is `child` the same inode as `parent`, or inside it — after symlinks?
 
@@ -4436,6 +4466,7 @@ def diagnostic_summary(app_id: str = "") -> dict:
     net_lease = _diag_net_lease(eff)
     severance = _diag_severance(store, postgres, net_lease)
     uid_separation = _diag_uid_separation(eff)
+    store_db_perms = _diag_store_db_perms(eff)
     env = _diag_env()
 
     problems = _derive_problems(store, postgres, manifest, mode, worker, consent,
@@ -4450,7 +4481,8 @@ def diagnostic_summary(app_id: str = "") -> dict:
         "checks": {"store": store, "postgres": postgres, "rings": rings,
                    "schema": schema, "manifest": manifest, "identity_bindings": bindings,
                    "worker": worker, "consent": consent, "net_lease": net_lease,
-                   "severance": severance, "uid_separation": uid_separation, "env": env},
+                   "severance": severance, "uid_separation": uid_separation,
+                   "store_db_perms": store_db_perms, "env": env},
         "problems": problems,
     }
     if redact:
@@ -5812,6 +5844,14 @@ def _cmd_doctor(args) -> None:
         print("[warn] secret_files: group/world-readable secret file(s) (#181 audit)")
         for item in audit["secret_file_exposure"]:
             print(f"  {item.get('key')}: {item.get('path')} (mode {item.get('mode')})")
+        print(f"  fix: {cli} repair-runtime-perms")
+        print()
+    if audit.get("store_db_exposure"):
+        cli = shutil.which("wmc") or shutil.which("willow-mcp") or "willow-mcp"
+        print("[warn] store_db: group/world-readable store .db file(s) (#232)")
+        for item in audit["store_db_exposure"]:
+            print(f"  {item.get('key')}: {item.get('path')} (mode {item.get('mode')})")
+        print("  the client-side hook (pre_tool_use.py) is not an OS control --")
         print(f"  fix: {cli} repair-runtime-perms")
         print()
 

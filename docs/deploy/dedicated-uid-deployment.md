@@ -261,13 +261,44 @@ deployment, changing the default would deny egress on every existing
 single-uid install — exactly the outcome `strict_trust_root()`'s own
 docstring says the off-default exists to avoid.
 
+## Store `.db` files (#232)
+
+The client-side hook (`hooks/pre_tool_use.py`'s `_OWNED_DB_FILE_RE`) blocks
+Write/Edit and raw `sqlite3` against `store.db`/`vault.db`/`kart.db`/
+`mcp_receipt.db` — but it is a tripwire in the agent's own harness, not an
+OS control, and #232 said so explicitly: the acceptance test "proves the
+hook fires, not that the OS refuses the write." A process that doesn't load
+the hook skips it entirely.
+
+`willow-mcp repair-runtime-perms` now closes the OS half, the same way it
+already does for `vault.key`/`mcp_token.json` (B-46): every SOIL collection's
+`store.db` (under `store_root()`), `kart.db`, and `mcp_receipt.db` get
+owner-only `0700`/`0600` instead of the world-readable `0755`/`0644`
+ordinary runtime state gets. `vault.db` was already covered (B-46).
+
+```bash
+willow-mcp repair-runtime-perms
+willow-mcp doctor --app-id willow   # look for store_db_exposure: []
+```
+
+**This is the exact same shape of gap as the rest of this document, and the
+exact same fix.** Tightening mode bits changes *nothing* while the agent and
+the MCP server share a uid — the runtime user IS the agent uid in Shape A
+above, so a `0600` file owned by "yourself" is exactly as readable as a
+`0644` one was. It only becomes a real OS boundary once Shape B (or an
+equivalent multi-uid Shape A, per #231) is actually deployed. `diagnostic_summary`'s
+new `checks.store_db_perms` reports `exposure` (which files are still
+group/world-readable) and `enforced` (bool) — like `checks.uid_separation`,
+this is purely informational and never folded into `problems`/the verdict:
+a fresh, unhardened single-uid install honestly reports `enforced: false`
+and stays `verdict: ok`.
+
 ## Out of scope here
 
-- **#232** (store `.db` OS-level permission enforcement) depends on this same
-  uid separation but is its own issue — not touched by this document or the
-  code changes that accompany it.
-- Real end-to-end verification on a genuine multi-uid host. Everything in
-  `checks.uid_separation`'s test coverage simulates a second account via
-  monkeypatched ownership; no automated test here creates a real second unix
-  user, because the sandboxes this suite runs in do not have the privilege
-  to do so.
+- Real end-to-end verification on a genuine multi-uid host, for both #231's
+  uid separation and #232's store `.db` mode hardening above. Everything in
+  `checks.uid_separation`/`checks.store_db_perms`'s test coverage simulates a
+  second account via monkeypatched ownership or a real chmod verified from
+  the same uid that set it; no automated test here creates a real second
+  unix user, because the sandboxes this suite runs in do not have the
+  privilege to do so.

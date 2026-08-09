@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
+import stat
 from pathlib import Path
 
 import pytest
@@ -433,4 +435,206 @@ def test_doctor_cli_warns_on_secret_file_exposure(home, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "secret_files" in out
     assert "mcp_token.json" in out
+    assert "repair-runtime-perms" in out
+
+
+# ── store `.db` OS-level permission hardening (#232) ──────────────────────────
+#
+# The client-side hook (hooks/pre_tool_use.py's _OWNED_DB_FILE_RE) blocks
+# Write/Edit and raw sqlite3 against store.db/vault.db/kart.db/mcp_receipt.db
+# -- but it is a tripwire in the agent's own harness, not an OS control.
+# vault.db is already covered by B-46's _SECRET_FILE_NAMES; these tests cover
+# the other three the same way: store.db (nested per SOIL collection under
+# store_root()), kart.db (location follows WILLOW_STORE_ROOT), and
+# mcp_receipt.db (now also in _SECRET_FILE_NAMES -- previously only chowned,
+# never chmodded, by its own dedicated block; found while implementing #232).
+#
+# The `home` fixture (conftest.py) always exports WILLOW_STORE_ROOT pointed
+# at tmp_path/"store", so kart.db resolves INSIDE store_root() in every test
+# below unless a test explicitly unsets it -- exactly the "recommended shape"
+# noted in _kart_db_candidate()'s docstring.
+
+def test_store_db_files_empty_on_fresh_home(home):
+    hi.ensure_home_layout()
+    assert trs.store_db_files() == []
+
+
+def test_store_db_files_finds_per_collection_store_db(home):
+    col_db = paths.store_root() / "knowledge" / "store.db"
+    col_db.parent.mkdir(parents=True, exist_ok=True)
+    col_db.write_text("sqlite-placeholder")
+    assert trs.store_db_files() == [col_db]
+
+
+def test_store_db_files_finds_kart_db_without_duplicating_it(home):
+    kart_db = paths.store_root() / "kart.db"
+    kart_db.parent.mkdir(parents=True, exist_ok=True)
+    kart_db.write_text("sqlite-placeholder")
+    found = trs.store_db_files()
+    assert found == [kart_db]  # not double-counted via both the glob and the explicit lookup
+
+
+def test_store_db_exposure_empty_when_nothing_present(home):
+    assert trs.store_db_exposure() == []
+
+
+def test_store_db_exposure_detects_world_readable_collection_db(home):
+    col_db = paths.store_root() / "knowledge" / "store.db"
+    col_db.parent.mkdir(parents=True, exist_ok=True)
+    col_db.write_text("sqlite-placeholder")
+    col_db.chmod(0o644)
+    exposure = trs.store_db_exposure()
+    assert {"store.db"} == {e["key"] for e in exposure}
+    assert exposure[0]["mode"] == oct(0o644)
+
+
+def test_store_db_exposure_silent_when_properly_protected(home):
+    col_db = paths.store_root() / "knowledge" / "store.db"
+    col_db.parent.mkdir(parents=True, exist_ok=True)
+    col_db.write_text("sqlite-placeholder")
+    col_db.chmod(0o600)
+    assert trs.store_db_exposure() == []
+
+
+def test_audit_trust_root_not_hardened_when_store_db_exposed(home, monkeypatch):
+    monkeypatch.setattr(trs.lease, "self_writable_trust_paths", lambda *_: [])
+    monkeypatch.setattr(trs.lease, "path_is_self_writable_or_replaceable", lambda *_: False)
+    monkeypatch.setattr(trs.lease, "path_is_directly_writable_for_trust", lambda *_: False)
+    monkeypatch.setenv("WILLOW_MCP_STRICT_TRUST_ROOT", "1")
+    col_db = paths.store_root() / "knowledge" / "store.db"
+    col_db.parent.mkdir(parents=True, exist_ok=True)
+    col_db.write_text("sqlite-placeholder")
+    col_db.chmod(0o644)
+    audit = trs.audit_trust_root("hanuman")
+    assert audit["hardened"] is False
+    assert audit["store_db_exposure"]
+
+
+def test_audit_trust_root_hardened_when_store_db_protected_alongside_everything_else(home, monkeypatch):
+    monkeypatch.setattr(trs.lease, "self_writable_trust_paths", lambda *_: [])
+    monkeypatch.setattr(trs.lease, "path_is_self_writable_or_replaceable", lambda *_: False)
+    monkeypatch.setattr(trs.lease, "path_is_directly_writable_for_trust", lambda *_: False)
+    monkeypatch.setenv("WILLOW_MCP_STRICT_TRUST_ROOT", "1")
+    col_db = paths.store_root() / "knowledge" / "store.db"
+    col_db.parent.mkdir(parents=True, exist_ok=True)
+    col_db.write_text("sqlite-placeholder")
+    col_db.chmod(0o600)
+    audit = trs.audit_trust_root("hanuman")
+    assert audit["store_db_exposure"] == []
+    assert audit["hardened"] is True
+
+
+def test_repair_runtime_dry_run_plans_owner_only_mode_for_store_root(home, monkeypatch):
+    """store_root() itself -- not just a named file -- gets the secret-file
+    treatment: owner-only 0700/0600 recursively, same class of fix as B-46's
+    vault.key, applied to the whole SOIL store tree."""
+    hi.ensure_home_layout()
+    monkeypatch.setattr(trs, "resolve_runtime_user", lambda _user: "runtime")
+    result = trs.repair_runtime_permissions(dry_run=True)
+    store_root = str(paths.store_root())
+    assert any(
+        f"find {store_root} -type f -exec chmod 600" in a for a in result["actions"]
+    )
+    assert any(
+        f"find {store_root} -type d -exec chmod 700" in a for a in result["actions"]
+    )
+    assert not any(
+        f"find {store_root} -type f -exec chmod 644" in a for a in result["actions"]
+    )
+
+
+def test_repair_runtime_dry_run_hardens_mcp_receipt_db(home, monkeypatch):
+    (home / "mcp_receipt.db").write_text("sqlite-placeholder")
+    monkeypatch.setattr(trs, "resolve_runtime_user", lambda _user: "runtime")
+    result = trs.repair_runtime_permissions(dry_run=True)
+    receipt = str(home / "mcp_receipt.db")
+    assert any(f"chmod 600 {receipt}" in a for a in result["actions"])
+    assert not any(f"chmod 644 {receipt}" in a for a in result["actions"])
+
+
+def test_kart_db_candidate_falls_back_outside_willow_home_when_store_root_unset(home, monkeypatch):
+    """When WILLOW_STORE_ROOT is unset, task_queue.py's kart.db fallback
+    lands under raw ~/.willow -- NOT paths.willow_home(), which also honors
+    WILLOW_HOME -- so it can end up outside this install's home entirely.
+    Pure path computation, no filesystem touched: asserts the documented
+    divergence exists rather than asserting on the real host's home dir."""
+    monkeypatch.delenv("WILLOW_STORE_ROOT", raising=False)
+    expected = str(Path.home() / ".willow" / "kart.db")
+    assert str(trs._kart_db_candidate()) == expected
+
+
+def test_repair_runtime_dry_run_hardens_kart_db_wherever_it_resolves(home, monkeypatch):
+    """kart.db must be named and hardened even when it lands outside
+    store_root() (the WILLOW_STORE_ROOT-unset case) -- not silently skipped
+    because it isn't nested under the store sweep. _kart_db_candidate() is
+    monkeypatched to a safe tmp location standing in for that "outside
+    store_root" case, rather than touching the real host's ~/.willow."""
+    hi.ensure_home_layout()
+    outside_root = home.parent / "outside-store-root"
+    outside_root.mkdir()
+    kart_db = outside_root / "kart.db"
+    kart_db.write_text("sqlite-placeholder")
+    monkeypatch.setattr(trs, "_kart_db_candidate", lambda: kart_db)
+    monkeypatch.setattr(trs, "resolve_runtime_user", lambda _user: "runtime")
+    result = trs.repair_runtime_permissions(dry_run=True)
+    expected = str(kart_db)
+    assert any(f"chown runtime:runtime {expected}" in a for a in result["actions"])
+    assert any(f"chmod 600 {expected}" in a for a in result["actions"])
+
+
+def test_repair_runtime_real_run_tightens_store_db_files_to_owner_only_mode(home, monkeypatch):
+    """Real chmod, not a dry-run action-string assertion -- the same
+    verification method B-46 used for vault.key: create real files, run
+    repair_runtime_permissions() for REAL (not dry_run), then stat the
+    actual mode bits on disk afterward. Ownership is monkeypatched to the
+    CURRENT real unix user (this sandbox has no second account to chown to
+    -- see docs/deploy/dedicated-uid-deployment.md), so the chown half is
+    simulated, but the chmod calls run through the real `chmod`/`find`
+    subprocess -- this proves the MODE half of #232 actually lands on disk,
+    independent of the (untestable here) uid-separation half."""
+    hi.ensure_home_layout()
+    real_user = pwd.getpwuid(os.geteuid()).pw_name
+    monkeypatch.setattr(trs, "resolve_runtime_user", lambda _user: real_user)
+
+    col_db = paths.store_root() / "knowledge" / "store.db"
+    col_db.parent.mkdir(parents=True, exist_ok=True)
+    col_db.write_text("sqlite-placeholder")
+    col_db.chmod(0o644)
+
+    receipt = home / "mcp_receipt.db"
+    receipt.write_text("sqlite-placeholder")
+    receipt.chmod(0o644)
+
+    kart_db = paths.store_root() / "kart.db"
+    kart_db.write_text("sqlite-placeholder")
+    kart_db.chmod(0o644)
+
+    trs.repair_runtime_permissions(dry_run=False)
+
+    for f in (col_db, receipt, kart_db):
+        mode = stat.S_IMODE(f.stat().st_mode)
+        assert mode == 0o600, f"{f} left at {oct(mode)}, expected owner-only 0600"
+    dir_mode = stat.S_IMODE(paths.store_root().stat().st_mode)
+    assert dir_mode == 0o700, f"store_root left at {oct(dir_mode)}, expected owner-only 0700"
+    # And the exposure/audit surfaces agree with what's now on disk.
+    assert trs.store_db_exposure() == []
+
+
+def test_doctor_cli_warns_on_store_db_exposure(home, monkeypatch, capsys):
+    from willow_mcp import server
+
+    col_db = paths.store_root() / "knowledge" / "store.db"
+    col_db.parent.mkdir(parents=True, exist_ok=True)
+    col_db.write_text("sqlite-placeholder")
+    col_db.chmod(0o644)
+    monkeypatch.setattr(server, "diagnostic_summary", lambda app_id: {"checks": {}})
+
+    class _Args:
+        app_id = "testapp"
+        project_root = ""
+
+    server._cmd_doctor(_Args())
+    out = capsys.readouterr().out
+    assert "store_db" in out
+    assert "store.db" in out
     assert "repair-runtime-perms" in out
