@@ -376,6 +376,8 @@ def test_main_silent_on_clean_task_submit():
 
 @pytest.mark.parametrize("command", [
     "willow-mcp grant-net willow --ttl 30m",
+    "willow-mcp dev-net willow --ttl 30m",
+    ".venv/bin/python -m willow_mcp dev-net willow --ttl 1h --reason local",
     "willow-mcp sign-net-task willow --task 'git push' --key /operator/key.pem",
     ".venv/bin/python -m willow_mcp grant-net willow --ttl 1h --reason push",
     'python -c "from willow_mcp import lease; lease.grant(\'willow\', 60, issuer=\'me\')"',

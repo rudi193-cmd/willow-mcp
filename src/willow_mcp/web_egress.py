@@ -43,3 +43,66 @@ def egress_denial(app_id: str) -> Optional[dict]:
                 + ", ".join(f"{f['key']} ({f['path']})" for f in forgeable)
                 + ". Chown these to a uid the agent does not run as.")}
     return None
+
+
+def egress_status(app_id: str) -> dict:
+    """Read-only diagnostic: all four keys of the web_net egress gate (#287).
+
+    `egress_denial` above stops at the first closed lock — the right shape for
+    a gate, wrong shape for a diagnostic, where an operator debugging "why is
+    egress still denied" wants every key at once instead of fixing one and
+    re-running to discover the next. This reads the exact same primitives
+    `egress_denial` checks (`gate.permitted`, `consent.internet_permitted`,
+    `lease.read_lease`, `lease.strict_trust_root`) in the same order, so the
+    two can never silently drift apart — a key `egress_denial` would deny is
+    always the same key this reports ungranted.
+
+    Purely a read: it authorizes nothing and writes nothing. Never raises —
+    every sub-check it calls is itself fail-closed and exception-free.
+    """
+    from . import consent, gate, lease
+
+    manifest_granted = gate.permitted(app_id, gate.WEB_NET_PERMISSION)
+    consent_granted = consent.internet_permitted()
+    lease_state = lease.read_lease(app_id)
+    lease_granted = lease_state["status"] == "active"
+    strict = lease.strict_trust_root()
+    forgeable = lease.self_writable_trust_paths(app_id)
+    # Strict mode off ⇒ this key never blocks (it is informational until an
+    # operator opts in). Strict mode on ⇒ it only blocks if the keys it would
+    # check are actually forgeable by this process — mirrors egress_denial.
+    trust_root_ok = not (strict and forgeable)
+
+    return {
+        "app_id": app_id,
+        "egress_permitted": (
+            manifest_granted and consent_granted and lease_granted and trust_root_ok
+        ),
+        "keys": {
+            "manifest_permission": {
+                "granted": manifest_granted,
+                "permission": gate.WEB_NET_PERMISSION,
+                "path": f"mcp_apps/{app_id}/manifest.json",
+                "cli": f"willow-mcp allow-permission {app_id} {gate.WEB_NET_PERMISSION}",
+            },
+            "operator_consent": {
+                "granted": consent_granted,
+                "path": str(consent.settings_path()),
+                "cli": "willow-mcp consent set internet true",
+            },
+            "egress_lease": {
+                "granted": lease_granted,
+                "status": lease_state["status"],
+                "expires_at": lease_state.get("expires_at"),
+                "remaining_seconds": lease_state.get("remaining_seconds"),
+                "error": lease_state.get("error"),
+                "cli": f"willow-mcp grant-net {app_id} --ttl 30m --reason ...",
+            },
+            "strict_trust_root": {
+                "enabled": strict,
+                "ok": trust_root_ok,
+                "forgeable": forgeable,
+                "cli": "willow-mcp harden-trust-root" if forgeable else None,
+            },
+        },
+    }

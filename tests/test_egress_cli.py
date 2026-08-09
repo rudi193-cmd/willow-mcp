@@ -38,6 +38,92 @@ def test_setup_egress_creates_manifest(tmp_path, monkeypatch):
     assert (cfg / "manifest.json").is_file()
 
 
+def _willow_home(tmp_path, monkeypatch):
+    willow_home = tmp_path / "willow"
+    willow_home.mkdir()
+    monkeypatch.setenv("WILLOW_HOME", str(willow_home))
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(willow_home / "mcp_apps"))
+    monkeypatch.setenv("WILLOW_STORE_ROOT", str(willow_home / "store"))
+    monkeypatch.delenv("WILLOW_MCP_STRICT_TRUST_ROOT", raising=False)
+    monkeypatch.delenv("WILLOW_IN_KART", raising=False)
+    return willow_home
+
+
+# ── dev-net: one command for the three legitimate open-web grants (#287) ─────
+
+def test_dev_net_grants_all_three_keys_when_consent_already_on(tmp_path, monkeypatch):
+    willow_home = _willow_home(tmp_path, monkeypatch)
+    apps = willow_home / "mcp_apps" / "devapp"
+    apps.mkdir(parents=True)
+    (apps / "manifest.json").write_text(json.dumps({"permissions": ["web_read"]}))
+    # Consent already granted — dev-net must not need a TTY for this run.
+    (willow_home / "config").mkdir(parents=True)
+    (willow_home / "config" / "settings.global.json").write_text(
+        json.dumps({"consent": {"internet": True, "cloud_llm": False}})
+    )
+
+    out = _run("dev-net", "devapp", "--ttl", "30m", "--issuer", "ci", "--reason", "test")
+    assert out.returncode == 0, out.stderr
+
+    manifest = json.loads((apps / "manifest.json").read_text())
+    assert "web_net" in manifest["permissions"]
+
+    lease_file = willow_home / "mcp_apps" / "_net_leases" / "devapp.json"
+    assert lease_file.is_file()
+    lease_record = json.loads(lease_file.read_text())
+    assert lease_record["app_id"] == "devapp"
+    assert lease_record["issuer"] == "ci"
+
+    # The trailing block of stdout is the egress_status JSON dump.
+    json_start = out.stdout.index("{")
+    status = json.loads(out.stdout[json_start:])
+    assert status["app_id"] == "devapp"
+    assert status["egress_permitted"] is True
+    assert status["keys"]["manifest_permission"]["granted"] is True
+    assert status["keys"]["operator_consent"]["granted"] is True
+    assert status["keys"]["egress_lease"]["granted"] is True
+
+
+def test_dev_net_refuses_without_tty_when_consent_still_needs_changing(tmp_path, monkeypatch):
+    willow_home = _willow_home(tmp_path, monkeypatch)
+    apps = willow_home / "mcp_apps" / "devapp"
+    apps.mkdir(parents=True)
+    (apps / "manifest.json").write_text(json.dumps({"permissions": ["web_read"]}))
+    # No consent file at all — consent.internet_permitted() reads False, so
+    # dev-net must attempt the mutation, which requires an operator terminal.
+    # subprocess.run's stdin is never a real tty, so this must fail closed.
+
+    out = _run("dev-net", "devapp", "--ttl", "30m")
+    assert out.returncode != 0
+    assert "consent" in out.stderr.lower()
+    # The manifest permission grant may have landed (it needs no TTY), but no
+    # lease should exist — the sequence must not silently skip the consent
+    # failure and grant a lease anyway.
+    lease_file = willow_home / "mcp_apps" / "_net_leases" / "devapp.json"
+    assert not lease_file.is_file()
+
+
+def test_dev_net_refuses_when_strict_trust_root_is_set_without_force(tmp_path, monkeypatch):
+    willow_home = _willow_home(tmp_path, monkeypatch)
+    monkeypatch.setenv("WILLOW_MCP_STRICT_TRUST_ROOT", "1")
+
+    out = _run(
+        "dev-net", "devapp", "--ttl", "30m",
+        env={"WILLOW_MCP_STRICT_TRUST_ROOT": "1"},
+    )
+    assert out.returncode != 0
+    assert "STRICT_TRUST_ROOT" in out.stderr or "strict" in out.stderr.lower()
+    lease_file = willow_home / "mcp_apps" / "_net_leases" / "devapp.json"
+    assert not lease_file.is_file()
+
+
+def test_dev_net_cannot_run_inside_kart(tmp_path, monkeypatch):
+    _willow_home(tmp_path, monkeypatch)
+    out = _run("dev-net", "devapp", "--ttl", "30m", env={"WILLOW_IN_KART": "1"})
+    assert out.returncode != 0
+    assert "Kart" in out.stderr
+
+
 def test_setup_egress_merges_mcp_json(tmp_path, monkeypatch):
     cfg = tmp_path / "egress"
     willow_home = tmp_path / "willow"

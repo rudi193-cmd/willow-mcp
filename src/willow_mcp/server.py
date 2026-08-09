@@ -5905,6 +5905,86 @@ def _cmd_net_status(args) -> None:
             print(f"  {f['key']}: {f['path']}")
 
 
+def _cmd_dev_net(args) -> None:
+    """`willow-mcp dev-net` — local/dev convenience: one command for the three
+    legitimate open-web egress grants (#287).
+
+    **Not a new bypass path.** It calls exactly the same operator-only admin
+    functions `allow-permission`, `consent set`, and `grant-net` already call —
+    `manifest_admin.set_permission`, `consent_admin.set_key`, `lease.grant` —
+    so there is no extra code path to audit and nothing it grants that those
+    three commands, run in sequence, would not also grant. Like them it is
+    local-CLI-only and unreachable from any MCP tool; the PreToolUse self-grant
+    guard blocks an agent from invoking it via Bash exactly as it blocks
+    `grant-net` (the sudo invariant, FRANK 90e52ab7). The point is removing
+    friction from the *sequence*, not from any individual gate.
+
+    Consent mutation still requires an interactive operator terminal —
+    `consent_admin.set_key` enforces that itself — but only when consent is
+    not already granted, so a repeat run with consent already on needs no TTY.
+    Refuses outright when `WILLOW_MCP_STRICT_TRUST_ROOT` is on (a hardened
+    posture this local/dev shortcut is not meant for) unless `--force`.
+    """
+    from . import consent, consent_admin, gate, lease, manifest_admin, web_egress
+
+    if os.environ.get("WILLOW_IN_KART", "").strip():
+        print("Error: dev-net cannot run inside Kart.", file=sys.stderr)
+        raise SystemExit(1)
+
+    if lease.strict_trust_root() and not args.force:
+        print(
+            "Error: WILLOW_MCP_STRICT_TRUST_ROOT is set — this host is in a hardened "
+            "posture, and dev-net's one-command convenience is for local/dev use, not "
+            "a hardened deployment. Grant the three keys individually with full review "
+            "(allow-permission / consent set / grant-net), or pass --force to proceed "
+            "anyway.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    try:
+        app_id = gate._validate_app_id(args.app_id)
+        ttl = lease.parse_ttl(args.ttl)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    # 1. manifest permission — same call `allow-permission` makes.
+    try:
+        manifest_admin.set_permission(app_id, gate.WEB_NET_PERMISSION, True)
+    except (ValueError, RuntimeError) as e:
+        print(f"Error: manifest permission: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    # 2. operator consent — same call `consent set internet true` makes.
+    # Skipped (and so TTY-free) when consent is already granted.
+    if not consent.internet_permitted():
+        try:
+            consent_admin.set_key("internet", True)
+        except (OSError, PermissionError, ValueError) as e:
+            print(f"Error: consent: {e}", file=sys.stderr)
+            raise SystemExit(1)
+
+    # 3. egress lease — same call `grant-net` makes.
+    try:
+        record = lease.grant(app_id, ttl, issuer=args.issuer, reason=args.reason or "dev-net")
+    except ValueError as e:
+        print(f"Error: lease: {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    status = web_egress.egress_status(app_id)
+    print(f"dev-net: web egress granted for app_id={app_id!r}")
+    print(f"  expires: {record['expires_at']} (ttl {record['ttl_seconds']}s)")
+    print(f"  renew:   willow-mcp grant-net {app_id} --ttl {args.ttl} --reason \"...\"")
+    if not status["egress_permitted"]:
+        print(
+            "\nNOTE: not every key reads as granted yet — see below "
+            "(egress_status, all four keys):",
+            file=sys.stderr,
+        )
+    print(json.dumps(status, indent=2))
+
+
 def _cmd_gates(args) -> None:
     """`willow-mcp gates` — every authorization gate as one on/off panel.
 
@@ -6345,6 +6425,21 @@ def _main():
         "net-status", help="Show egress leases and which trust-root keys this process can forge")
     status_p.add_argument("app_id", nargs="?", default="")
 
+    dev_net_p = subparsers.add_parser(
+        "dev-net",
+        help="Local/dev convenience: grant web_net + operator consent + an egress lease "
+             "in one command (never an MCP tool — calls the same admin functions "
+             "allow-permission/consent set/grant-net already call; #287)",
+    )
+    dev_net_p.add_argument("app_id")
+    dev_net_p.add_argument("--ttl", default="30m",
+                            help="lease lifetime: 900s / 30m / 2h (ceiling 3h)")
+    dev_net_p.add_argument("--reason", default="", help="why this grant exists — it is recorded")
+    dev_net_p.add_argument("--issuer", default=os.environ.get("USER", "operator"),
+                            help="who is issuing the lease (default $USER)")
+    dev_net_p.add_argument("--force", action="store_true",
+                            help="proceed even though WILLOW_MCP_STRICT_TRUST_ROOT is set")
+
     harden_p = subparsers.add_parser(
         "harden-trust-root",
         help="Separate egress confirm authority from the agent (B-32): chown trust roots + strict mode",
@@ -6554,6 +6649,9 @@ def _main():
         return
     if args.command == "net-status":
         _cmd_net_status(args)
+        return
+    if args.command == "dev-net":
+        _cmd_dev_net(args)
         return
     if args.command == "harden-trust-root":
         _cmd_harden_trust_root(args)
