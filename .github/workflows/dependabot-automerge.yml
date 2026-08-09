@@ -6,9 +6,13 @@ on:
   push:
     branches: [master, main]
 
+# GITHUB_TOKEN keeps only what the read-only metadata fetch below needs.
+# Everything that arms auto-merge uses RELEASE_PLEASE_TOKEN instead (see WHY
+# THE PAT below), so GITHUB_TOKEN performs no write in this workflow and does
+# not need write scope.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 # Deliberately NO `gh pr update-branch` anywhere in this workflow: pushes made
 # with GITHUB_TOKEN do not trigger workflow runs, so a token-made update
@@ -16,6 +20,22 @@ permissions:
 # then waits forever. Arming auto-merge is sufficient: when branch protection
 # has "require branches to be up to date", GitHub updates the branch
 # server-side, and THAT update runs CI normally.
+#
+# WHY THE PAT (#297). Arming was correct; the token behind it was not.
+# GitHub attributes the merge auto-merge eventually performs to whoever armed
+# it — release-please.yml documents the same fact for the release PR. `gh pr
+# merge --auto` run with GITHUB_TOKEN here armed the merge as github-actions[bot],
+# so when checks passed and GitHub merged #293 for real, the resulting push to
+# master was a GITHUB_TOKEN push: no `Tests` run, no `Release Please` run, zero
+# workflow runs against `3c848a1` at all. That silently dropped two CHANGELOG
+# entries (release-please's changelog-rebuild step never ran) and left master
+# red with nobody told. Arming with RELEASE_PLEASE_TOKEN — the same PAT
+# release-please.yml already requires, not a new credential — makes the
+# eventual merge a normal, non-bot push, so `Tests` (on: push) and
+# `Release Please` (on: push) both run on the result like any other merge to
+# master. `dependabot/fetch-metadata` above stays on GITHUB_TOKEN: it only
+# reads the PR, it merges nothing, and giving it the PAT would be scope it
+# never needs.
 
 jobs:
   dependabot-pr:
@@ -29,6 +49,35 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Require the release PAT
+        # Same guard release-please.yml carries, for the same reason: a missing
+        # secret must not silently fall back to GITHUB_TOKEN. That fallback
+        # would still arm auto-merge and still look healthy — right up until
+        # the merge lands with no CI run and no release-please run, which is
+        # the exact failure #297 is closing.
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-major' ||
+          steps.metadata.outputs.update-type == 'github_actions'
+        env:
+          TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::RELEASE_PLEASE_TOKEN is not set on this repository."
+            cat <<'MSG'
+          Auto-merge would still arm with GITHUB_TOKEN, and the PR would look
+          fine — but the merge GitHub performs when checks pass would be
+          attributed to github-actions[bot], and that push starts no workflow
+          run: no Tests, no Release Please. Silently.
+
+          Add the same fine-grained PAT release-please.yml requires (repo
+          secret RELEASE_PLEASE_TOKEN, scoped Contents: read/write and
+          Pull requests: read/write).
+          MSG
+            exit 1
+          fi
+
       - name: Enable auto-merge
         if: |
           steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
@@ -36,7 +85,9 @@ jobs:
           steps.metadata.outputs.update-type == 'version-update:semver-major' ||
           steps.metadata.outputs.update-type == 'github_actions'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The PAT, not GITHUB_TOKEN — see WHY THE PAT above. This is the
+          # token whose identity the eventual auto-merge push carries.
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr merge --auto --merge "$PR_URL"
 
@@ -45,9 +96,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Require the release PAT
+        # Same guard as the dependabot-pr job — see its "Require the release
+        # PAT" step. This job re-arms auto-merge too, so it carries the same
+        # requirement.
+        env:
+          TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+        run: |
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::RELEASE_PLEASE_TOKEN is not set on this repository."
+            echo "Re-arming with GITHUB_TOKEN would attribute the eventual"
+            echo "merge to github-actions[bot], and that push starts no"
+            echo "workflow run. See dependabot-pr's 'Require the release PAT'."
+            exit 1
+          fi
+
       - name: Re-arm auto-merge on open Dependabot PRs after the base moves
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The PAT, not GITHUB_TOKEN — see WHY THE PAT above the jobs.
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: |
           set -euo pipefail
           mapfile -t prs < <(gh pr list --repo "${{ github.repository }}" --state open --author app/dependabot --json number --jq '.[].number')
