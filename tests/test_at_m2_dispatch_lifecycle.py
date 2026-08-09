@@ -258,6 +258,181 @@ def test_b52_a_real_dispatch_send_packet_still_reads_fine(home):
     assert result.get("error") is None
 
 
+# ── B-52/#241 (continued): symlinked packet members are refused ──────────────
+#
+# _meta_is_well_formed alone doesn't stop a same-uid attacker who replicates
+# the required meta fields exactly *and* swaps assignment.md (or meta.json/
+# status.json/handoff.json/closeout.md) for a symlink into a file elsewhere
+# on disk -- dispatch_read/handoff_read would otherwise hand that file's
+# content back as if it were packet content, to whichever party reads it
+# (frequently a specialist reached only through MCP, with no independent way
+# to notice the substitution). These assert that vector is now refused.
+
+def test_b52_symlinked_assignment_is_refused_by_dispatch_read(home, monkeypatch):
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    _write_manifest(home, "willow", permissions=["orchestrator"])
+    _write_manifest(home, "hanuman", permissions=["dispatch_read", "dispatch_write"])
+    _write_manifest(home, "loki", permissions=["dispatch_read", "dispatch_write"])
+
+    sent = server.dispatch_send("hanuman", "loki", "# Assignment\n\nAudit x.\n")
+    did = sent["dispatch_id"]
+
+    secret = home / "secret.txt"
+    secret.write_text("attacker wants this exfiltrated\n", encoding="utf-8")
+    assignment_path = paths.dispatch_dir(did) / "assignment.md"
+    assignment_path.unlink()
+    assignment_path.symlink_to(secret)
+
+    result = server.dispatch_read("hanuman", did)
+    assert result.get("error") == "symlinked_packet"
+    assert "assignment" not in result
+
+
+def test_b52_symlinked_meta_is_refused_by_dispatch_read(home, monkeypatch):
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    _write_manifest(home, "willow", permissions=["orchestrator"])
+
+    secret = home / "secret_meta.json"
+    secret.write_text(
+        json.dumps({
+            "format": "startup_packet_meta_v1",
+            "dispatch_id": "DEADBEEF",
+            "from_app": "hanuman",
+            "to_app": "willow",
+        }),
+        encoding="utf-8",
+    )
+    forged = paths.dispatch_dir("DEADBEEF")
+    forged.mkdir(parents=True)
+    (forged / "meta.json").symlink_to(secret)
+
+    result = server.dispatch_read("willow", "DEADBEEF")
+    assert result.get("error") == "symlinked_packet"
+
+
+def test_b52_symlinked_packet_directory_is_refused(home, monkeypatch):
+    """The whole packet directory itself being a symlink (not just a member
+    file) must be refused too -- dispatch_dir()'s regex on dispatch_id
+    doesn't stop the operator-writable dispatch/ tree from containing a
+    symlinked entry at a validly-shaped name."""
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    _write_manifest(home, "willow", permissions=["orchestrator"])
+
+    elsewhere = home / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "meta.json").write_text(
+        json.dumps({
+            "format": "startup_packet_meta_v1",
+            "dispatch_id": "DEADBEEF",
+            "from_app": "hanuman",
+            "to_app": "willow",
+        }),
+        encoding="utf-8",
+    )
+    (elsewhere / "assignment.md").write_text("planted\n", encoding="utf-8")
+
+    dispatch_root = paths.dispatch_root()
+    dispatch_root.mkdir(parents=True, exist_ok=True)
+    (dispatch_root / "DEADBEEF").symlink_to(elsewhere)
+
+    result = server.dispatch_read("willow", "DEADBEEF")
+    assert result.get("error") == "symlinked_packet"
+
+
+def test_b52_symlinked_packet_directory_excluded_from_dispatch_list(home, monkeypatch):
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    _write_manifest(home, "willow", permissions=["orchestrator"])
+
+    elsewhere = home / "elsewhere2"
+    elsewhere.mkdir()
+    (elsewhere / "meta.json").write_text(
+        json.dumps({
+            "format": "startup_packet_meta_v1",
+            "dispatch_id": "CAFEBABE",
+            "from_app": "hanuman",
+            "to_app": "willow",
+        }),
+        encoding="utf-8",
+    )
+    (elsewhere / "assignment.md").write_text("planted\n", encoding="utf-8")
+
+    dispatch_root = paths.dispatch_root()
+    dispatch_root.mkdir(parents=True, exist_ok=True)
+    (dispatch_root / "CAFEBABE").symlink_to(elsewhere)
+
+    result = server.dispatch_list("willow")
+    assert all(row["dispatch_id"] != "CAFEBABE" for row in result["dispatches"])
+
+
+def test_b52_symlinked_handoff_is_refused_by_handoff_read(home, monkeypatch):
+    """handoff.json/closeout.md are read directly by handoff_read, not
+    through dispatch_read -- they need their own refusal or a symlinked
+    closeout could disclose an arbitrary file to the orchestrator/reply_to."""
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    _write_manifest(home, "willow", permissions=["orchestrator"])
+    _write_manifest(home, "hanuman", permissions=["dispatch_read", "dispatch_write"])
+    _write_manifest(home, "loki", permissions=["dispatch_read", "dispatch_write"])
+
+    sent = server.dispatch_send("hanuman", "loki", "# Assignment\n\nAudit x.\n")
+    did = sent["dispatch_id"]
+    server.dispatch_accept("loki", did)
+    server.handoff_write_v4("loki", did, narrative="done")
+
+    secret = home / "secret_handoff.json"
+    secret.write_text(json.dumps({"findings": []}), encoding="utf-8")
+    handoff_path = paths.dispatch_dir(did) / "handoff.json"
+    handoff_path.unlink()
+    handoff_path.symlink_to(secret)
+
+    result = server.handoff_read("willow", did)
+    assert result.get("error") == "symlinked_packet"
+
+
+def test_b52_symlinked_status_json_is_refused_not_written_through(home, monkeypatch):
+    """dispatch_set_status writes through status.json/meta.json -- if either
+    were a symlink, that write would land on whatever the symlink points at
+    (an arbitrary file the runtime user can write). Guarded directly, not
+    only via callers routing through dispatch_read first."""
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    _write_manifest(home, "willow", permissions=["orchestrator"])
+    _write_manifest(home, "hanuman", permissions=["dispatch_read", "dispatch_write"])
+    _write_manifest(home, "loki", permissions=["dispatch_read", "dispatch_write"])
+
+    sent = server.dispatch_send("hanuman", "loki", "# Assignment\n\nAudit x.\n")
+    did = sent["dispatch_id"]
+
+    target = home / "not_a_dispatch_file.json"
+    target.write_text("untouched\n", encoding="utf-8")
+    status_path = paths.dispatch_dir(did) / "status.json"
+    status_path.unlink()
+    status_path.symlink_to(target)
+
+    from willow_mcp import dispatch as dispatch_stack
+    result = dispatch_stack.dispatch_set_status(did, "working")
+    assert result.get("error") == "symlinked_packet"
+    assert target.read_text(encoding="utf-8") == "untouched\n"
+
+
+def test_b52_dispatch_root_itself_symlinked_is_refused_by_send_and_list(home, monkeypatch):
+    """If dispatch/ itself has been swapped for a symlink (e.g. to redirect
+    all future writes elsewhere), dispatch_send and dispatch_list must both
+    fail closed rather than silently follow it."""
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    _write_manifest(home, "willow", permissions=["orchestrator"])
+    _write_manifest(home, "hanuman", permissions=["dispatch_read", "dispatch_write"])
+    _write_manifest(home, "loki", permissions=["dispatch_read", "dispatch_write"])
+
+    elsewhere = home / "elsewhere_root"
+    elsewhere.mkdir()
+    paths.dispatch_root().symlink_to(elsewhere)
+
+    sent = server.dispatch_send("hanuman", "loki", "# Assignment\n\nAudit x.\n")
+    assert sent.get("error") == "dispatch_root_symlinked"
+
+    listed = server.dispatch_list("willow")
+    assert listed == {"dispatches": [], "total": 0}
+
+
 # ── B-55/#243: assignment.md tamper detection ────────────────────────────────
 
 def test_b55_tampered_assignment_is_detected_by_dispatch_read(home):

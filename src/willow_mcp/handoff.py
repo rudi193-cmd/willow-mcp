@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .dispatch import dispatch_read, dispatch_set_status
+from .dispatch import dispatch_read, dispatch_set_status, packet_symlink_refused
 from .paths import dispatch_dir
 
 
@@ -129,6 +129,12 @@ def _render_closeout(dispatch_id: str, app_id: str, handoff: dict, pkt: dict) ->
 
 def handoff_read(dispatch_id: str) -> dict:
     root = dispatch_dir(dispatch_id)
+    # B-52/#241: handoff.json/closeout.md are read here directly (not via
+    # dispatch_read), so they need their own symlink refusal -- otherwise a
+    # symlinked handoff.json/closeout.md could disclose an arbitrary file's
+    # content to the orchestrator/reply_to reading this closeout.
+    if packet_symlink_refused(root):
+        return {"error": "symlinked_packet", "dispatch_id": dispatch_id}
     path = root / "handoff.json"
     if not path.exists():
         return {"error": "not_found", "dispatch_id": dispatch_id}
