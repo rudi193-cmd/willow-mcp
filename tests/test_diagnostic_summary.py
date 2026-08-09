@@ -218,6 +218,55 @@ def test_uid_separation_not_separated_never_added_to_problems(monkeypatch):
     assert "uid_separation" not in checks
 
 
+# ── store_db_perms check (#232) — informational only, never gates verdict ────
+
+def test_diagnostic_summary_includes_store_db_perms_check():
+    fn = getattr(server.diagnostic_summary, "fn", server.diagnostic_summary)
+    rep = fn(app_id="hanuman")
+    assert "store_db_perms" in rep["checks"]
+    check = rep["checks"]["store_db_perms"]
+    assert "files" in check and "exposure" in check and "enforced" in check
+
+
+def test_store_db_perms_exposure_never_added_to_problems(monkeypatch):
+    """Same B-18 discipline as uid_separation: a store `.db` file the mode-bit
+    hygiene check finds group/world-readable must never become a new
+    `warn`/`error` in `problems` on its own — every unhardened single-uid
+    install has exposed store files today, and this check must not degrade
+    that install's resting state just by existing."""
+    from willow_mcp import trust_root_setup
+
+    monkeypatch.setattr(
+        trust_root_setup,
+        "store_db_files",
+        lambda: ["/x/.willow/store/knowledge/store.db"],
+    )
+    monkeypatch.setattr(
+        trust_root_setup,
+        "store_db_exposure",
+        lambda: [{"key": "store.db", "path": "/x/.willow/store/knowledge/store.db", "mode": "0o644"}],
+    )
+    fn = getattr(server.diagnostic_summary, "fn", server.diagnostic_summary)
+    rep = fn(app_id="hanuman")
+    assert rep["checks"]["store_db_perms"]["exposure"]
+    assert rep["checks"]["store_db_perms"]["enforced"] is False
+    checks = {p.get("check") for p in rep["problems"]}
+    assert "store_db_perms" not in checks
+
+
+def test_store_db_perms_enforced_false_on_fresh_install_with_no_db_files_yet(monkeypatch):
+    """An empty list is not evidence of protection -- `enforced` must read
+    False (the honest 'not enforced yet' resting state), not True by the
+    vacuous absence of anything to expose."""
+    from willow_mcp import trust_root_setup
+
+    monkeypatch.setattr(trust_root_setup, "store_db_files", lambda: [])
+    monkeypatch.setattr(trust_root_setup, "store_db_exposure", lambda: [])
+    fn = getattr(server.diagnostic_summary, "fn", server.diagnostic_summary)
+    rep = fn(app_id="hanuman")
+    assert rep["checks"]["store_db_perms"]["enforced"] is False
+
+
 # ── learned-mapping tree (schema_rings) health ───────────────────────────────
 
 def test_diag_rings_reports_sapling_when_empty(tmp_path, monkeypatch):

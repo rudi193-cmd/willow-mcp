@@ -40,7 +40,18 @@ _TRUST_DIR_NAMES = frozenset({"config", "mcp_apps"})
 # The server (running as the runtime user) still needs to read these, so
 # they can't move to the trust owner like the egress key did (#182) -- they
 # need the SAME owner, a STRICTER mode: nothing but that owner, ever.
-_SECRET_FILE_NAMES = frozenset({"vault.key", "vault.db", "mcp_token.json"})
+#
+# #232 added "mcp_receipt.db" here: it is one of the four names the client-
+# side hook (_OWNED_DB_FILE_RE in bundle/hooks/pre_tool_use.py) already
+# treats as owned -- store.db/vault.db/kart.db/mcp_receipt.db -- and it sits
+# at the exact same top-level $WILLOW_HOME position vault.key/mcp_token.json
+# do, so the same sweep applies unchanged. Before this it was chowned (see
+# the old dedicated block this replaced, below) but never chmodded: it kept
+# whatever mode sqlite created it with, typically world-readable. store.db
+# and kart.db are NOT flat top-level files (store.db is nested per-collection
+# under store_root(); kart.db's location depends on WILLOW_STORE_ROOT) so
+# they get their own handling below rather than a name in this set.
+_SECRET_FILE_NAMES = frozenset({"vault.key", "vault.db", "mcp_token.json", "mcp_receipt.db"})
 
 
 def default_trust_owner() -> str:
@@ -184,6 +195,78 @@ def secret_file_exposure() -> list[dict[str, str]]:
     return exposed
 
 
+def _kart_db_candidate() -> Path:
+    """Where task_queue.build_task_queue()'s SQLite fallback puts `kart.db`.
+
+    Duplicated rather than imported: importing task_queue would pull in a
+    real `kartikeya` module and probe Postgres just to resolve one path, and
+    this module otherwise has no dependency on it. Mirrors that function's
+    resolution EXACTLY, including its divergence from the rest of this
+    module -- it reads WILLOW_STORE_ROOT directly (matching
+    paths.store_root() when set) but falls back to raw ``~/.willow``, not
+    ``paths.willow_home()`` (which also honors WILLOW_HOME). So a deployment
+    with WILLOW_HOME set but no matching WILLOW_STORE_ROOT can end up with
+    kart.db outside this install's home entirely, invisible to
+    `runtime_writable_directories()`/`runtime_writable_home_children()`
+    (both scoped under `paths.willow_home()`). That divergence is a
+    task_queue.py resolution question, not something this module can paper
+    over -- hardening below targets wherever this actually resolves to, the
+    same posture `egress_trust_directory()` takes for a path that also lives
+    outside $WILLOW_HOME by design. See #232 residuals.
+    """
+    root = os.environ.get("WILLOW_STORE_ROOT", "").strip() or str(Path.home() / ".willow")
+    return Path(root).expanduser() / "kart.db"
+
+
+def store_db_files() -> list[Path]:
+    """Every store `.db` file this install currently has on disk -- the
+    concrete target set behind the client-side hook's `_OWNED_DB_FILE_RE`
+    (`store.db`/`vault.db`/`kart.db`/`mcp_receipt.db`,
+    bundle/hooks/pre_tool_use.py's own comment names all four). `vault.db`
+    is deliberately excluded here: B-46 already covers it via
+    `_SECRET_FILE_NAMES` (so is `mcp_receipt.db`, added above by #232) --
+    this function exists for `store.db` (nested per SOIL collection under
+    `store_root()`, so there is one per collection, not one fixed name) and
+    `kart.db` (location depends on WILLOW_STORE_ROOT), the two the generic
+    top-level-file sweep can't name directly. Reports only files that
+    exist: an empty store has nothing to expose."""
+    out: list[Path] = []
+    root = paths.store_root()
+    if root.is_dir():
+        out.extend(sorted(root.glob("*/store.db")))
+    kart = _kart_db_candidate()
+    if kart.is_file():
+        key = str(kart.resolve(strict=False))
+        if key not in {str(p.resolve(strict=False)) for p in out}:
+            out.append(kart)
+    return out
+
+
+def store_db_exposure() -> list[dict[str, str]]:
+    """#232: which store `.db` files (`store_db_files()`) are currently
+    group/world readable -- the mode-bits hygiene check for the OS control
+    the client-side hook can never provide on its own (see
+    bundle/hooks/pre_tool_use.py's module docstring, and issue #232 itself:
+    "the hook fires, not that the OS refuses the write").
+
+    Same shape and same caveat as `secret_file_exposure()`: this reads raw
+    mode bits, independent of this process's own uid -- a same-uid agent can
+    always read its own files no matter the mode, which is the issue's own
+    point ("the agent still owns the uid that owns the files" until #231's
+    separation is actually deployed). This is a fact about the file on disk,
+    not a claim of enforcement across a uid boundary this process cannot
+    create by itself."""
+    exposed: list[dict[str, str]] = []
+    for path in store_db_files():
+        try:
+            mode = stat.S_IMODE(path.stat().st_mode)
+        except OSError:
+            continue
+        if mode & 0o077:
+            exposed.append({"key": path.name, "path": str(path), "mode": oct(mode)})
+    return exposed
+
+
 def audit_trust_root(app_id: str = "") -> dict[str, Any]:
     """Report forgeable trust paths and whether strict separation is active."""
     forgeable = list(lease.self_writable_trust_paths(app_id))
@@ -205,6 +288,10 @@ def audit_trust_root(app_id: str = "") -> dict[str, Any]:
                           "path": str(key_path) if key_path else "<unresolved>"})
 
     secret_exposure = secret_file_exposure()
+    # #232: same class of finding as secret_exposure above, over the store
+    # `.db` files the client-side hook (not an OS control) was standing in
+    # for. See store_db_exposure()'s own docstring for the uid caveat.
+    store_exposure = store_db_exposure()
 
     strict = lease.strict_trust_root()
     all_forgeable = forgeable + consent_writable
@@ -213,7 +300,8 @@ def audit_trust_root(app_id: str = "") -> dict[str, Any]:
         "strict_trust_root": strict,
         "forgeable": all_forgeable,
         "secret_file_exposure": secret_exposure,
-        "hardened": strict and not all_forgeable and not secret_exposure,
+        "store_db_exposure": store_exposure,
+        "hardened": strict and not all_forgeable and not secret_exposure and not store_exposure,
         "trust_roots": [str(p) for p in trust_root_directories()],
         "trust_policy_files": [str(p) for p in trust_policy_files()],
         "runtime_paths": [str(p) for p in runtime_writable_directories()],
@@ -482,7 +570,18 @@ def apply_egress_key_hardening(owner: str, *, dry_run: bool = False) -> dict[str
 
 
 def repair_runtime_permissions(runtime_user: str = "", *, dry_run: bool = False) -> dict[str, Any]:
-    """Restore MCP runtime write paths to the server user (store, dispatch, …)."""
+    """Restore MCP runtime write paths to the server user (store, dispatch, …).
+
+    #232: `store_root()` itself is one of `runtime_writable_directories()`'s
+    targets below, and now gets the SAME owner-only 0700/0600 treatment
+    `_SECRET_FILE_NAMES` gets rather than the ordinary-runtime-state
+    0755/0644 -- it holds every SOIL collection's `store.db`, exactly the
+    surface the client-side hook (`_OWNED_DB_FILE_RE`) was standing in for
+    with no OS backing. This changes nothing for a single-uid install (the
+    runtime user IS the agent uid there, so 0600-owned-by-self reads exactly
+    like 0644-owned-by-self did); it only matters once #231's uid separation
+    is actually deployed, same as every other change in this module.
+    """
     user = resolve_runtime_user(runtime_user)
     actions: list[str] = []
     targets: list[Path] = []
@@ -493,6 +592,7 @@ def repair_runtime_permissions(runtime_user: str = "", *, dry_run: bool = False)
             continue
         seen.add(key)
         targets.append(path)
+    store_key = str(paths.store_root().resolve(strict=False))
     for target in targets:
         if not target.exists() and not dry_run:
             if target.suffix:
@@ -501,7 +601,8 @@ def repair_runtime_permissions(runtime_user: str = "", *, dry_run: bool = False)
                 target.mkdir(parents=True, exist_ok=True)
         if target.exists() or dry_run:
             actions.extend(_chown_target(target, user, dry_run=dry_run))
-            secret = target.name in _SECRET_FILE_NAMES
+            target_key = str(target.resolve(strict=False))
+            secret = target.name in _SECRET_FILE_NAMES or target_key == store_key
             dir_mode, file_mode = (0o700, 0o600) if secret else (0o755, 0o644)
             if target.exists() and target.is_dir():
                 actions.extend(
@@ -511,9 +612,28 @@ def repair_runtime_permissions(runtime_user: str = "", *, dry_run: bool = False)
                 actions.extend(
                     _chmod_tree(target, dir_mode=dir_mode, file_mode=file_mode, dry_run=dry_run)
                 )
-    receipt = paths.willow_home() / "mcp_receipt.db"
-    if receipt.exists() or dry_run:
-        actions.extend(_chown_target(receipt, user, dry_run=dry_run))
+    # #232: kart.db (task_queue's SQLite fallback) usually lives INSIDE
+    # store_root() -- the recommended shape, WILLOW_STORE_ROOT set -- and is
+    # already covered by the store-root sweep above via `seen`. It resolves
+    # outside $WILLOW_HOME entirely when WILLOW_STORE_ROOT is unset (see
+    # _kart_db_candidate()'s docstring for why); this step hardens whatever
+    # it actually resolves to, wherever that lands, the same posture
+    # apply_egress_key_hardening takes for a path outside $WILLOW_HOME by
+    # design. mcp_receipt.db needs no equivalent explicit step any more --
+    # it is now in _SECRET_FILE_NAMES and is always a top-level $WILLOW_HOME
+    # child, so the generic sweep above already gives it owner-only mode
+    # (previously it was only chowned here, never chmodded -- found while
+    # implementing #232).
+    kart_db = _kart_db_candidate()
+    kart_key = str(kart_db.resolve(strict=False))
+    if kart_key not in seen and (kart_db.exists() or dry_run):
+        seen.add(kart_key)
+        targets.append(kart_db)
+        actions.extend(_chown_target(kart_db, user, dry_run=dry_run))
+        if kart_db.exists():
+            actions.extend(
+                _chmod_tree(kart_db, dir_mode=0o700, file_mode=0o600, dry_run=dry_run)
+            )
     trust_owner = default_trust_owner()
     try:
         resolve_trust_owner(trust_owner)
