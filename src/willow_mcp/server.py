@@ -20,6 +20,7 @@ Tools:
   Fleet (PG):      fleet_status, fleet_health
   Context (SQLite):context_save, context_get, context_list, context_expire
   Integrations:    integration_list, integration_status, integration_call
+  Federated MCP:   federation_discover, federation_list_servers, federation_call
   Audit (SQLite):  receipts_tail
   Diagnostic:      diagnostic_summary (ungated self-check)
 
@@ -105,7 +106,7 @@ def _read_call_credential() -> Optional[dict]:
     from the `ServerRequestContext` the SDK hands it. SDK 1.x had an ambient
     `mcp.server.lowlevel.server.request_ctx`; 2.0 removed it deliberately and
     injects `Context` into tool functions instead — an injection that does not
-    reach a decorator wrapping 104 tools. See willow_mcp/request_context.py for
+    reach a decorator wrapping 107 tools. See willow_mcp/request_context.py for
     why the replacement is a ContextVar we own rather than one the SDK might
     move again.
     """
@@ -3454,6 +3455,80 @@ def integration_call(app_id: str, name: str, method: str, path: str,
     if denial:
         return denial
     return adapter.request(method, path, params=params, body=body)
+
+
+# ── Federated MCP (willow-mcp as a client) ──────────────────────────────────
+#
+# docs/design/federated-mcp-gating.md, built in the order its §9 sets out.
+# federation_discover and federation_list_servers are inventory-only (no
+# subprocess, no egress); federation_call is the escalated dispatcher and is
+# where the fourth egress class (`mcp_federation`) plus the per-downstream-tool
+# namespaced grant are enforced, both re-checked from disk at call time.
+
+@mcp.tool()
+@_guarded("federation_discover")
+def federation_discover(app_id: str, root: Optional[str] = None) -> dict:
+    """Shadow-IT scan: `.mcp.json` files under `root` (default: this host's
+    home directory, or $WILLOW_MCP_FEDERATION_SCAN_ROOT) that the ratified
+    registry does not yet own. Read-only — never parses an entry into a
+    connectable spec and never ratifies anything. "Which MCP servers exist
+    that willow-mcp does not know about" is the first question an orchestrator
+    must answer before it can federate at all."""
+    from . import mcp_federation
+    scan_root = Path(root) if root else Path(
+        os.environ.get("WILLOW_MCP_FEDERATION_SCAN_ROOT", "") or Path.home()
+    )
+    unmanaged = mcp_federation.unregistered_mcp_files(scan_root)
+    return {"root": str(scan_root), "unregistered": [str(p) for p in unmanaged]}
+
+
+@mcp.tool()
+@_guarded("federation_list_servers")
+def federation_list_servers(app_id: str) -> dict:
+    """List every operator-ratified downstream MCP server: id, name, launch
+    command/args, the environment-variable NAMES it receives (never values),
+    who ratified it and when. Never includes a discovered-but-unratified
+    server — connecting requires ratification first (see federation_discover)."""
+    from . import mcp_federation
+    return {"servers": mcp_federation.list_ratified()}
+
+
+@mcp.tool()
+@_guarded("federation_call")
+def federation_call(app_id: str, server_id: str, tool: str,
+                    arguments: Optional[dict] = None) -> dict:
+    """Call one tool on one ratified downstream MCP server.
+
+    Authorized only at the intersection of two ceilings (docs/design/
+    federated-mcp-gating.md Decision 2): this app's manifest must grant BOTH
+    the 'mcp_federation' capability (own line — spawning a server at all) AND
+    the namespaced `mcp:<server_id>:<tool>` permission (this specific tool on
+    this specific server) — plus the operator's standing consent.federation
+    and an unexpired egress lease, same as every other egress lane. The
+    server itself must be in the operator-ratified registry regardless of
+    what this app's manifest grants; a manifest grant alone can never make an
+    unratified server reachable.
+
+    The downstream tool's result is scanned by external-guard and
+    sandwich-wrapped if flagged (untrusted output, same treatment
+    willow_web_fetch gives fetched pages) before it comes back."""
+    from . import federation_egress, mcp_federation_client
+
+    denial = federation_egress.egress_denial(app_id, server_id, tool)
+    if denial:
+        return denial
+
+    from . import mcp_federation
+    result = mcp_federation_client.call_tool(server_id, tool, arguments)
+    _receipt_log.record(
+        app_id, "federation_call", "federated_call",
+        f"server_id={server_id} tool={tool} "
+        f"guard_verdict={result.get('guard_verdict')}")
+    entry = mcp_federation.get_ratified(server_id) or {}
+    result["server_id"] = server_id
+    result["server_name"] = entry.get("name")
+    result["tool"] = tool
+    return result
 
 
 # ── Self-audit ───────────────────────────────────────────────────────────────

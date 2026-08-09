@@ -31,7 +31,7 @@ def _legacy(home, **con):
 
 def test_no_policy_at_all_denies(home):
     out = consent.read_consent()
-    assert out["consent"] == {"internet": False, "cloud_llm": False}
+    assert out["consent"] == {"internet": False, "cloud_llm": False, "federation": False}
     assert out["source"] == "none"
     assert out["status"] == "warn"
     assert consent.internet_permitted() is False
@@ -63,7 +63,7 @@ def test_truthy_non_bool_is_not_consent(home):
 def test_missing_key_denies_that_key(home):
     _canonical(home, cloud_llm=True)
     out = consent.read_consent()
-    assert out["consent"] == {"internet": False, "cloud_llm": True}
+    assert out["consent"] == {"internet": False, "cloud_llm": True, "federation": False}
 
 
 def test_explicit_true_permits(home):
@@ -173,7 +173,7 @@ def test_partial_legacy_still_denies_its_undeclared_keys_when_it_governs(home):
     _legacy(home, internet=True)  # no canonical file, so legacy governs
     out = consent.read_consent()
     assert out["source"] == "legacy"
-    assert out["consent"] == {"internet": True, "cloud_llm": False}
+    assert out["consent"] == {"internet": True, "cloud_llm": False, "federation": False}
 
 
 def test_consent_module_never_writes(home):

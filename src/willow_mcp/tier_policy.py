@@ -53,6 +53,9 @@ TOOL_CLASS: dict[str, str] = {
     "fleet_status": READ, "fleet_health": READ, "frank_read": READ,
     "frank_verify": READ,
     "integration_list": READ, "integration_status": READ,
+    # Federated MCP inventory — discovery (shadow-IT scan) and the ratified
+    # server list are both read-only, no subprocess spawned.
+    "federation_discover": READ, "federation_list_servers": READ,
     "receipts_tail": READ,
     "lineage_why": READ, "lineage_list": READ,
     "friction_flags_list": READ,
@@ -105,6 +108,7 @@ TOOL_CLASS: dict[str, str] = {
     "integration_call": EXECUTE,              # export-gated (see EGRESS_TOOLS)
     "willow_web_search": EXECUTE, "willow_web_fetch": EXECUTE,
     "willow_institutional_search": EXECUTE,   # export-gated (see EGRESS_TOOLS)
+    "federation_call": EXECUTE,               # export-gated (see EGRESS_TOOLS); fork/exec at server uid
     "fork_create": WRITE, "fork_join": WRITE, "fork_log": WRITE,
     "fork_merge": WRITE, "fork_delete": WRITE,
     "envelope_apply": EXECUTE,
@@ -118,7 +122,7 @@ TOOL_CLASS: dict[str, str] = {
 # purpose). The tier is a *third* gate, never a replacement for the own-line one.
 EGRESS_TOOLS: frozenset = frozenset({
     "integration_call", "willow_web_search", "willow_web_fetch",
-    "willow_institutional_search",
+    "willow_institutional_search", "federation_call",
 })
 
 # Cumulative class sets by trust level. Mirrors session_binder.TRUST_LEVELS:

@@ -167,6 +167,24 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "integration_read": frozenset({
         "integration_list", "integration_status",
     }),
+    # Federated MCP (willow_mcp.mcp_federation) — willow-mcp as a *client* of
+    # other MCP servers (docs/design/federated-mcp-gating.md). Read is
+    # inventory-only: discovery of .mcp.json files not yet owned by the
+    # ratified registry (shadow-IT), plus the ratified server list itself —
+    # neither spawns anything or reaches a downstream tool. federation_call is
+    # its own group, deliberately NOT in full_access, for the same reason
+    # integration_call and web_net stay off it: fork/exec at the server's own
+    # uid is the single most privileged egress lane in this file (Decision 3),
+    # so even the *attempt* surface is opt-in. Reaching an actual downstream
+    # tool additionally needs the mcp_federation capability (own line, below),
+    # a namespaced `mcp:<server_id>:<tool>` grant, and the three-key egress
+    # gate in federation_egress.py — this group only unlocks the dispatcher.
+    "federation_read": frozenset({
+        "federation_discover", "federation_list_servers",
+    }),
+    "federation_call": frozenset({
+        "federation_call",
+    }),
     # integration_call is its own group and deliberately NOT in full_access:
     # it is the only tool whose entire purpose is server-process egress, so it
     # is granted on its own line — same spirit as NET_PERMISSION below. (The
@@ -367,6 +385,30 @@ INTEGRATION_NET_PERMISSION = "integration_net"
 # three-key gate as integration_call but a separate manifest line so operators
 # can grant web without arbitrary integration adapters.
 WEB_NET_PERMISSION = "web_net"
+
+# A stdio MCP server willow-mcp spawns itself is fork/exec at the server's own
+# uid — strictly more privileged than the three lanes above (full filesystem
+# view, no network namespace, a child that may hold its own credentials). See
+# docs/design/federated-mcp-gating.md Decision 3. Own line, same reasoning as
+# the three above: a task_net/integration_net/web_net grant must never be read
+# as "and may also fork a downstream MCP server as me".
+MCP_FEDERATION_PERMISSION = "mcp_federation"
+
+
+def federated_tool_permission(server_id: str, tool: str) -> str:
+    """The namespaced permission name for one tool on one downstream MCP
+    server: ``mcp:<server_id>:<tool>``.
+
+    `permitted()` above does not change to support this — it stays a literal
+    name lookup, which is what makes the ACL auditable. Only the names grow a
+    namespace, so a manifest grants federated tools one at a time, the way a
+    grant for `store_get` never implied `store_delete` (docs/design/
+    federated-mcp-gating.md Decision 1: gate per downstream tool, never per
+    call). `server_id` is `mcp_federation._stable_id()` — a digest of the
+    server's launch identity, not its human label, so renaming a server in a
+    config file never silently carries its grants over.
+    """
+    return f"mcp:{server_id}:{tool}"
 
 
 #: Why a manifest read produced no usable manifest. The gate's *behaviour* is
