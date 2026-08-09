@@ -109,17 +109,22 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Correct the section release-please just wrote, on the release PR, before
-      # auto-merge is armed below — so the changelog is right when the release
-      # ships rather than fixed afterwards.
+      # Correct the section release-please just wrote — in CHANGELOG.md and in
+      # the release PR's own description, its third copy — before auto-merge
+      # is armed below, so both are right when the release ships rather than
+      # fixed afterwards.
       #
       # This repo merges with merge commits rather than squashing, and GitHub
       # writes the PR title into the merge commit *body*. release-please parses
       # that body, so one change reaches it twice: once as the real commit, once
       # as the merge commit carrying its title. 2.1.2 listed the same fix twice;
       # 2.1.3 listed the merge commit and dropped `0073767` — a shipped fix, left
-      # undocumented, with a synthetic entry standing in for it. Both were
-      # corrected by hand, which is what this replaces.
+      # undocumented, with a synthetic entry standing in for it. #274's PR
+      # description carried the same duplicate as its changelog entry, after the
+      # changelog had already been fixed by hand — the PR body is the one copy a
+      # reviewer actually reads before approving the release, and nothing
+      # reconciled it. All of these were corrected by hand, which is what this
+      # replaces.
       #
       # No `if:` on a release-please output — whether an open release PR exists is
       # read from GitHub below, which is the thing actually being acted on. One
@@ -131,9 +136,10 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          branch=$(gh pr list --repo "$REPO" --state open --json number,headRefName \
+          IFS=$'\t' read -r pr branch <<<"$(gh pr list --repo "$REPO" --state open \
+                     --json number,headRefName \
                      --jq '[.[] | select(.headRefName | startswith("release-please--"))]
-                           | first | .headRefName // empty')
+                           | first | "\(.number // "")\t\(.headRefName // "")"')"
           if [ -z "$branch" ]; then
             echo "No open release PR — nothing releasable, nothing to correct."
             exit 0
@@ -174,6 +180,65 @@ jobs:
           merge, because this repo does not squash-merge. See
           tools/changelog_dedup.py."
           git push origin "$branch"
+
+          # A third copy of this same section lives in the release PR's own
+          # description — release-please writes it once, from its own parse,
+          # when it opens or updates the PR. Pushing the corrected
+          # CHANGELOG.md above does not touch it. It is the one copy still
+          # visible to a reviewer deciding whether to approve the release: on
+          # #274 the PR body carried the duplicate (`8a436f0` and `f6d39a3`,
+          # same fix) after CHANGELOG.md had already been made correct.
+          #
+          # No new parsing here — the section is already computed and already
+          # pushed. Splice it into the existing PR body in place of
+          # release-please's own copy, keeping the ":robot: I have created a
+          # release" preamble and the "This PR was generated with..." footer
+          # around it exactly as release-please wrote them.
+          version=$(python -c "import json; print(json.load(open('.release-please-manifest.json'))['.'])")
+
+          section_file=$(mktemp)
+          python tools/changelog_dedup.py --print-section "$version" > "$section_file"
+
+          body_file=$(mktemp)
+          gh pr view "$pr" --repo "$REPO" --json body --jq .body > "$body_file"
+
+          new_body_file=$(mktemp)
+          python - "$body_file" "$section_file" "$new_body_file" <<'PY'
+          import re
+          import sys
+
+          body_path, section_path, out_path = sys.argv[1:4]
+          body = open(body_path).read()
+          section = open(section_path).read().rstrip("\n")
+
+          # Same header release-please writes into CHANGELOG.md:
+          # "## [2.2.1](https://.../compare/v2.2.0...v2.2.1) (2026-08-04)"
+          header_re = re.compile(r"^## \[[^\]]+\]\(https://[^)]+\)[^\n]*$", re.MULTILINE)
+          m = header_re.search(body)
+          if not m:
+              # Not the shape this expects -- leave release-please's body
+              # alone rather than guess and corrupt the PR description.
+              open(out_path, "w").write(body)
+              sys.exit(0)
+
+          tail = body[m.end():]
+          footer = re.search(r"\n---\n", tail)
+          end = m.end() + footer.start() if footer else len(body)
+
+          open(out_path, "w").write(body[:m.start()] + section + "\n" + body[end:])
+          PY
+
+          if python - "$body_file" "$new_body_file" <<'PY'
+          import sys
+          a, b = (open(p).read().rstrip() for p in sys.argv[1:3])
+          sys.exit(0 if a == b else 1)
+          PY
+          then
+            echo "Release PR description already matches CHANGELOG.md."
+          else
+            echo "Release PR description disagrees with CHANGELOG.md — updating it."
+            gh pr edit "$pr" --repo "$REPO" --body-file "$new_body_file"
+          fi
 
       # The GitHub Release body is generated by release-please from its OWN
       # parse, not from CHANGELOG.md — so correcting the file leaves the release

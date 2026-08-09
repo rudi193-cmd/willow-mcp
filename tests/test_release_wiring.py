@@ -187,6 +187,47 @@ def test_the_release_body_is_synced_after_the_release_is_created():
     assert "rstrip()" in run, "the comparison must ignore trailing whitespace"
 
 
+def test_the_release_prs_own_description_is_synced_too():
+    """The changelog and the GitHub Release page are two of three copies of the
+    same section; the release PR's own description is the third, and nothing
+    corrected it. #274 shipped with the duplicate entry still sitting in the PR
+    body after CHANGELOG.md had already been fixed — the one copy a reviewer
+    reads before approving the release.
+
+    This must live in the same step as the changelog rebuild (not a separate
+    one), because it needs the PR number that step already looked up, and it
+    must run after the corrected CHANGELOG.md is pushed, so `--print-section`
+    reads the fixed text rather than release-please's original."""
+    steps = _yaml(_RP_WF)["jobs"]["release-please"]["steps"]
+    names = [s.get("name") or str(s.get("uses", "")) for s in steps]
+
+    def index_of(needle: str) -> int:
+        hits = [i for i, n in enumerate(names) if needle in n]
+        assert hits, f"no step matching {needle!r} in {names}"
+        return hits[0]
+
+    step = steps[index_of("Rebuild the changelog")]
+    run = step["run"]
+
+    assert "gh pr edit" in run, "must write the corrected description back"
+    assert "gh pr view" in run, "must read release-please's own body to splice into"
+    assert run.count("--print-section") >= 1, (
+        "must reuse the section already computed for the changelog/release-body "
+        "sync, not recompute it a third way"
+    )
+    assert "RELEASE_PLEASE_TOKEN" in str(step.get("env"))
+    assert "GITHUB_TOKEN" not in str(step.get("env"))
+
+    # The splice must run after CHANGELOG.md is pushed (so the section it reads
+    # back out is the corrected one) and, being in this step, necessarily before
+    # "Arm auto-merge" runs as the next step.
+    assert run.index("git push origin") < run.index("gh pr edit"), (
+        "the PR description must be synced from the *pushed* (corrected) "
+        "CHANGELOG.md, not from release-please's original"
+    )
+    assert index_of("Rebuild the changelog") < index_of("Arm auto-merge")
+
+
 def test_the_changelog_tool_exists_and_the_workflow_calls_it():
     """A workflow step invoking a script nobody ships is a silent no-op — and
     this one runs on the release path, where nobody is watching."""

@@ -167,14 +167,14 @@ def _find_existing_atom_id(
     params: list[Any]
     if source_col:
         sql = (
-            f'SELECT "{id_col}" FROM knowledge WHERE "{source_col}" = %s '
+            f'SELECT "{id_col}" FROM knowledge WHERE "{source_col}" = %s '  # nosec B608 - id_col/content_col/source_col come from the caller's confirmed schema_profile field mapping, not request input; all values are bound params
             f'AND "{content_col}"->>\'agent_id\' = %s AND "{content_col}"->>\'slice\' = %s '
             f"LIMIT 1"
         )
         params = [SOURCE_TYPE, agent_id, slice_name]
     else:
         sql = (
-            f'SELECT "{id_col}" FROM knowledge WHERE "{content_col}"->>\'kind\' = %s '
+            f'SELECT "{id_col}" FROM knowledge WHERE "{content_col}"->>\'kind\' = %s '  # nosec B608 - id_col/content_col come from the caller's confirmed schema_profile field mapping, not request input; all values are bound params
             f'AND "{content_col}"->>\'agent_id\' = %s AND "{content_col}"->>\'slice\' = %s '
             f"LIMIT 1"
         )
@@ -227,7 +227,7 @@ def promote_seed_to_kb(
         set_parts = [f'"{fields[f]["column"]}" = %s' for f in values if f != "id"]
         params = [_write_param(fields[f], values[f]) for f in values if f != "id"]
         params.append(atom_id)
-        sql = f'UPDATE knowledge SET {", ".join(set_parts)} WHERE "{fields["id"]["column"]}" = %s'
+        sql = f'UPDATE knowledge SET {", ".join(set_parts)} WHERE "{fields["id"]["column"]}" = %s'  # nosec B608 - set_parts/fields["id"] come from the caller's confirmed schema_profile field mapping, not request input; all values are bound params
         cur = pg.cursor()
         cur.execute(sql, params)
         cur.close()
@@ -237,7 +237,7 @@ def promote_seed_to_kb(
         params = [_write_param(fields[f], v) for f, v in values.items()]
         cur = pg.cursor()
         cur.execute(
-            f"INSERT INTO knowledge ({cols}) VALUES ({placeholders})",
+            f"INSERT INTO knowledge ({cols}) VALUES ({placeholders})",  # nosec B608 - cols come from the caller's confirmed schema_profile field mapping, not request input; placeholders is a fixed "%s" repeat; all values are bound params
             params,
         )
         cur.close()

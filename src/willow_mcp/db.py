@@ -245,7 +245,7 @@ class Store:
         with self._lock:
             conn = self._conn(collection)
             rows = conn.execute(
-                f"SELECT id, data, deviation, action FROM records "
+                f"SELECT id, data, deviation, action FROM records "  # nosec B608 - conditions is `" AND ".join(["data LIKE ?"] * len(tokens))`, a fixed literal repeated N times; every token value is a bound param
                 f"WHERE deleted = 0 AND {conditions}",
                 params
             ).fetchall()

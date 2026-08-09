@@ -42,11 +42,25 @@ _TAG_RE = re.compile(r"<[^>]+>")
 # cite through, while carrying `www.w3.org`, which is arXiv's Atom *namespace*
 # identifier and not a source at all.
 #
-# The registry is now the authority: `jeles.sources.registered_hosts()` declares
-# the hostnames each source contacts, and `tests/test_trusted_sources.py`
-# asserts every one of them is either covered here or listed in
-# `_NOT_TRUST_EVIDENCE` below with a reason. Drift becomes a failing test
-# instead of a stale comment.
+# `jeles.sources.registered_hosts()` was then made the authority, and that was
+# also wrong, in a subtler way: it answers "which hosts does jeles *contact*",
+# not "can a link to this host be *cited*" — 48 of jeles' 84 registered hosts
+# (query-only endpoints, plus XML namespace URIs like `www.loc.gov` that are
+# not a network relationship at all) can never be a search-result URL, so a
+# trust verdict was never owed on them. See jeles' `docs/design/host-cards.md`
+# for the measurement and `_card_axis_verdict()` below for what replaces it.
+#
+# The axis a verdict actually turns on, measured against this list rather than
+# assumed: **system of record vs. wrapper.** It trusts the reference work of a
+# domain whoever may edit it (Wikipedia, MusicBrainz, OpenStreetMap, IMDb,
+# ISFDB) and refuses wrappers over someone else's record (`gutendex.com`,
+# `omdbapi.com`) or utilities that are not authorities (`frankfurter.app`,
+# `open-meteo.com`). It is *not* "does a named institution hold editorial
+# custody" — that rule, tried and measured, flips 11 of the 12 `custody:
+# community` hosts this repo has trusted for years. `tests/test_trusted_sources.py`
+# still checks this list against `jeles.sources.registered_hosts()` for drift
+# (a new source arriving with no stated position); `_card_axis_verdict()` below
+# is the newer, narrower check, scoped to hosts jeles can actually cite through.
 #
 # It is still a hand-curated list, and that is deliberate rather than lazy:
 # "jeles queries this host" and "a link to this host can be believed" are
@@ -127,6 +141,82 @@ _NOT_TRUST_EVIDENCE = {
 }
 
 
+# System-of-record overrides — the "short named override list for genuinely
+# contested calls" jeles' host-cards.md asks this repo to keep. Every entry
+# here is a citation-role jeles host whose `custody` is *not* `institutional`,
+# so `_card_axis_verdict()` cannot decide it from the card alone (see below)
+# and a person has to. Measured against jeles 0.7 (see the worktree's own
+# verification, not reproduced here): every non-institutional citation host
+# this repo currently trusts appears below as True, and the two it withholds
+# — despite a citation role — appear as False. Nothing here changes an
+# existing verdict; it names the ones that were always implicit in
+# `_TRUSTED_SUFFIXES`/`_NOT_TRUST_EVIDENCE` below.
+_SYSTEM_OF_RECORD_OVERRIDES: dict[str, bool] = {
+    # Community-editable, and still the reference work of the domain — the
+    # same standing this repo has always given Wikipedia and MusicBrainz.
+    "en.wikipedia.org": True,
+    "www.wikidata.org": True,
+    "musicbrainz.org": True,
+    "openlibrary.org": True,
+    "www.openstreetmap.org": True,
+    "www.inaturalist.org": True,
+    "world.openfoodfacts.org": True,
+    "www.imdb.com": True,   # de-facto filmography authority; see _NOT_TRUST_EVIDENCE-style
+                            # reasoning in the suffix list above for the parallel with ISFDB.
+    "www.isfdb.org": True,  # the dblp/openlibrary of speculative-fiction bibliography.
+    # Aggregator custody: indexes someone else's record, but the index itself
+    # is the system of record for the identifier it mints or the search it runs.
+    "doi.org": True,        # the resolver, not the destination — host-cards.md §6.5.
+    "eol.org": True,
+    "www.gbif.org": True,
+    "patents.google.com": True,  # full host only; see the google.com exclusion in
+                                  # tests/test_trusted_sources.py.
+    # Commercial custody, decided on domain standing rather than custody.
+    "www.psychiatrictimes.com": True,
+    # Decided False despite a citation role: not a system of record.
+    "www.thesportsdb.com": False,  # demo tier — the card's own notes agree:
+                                    # "Explicitly not an authority."
+    "open-meteo.com": False,       # a company's own feed, no editorial record.
+}
+
+
+def _card_axis_verdict(host: str) -> bool | None:
+    """Citability verdict for `host` from jeles' card catalog, decided on the
+    system-of-record axis rather than from `custody` directly.
+
+    Returns `None` — "no opinion, fall through to the suffix heuristic below"
+    — unless a card settles it:
+
+    * No card, or a card whose `roles` does not include `citation`: `None`,
+      never `False`. jeles' `roles` field is generated from a static scan of
+      its own source code and is a documented **lower bound** on
+      citation-capability (host-cards.md §1) — a host it misses is a gap in
+      that scan, not proof the host is uncitable. This function must never
+      take trust away from a host the suffix list below grants for its own,
+      independent reasons (`www.loc.gov` is exactly this case: its card is
+      `roles: ["namespace", "query"]`, and it stays trusted via the `.gov`
+      suffix, on its own standing as the Library of Congress).
+    * `custody == "institutional"`: `True`. A named institution holding
+      editorial responsibility for the record is definitionally a system of
+      record. This direction of the custody axis is the one that *is*
+      predictive — every institutional-custody citation host jeles ships a
+      card for is already trusted by this module today.
+    * Anything else: `_SYSTEM_OF_RECORD_OVERRIDES.get(host)` — a named call,
+      or `None` if this host has not been reviewed and the suffix heuristic
+      keeps deciding, same as it always has.
+    """
+    try:
+        from jeles import cards
+    except ImportError:
+        return None
+    card = cards.card(host)
+    if card is None or "citation" not in card.get("roles", ()):
+        return None
+    if card.get("custody") == "institutional":
+        return True
+    return _SYSTEM_OF_RECORD_OVERRIDES.get(host)
+
+
 def _hostname(url: str) -> str:
     try:
         return urlparse(url).netloc or "web"
@@ -175,8 +265,22 @@ def _trusted_host(hostname: str) -> bool:
     `ikipedia.org` and `worldbank.org` became `orldbank.org`, and neither
     matched the list they are explicitly on. The list was simultaneously too
     permissive and too strict.
+
+    jeles' card catalog is consulted first, on the exact (unstripped) host —
+    `_card_axis_verdict()` — because a card's key can be a specific subdomain
+    (`www.imdb.com`, `en.wikipedia.org`) that the www-stripped registrable
+    domain below would still match anyway, but a card can also *withhold* a
+    verdict, and that withholding must never widen what the suffix list
+    already grants. A card verdict of `None` falls through to the suffix
+    check unchanged; only a card that actually settles the question — the
+    `institutional`-custody rule or a named override — returns early.
     """
     host = (hostname or "").strip().lower().rstrip(".")
+    if not host:
+        return False
+    card_verdict = _card_axis_verdict(host)
+    if card_verdict is not None:
+        return card_verdict
     if host.startswith("www."):
         host = host[4:]
     if not host:

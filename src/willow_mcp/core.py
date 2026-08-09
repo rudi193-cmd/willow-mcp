@@ -66,7 +66,7 @@ def _journal_table(conn) -> Optional[tuple[str, list[str], Optional[str]]]:
         text_cols, date_col = _text_and_date_columns(conn, table)
         if not text_cols:
             continue
-        count = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+        count = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]  # nosec B608 - table comes from this connection's own sqlite_master catalog (line 63), not external input
         if best is None or count > best[0]:
             best = (count, table, text_cols, date_col)
     if best is None:
@@ -92,11 +92,11 @@ def record_lessons(journal_path: str, themes: Optional[dict] = None,
                 return {"error": "no_text_table", "source": str(path)}
             table, text_cols, date_col = found
 
-            entries = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+            entries = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]  # nosec B608 - table is the value _journal_table() already read from sqlite_master (same connection), not external input
             date_range = None
             if date_col:
                 lo, hi = conn.execute(
-                    f'SELECT MIN("{date_col}"), MAX("{date_col}") FROM "{table}"'
+                    f'SELECT MIN("{date_col}"), MAX("{date_col}") FROM "{table}"'  # nosec B608 - table/date_col both come from PRAGMA table_info/sqlite_master introspection of this same connection, not external input
                 ).fetchone()
                 if lo is not None:
                     date_range = [str(lo), str(hi)]
@@ -105,7 +105,7 @@ def record_lessons(journal_path: str, themes: Optional[dict] = None,
             lexicon = themes if themes is not None else DEFAULT_THEMES
             counts = {theme: 0 for theme in lexicon}
             joined = " || ".join(f'COALESCE("{c}", \'\')' for c in text_cols)
-            for (body,) in conn.execute(f'SELECT {joined} FROM "{table}"'):
+            for (body,) in conn.execute(f'SELECT {joined} FROM "{table}"'):  # nosec B608 - joined/table both come from PRAGMA table_info/sqlite_master introspection of this same connection, not external input
                 lowered = (body or "").lower()
                 for theme, fragments in lexicon.items():
                     if any(f in lowered for f in fragments):

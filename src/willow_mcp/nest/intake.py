@@ -66,7 +66,10 @@ def track_to_dest() -> dict[str, Path]:
 
 
 def _item_id(src: str) -> str:
-    return "itm-" + hashlib.sha1(src.encode()).hexdigest()[:10]
+    # Content-addressing only (dedup key derived from a file path), not a
+    # security boundary — usedforsecurity=False silences B324 honestly
+    # rather than suppressing it.
+    return "itm-" + hashlib.sha1(src.encode(), usedforsecurity=False).hexdigest()[:10]
 
 
 def _track_for_dest(dest: Path) -> str:
@@ -154,7 +157,10 @@ def open_flags(store) -> list[dict]:
 # ── feedback loop ────────────────────────────────────────────────────────────
 
 def _correction_rule_key(predicted: str, outcome: str, ext: str) -> str:
-    return hashlib.md5(f"{predicted}->{outcome}:{ext}".encode()).hexdigest()[:8]
+    # Same as _item_id above: a short grouping key, not a security hash.
+    return hashlib.md5(
+        f"{predicted}->{outcome}:{ext}".encode(), usedforsecurity=False
+    ).hexdigest()[:8]
 
 
 def _record_correction(store, prediction: dict, outcome_track: str,

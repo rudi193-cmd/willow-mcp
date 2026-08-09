@@ -43,7 +43,20 @@ jobs:
       - name: Ruff (enforced)
         run: ruff check src tests
 
-      - name: Bandit (report-only — 26 B608 string-SQL findings to triage)
+      # #290: the step name used to carry a fixed B608 count ("26") that drifted
+      # to 48, then 60, silently, because nothing joined the number in this
+      # name to bandit's actual output. Every B608 finding has since been
+      # triaged (identifier-only interpolation from constants/confirmed
+      # schema mappings/DB introspection, values always bound — see the
+      # `# nosec B608` reason on each line) and the 2 HIGH B324 weak-hash
+      # findings were fixed with usedforsecurity=False. No count is repeated
+      # here — see the issue's own point that a stale count is worse than
+      # none. `|| true` still stands: B310 (urllib-scheme audit) and B108
+      # (hardcoded /tmp path) findings remain untriaged and are out of this
+      # issue's scope, so gating on them now would fail CI for reasons this
+      # change didn't address. Once those are triaged/suppressed too, drop
+      # `|| true` so bandit gates and a new drift is caught, not just logged.
+      - name: Bandit (report-only — B608/B324 triaged; B310/B108 still open, see bandit-report.txt)
         run: bandit -r src -ll -f txt 2>&1 | tee bandit-report.txt || true
 
       - name: Upload bandit report

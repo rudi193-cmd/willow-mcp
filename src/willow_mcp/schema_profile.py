@@ -479,7 +479,7 @@ def _sample_columns(conn, table: str, columns: list, limit: int = 8) -> dict:
     col_sql = ", ".join(f'"{c}"' for c in names)
     cur = conn.cursor()
     try:
-        cur.execute(f'SELECT {col_sql} FROM "{table}" LIMIT %s', (limit,))
+        cur.execute(f'SELECT {col_sql} FROM "{table}" LIMIT %s', (limit,))  # nosec B608 - table passed _validate_table()'s [A-Za-z0-9_-]{1,128} allowlist above; col_sql is built from introspected column names, not raw text; limit is a bound param
         rows = cur.fetchall()
     except Exception:  # noqa: BLE001 — advisory sampler must not crash a review
         return {}
@@ -719,7 +719,7 @@ def render_sample(conn, table: str, fields: dict, limit: int = 3) -> list[dict]:
     limit = max(1, min(int(limit), 10))
     cur = conn.cursor()
     try:
-        cur.execute(f'SELECT {", ".join(cols)} FROM "{table}" LIMIT %s', (limit,))
+        cur.execute(f'SELECT {", ".join(cols)} FROM "{table}" LIMIT %s', (limit,))  # nosec B608 - table passed _validate_table()'s [A-Za-z0-9_-]{1,128} allowlist above; cols come from the confirmed field mapping, not raw text; limit is a bound param
         rows = cur.fetchall()
     except Exception as e:  # noqa: BLE001 — evidence tool must degrade, not raise
         return [{"_sample_error": str(e)[:160]}]

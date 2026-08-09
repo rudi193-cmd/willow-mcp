@@ -55,10 +55,13 @@ def build_bridge(db_path: str, model: str = _embed.DEFAULT_EMBED_MODEL) -> dict:
 
     src_total = q("select count(*) from sources")[0][0]
     frag_total = q("select count(*) from fragments")[0][0]
-    raw_cats = q(f"""select label, count(*) n from fragments
-                 where label != '' and fragment_type in
-                 ({','.join('?' for _ in _TOPICAL)})
-                 group by label order by n desc""", *_TOPICAL)
+    raw_cats = q(
+        "select label, count(*) n from fragments "  # nosec B608 - fixed literal template; only the placeholder count varies with len(_TOPICAL); values are bound via *_TOPICAL below
+        "where label != '' and fragment_type in "
+        f"({','.join('?' for _ in _TOPICAL)}) "
+        "group by label order by n desc",
+        *_TOPICAL,
+    )
     # THE WALL: a fragment's label is a topical category only when it came from
     # the embedding/LLM tier; the regex fallback labels it with its *filename*,
     # which embeds dates and names. Only allowlisted category names (never a
