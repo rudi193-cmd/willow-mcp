@@ -1067,3 +1067,47 @@ def test_design_doc_states_guardrail_not_control():
     text = _DESIGN_DOC_PATH.read_text()
     assert "guardrail, not a control" in text
     assert "chown" in text and "WILLOW_MCP_STRICT_TRUST_ROOT" in text
+
+
+# ── #304: allow-permission is a self-grant path the path-keyed guard missed ──
+
+def test_allow_permission_blocks_every_egress_cap_and_write_group():
+    """#304 drift guard. `willow-mcp allow-permission <app> <perm>` edits the
+    manifest, so it must refuse the SAME egress capabilities and write-capable
+    groups the manifest-file guard does — that guard keyed on the manifest.json
+    path this CLI never names, so it slipped through. Derived from the same sets
+    the seat/net-cap guards use, so a new cap or write group cannot be added
+    without this path learning to block it too."""
+    for perm in sorted(set(_WRITE_CAPABLE_GROUPS) | set(_NET_CAPABILITIES)):
+        cmd = "willow-mcp allow-permission someapp %s" % perm
+        assert pre_tool_use.check_bash_self_grant(cmd) is not None, (
+            "allow-permission of %s is not blocked (#304 self-grant path)" % perm)
+
+
+def test_allow_permission_leaves_read_only_groups_alone():
+    """The other half: granting a read-only group is not escalation, exactly as
+    the manifest-file seat guard leaves read groups alone — over-blocking would
+    turn ordinary operator setup into a refusal."""
+    for perm in sorted(_READ_ONLY_GROUPS):
+        cmd = "willow-mcp allow-permission someapp %s" % perm
+        assert pre_tool_use.check_bash_self_grant(cmd) is None, (
+            "allow-permission of read-only %s should not be blocked" % perm)
+
+
+@pytest.mark.parametrize("command", [
+    ".venv/bin/willow-mcp allow-permission willow web_net",   # a real path invocation
+    'willow-mcp allow-permission myapp "web_net"',            # quoted permission
+    "willow_mcp allow-permission myapp web_net",              # underscore spelling
+    "willow-mcp allow-permission myapp orchestrator",         # bare write seat
+])
+def test_allow_permission_self_grant_forms_blocked(command):
+    assert pre_tool_use.check_bash_self_grant(command) is not None
+
+
+@pytest.mark.parametrize("command", [
+    "willow-mcp deny-permission myapp web_net",               # de-escalation is fine
+    "willow-mcp net-status",
+    "echo document the allow-permission web_net gap for #304",  # prose, not the command
+])
+def test_deny_permission_and_prose_are_not_blocked(command):
+    assert pre_tool_use.check_bash_self_grant(command) is None

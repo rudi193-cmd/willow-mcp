@@ -28,9 +28,11 @@ Seven guards:
   or re-grant its own write seat: minting a lease under `mcp_apps/_net_leases/`,
   running `willow-mcp grant-net` or `dev-net` (the local/dev one-command
   convenience that grants the same three keys — #287; via Bash *or* smuggled
-  into Kart task text), or editing a manifest to add an egress capability
-  (`task_net` / `integration_net` / `web_net`) or any write-capable permission
-  group (blocks).
+  into Kart task text), running `willow-mcp allow-permission` to grant an egress
+  capability or a write-capable group (that CLI edits the manifest the path-keyed
+  guard below never sees — #304), or editing a manifest to add an egress
+  capability (`task_net` / `integration_net` / `web_net` / `mcp_federation`) or
+  any write-capable permission group (blocks).
 
 That third guard is the sudo invariant (FRANK `90e52ab7`) enforced where the
 agent actually acts: *a model may REQUEST egress, never CONFIRM it.* It is a
@@ -556,6 +558,20 @@ _GRANT_CMD_RE = re.compile(
     r"|\bconsent_admin\.(?:write_consent|set_key|reconcile)\s*\("
     r"|\bfleet_roster\.sync\s*\("
 )
+# #304: `willow-mcp allow-permission <app> <perm>` edits a manifest under the
+# hood, so granting an egress capability or a write-capable group through it is
+# the same self-grant the manifest-file branches below already refuse — but that
+# guard keys on the manifest.json *path*, which this CLI never names, so it
+# slipped through. Match the command and inspect the permission argument;
+# `deny-permission` (de-escalation) and granting a read-only group are
+# deliberately NOT matched. A quoted permission (`"web_net"`) is tolerated.
+_ALLOW_PERMISSION_GRANT_RE = re.compile(
+    r"\bwillow[-_]mcp\s+allow-permission\s+\S+\s+[\"']?([A-Za-z0-9_]+)"
+)
+# orchestrator/context/binding are write-capable groups that _SEAT_PRIV_QUOTED_RE
+# only catches when quoted (prose-safety); here the perm is an exact CLI token,
+# so the three are safe to name directly.
+_ALLOW_PERMISSION_SEAT_BARE = frozenset({"orchestrator", "context", "binding"})
 _MANIFEST_RE = re.compile(r"mcp_apps/[^/\s\"']+/manifest\.json")
 # The server-process / sandbox egress capabilities. These are NOT permission
 # groups — they are the capability half of the three-key gate (gate.py:326-341)
@@ -645,6 +661,17 @@ _SEAT_ESCALATION_REASON = (
     "invariant, FRANK 90e52ab7). Ask the operator to grant it; do not write the file."
 )
 
+_ALLOW_PERMISSION_REASON = (
+    "willow-mcp: `willow-mcp allow-permission` is a local, operator-only CLI that "
+    "edits the app's manifest — granting an egress capability (task_net / "
+    "integration_net / web_net / mcp_federation) or a write-capable permission "
+    "group (or orchestrator / context / binding) through it is the same self-grant "
+    "the manifest-file guard already refuses, one command deeper (#304). An agent "
+    "may REQUEST standing, never CONFIRM it (sudo invariant, FRANK 90e52ab7). Ask "
+    "the operator to run it. `deny-permission` and granting a read-only group stay "
+    "allowed."
+)
+
 
 def check_bash_self_grant(command: str) -> Optional[str]:
     """Block a command that mints a lease/envelope, grants itself task_net, or
@@ -658,6 +685,11 @@ def check_bash_self_grant(command: str) -> Optional[str]:
         return None
     if _GRANT_CMD_RE.search(command):
         return _SELF_GRANT_REASON
+    for _m in _ALLOW_PERMISSION_GRANT_RE.finditer(command):
+        perm = _m.group(1)
+        if (_NET_CAP_RE.fullmatch(perm) or _SEAT_PRIV_RE.fullmatch(perm)
+                or perm in _ALLOW_PERMISSION_SEAT_BARE):
+            return _ALLOW_PERMISSION_REASON
     if not _WRITE_VERB_RE.search(command):
         return None
     if _LEASE_DIR_RE.search(command):
