@@ -416,6 +416,47 @@ that owns `$WILLOW_HOME`):
    wired without the base taking on python-gnupg (D5). **The seam's four holes
    (H1/H2/H3 + policy) and D1–D5 are all closed.**
 
+6. **Outbound binding — the federated client signs.** **SHIPPED**
+   (`mcp_federation.signing_config` / `load_signing_secret`,
+   `_ServerConnection._bind_if_signed` / `_reconcile_if_signed`,
+   `tier_policy.classes_for_tier`). Phases 1–5 made this server *enforce* a
+   caller's identity; this is the same seam in the other direction — what this
+   server presents when it calls someone else.
+
+   A ratified entry may carry `signing_agent_id`, `signing_secret_env`, and
+   `signing_trust_level`. When it does, the connection checks in once via
+   `session_bind` after `initialize()`, signs every subsequent `call_tool` with a
+   per-call credential in `_meta`, and checks out at disconnect declaring the
+   classes it actually called (which is what frees the session's single-use nonce
+   set downstream — a long-lived link that never checks out grows it for the
+   downstream process's life). An entry without `signing_agent_id` is unsigned and
+   behaves exactly as before.
+
+   Three properties worth stating, because each is a decision rather than an
+   accident:
+   - **The identity is attached at `ratify()`, never parsed from a `.mcp.json`.**
+     `McpServerSpec` is "a fact about what was on disk at parse time"; a config
+     file discovered on disk must not be able to choose which identity this
+     server presents. That is the outbound twin of Decision 4(a).
+   - **The secret is never stored.** The entry names an environment variable; the
+     value is read from this process at connect time, exactly as `load_server_env`
+     reads `env_keys`. The registry is world-readable operator config that gets
+     PGP detach-signed — it is not a keystore.
+   - **Fail-closed throughout.** A missing, malformed, or short secret, or a
+     refused check-in, raises rather than connecting unsigned; the config is
+     resolved *before* a child process is spawned, so a link that cannot sign
+     never starts one. `SigningConfigError` is raised, not returned, so a caller
+     cannot mistake "no secret" for "no signing configured".
+
+   **What it buys today, plainly:** against a downstream this process spawns, it
+   is least-privilege and audit — the downstream's tier ceiling applies to us, its
+   receipt log attributes our calls, and check-out reconciles our declaration
+   against its own log. It is *not* authentication, because we already chose that
+   child's binary and environment. It becomes authentication the day the transport
+   reaches a peer this process did not start, which is why the remaining work is
+   **transport, not signing** (`McpServerSpec` already carries `url`/`transport`;
+   the client refuses anything but stdio).
+
 ### Residuals after the build (known, tracked)
 The mechanism is complete and fail-closed. The client signer is now shipped, so
 enforcement runs end to end; what remains is one operator step and one pre-existing
@@ -452,11 +493,8 @@ gap the review surfaced:
     the operator's own seat.
   - **`willow-mcp worker`** is in-process, not an MCP client.
   - **Serve mode** is already bound via OAuth.
-  - **`mcp_federation_client`** is the one genuine `ClientSession` in `src/` — and
-    it does *not* sign. It references `SigningClientSession` only in its module
-    docstring. Instrumenting it is the natural next phase and the only path that
-    gives enforcement a real consumer; it is unexercised today because no
-    downstream server is ratified.
+  - **`mcp_federation_client`** ~~does *not* sign~~ — **now signs (2026-08-10).**
+    See "Phase 6" below.
 - **Registration is not the observe-only lever, and the phase list reads as if it
   were.** `_observe_binding` never consults `is_registered()`: it records a
   receipt when a per-call credential is present, else when `session_for(app_id)`
@@ -529,8 +567,10 @@ that an embedder must compose `host_acl(identity) ∩ tier_ceiling(trust_level)`
 and stay fail-closed so the gate can only narrow a host's reads, never widen
 them. This seam is cited there as the worked example.
 
-**Both Phase 5 prerequisites are now closed.** What remains is not a gap in the
-seam but the absence of a caller — see the survey in the residuals above.
+**Both Phase 5 prerequisites are now closed**, and Phase 6 gave the seam its
+first caller: the federated client signs its outbound calls. What remains is
+**transport, not signing** — binding becomes authentication rather than audit
+only against a peer this process did not spawn, and the client is stdio-only.
 
 @phase constraints
 ## Constraints

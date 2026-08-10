@@ -476,6 +476,39 @@ listing and every call result is run through **external-guard** before it
 reaches a caller — a downstream server's tool names and descriptions are
 untrusted input, scanned at listing time as well as at call time.
 
+#### Signed downstream links (optional)
+
+When the downstream is another willow-mcp running with
+`WILLOW_MCP_ENFORCE_BINDING=1`, a ratified entry can carry an identity so this
+server checks in and signs every outbound call — the willow-gate binding, in the
+outbound direction. Three fields, attached at ratification:
+
+| field | meaning |
+|---|---|
+| `signing_agent_id` | the `app_id` this server presents downstream |
+| `signing_secret_env` | the **name** of an env var holding the hex secret — never the value |
+| `signing_trust_level` | the tier claimed at check-in (0–4; the downstream caps it at your registered ceiling) |
+
+The downstream operator runs `willow-mcp register-agent <signing_agent_id>` and
+hands you the minted secret out of band; you export it under the name you chose
+and ratify the link. The registry never holds the secret — it names the variable
+and the value is read from this process at connect time, exactly as `env_keys`
+works for a child's environment.
+
+A link that asks to sign and cannot — secret unset, malformed, under 32 bytes, or
+a check-in the downstream refuses — **fails closed**: it raises rather than
+connecting unsigned, and the config is resolved before any child process is
+spawned. An entry with no `signing_agent_id` is unsigned and behaves exactly as
+it always has.
+
+What this buys depends on who you are calling. Against a downstream this process
+**spawns** it is least-privilege and audit — the downstream's tier ceiling
+applies to you, its receipt log attributes your calls, and check-out reconciles
+what you declared against what its log recorded. It is not *authentication* there,
+because you already chose that child's binary and environment. It becomes
+authentication against a peer this process did not start — which needs a
+non-stdio transport this client does not yet implement.
+
 ### Running the task worker
 
 `task_submit` only *queues* a task. A worker process executes it, sandboxed with

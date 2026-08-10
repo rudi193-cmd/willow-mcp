@@ -37,7 +37,7 @@ from typing import Any, Optional
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from . import external_guard, mcp_federation
+from . import external_guard, mcp_federation, signing, tier_policy
 
 logger = logging.getLogger("willow_mcp.mcp_federation_client")
 
@@ -54,6 +54,21 @@ class FederationClientError(Exception):
     a gate denial (which is a dict, not an exception — see server.py's
     _guarded convention) and from an MCP protocol error (which the SDK itself
     raises and this module lets propagate)."""
+
+
+def _unwrap(exc: BaseException) -> BaseException:
+    """Peel single-exception ExceptionGroups.
+
+    anyio wraps whatever escapes `stdio_client` / `ClientSession` in a
+    TaskGroup's ExceptionGroup, so the error a caller of `connect_server` sees
+    is a group whose only member is the real cause — un-catchable by type, which
+    matters now that a signed link raises a specific, catchable failure. Only
+    single-member groups are peeled: a genuine multi-error group is information,
+    not noise.
+    """
+    while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
+    return exc
 
 
 def _scan_text(text: str) -> tuple[str, list[dict]]:
@@ -104,6 +119,13 @@ class _ServerConnection:
         self._requests: "queue.Queue[tuple[str, Any, futures.Future]]" = queue.Queue()
         self._ready = threading.Event()
         self._ready_error: Optional[BaseException] = None
+        # Outbound willow-gate binding. `_signer` is None for an unsigned link,
+        # which is the default and the pre-existing behaviour. `_tools_called`
+        # feeds the check-out declaration at disconnect; it is only touched from
+        # this connection's own task, so it needs no lock.
+        self._signer: Optional[signing.ClientSigner] = None
+        self._signing_secret: Optional[bytes] = None
+        self._tools_called: set[str] = set()
 
     # -- lifecycle: ONE task owns connect, every call, and disconnect ----
     #
@@ -133,6 +155,18 @@ class _ServerConnection:
                 "supported by this client (stdio only)")
             self._ready.set()
             return
+        # Resolve the signing identity BEFORE spawning anything. A link that
+        # cannot sign must not reach the point of starting a child process it
+        # would then have to tear down — and a config error raised out here is a
+        # plain exception, not one anyio has wrapped in a TaskGroup group.
+        try:
+            self._signing_secret = (
+                mcp_federation.load_signing_secret(self.entry)
+                if mcp_federation.signing_config(self.entry) is not None else None)
+        except mcp_federation.SigningConfigError as e:
+            self._ready_error = e
+            self._ready.set()
+            return
         params = StdioServerParameters(
             command=spec.command, args=list(spec.args),
             env=mcp_federation.load_server_env(self.entry), cwd=spec.cwd,
@@ -141,17 +175,86 @@ class _ServerConnection:
             async with stdio_client(params) as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
+                    await self._bind_if_signed(session)
                     listing = await session.list_tools()
                     self._tools_cache = _guard_tool_listing(listing.tools)
                     self._ready.set()
                     await self._serve_requests(loop, session)
         except Exception as e:
             if not self._ready.is_set():
-                self._ready_error = e
+                self._ready_error = _unwrap(e)
                 self._ready.set()
             else:
                 logger.warning("mcp_federation_client: %s: session ended with "
                                "an error", self.server_id, exc_info=True)
+
+    async def _bind_if_signed(self, session: ClientSession) -> None:
+        """Check in to a downstream that enforces willow-gate binding, arming the
+        per-call signer. No-op for an unsigned link.
+
+        What this buys, stated plainly so it is not over-read: when the downstream
+        is another willow-mcp with `WILLOW_MCP_ENFORCE_BINDING=1`, our calls arrive
+        as a *bound identity at a declared tier* rather than as a bare `app_id`
+        string — so the downstream's tier ceiling applies to us, its receipt log
+        attributes our calls, and check-out reconciles what we declared against
+        what its own log says we did. Against a downstream we spawn ourselves it is
+        least-privilege and audit, not authentication: we already chose that
+        process's binary and environment. It becomes authentication the day the
+        transport reaches a peer this process did not start.
+
+        Fail-closed: a link that asks to sign and cannot — missing secret, refused
+        header, a downstream with no `session_bind` — raises rather than silently
+        connecting unsigned. Downgrading here would defeat the point of asking.
+        """
+        cfg = mcp_federation.signing_config(self.entry)
+        if cfg is None:
+            return
+        secret = self._signing_secret
+        if secret is None:  # pragma: no cover - _main resolves this first
+            raise FederationClientError(
+                f"server {self.server_id!r}: signing configured but no secret resolved")
+        # Declare the classes we could exercise at this tier. The downstream caps
+        # the claim at our registered ceiling, so claiming is not granting.
+        declared = sorted(tier_policy.classes_for_tier(cfg["trust_level"]))
+        header = signing.build_checkin_header(
+            secret, cfg["agent_id"], cfg["trust_level"], tools=declared)
+        result = await session.call_tool(
+            "session_bind", {"app_id": cfg["agent_id"], "header": header})
+        data = signing._result_dict(result)
+        if "error" in data or "session_id" not in data:
+            raise FederationClientError(
+                f"server {self.server_id!r}: signed link refused at check-in as "
+                f"{cfg['agent_id']!r}: {data.get('error') or data or 'no result'}")
+        self._signer = signing.ClientSigner(cfg["agent_id"], secret, data["session_id"])
+        logger.info("mcp_federation_client: %s: bound as %s (tier %s, session %s…)",
+                    self.server_id, cfg["agent_id"], cfg["trust_level"],
+                    str(data["session_id"])[:8])
+
+    async def _reconcile_if_signed(self, session: ClientSession) -> None:
+        """Check out of a signed link, declaring the classes we actually called.
+
+        Best-effort by design: we are shutting down either way, and a downstream
+        that has already dropped the session must not turn teardown into an error.
+        Worth doing rather than skipping — check-out is what frees the session's
+        single-use nonce set downstream, so a long-lived federation link that never
+        checks out grows that set for the life of the downstream process.
+        """
+        if self._signer is None:
+            return
+        used = sorted({tier_policy.classify(t) or "read" for t in self._tools_called})
+        try:
+            await session.call_tool(
+                "session_reconcile",
+                {"app_id": self._signer.agent_id,
+                 "exit_declaration": {"tools": used, "pass_count": 0, "fail_count": 0,
+                                      "drift": 0, "state_hash": ""}},
+                meta=self._signer.meta_for("session_reconcile"))
+        except Exception:
+            logger.warning("mcp_federation_client: %s: check-out failed; the "
+                           "downstream will drop the session on its own",
+                           self.server_id, exc_info=True)
+        finally:
+            self._signer = None
 
     async def _serve_requests(self, loop: asyncio.AbstractEventLoop, session: ClientSession) -> None:
         """Drain `_requests` until a `shutdown` arrives. The blocking
@@ -161,12 +264,21 @@ class _ServerConnection:
         while True:
             kind, payload, reply = await loop.run_in_executor(None, self._requests.get)
             if kind == "shutdown":
+                await self._reconcile_if_signed(session)
                 reply.set_result(None)
                 return
             try:
                 if kind == "call":
                     tool, arguments = payload
-                    reply.set_result(await session.call_tool(tool, arguments))
+                    if self._signer is not None:
+                        # The credential rides `_meta`, out of band — the tool's own
+                        # arguments are untouched, so a signed link and an unsigned
+                        # one send identical `arguments` for the same call.
+                        self._tools_called.add(tool)
+                        reply.set_result(await session.call_tool(
+                            tool, arguments, meta=self._signer.meta_for(tool)))
+                    else:
+                        reply.set_result(await session.call_tool(tool, arguments))
                 elif kind == "list_tools":
                     listing = await session.list_tools()
                     self._tools_cache = _guard_tool_listing(listing.tools)

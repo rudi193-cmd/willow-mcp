@@ -152,6 +152,85 @@ class McpServerSpec:
         )
 
 
+# ── Signed downstream links (willow-gate binding, outbound) ─────────────────
+#
+# A signed link is a RATIFICATION-time decision, deliberately not a spec field:
+# `McpServerSpec` is "a fact about what was on disk at parse time", and a
+# `.mcp.json` found by discovery must never be able to declare which identity
+# this server presents downstream. That is the outbound twin of Decision 4(a) —
+# a spec cannot manufacture a credential this process was never given — so the
+# identity is attached by `ratify()`, the operator-only act, and nowhere else.
+#
+# The secret itself is NEVER stored: the entry names an environment variable and
+# the value is read from THIS process's environment at connect time, exactly as
+# `load_server_env` reads `env_keys`. The registry is world-readable operator
+# config that gets PGP detach-signed; it is not a keystore.
+
+#: Minimum bytes for an outbound signing secret — matches `agent_registry`'s
+#: inbound floor, since it is the same HMAC on the other end of the wire.
+MIN_SIGNING_SECRET_BYTES = 32
+
+
+class SigningConfigError(ValueError):
+    """A signed link that cannot be honoured. Raised, never swallowed: an entry
+    that asks to sign and then cannot must fail closed, the same way
+    `_enforce_binding_gate` refuses a registered agent whose secret is
+    unreadable rather than silently downgrading it to unsigned."""
+
+
+def signing_config(entry: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """The signing identity for a downstream link, or None for an unsigned one.
+
+    Unsigned is the default and stays byte-for-byte the behaviour that shipped:
+    an entry with no `signing_agent_id` connects and calls exactly as before.
+    """
+    agent_id = str(entry.get("signing_agent_id") or "").strip()
+    if not agent_id:
+        return None
+    env_name = str(entry.get("signing_secret_env") or "").strip()
+    if not env_name:
+        raise SigningConfigError(
+            f"server {entry.get('id')!r} declares signing_agent_id={agent_id!r} but no "
+            "signing_secret_env — the registry names the variable, it never holds the secret")
+    try:
+        level = int(entry.get("signing_trust_level", 1))
+    except (TypeError, ValueError):
+        raise SigningConfigError(
+            f"server {entry.get('id')!r}: signing_trust_level must be an int 0..4") from None
+    if not 0 <= level <= 4:
+        raise SigningConfigError(
+            f"server {entry.get('id')!r}: signing_trust_level {level} outside 0..4")
+    return {"agent_id": agent_id, "secret_env": env_name, "trust_level": level}
+
+
+def load_signing_secret(entry: dict[str, Any]) -> bytes:
+    """Read the outbound HMAC secret named by this entry from the environment.
+
+    Fail-closed on every ambiguous path — a missing, malformed, or too-short
+    secret raises rather than returning None, so a caller cannot mistake "no
+    secret" for "no signing configured". Use `signing_config(...) is None` for
+    that question.
+    """
+    cfg = signing_config(entry)
+    if cfg is None:  # pragma: no cover - callers check first
+        raise SigningConfigError("no signing configured for this entry")
+    raw = os.environ.get(cfg["secret_env"], "")
+    if not raw:
+        raise SigningConfigError(
+            f"server {entry.get('id')!r}: ${cfg['secret_env']} is unset in this process — "
+            "the signed link cannot be established (refusing, not falling back to unsigned)")
+    try:
+        secret = bytes.fromhex(raw.strip())
+    except ValueError:
+        raise SigningConfigError(
+            f"server {entry.get('id')!r}: ${cfg['secret_env']} is not valid hex") from None
+    if len(secret) < MIN_SIGNING_SECRET_BYTES:
+        raise SigningConfigError(
+            f"server {entry.get('id')!r}: ${cfg['secret_env']} is {len(secret)} bytes, "
+            f"need >= {MIN_SIGNING_SECRET_BYTES}")
+    return secret
+
+
 def _entries_block(raw: dict[str, Any]) -> dict[str, Any]:
     """`.mcp.json` names its server map `mcpServers` (Claude convention) or
     `servers` (VS Code / others) — accept either, preferring `mcpServers` when
@@ -286,7 +365,9 @@ def is_ratified(server_id: str) -> bool:
     return get_ratified(server_id) is not None
 
 
-def ratify(spec: McpServerSpec, *, ratified_by: str, reason: str = "") -> dict[str, Any]:
+def ratify(spec: McpServerSpec, *, ratified_by: str, reason: str = "",
+           signing_agent_id: str = "", signing_secret_env: str = "",
+           signing_trust_level: int = 1) -> dict[str, Any]:
     """Promote a discovered spec into the ratified registry. **Operator-only —
     never call this from an MCP tool.** Mirrors `lease.grant`: not reachable
     through the gate, attributed, and it is the act `federation_egress`'s
@@ -300,12 +381,23 @@ def ratify(spec: McpServerSpec, *, ratified_by: str, reason: str = "") -> dict[s
     entries, _ok = _read_registry_file()
     now = datetime.now(timezone.utc).isoformat()
     entries = dict(entries)
-    entries[spec.id] = {
+    entry = {
         **spec.to_dict(),
         "ratified_by": ratified_by,
         "ratified_at": now,
         "reason": reason,
     }
+    if signing_agent_id:
+        # Attached HERE and only here — see the note above McpServerSpec's signing
+        # helpers. Validated at ratification so a bad identity is refused at the
+        # operator's terminal rather than at connect time on some later call.
+        entry.update({
+            "signing_agent_id": signing_agent_id,
+            "signing_secret_env": signing_secret_env,
+            "signing_trust_level": signing_trust_level,
+        })
+        signing_config(entry)   # raises SigningConfigError on a malformed link
+    entries[spec.id] = entry
     path = registry_path()
     _write_json_atomic(path, {"servers": entries})
     if pgp.pgp_enabled():
