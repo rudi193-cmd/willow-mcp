@@ -31,6 +31,14 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.4.4](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.3...v2.4.4) (2026-08-10)
+
+
+### Fixed
+
+* stop the seed overlay clobbering local registry entries ([071709e](https://github.com/rudi193-cmd/willow-mcp/commit/071709e6df6dc03024262f93d3b51d70783b8d03))
+* stop the seed overlay clobbering local registry entries ([3846cca](https://github.com/rudi193-cmd/willow-mcp/commit/3846ccace7f32adbd59ac420e6f8e914ef633cc4))
+
 ## [2.4.3](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.2...v2.4.3) (2026-08-10)
 
 
