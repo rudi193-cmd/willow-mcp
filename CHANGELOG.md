@@ -36,7 +36,6 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 
 ### Fixed
 
-* resolve the interpreter to a venv, and stop shipping one operator's layout ([1456292](https://github.com/rudi193-cmd/willow-mcp/commit/145629245a76fe1c4ba923a0569150cd9324dfa3))
 * resolve the interpreter to a venv, and stop shipping one operator's layout ([94738e3](https://github.com/rudi193-cmd/willow-mcp/commit/94738e3d153b1542425bfc9ca230c97489bd3a64))
 
 ## [2.4.2](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.1...v2.4.2) (2026-08-10)
