@@ -371,3 +371,79 @@ def test_load_manifest_pgp_denial_is_indistinguishable_from_no_manifest(apps_roo
     monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
     monkeypatch.setattr(gate.pgp, "verify_detached", lambda p: (False, "tampered"))
     assert gate.store_scope("testapp") == []
+
+
+# ── #312: startup verify sweep ──────────────────────────────────────────────
+#
+# The gate itself never says WHY a call was denied (see above); this sweep is
+# the operator-facing surface that turns a manifest a writer forgot to
+# re-sign into a boot-time log line instead of a days-later mystery.
+
+def test_verify_all_manifests_is_noop_when_pgp_disabled(apps_root, monkeypatch):
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: False)
+    _write_manifest(apps_root, "testapp", ["store_read"])
+    assert gate.verify_all_manifests() == []
+
+
+def test_verify_all_manifests_reports_unsigned_manifest(apps_root, monkeypatch):
+    _write_manifest(apps_root, "testapp", ["store_read"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(gate.pgp, "verify_detached", lambda p: (False, "no signature file"))
+    problems = gate.verify_all_manifests()
+    assert problems == [
+        {"app_id": "testapp", "reason": gate.MANIFEST_UNSIGNED, "detail": problems[0]["detail"]}
+    ]
+
+
+def test_verify_all_manifests_skips_apps_that_verify_ok(apps_root, monkeypatch):
+    _write_manifest(apps_root, "good", ["store_read"])
+    _write_manifest(apps_root, "bad", ["store_read"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(
+        gate.pgp, "verify_detached",
+        lambda p: (True, "ok") if p.parent.name == "good" else (False, "tampered"),
+    )
+    problems = gate.verify_all_manifests()
+    assert [p["app_id"] for p in problems] == ["bad"]
+
+
+def test_verify_all_manifests_skips_dirs_without_a_manifest_file(apps_root, monkeypatch):
+    (apps_root / "empty_dir").mkdir()
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    assert gate.verify_all_manifests() == []
+
+
+def test_verify_all_manifests_handles_missing_apps_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "does-not-exist"))
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    assert gate.verify_all_manifests() == []
+
+
+def test_log_manifest_verify_sweep_logs_each_problem(apps_root, monkeypatch, caplog):
+    _write_manifest(apps_root, "broken", ["store_read"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(gate.pgp, "verify_detached", lambda p: (False, "tampered"))
+    with caplog.at_level("ERROR", logger="willow_mcp.gate"):
+        problems = gate.log_manifest_verify_sweep()
+    assert [p["app_id"] for p in problems] == ["broken"]
+    assert any("broken" in rec.message for rec in caplog.records)
+
+
+def test_log_manifest_verify_sweep_quiet_when_all_verify_ok(apps_root, monkeypatch, caplog):
+    _write_manifest(apps_root, "fine", ["store_read"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(gate.pgp, "verify_detached", lambda p: (True, "signature verified"))
+    with caplog.at_level("ERROR", logger="willow_mcp.gate"):
+        problems = gate.log_manifest_verify_sweep()
+    assert problems == []
+    assert not any(rec.levelname == "ERROR" for rec in caplog.records)
+
+
+def test_log_manifest_verify_sweep_return_drives_boot_refusal(apps_root, monkeypatch):
+    """server._main refuses to start when this returns a non-empty list — the
+    return value is the boot-refusal signal, not just a log convenience."""
+    _write_manifest(apps_root, "broken", ["store_read"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(gate.pgp, "verify_detached", lambda p: (False, "tampered"))
+    problems = gate.log_manifest_verify_sweep()
+    assert problems  # non-empty → server._main SystemExit(1)

@@ -30,7 +30,7 @@ from .paths import (
     willow_home,
 )
 from .exposure import default_exposure_config
-from .registry import compile_manifests, load_registry
+from .registry import ManifestSignError, compile_manifests, load_registry
 
 _DEFAULT_ROSTER: dict[str, Any] = {
     "format": "agent_roster_v1",
@@ -130,13 +130,25 @@ def _materialize_registry() -> dict[str, list[str]]:
     if _copy_bundle_file_if_missing(seed_tpl, seed_dest):
         seeds_copied.append(str(seed_dest.relative_to(willow_home())))
 
-    compile_result = compile_manifests(load_registry(), only_missing=True)
+    # ensure_home_layout() is documented "safe to call repeatedly" -- a raised
+    # ManifestSignError (issue #312) would abort the whole layout pass on a
+    # partial state (dirs already made, config already written) rather than
+    # leave the install idempotently retriable. Catch it here instead: the
+    # underlying rollback in compile_manifests already happened (no manifest
+    # is left written-but-unsigned), and `manifests_sign_failed` below makes
+    # the failure visible in ensure_home_layout()'s own return value so it is
+    # never silent, just non-fatal to onboarding.
+    try:
+        compile_result = compile_manifests(load_registry(), only_missing=True)
+    except ManifestSignError as e:
+        compile_result = e.result
 
     return {
         "registry_config_created": created,
         "personas_copied": personas_copied,
         "seeds_copied": seeds_copied,
         "manifests_created": compile_result.get("written") or [],
+        "manifests_sign_failed": compile_result.get("sign_failed") or [],
     }
 
 

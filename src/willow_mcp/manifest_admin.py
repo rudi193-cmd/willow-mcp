@@ -99,21 +99,22 @@ def set_permission(app_id: str, perm: str, granted: bool) -> dict:
     manifest["permissions"] = perms
     path = manifest_path(_validate_app_id(app_id))
     previous = path.read_text(encoding="utf-8") if existed else None
+    previous_sig = pgp.read_detached_sig_bytes(path) if existed else None
     _write_json_atomic(path, manifest)
 
     # Under PGP enforcement the manifest's authority comes from its detached
     # signature, and rewriting the file invalidates it. Writing and walking away
     # would silently revoke the app's entire gate -- the operator's own supported
-    # edit path taking the fleet down, with nothing said. Re-sign, or put the file
-    # back exactly as it was and refuse: a half-applied permission change that
-    # leaves an unsigned manifest is strictly worse than no change at all.
+    # edit path taking the fleet down, with nothing said. Re-sign, or put the
+    # content *and* `.sig` back exactly as they were and refuse: a half-applied
+    # permission change that leaves an unsigned (or wrong-signed) manifest is
+    # strictly worse than no change at all. `gpg --detach-sign --yes -o` can
+    # clobber the prior `.sig` even when the sign later fails, so content-only
+    # rollback is not enough.
     if pgp.pgp_enabled():
         ok, detail = pgp.sign_detached(path)
         if not ok:
-            if previous is None:
-                path.unlink(missing_ok=True)
-            else:
-                path.write_text(previous, encoding="utf-8")
+            pgp.restore_signed_content(path, previous, previous_sig)
             raise RuntimeError(
                 f"permission change rolled back: manifest for {app_id!r} could not be "
                 f"re-signed and an unsigned manifest is denied everywhere ({detail}). "

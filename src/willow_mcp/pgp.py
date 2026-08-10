@@ -71,6 +71,44 @@ def sign_detached(file_path: Path) -> tuple[bool, str]:
     return True, str(sig_path)
 
 
+def detached_sig_path(file_path: Path) -> Path:
+    """Sibling path of the armored detached signature for `file_path`."""
+    return file_path.parent / f"{file_path.name}.sig"
+
+
+def read_detached_sig_bytes(file_path: Path) -> bytes | None:
+    """Return the current `.sig` bytes for `file_path`, or None if absent."""
+    sig_path = detached_sig_path(file_path)
+    if not sig_path.is_file():
+        return None
+    return sig_path.read_bytes()
+
+
+def restore_signed_content(
+    file_path: Path,
+    previous_bytes: str | None,
+    previous_sig: bytes | None,
+) -> None:
+    """Undo a write+sign attempt so the trust pair is never left half-applied.
+
+    `gpg --detach-sign --yes -o <sig>` can clobber an existing `.sig` even when
+    the sign later fails. Restoring only the content file would leave the
+    previous good bytes next to a missing/wrong signature — still denied
+    everywhere under enforcement, and worse than the pre-call state. This
+    restores both, or removes both when the call created the file.
+    """
+    sig_path = detached_sig_path(file_path)
+    if previous_bytes is None:
+        file_path.unlink(missing_ok=True)
+        sig_path.unlink(missing_ok=True)
+        return
+    file_path.write_text(previous_bytes, encoding="utf-8")
+    if previous_sig is None:
+        sig_path.unlink(missing_ok=True)
+    else:
+        sig_path.write_bytes(previous_sig)
+
+
 def verify_detached(file_path: Path) -> tuple[bool, str]:
     """Verify file_path + file_path.name.sig against WILLOW_PGP_FINGERPRINT."""
     expected = expected_fingerprint()
@@ -79,7 +117,7 @@ def verify_detached(file_path: Path) -> tuple[bool, str]:
     if not _FP_RE.match(expected):
         return False, "WILLOW_PGP_FINGERPRINT malformed"
 
-    sig_path = file_path.parent / f"{file_path.name}.sig"
+    sig_path = detached_sig_path(file_path)
     if not sig_path.is_file():
         return False, f"no signature file: {sig_path.name}"
 

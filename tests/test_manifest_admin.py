@@ -51,31 +51,46 @@ def test_set_permission_resigns_when_pgp_enforced(apps_root, monkeypatch):
 
 def test_set_permission_rolls_back_when_resigning_fails(apps_root, monkeypatch):
     """A half-applied change that leaves an unsigned manifest is worse than no
-    change: the app loses every tool it already had. Restore and raise."""
+    change: the app loses every tool it already had. Restore content *and*
+    `.sig`, then raise — gpg may have clobbered the prior signature file."""
     manifest_admin.set_permission("app", "store_read", True)
-    before = (apps_root / "app" / "manifest.json").read_text()
+    path = apps_root / "app" / "manifest.json"
+    sig = path.parent / f"{path.name}.sig"
+    # Plant a prior signature so rollback must restore it, not just content.
+    sig.write_bytes(b"PRIOR-SIG")
+    before = path.read_text()
+    before_sig = sig.read_bytes()
+
+    def _failing_sign(p):
+        # Simulate gpg --yes -o clobbering the prior .sig before failing.
+        (p.parent / f"{p.name}.sig").write_bytes(b"PARTIAL")
+        return False, "gpg not found on PATH"
 
     monkeypatch.setattr(manifest_admin.pgp, "pgp_enabled", lambda: True)
-    monkeypatch.setattr(
-        manifest_admin.pgp, "sign_detached", lambda p: (False, "gpg not found on PATH"),
-    )
+    monkeypatch.setattr(manifest_admin.pgp, "sign_detached", _failing_sign)
     with pytest.raises(RuntimeError, match="rolled back"):
         manifest_admin.set_permission("app", "task_net", True)
 
-    assert (apps_root / "app" / "manifest.json").read_text() == before
+    assert path.read_text() == before
+    assert sig.read_bytes() == before_sig
 
 
 def test_set_permission_rollback_removes_a_manifest_it_created(apps_root, monkeypatch):
     """First-permission case: there is no previous content to restore, so the
-    file the failed call materialized must be removed, not left unsigned."""
+    file the failed call materialized must be removed, not left unsigned —
+    including any partial `.sig` gpg may have written."""
     monkeypatch.setattr(manifest_admin.pgp, "pgp_enabled", lambda: True)
-    monkeypatch.setattr(
-        manifest_admin.pgp, "sign_detached", lambda p: (False, "gpg-agent unreachable"),
-    )
+
+    def _failing_sign(p):
+        (p.parent / f"{p.name}.sig").write_bytes(b"PARTIAL")
+        return False, "gpg-agent unreachable"
+
+    monkeypatch.setattr(manifest_admin.pgp, "sign_detached", _failing_sign)
     with pytest.raises(RuntimeError, match="rolled back"):
         manifest_admin.set_permission("fresh", "store_read", True)
 
     assert not (apps_root / "fresh" / "manifest.json").exists()
+    assert not (apps_root / "fresh" / "manifest.json.sig").exists()
 
 
 def test_set_permission_revoke_on_absent_manifest_writes_nothing(apps_root):

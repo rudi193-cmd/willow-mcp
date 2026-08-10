@@ -492,6 +492,65 @@ def authorized(app_id: str) -> bool:
     return _load_manifest(app_id) is not None
 
 
+def verify_all_manifests() -> list[dict[str, str]]:
+    """Startup verify sweep (issue #312): scan every mcp_apps/<app_id>/manifest.json
+    on disk and report every one that fails PGP verification -- unsigned, tampered,
+    unparseable, whatever `_read_manifest` would return non-`MANIFEST_OK` for.
+
+    A no-op (`[]`) unless `pgp.pgp_enabled()`: with enforcement off, gate never
+    checks signatures at all, so a sweep would only report noise nobody acts on.
+    With enforcement on, a manifest a writer forgot to (re-)sign is otherwise
+    invisible until an agent using that app_id happens to boot and gets denied
+    with no reason surfaced (`_load_manifest` is reason-free by design) -- this
+    exists to turn that into a line in the log at server start instead of a
+    days-later "why can't I call anything" support thread. Catches breakage from
+    ANY writer of mcp_apps/*/manifest.json, not just `compile_manifests` -- the
+    next one that forgets to sign gets caught here too, without needing a fix at
+    every write site (issue #312 item 4).
+    """
+    problems: list[dict[str, str]] = []
+    if not pgp.pgp_enabled():
+        return problems
+    root = _apps_root()
+    if not root.is_dir():
+        return problems
+    for app_dir in sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name):
+        app_id = app_dir.name
+        if not valid_app_id(app_id):
+            continue
+        if not (app_dir / "manifest.json").is_file():
+            continue
+        reason, detail = manifest_diagnosis(app_id)
+        if reason != MANIFEST_OK:
+            problems.append({"app_id": app_id, "reason": reason, "detail": detail})
+    return problems
+
+
+def log_manifest_verify_sweep() -> list[dict[str, str]]:
+    """Run `verify_all_manifests` and log the result -- call once at server boot
+    (see `server._main`). Returns the same problem list it logs, so a caller that
+    wants it programmatically (tests, a future health endpoint) doesn't have to
+    re-run the sweep. `server._main` treats a non-empty return as fatal and
+    exits 1 rather than serving while those app_ids are silently gated off."""
+    problems = verify_all_manifests()
+    if not problems:
+        if pgp.pgp_enabled():
+            logger.info("gate: boot manifest verify sweep — all manifests under %s verified ok", _apps_root())
+        return problems
+    for p in problems:
+        logger.error(
+            "gate: boot manifest verify — %s: %s (%s)", p["app_id"], p["reason"], p["detail"],
+        )
+    logger.error(
+        "gate: boot manifest verify sweep — %d of the manifests under %s failed PGP "
+        "verification; every gated call for those app_ids is being denied. Re-sign "
+        "with `willow-mcp sign-manifest <app_id>` from a host terminal. "
+        "Server boot will refuse to start while any row remains bad.",
+        len(problems), _apps_root(),
+    )
+    return problems
+
+
 #: Returned when a scope cannot be established. `[]` denies every collection
 #: (see db.collection_in_scope), so an unreadable policy confines rather than
 #: releases. Distinct from None, which means "no policy declared".

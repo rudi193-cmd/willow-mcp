@@ -54,7 +54,7 @@ from mcp.server.mcpserver import MCPServer
 from psycopg2.extras import Json
 
 from .db import Store, get_pg
-from .gate import permitted, resolve_collection_alias
+from .gate import log_manifest_verify_sweep, permitted, resolve_collection_alias
 from .identity_binding import resolve_app_id
 from .receipts import ReceiptLog
 from . import paths
@@ -6926,14 +6926,19 @@ def _main():
         _cmd_tree(args)
         return
     if args.command == "compile-agents":
-        from .registry import compile_agents_main
+        from .registry import ManifestSignError, compile_agents_main
 
         reg = Path(args.registry).expanduser() if args.registry else None
-        result = compile_agents_main(
-            force=args.force,
-            dry_run=args.dry_run,
-            registry_file=reg,
-        )
+        try:
+            result = compile_agents_main(
+                force=args.force,
+                dry_run=args.dry_run,
+                registry_file=reg,
+            )
+        except ManifestSignError as e:
+            print(json.dumps(e.result, indent=2))
+            print(f"Error: {e}", file=sys.stderr)
+            raise SystemExit(1)
         print(json.dumps(result, indent=2))
         return
     if args.command == "compile-persona":
@@ -6945,6 +6950,23 @@ def _main():
     if args.command == "project":
         _cmd_project(args)
         return
+
+    # #312 startup verify sweep: an unsigned/tampered manifest denies every
+    # gated call for that app_id with no reason surfaced to the caller
+    # (_load_manifest is deliberately reason-free). Log every BAD-SIG / NO-SIG
+    # row, then refuse to start — a process that would deny those app_ids on
+    # every gated call is not a healthy serve/stdio boot. No-op (and no exit)
+    # unless WILLOW_PGP_FINGERPRINT is set.
+    _manifest_verify_problems = log_manifest_verify_sweep()
+    if _manifest_verify_problems:
+        print(
+            "willow-mcp: refusing to start — "
+            f"{len(_manifest_verify_problems)} manifest(s) failed PGP verification. "
+            "Re-sign with `willow-mcp sign-manifest <app_id>` from a host terminal, "
+            "or unset WILLOW_PGP_FINGERPRINT to run without enforcement.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
     # Serve mode is SINGLE-INSTANCE per WILLOW_HOME — agent sessions, rate-limit
     # buckets and in-flight OAuth state are process memory, so a second replica
