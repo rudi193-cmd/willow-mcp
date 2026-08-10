@@ -448,14 +448,40 @@ that owns `$WILLOW_HOME`):
      never starts one. `SigningConfigError` is raised, not returned, so a caller
      cannot mistake "no secret" for "no signing configured".
 
-   **What it buys today, plainly:** against a downstream this process spawns, it
-   is least-privilege and audit — the downstream's tier ceiling applies to us, its
-   receipt log attributes our calls, and check-out reconciles our declaration
-   against its own log. It is *not* authentication, because we already chose that
-   child's binary and environment. It becomes authentication the day the transport
-   reaches a peer this process did not start, which is why the remaining work is
-   **transport, not signing** (`McpServerSpec` already carries `url`/`transport`;
-   the client refuses anything but stdio).
+   **What it buys depends on who you are calling.** Against a downstream this
+   process spawns it is least-privilege and audit — the downstream's tier ceiling
+   applies to us, its receipt log attributes our calls, and check-out reconciles
+   our declaration against its own log — but not *authentication*, because we
+   already chose that child's binary and environment. Against a peer this process
+   did not start, it is authentication, and Phase 7 makes that peer reachable.
+
+7. **Remote transport — the peer this process did not spawn.** **SHIPPED**
+   (`mcp_federation.is_http_transport` / `validate_remote_url` /
+   `load_auth_headers`, `_ServerConnection._transport`). An entry with
+   `transport: streamable-http` and a `url` is dialled over the network;
+   `auth_token_env` optionally names an env var holding a bearer token.
+
+   This is the phase that makes Phase 6 load-bearing rather than ornamental —
+   and it is the first time federation reaches something willow-mcp did not
+   fork, so it is also the first time the destination itself is attacker-
+   influenced. Two properties carry that weight:
+   - **The destination is validated at ratification AND at every connect**, via
+     `web_fetch.validate_fetch_url` — the open-web lane's guard, which *resolves*
+     names rather than pattern-matching them. Validating once at ratification
+     would be exactly the "cached decision is a claim" mistake Decision 5 names:
+     the registry records a URL, but DNS decides where a name points, and it can
+     be re-pointed at loopback or `169.254.169.254` long afterwards without the
+     registry changing.
+   - **Reusing that guard rather than writing a second one.** A local copy would
+     be a weaker duplicate of a control that has already been audited.
+
+   Consequence worth stating because operators will hit it: **a remote downstream
+   cannot be on `localhost`.** Loopback, link-local and private space are refused.
+   That is the guard working; a local downstream is what `stdio` is for.
+
+   The five egress locks in `federation_egress` are unchanged and apply to a
+   remote peer exactly as to a spawned one — this phase changes what is dialled,
+   not who may dial it.
 
 ### Residuals after the build (known, tracked)
 The mechanism is complete and fail-closed. The client signer is now shipped, so
@@ -567,10 +593,15 @@ that an embedder must compose `host_acl(identity) ∩ tier_ceiling(trust_level)`
 and stay fail-closed so the gate can only narrow a host's reads, never widen
 them. This seam is cited there as the worked example.
 
-**Both Phase 5 prerequisites are now closed**, and Phase 6 gave the seam its
-first caller: the federated client signs its outbound calls. What remains is
-**transport, not signing** — binding becomes authentication rather than audit
-only against a peer this process did not spawn, and the client is stdio-only.
+**Both Phase 5 prerequisites are closed, and Phases 6-7 close the seam.** The
+federated client signs its outbound calls (6) and can now reach a peer this
+process did not spawn (7), which is what turns that signature from audit into
+authentication. The mechanism is complete in both directions.
+
+What remains is deployment, not construction: no downstream server is ratified
+on this box, so nothing exercises the outbound path yet. The inbound survey in
+the residuals above still stands — an IDE seat cannot sign, and registering one
+buys nothing.
 
 @phase constraints
 ## Constraints

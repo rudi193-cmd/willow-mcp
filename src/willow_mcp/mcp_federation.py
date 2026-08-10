@@ -152,6 +152,63 @@ class McpServerSpec:
         )
 
 
+# ── Remote transports ───────────────────────────────────────────────────────
+#
+# A stdio downstream is a subprocess this process forks; a remote one is a
+# network peer. That is a different threat model, not a different string in a
+# config field: the URL comes from the ratified registry, but where a *name*
+# points is decided by DNS at connect time, so an entry an operator ratified
+# against a public host can be aimed at 169.254.169.254 or 127.0.0.1 later
+# without the registry changing at all.
+#
+# So the destination is validated with `web_fetch.validate_fetch_url` — the same
+# resolve-don't-pattern-match guard the open-web lane uses — at ratification AND
+# again at every connect, never once at ratification and then trusted. That is
+# the same doctrine `federation_egress` states for its own locks: "a lease on
+# disk owned elsewhere is a fact; a cached decision is a claim."
+
+#: Transport values this fleet understands as "remote HTTP peer". `http` is
+#: accepted as an alias because `.mcp.json` dialects use both.
+HTTP_TRANSPORTS = ("streamable-http", "streamable_http", "http")
+
+
+def is_http_transport(transport: str) -> bool:
+    return (transport or "").strip().lower() in HTTP_TRANSPORTS
+
+
+def validate_remote_url(entry: dict[str, Any]) -> Optional[str]:
+    """Why this entry's `url` must not be dialled, or None.
+
+    Delegates to the open-web guard rather than reimplementing it: hostnames are
+    resolved, loopback / link-local / private space is refused, and only
+    http(s) is allowed. Reimplementing that here would be a second, weaker copy
+    of a control that has already been through a security audit.
+    """
+    from . import web_fetch
+
+    url = str(entry.get("url") or "").strip()
+    if not url:
+        return "missing url for an http transport"
+    return web_fetch.validate_fetch_url(url)
+
+
+def load_auth_headers(entry: dict[str, Any]) -> dict[str, str]:
+    """Headers for a remote downstream — currently just an optional bearer.
+
+    `auth_token_env` names an environment variable, exactly as `env_keys` and
+    `signing_secret_env` do; the registry never holds the token. An entry that
+    names a variable which is unset gets NO Authorization header rather than an
+    empty one, matching `load_server_env`'s rule that an unset key is absent
+    rather than empty-stringed — a spec cannot manufacture a credential this
+    process was never given.
+    """
+    name = str(entry.get("auth_token_env") or "").strip()
+    if not name:
+        return {}
+    token = os.environ.get(name, "").strip()
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 # ── Signed downstream links (willow-gate binding, outbound) ─────────────────
 #
 # A signed link is a RATIFICATION-time decision, deliberately not a spec field:
@@ -387,6 +444,17 @@ def ratify(spec: McpServerSpec, *, ratified_by: str, reason: str = "",
         "ratified_at": now,
         "reason": reason,
     }
+    if is_http_transport(spec.transport):
+        # Refuse a bad destination at the operator's terminal, not on some later
+        # call. This is a ratification-time check AND a connect-time one — see
+        # the note above `validate_remote_url` for why once is not enough.
+        err = validate_remote_url(entry)
+        if err:
+            raise ValueError(
+                f"refusing to ratify {spec.id!r}: {err}. A federated HTTP peer is "
+                "dialled by this process; loopback, link-local and private-space "
+                "destinations are refused for the same reason the open-web lane "
+                "refuses them.")
     if signing_agent_id:
         # Attached HERE and only here — see the note above McpServerSpec's signing
         # helpers. Validated at ratification so a bad identity is refused at the

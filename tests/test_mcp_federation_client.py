@@ -96,10 +96,16 @@ def test_call_tool_refuses_a_server_that_is_not_ratified(monkeypatch):
 
 
 def test_unsupported_transport_is_reported_not_silently_ignored(monkeypatch):
-    entry = {"id": "httpsrv", "name": "http-thing", "command": "", "transport": "http",
-              "url": "https://example.invalid", "env_keys": []}
+    """`http` used to be the example of an unsupported transport here; it is now
+    routed to the streamable-HTTP client (see test_mcp_federation_client_http.py),
+    so the case this test exists for needs a transport that really is unknown.
+    The property under test is unchanged: an entry this client cannot honour
+    fails loudly rather than connecting to nothing."""
+    entry = {"id": "pigeon", "name": "carrier-pigeon", "command": "",
+             "transport": "carrier-pigeon", "url": "https://example.invalid",
+             "env_keys": []}
     monkeypatch.setattr("willow_mcp.mcp_federation.get_ratified",
-                        lambda server_id: entry if server_id == "httpsrv" else None)
-    with pytest.raises(mfc.FederationClientError):
-        mfc.connect_server("httpsrv")
+                        lambda server_id: entry if server_id == "pigeon" else None)
+    with pytest.raises(mfc.FederationClientError, match="not supported"):
+        mfc.connect_server("pigeon")
     mfc.shutdown_all()
