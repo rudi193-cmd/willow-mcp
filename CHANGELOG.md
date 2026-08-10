@@ -31,6 +31,13 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.4.2](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.1...v2.4.2) (2026-08-10)
+
+
+### Fixed
+
+* **pgp:** attest-session signs stable identity, not mutable session record ([#313](https://github.com/rudi193-cmd/willow-mcp/issues/313)) ([3644de3](https://github.com/rudi193-cmd/willow-mcp/commit/3644de377f93b3bd21824a29c626b7509573b36d))
+
 ## [2.4.1](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.0...v2.4.1) (2026-08-10)
 
 
