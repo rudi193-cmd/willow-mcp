@@ -31,6 +31,19 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.4.2](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.1...v2.4.2) (2026-08-10)
+
+
+### Fixed
+
+* **pgp:** require live session file; roll back failed attest-session ([f594566](https://github.com/rudi193-cmd/willow-mcp/commit/f5945660e4fa1ccf0bb3618d896a473c7013c74a))
+* **pgp:** attest-session signs stable identity, not mutable session record (#313) ([ad18966](https://github.com/rudi193-cmd/willow-mcp/commit/ad18966467a8466d7db2647c28c08beabb964f95))
+
+
+### Changed
+
+* **pgp:** use restore_signed_content for attest-session rollback ([8437a73](https://github.com/rudi193-cmd/willow-mcp/commit/8437a73a960a244daa76a1c0d0d5af097d24865f))
+
 ## [2.4.1](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.0...v2.4.1) (2026-08-10)
 
 
