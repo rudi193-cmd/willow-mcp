@@ -116,11 +116,13 @@ def compile_manifests(
     with no fresh `.sig` is denied everywhere (`gate._load_manifest`), and
     that denial is indistinguishable from "no manifest at all" by design, so
     an un-re-signed compile is a *silent* fleet-wide lockout. Each write is
-    followed by `pgp.sign_detached`; a failure rolls that one manifest back to
-    its previous bytes (or removes it, if this call created it) rather than
-    leaving a written-but-unsigned file on disk. Rolled-back manifests are
-    reported in ``sign_failed`` and dropped from ``written`` (they were not
-    durably written); manifests that signed cleanly land in ``signed``.
+    followed by `pgp.sign_detached`; a failure rolls that one manifest *and* its
+    detached `.sig` back to their previous bytes (or removes both, if this call
+    created the file) rather than leaving written-but-unsigned content on disk —
+    `gpg --detach-sign --yes -o` can clobber an existing `.sig` even when the
+    sign later fails, so restoring content alone is not enough. Rolled-back
+    manifests are reported in ``sign_failed`` and dropped from ``written`` (they
+    were not durably written); manifests that signed cleanly land in ``signed``.
     Compilation continues across rows so one bad manifest doesn't strand the
     others un-re-signed too, but if anything failed to sign the whole call
     raises `ManifestSignError` (carrying the full result dict) once every row
@@ -167,6 +169,7 @@ def compile_manifests(
 
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         previous_bytes = manifest_path.read_text(encoding="utf-8") if existed_before else None
+        previous_sig = pgp.read_detached_sig_bytes(manifest_path) if existed_before else None
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         written.append(rel)
 
@@ -175,10 +178,7 @@ def compile_manifests(
             if ok:
                 signed.append(rel)
             else:
-                if previous_bytes is None:
-                    manifest_path.unlink(missing_ok=True)
-                else:
-                    manifest_path.write_text(previous_bytes, encoding="utf-8")
+                pgp.restore_signed_content(manifest_path, previous_bytes, previous_sig)
                 written.remove(rel)
                 sign_failed.append({"manifest": rel, "detail": detail})
 
@@ -192,7 +192,8 @@ def compile_manifests(
     if sign_failed:
         raise ManifestSignError(
             f"{len(sign_failed)} manifest(s) could not be (re-)signed and were "
-            f"rolled back to their previous content (never left unsigned on disk): "
+            f"rolled back to their previous content+signature (never left "
+            f"unsigned on disk): "
             f"{[f['manifest'] for f in sign_failed]}. Sign from a host terminal with "
             f"a reachable gpg-agent (`willow-mcp sign-manifest <app_id>`), or unset "
             f"WILLOW_PGP_FINGERPRINT to run without enforcement, then re-run compile.",

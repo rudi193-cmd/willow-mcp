@@ -116,30 +116,45 @@ def test_compile_manifests_rolls_back_and_raises_on_a_fresh_manifest(home, monke
     fails -- it must not be left on disk unsigned (denied everywhere), and the
     caller must be told loudly, not handed a return value that looks fine."""
     monkeypatch.setattr(reg.pgp, "pgp_enabled", lambda: True)
-    monkeypatch.setattr(reg.pgp, "sign_detached", lambda p: (False, "gpg-agent unreachable"))
+
+    def _failing_sign(p):
+        (p.parent / f"{p.name}.sig").write_bytes(b"PARTIAL")
+        return False, "gpg-agent unreachable"
+
+    monkeypatch.setattr(reg.pgp, "sign_detached", _failing_sign)
 
     with pytest.raises(reg.ManifestSignError, match="1 manifest"):
         reg.compile_manifests(_solo_registry())
 
     assert not (home / "mcp_apps" / "kart" / "manifest.json").exists()
+    assert not (home / "mcp_apps" / "kart" / "manifest.json.sig").exists()
 
 
 def test_compile_manifests_rolls_back_to_previous_bytes_on_resign_failure(home, monkeypatch):
     """The observed-impact leg (issue #312 body): a compile that OVERWRITES an
     already-signed manifest and then can't re-sign it must restore the exact
-    previous bytes, not leave the new, unsigned content sitting there."""
+    previous content *and* `.sig`, not leave new content next to a clobbered
+    signature."""
     path = home / "mcp_apps" / "kart" / "manifest.json"
     path.parent.mkdir(parents=True)
     before = json.dumps({"app_id": "kart", "permissions": ["knowledge_read"]})
     path.write_text(before)
+    sig = path.parent / f"{path.name}.sig"
+    sig.write_bytes(b"PRIOR-SIG")
+    before_sig = sig.read_bytes()
+
+    def _failing_sign(p):
+        (p.parent / f"{p.name}.sig").write_bytes(b"PARTIAL")
+        return False, "gpg not found on PATH"
 
     monkeypatch.setattr(reg.pgp, "pgp_enabled", lambda: True)
-    monkeypatch.setattr(reg.pgp, "sign_detached", lambda p: (False, "gpg not found on PATH"))
+    monkeypatch.setattr(reg.pgp, "sign_detached", _failing_sign)
 
     with pytest.raises(reg.ManifestSignError) as excinfo:
         reg.compile_manifests(_solo_registry(permissions=["store_read"]), only_missing=False)
 
     assert path.read_text() == before
+    assert sig.read_bytes() == before_sig
     failure = excinfo.value.result
     assert failure["sign_failed"] == [
         {"manifest": "mcp_apps/kart/manifest.json", "detail": "gpg not found on PATH"}
