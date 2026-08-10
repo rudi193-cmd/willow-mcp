@@ -1,0 +1,13 @@
+# Weekly, matching the cadence the predecessor ran on for a year.
+# Persistent=true so a sweep missed while the machine was off runs on next boot
+# rather than being skipped silently — the report is only useful if it happens.
+[Unit]
+Description=willow-mcp repo sweep — weekly hygiene pass
+
+[Timer]
+OnCalendar=@ONCALENDAR@
+Persistent=true
+Unit=@SERVICE_UNIT@
+
+[Install]
+WantedBy=timers.target
