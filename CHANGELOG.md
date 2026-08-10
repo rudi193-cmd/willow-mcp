@@ -31,6 +31,14 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.7.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.6.0...v2.7.0) (2026-08-10)
+
+
+### Added
+
+* port the repo hygiene sweep from the decommissioned fleet ([2448b35](https://github.com/rudi193-cmd/willow-mcp/commit/2448b3597c89538ece567c9b76783d617ed5f03f))
+* port the repo hygiene sweep from the decommissioned fleet ([993c4fb](https://github.com/rudi193-cmd/willow-mcp/commit/993c4fb016ff4555dbbe0241a96105a3f822e993))
+
 ## [2.6.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.5.0...v2.6.0) (2026-08-10)
 
 
