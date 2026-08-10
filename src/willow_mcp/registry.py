@@ -12,9 +12,23 @@ import json
 from pathlib import Path
 from typing import Any, Iterator
 
+from . import pgp
 from .paths import bundle_dir, mcp_app_dir, personas_dir, specialists_config_path, willow_home
 
 REGISTRY_FORMAT = "specialist_registry_v1"
+
+
+class ManifestSignError(RuntimeError):
+    """Raised by `compile_manifests` when PGP is enforced and one or more
+    written manifests could not be (re-)signed. `result` carries the same
+    dict a successful call would have returned (`written`/`skipped`/
+    `overridden`/`signed`/`sign_failed`), so a caller that catches this can
+    still report exactly what happened rather than only an error string —
+    see issue #312 item 2 ("report it")."""
+
+    def __init__(self, message: str, *, result: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.result = result
 
 
 def registry_path(prefer_home: bool = True) -> Path:
@@ -95,11 +109,29 @@ def compile_manifests(
     §3.4): registry-owned fields are authoritative, but operator-added local keys
     are preserved. Any registry field that replaces a differing local value is
     reported in ``overridden`` so the override is visible, never silent.
+
+    Signing (issue #312): under PGP enforcement (``pgp.pgp_enabled()``) every
+    manifest this writes has its old detached signature invalidated by the
+    write, exactly like `manifest_admin.set_permission` — a rewritten manifest
+    with no fresh `.sig` is denied everywhere (`gate._load_manifest`), and
+    that denial is indistinguishable from "no manifest at all" by design, so
+    an un-re-signed compile is a *silent* fleet-wide lockout. Each write is
+    followed by `pgp.sign_detached`; a failure rolls that one manifest back to
+    its previous bytes (or removes it, if this call created it) rather than
+    leaving a written-but-unsigned file on disk. Rolled-back manifests are
+    reported in ``sign_failed`` and dropped from ``written`` (they were not
+    durably written); manifests that signed cleanly land in ``signed``.
+    Compilation continues across rows so one bad manifest doesn't strand the
+    others un-re-signed too, but if anything failed to sign the whole call
+    raises `ManifestSignError` (carrying the full result dict) once every row
+    has been attempted — fail loud, per PR #294's precedent, never silent.
     """
     reg = registry if registry is not None else load_registry()
     written: list[str] = []
     skipped: list[str] = []
     overridden: list[dict[str, Any]] = []
+    signed: list[str] = []
+    sign_failed: list[dict[str, str]] = []
 
     for row in iter_registry_rows(reg):
         agent_id = str(row.get("agent_id", "")).strip()
@@ -116,7 +148,8 @@ def compile_manifests(
             row,
             collection_aliases=reg.get("collection_aliases") or {},
         )
-        if manifest_path.exists():
+        existed_before = manifest_path.exists()
+        if existed_before:
             existing = _read_manifest_json(manifest_path)
             if existing:
                 changed = sorted(
@@ -133,10 +166,39 @@ def compile_manifests(
             continue
 
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        previous_bytes = manifest_path.read_text(encoding="utf-8") if existed_before else None
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         written.append(rel)
 
-    return {"written": written, "skipped": skipped, "overridden": overridden}
+        if pgp.pgp_enabled():
+            ok, detail = pgp.sign_detached(manifest_path)
+            if ok:
+                signed.append(rel)
+            else:
+                if previous_bytes is None:
+                    manifest_path.unlink(missing_ok=True)
+                else:
+                    manifest_path.write_text(previous_bytes, encoding="utf-8")
+                written.remove(rel)
+                sign_failed.append({"manifest": rel, "detail": detail})
+
+    result = {
+        "written": written,
+        "skipped": skipped,
+        "overridden": overridden,
+        "signed": signed,
+        "sign_failed": sign_failed,
+    }
+    if sign_failed:
+        raise ManifestSignError(
+            f"{len(sign_failed)} manifest(s) could not be (re-)signed and were "
+            f"rolled back to their previous content (never left unsigned on disk): "
+            f"{[f['manifest'] for f in sign_failed]}. Sign from a host terminal with "
+            f"a reachable gpg-agent (`willow-mcp sign-manifest <app_id>`), or unset "
+            f"WILLOW_PGP_FINGERPRINT to run without enforcement, then re-run compile.",
+            result=result,
+        )
+    return result
 
 
 def compile_agents_main(
@@ -146,19 +208,26 @@ def compile_agents_main(
     registry_file: Path | None = None,
 ) -> dict[str, Any]:
     reg = load_registry(path=registry_file) if registry_file else load_registry()
-    result = compile_manifests(reg, only_missing=not force, dry_run=dry_run)
-    return {
+    meta = {
         "registry": str(registry_file or registry_path()),
         "dry_run": dry_run,
         "force": force,
-        **result,
     }
+    try:
+        result = compile_manifests(reg, only_missing=not force, dry_run=dry_run)
+    except ManifestSignError as e:
+        # Re-raise with the meta keys folded into `.result` so a caller that
+        # catches this (a CLI wrapper) can print one JSON blob instead of
+        # having to reassemble it from the bare compile_manifests() result.
+        raise ManifestSignError(str(e), result={**meta, **e.result}) from e
+    return {**meta, **result}
 
 
 def compile_cli_main() -> None:
     """Console entry for `willow-mcp-compile` (avoids fleet `willow-mcp` shim)."""
     import argparse
     import json
+    import sys
 
     parser = argparse.ArgumentParser(
         prog="willow-mcp-compile",
@@ -169,7 +238,13 @@ def compile_cli_main() -> None:
     parser.add_argument("--registry", default="", help="path to specialists.json")
     args = parser.parse_args()
     reg = Path(args.registry).expanduser() if args.registry else None
-    print(json.dumps(compile_agents_main(force=args.force, dry_run=args.dry_run, registry_file=reg), indent=2))
+    try:
+        result = compile_agents_main(force=args.force, dry_run=args.dry_run, registry_file=reg)
+    except ManifestSignError as e:
+        print(json.dumps(e.result, indent=2))
+        print(f"Error: {e}", file=sys.stderr)
+        raise SystemExit(1)
+    print(json.dumps(result, indent=2))
 
 
 # ── Specialist lookup + persona (S-R5 / S-R6) ───────────────────────────────

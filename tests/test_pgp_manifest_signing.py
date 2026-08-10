@@ -147,6 +147,44 @@ def test_sign_manifest_cli_signs_and_gate_then_trusts_it(home, pgp_env, monkeypa
     assert gate.authorized("kart") is True
 
 
+def test_compile_manifests_signs_with_a_real_key_and_gate_trusts_it(home, pgp_env):
+    """The #312 repro end to end, against a real GPG signature: compile a
+    manifest under enforcement and the gate must trust the result exactly as
+    it trusts a manually `sign-manifest`-ed one."""
+    from willow_mcp import registry as reg
+
+    registry_doc = {
+        "format": reg.REGISTRY_FORMAT,
+        "specialists": [{"agent_id": "kart", "role": "x", "permissions": ["store_read"]}],
+    }
+    result = reg.compile_manifests(registry_doc)
+    assert result["signed"] == ["mcp_apps/kart/manifest.json"]
+    assert gate.authorized("kart") is True
+    assert gate.permitted("kart", "store_get") is True
+
+
+def test_compile_manifests_recompile_keeps_the_manifest_signed(home, pgp_env):
+    """This IS issue #312: a second compile pass over an already-signed
+    manifest (`--force` / a registry edit) must re-sign the rewritten bytes,
+    not leave the stale `.sig` from the first pass sitting next to new
+    content it no longer matches — which used to deny every gated call for
+    this app_id with nothing in the output saying why."""
+    from willow_mcp import registry as reg
+
+    registry_doc = {
+        "format": reg.REGISTRY_FORMAT,
+        "specialists": [{"agent_id": "kart", "role": "x", "permissions": ["store_read"]}],
+    }
+    reg.compile_manifests(registry_doc)
+    assert gate.authorized("kart") is True
+
+    registry_doc["specialists"][0]["permissions"] = ["store_read", "knowledge_read"]
+    reg.compile_manifests(registry_doc, only_missing=False)
+
+    assert gate.authorized("kart") is True
+    assert gate.permitted("kart", "knowledge_search") is True  # granted via the knowledge_read group
+
+
 def test_sign_manifest_cli_refuses_when_pgp_not_enabled(home, monkeypatch):
     from willow_mcp import server
 
