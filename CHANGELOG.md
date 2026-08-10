@@ -31,6 +31,13 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.6.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.5.0...v2.6.0) (2026-08-10)
+
+
+### Added
+
+* federate to a remote peer over streamable HTTP ([7706e75](https://github.com/rudi193-cmd/willow-mcp/commit/7706e75c19d5b7f10a52539f4a4d356da00cb3e4))
+
 ## [2.5.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.4...v2.5.0) (2026-08-10)
 
 
