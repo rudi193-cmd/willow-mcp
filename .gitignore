@@ -7,6 +7,7 @@ logs/
 *.log
 .env
 .venv/
+.venv
 
 # Local sandbox: scaffolded WILLOW_HOME + ad-hoc MCP probe harness (runtime state, not source)
 .willow/
@@ -16,6 +17,10 @@ logs/
 # Host-specific (absolute paths, PG user); the committed template is .mcp.json.example.
 .mcp.json
 .mcp.json.stale.bak
+
+# Host-local Cursor wiring (absolute paths / project sync). Do not commit until
+# a template is established; .mcp.json.example remains the checked-in shape.
+.cursor/
 
 # pytest-cov's data file. It was tracked once (an `git add .` on a run that had
 # just produced one), so the first local `pytest --cov` showed the repo dirty
