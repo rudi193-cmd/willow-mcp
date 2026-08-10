@@ -31,6 +31,16 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.4.1](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.0...v2.4.1) (2026-08-10)
+
+
+### Fixed
+
+* **pgp:** restore content and .sig together on sign-failure rollback ([fb3742b](https://github.com/rudi193-cmd/willow-mcp/commit/fb3742bd7abc6bbd495aa9133b84967452802df3))
+* re-sign manifests after compile_manifests writes them ([#312](https://github.com/rudi193-cmd/willow-mcp/issues/312)) ([9218392](https://github.com/rudi193-cmd/willow-mcp/commit/92183920e5c65382b7dd88feec400df301d8b3f5))
+* re-sign manifests after compile_manifests writes them ([#312](https://github.com/rudi193-cmd/willow-mcp/issues/312)) ([ed0275a](https://github.com/rudi193-cmd/willow-mcp/commit/ed0275aadbae7a9acd67088d4f926f628100a133))
+* refuse boot when manifest verify sweep finds BAD-SIG rows ([c046160](https://github.com/rudi193-cmd/willow-mcp/commit/c046160219d7afd470ecff90d89283c2de65af98))
+
 ## [2.4.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.3.0...v2.4.0) (2026-08-07)
 
 
