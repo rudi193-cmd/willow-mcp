@@ -128,6 +128,17 @@ real meaning under serve mode too, not just under Shape A.
 ### Runbook (B2 shown; drop the `willow-runtime` account and point
 `ExecStart`'s `User=` at `willow-operator` for B1)
 
+Account creation is scripted in [`deploy/provision-uids.sh`](../../deploy/provision-uids.sh)
+(idempotent; `--shape b1` for the single-account variant) — it does the two
+`useradd`s and the `WILLOW_HOME` `chown` below and nothing else, then prints the
+`harden-trust-root`/`repair-runtime-perms` commands to run next:
+
+```bash
+sudo deploy/provision-uids.sh        # creates willow-operator + willow-runtime
+```
+
+or, equivalently, by hand:
+
 ```bash
 sudo useradd -r -s /usr/sbin/nologin willow-operator
 sudo useradd -r -s /usr/sbin/nologin willow-runtime
@@ -146,8 +157,11 @@ sudo -u willow-operator env WILLOW_HOME=/var/lib/willow-mcp \
     willow-mcp repair-runtime-perms --runtime-user willow-runtime
 ```
 
-System-level (not `--user`) systemd unit, adapted from
-`deploy/willow-mcp-serve.service.template`:
+System-level (not `--user`) systemd unit — ship the template
+[`deploy/willow-mcp-serve-system.service.template`](../../deploy/willow-mcp-serve-system.service.template),
+which is the block below with `@PLACEHOLDERS@`; fill them in and install to
+`/etc/systemd/system/`. (The `--user` templates in `deploy/` cannot express a
+uid switch — that is exactly why this system-level one exists.)
 
 ```ini
 # /etc/systemd/system/willow-mcp-serve.service
@@ -199,6 +213,22 @@ expect `uid separation: NOT separated` when checked *as `willow-operator`*
 (correct — you are the trust owner and the runtime account at once) and rely
 on the network/account boundary, not the file-permission check, as your
 actual control.
+
+## Shape C — container image
+
+The repo's `Dockerfile` runs the server as a dedicated non-login `willow`
+system user (never root) with its own writable `HOME` — the minimum a
+single-image build can enforce on its own. That closes the "container defaults
+to root" hole, but note it is only the **agent/runtime** role: a single
+container running one process cannot host a *separate* trust-owner uid, so it
+does not by itself satisfy #231's operator/agent split. For the real
+separation in a containerized deployment, run the trust owner outside the
+container (own `config/`/`mcp_apps/` on a mounted volume as a host
+`willow-operator` uid, mount them read-only to the container) or split the
+roles across two containers/uids sharing a pre-hardened volume — the same B1
+vs B2 choice as above, expressed with `user:` in your compose/orchestrator
+instead of systemd `User=`. `WILLOW_MCP_STRICT_TRUST_ROOT` stays off in the
+image's own shipped env for the same default-off reason as everywhere else.
 
 ## How `harden-trust-root` and `WILLOW_MCP_STRICT_TRUST_ROOT` compose
 
