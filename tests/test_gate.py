@@ -437,3 +437,13 @@ def test_log_manifest_verify_sweep_quiet_when_all_verify_ok(apps_root, monkeypat
         problems = gate.log_manifest_verify_sweep()
     assert problems == []
     assert not any(rec.levelname == "ERROR" for rec in caplog.records)
+
+
+def test_log_manifest_verify_sweep_return_drives_boot_refusal(apps_root, monkeypatch):
+    """server._main refuses to start when this returns a non-empty list — the
+    return value is the boot-refusal signal, not just a log convenience."""
+    _write_manifest(apps_root, "broken", ["store_read"])
+    monkeypatch.setattr(gate.pgp, "pgp_enabled", lambda: True)
+    monkeypatch.setattr(gate.pgp, "verify_detached", lambda p: (False, "tampered"))
+    problems = gate.log_manifest_verify_sweep()
+    assert problems  # non-empty → server._main SystemExit(1)

@@ -6953,10 +6953,20 @@ def _main():
 
     # #312 startup verify sweep: an unsigned/tampered manifest denies every
     # gated call for that app_id with no reason surfaced to the caller
-    # (_load_manifest is deliberately reason-free), so the only place this is
-    # visible without an operator manually running `whoami`/`doctor` per app
-    # is the boot log. No-op unless WILLOW_PGP_FINGERPRINT is set.
-    log_manifest_verify_sweep()
+    # (_load_manifest is deliberately reason-free). Log every BAD-SIG / NO-SIG
+    # row, then refuse to start — a process that would deny those app_ids on
+    # every gated call is not a healthy serve/stdio boot. No-op (and no exit)
+    # unless WILLOW_PGP_FINGERPRINT is set.
+    _manifest_verify_problems = log_manifest_verify_sweep()
+    if _manifest_verify_problems:
+        print(
+            "willow-mcp: refusing to start — "
+            f"{len(_manifest_verify_problems)} manifest(s) failed PGP verification. "
+            "Re-sign with `willow-mcp sign-manifest <app_id>` from a host terminal, "
+            "or unset WILLOW_PGP_FINGERPRINT to run without enforcement.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
 
     # Serve mode is SINGLE-INSTANCE per WILLOW_HOME — agent sessions, rate-limit
     # buckets and in-flight OAuth state are process memory, so a second replica

@@ -530,7 +530,8 @@ def log_manifest_verify_sweep() -> list[dict[str, str]]:
     """Run `verify_all_manifests` and log the result -- call once at server boot
     (see `server._main`). Returns the same problem list it logs, so a caller that
     wants it programmatically (tests, a future health endpoint) doesn't have to
-    re-run the sweep."""
+    re-run the sweep. `server._main` treats a non-empty return as fatal and
+    exits 1 rather than serving while those app_ids are silently gated off."""
     problems = verify_all_manifests()
     if not problems:
         if pgp.pgp_enabled():
@@ -543,7 +544,8 @@ def log_manifest_verify_sweep() -> list[dict[str, str]]:
     logger.error(
         "gate: boot manifest verify sweep — %d of the manifests under %s failed PGP "
         "verification; every gated call for those app_ids is being denied. Re-sign "
-        "with `willow-mcp sign-manifest <app_id>` from a host terminal.",
+        "with `willow-mcp sign-manifest <app_id>` from a host terminal. "
+        "Server boot will refuse to start while any row remains bad.",
         len(problems), _apps_root(),
     )
     return problems
