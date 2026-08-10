@@ -184,3 +184,15 @@ def unlocked_tools(trust_level: int, *, read_only: bool | None = None) -> frozen
     return frozenset(
         t for t in TOOL_CLASS if tier_permits(trust_level, t, read_only=read_only)
     )
+
+
+def classes_for_tier(trust_level: int) -> frozenset:
+    """The privilege CLASSES a tier unlocks — the willow-gate vocabulary, not the
+    tool names. `unlocked_tools` answers "which tools"; this answers "which
+    classes", which is what a check-in header declares in its `tools` field.
+
+    Unknown levels return the empty set rather than raising: the ceiling is a
+    fail-closed lookup everywhere else in this module, and a caller building a
+    declaration from a bad level should declare nothing, not crash.
+    """
+    return _TIER_CLASSES.get(trust_level, frozenset())
