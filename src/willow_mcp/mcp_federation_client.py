@@ -32,10 +32,13 @@ import queue
 import threading
 import time
 from concurrent import futures
+from contextlib import asynccontextmanager
 from typing import Any, Optional
 
+import httpx2 as httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 from . import external_guard, mcp_federation, signing, tier_policy
 
@@ -47,6 +50,9 @@ logger = logging.getLogger("willow_mcp.mcp_federation_client")
 CALL_TIMEOUT_SECONDS = 30.0
 #: How long to wait for a freshly-started thread to publish its event loop.
 _LOOP_START_TIMEOUT_SECONDS = 5.0
+#: TCP connect budget for a remote peer — short, because an unreachable host
+#: should fail fast rather than hold a federation slot for the call timeout.
+_HTTP_CONNECT_TIMEOUT_SECONDS = 10.0
 
 
 class FederationClientError(Exception):
@@ -146,15 +152,52 @@ class _ServerConnection:
             self._ready_error = e
             self._ready.set()
 
+    @asynccontextmanager
+    async def _transport(self, spec: "mcp_federation.McpServerSpec"):
+        """The read/write stream pair for this entry's transport.
+
+        Both `stdio_client` and `streamable_http_client` yield `(read, write)`,
+        so the only real difference is what has to be true before dialling.
+        """
+        if spec.transport == "stdio":
+            params = StdioServerParameters(
+                command=spec.command, args=list(spec.args),
+                env=mcp_federation.load_server_env(self.entry), cwd=spec.cwd,
+            )
+            async with stdio_client(params) as streams:
+                yield streams
+            return
+
+        if not mcp_federation.is_http_transport(spec.transport):
+            raise FederationClientError(
+                f"server {self.server_id!r}: transport {spec.transport!r} is not "
+                f"supported (stdio or one of {mcp_federation.HTTP_TRANSPORTS})")
+
+        # Re-validated HERE, not only at ratification. The registry records a URL;
+        # DNS decides where a name points, and it can be re-pointed at loopback or
+        # cloud metadata long after an operator ratified a public host. Same rule
+        # federation_egress applies to its own locks: read the fact at call time,
+        # never trust a decision cached at connect.
+        err = mcp_federation.validate_remote_url(self.entry)
+        if err:
+            raise FederationClientError(
+                f"server {self.server_id!r}: refusing to dial — {err}")
+
+        url = str(self.entry.get("url") or "").strip()
+        http_client = create_mcp_http_client(
+            headers=mcp_federation.load_auth_headers(self.entry) or None,
+            timeout=httpx.Timeout(CALL_TIMEOUT_SECONDS, connect=_HTTP_CONNECT_TIMEOUT_SECONDS),
+        )
+        async with http_client:
+            async with streamable_http_client(url, http_client=http_client) as streams:
+                # TransportStreams is a 2-tuple like stdio's yield; a third
+                # element (the session-id callback) is not part of this SDK's
+                # shape, so unpack defensively rather than by fixed arity.
+                yield (streams[0], streams[1])
+
     async def _main(self) -> None:
         loop = asyncio.get_running_loop()
         spec = mcp_federation.McpServerSpec.from_dict(self.entry)
-        if spec.transport != "stdio":
-            self._ready_error = FederationClientError(
-                f"server {self.server_id!r}: transport {spec.transport!r} not "
-                "supported by this client (stdio only)")
-            self._ready.set()
-            return
         # Resolve the signing identity BEFORE spawning anything. A link that
         # cannot sign must not reach the point of starting a child process it
         # would then have to tear down — and a config error raised out here is a
@@ -167,12 +210,8 @@ class _ServerConnection:
             self._ready_error = e
             self._ready.set()
             return
-        params = StdioServerParameters(
-            command=spec.command, args=list(spec.args),
-            env=mcp_federation.load_server_env(self.entry), cwd=spec.cwd,
-        )
         try:
-            async with stdio_client(params) as (read, write):
+            async with self._transport(spec) as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
                     await self._bind_if_signed(session)

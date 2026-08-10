@@ -476,6 +476,31 @@ listing and every call result is run through **external-guard** before it
 reaches a caller — a downstream server's tool names and descriptions are
 untrusted input, scanned at listing time as well as at call time.
 
+#### Remote downstream servers (streamable HTTP)
+
+A ratified entry with `transport: "streamable-http"` (or `http`) and a `url` is
+dialled over the network instead of forked as a subprocess. `auth_token_env`
+optionally names an environment variable holding a bearer token — the **name**,
+never the value, exactly as `env_keys` works.
+
+The destination is checked with the same resolve-don't-pattern-match guard the
+open-web lane uses, **at ratification and again at every connect**. Once is not
+enough: the registry records a URL, but DNS decides where a *name* points, so an
+entry ratified against a public host can be aimed at loopback or cloud metadata
+later without the registry changing at all.
+
+```console
+$ export FED_PEER_TOKEN=...          # out of band, never in the registry
+$ willow-mcp ...ratify... --transport streamable-http --url https://peer.example/mcp
+```
+
+**You cannot federate to `localhost` over HTTP.** Loopback, link-local
+(`169.254.0.0/16`), and private space are refused, which is the guard working —
+use `stdio` for a local downstream, which is what it is for. The five egress
+locks (`mcp_federation` permission, the per-downstream-tool grant, ratification,
+`consent.federation`, and a live egress lease) apply to a remote peer exactly as
+they do to a spawned one.
+
 #### Signed downstream links (optional)
 
 When the downstream is another willow-mcp running with
