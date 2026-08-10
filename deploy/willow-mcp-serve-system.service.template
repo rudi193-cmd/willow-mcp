@@ -1,0 +1,56 @@
+# SYSTEM-level (not `--user`) systemd unit template for willow-mcp serve mode
+# under a dedicated runtime uid — the deployment shape issue #231 asks for.
+#
+# Unlike the `--user` templates in this directory (willow-mcp-serve.service.template
+# et al.), which run as your own login uid and give NO uid separation, this unit
+# runs the server as a chosen system account via `User=`/`Group=`. That is the
+# only way systemd can put the runtime role on a different uid than the agent —
+# `systemd --user` units are structurally incapable of switching uid.
+#
+# Fill in the @PLACEHOLDERS@ and install to /etc/systemd/system/ (NOT
+# ~/.config/systemd/user/). Pair it with account provisioning + trust-root
+# hardening; the end-to-end runbook, the willow-operator vs willow-runtime
+# (B1 vs B2) choice, and verification are in
+# docs/deploy/dedicated-uid-deployment.md. deploy/provision-uids.sh creates the
+# accounts this unit's @RUNTIME_USER@ refers to.
+#
+# SINGLE-INSTANCE: as with the `--user` serve unit, run exactly ONE serve
+# process per $WILLOW_HOME — session/rate-limit/OAuth state lives in process
+# memory and the server flocks $WILLOW_HOME/serve.lock. Do not template this
+# into replicas.
+#
+# WILLOW_MCP_STRICT_TRUST_ROOT=1 below is correct ONLY for B2 (runtime is a
+# separate account from the trust owner). For B1 (runtime IS willow-operator),
+# DELETE that Environment= line — strict mode would otherwise deny egress on
+# every call, because the account running the gate check can rewrite its own
+# policy. See the B1/B2 section of the runbook.
+[Unit]
+Description=willow-mcp OAuth HTTP serve mode (dedicated runtime uid)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RUNTIME_USER@
+Group=@RUNTIME_USER@
+WorkingDirectory=@WORKDIR@
+Environment=WILLOW_HOME=@WILLOW_HOME@
+# B2 only — delete for B1 (runtime == willow-operator). See runbook.
+Environment=WILLOW_MCP_STRICT_TRUST_ROOT=1
+ExecStart=@VENV@ -m willow_mcp --serve --port @PORT@ --host @HOST@
+Restart=on-failure
+RestartSec=2
+
+# OS sandboxing beyond file ownership — the runtime account should only be able
+# to write its own working state, nothing else on the host.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# The trust root (config/, mcp_apps/, egress key) stays read-only to the
+# runtime here by ownership; these paths are the only ones it legitimately
+# writes. Adjust to your @WILLOW_HOME@.
+ReadWritePaths=@WILLOW_HOME@/store @WILLOW_HOME@/dispatch
+
+[Install]
+WantedBy=multi-user.target
