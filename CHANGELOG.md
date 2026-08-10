@@ -31,6 +31,13 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.5.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.4...v2.5.0) (2026-08-10)
+
+
+### Added
+
+* the federated client signs its outbound calls ([87ce8b2](https://github.com/rudi193-cmd/willow-mcp/commit/87ce8b202e1bf3f174224f009e089713d8fac57b))
+
 ## [2.4.4](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.3...v2.4.4) (2026-08-10)
 
 
