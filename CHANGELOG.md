@@ -31,6 +31,13 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.4.3](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.2...v2.4.3) (2026-08-10)
+
+
+### Fixed
+
+* resolve the interpreter to a venv, and stop shipping one operator's layout ([94738e3](https://github.com/rudi193-cmd/willow-mcp/commit/94738e3d153b1542425bfc9ca230c97489bd3a64))
+
 ## [2.4.2](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.1...v2.4.2) (2026-08-10)
 
 
