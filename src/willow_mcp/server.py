@@ -5649,14 +5649,28 @@ def _cmd_sign_manifest(args) -> None:
 
 def _cmd_attest_session(args) -> None:
     """`willow-mcp attest-session <session_id>` — detach-sign the human
-    orchestrator's session binding file (#186 P2, docs/design/pgp-and-persona.md).
-    Operator-terminal only, same Kart/tty guard as sign-manifest/sign-seed.
-    Requires session_enter(app_id='willow', session_id=...) to already have run
-    for this session_id -- this signs the file as it stands, it does not create
-    or mutate it. human_session.orchestrator_write_denial then requires this
-    signature to verify before dispatch_send/verify_handoff/agent_clear/
-    frank_append/envelope_apply run as app_id=willow, whenever
-    WILLOW_PGP_FINGERPRINT is set."""
+    orchestrator's stable session identity (#186 P2 / #313,
+    docs/design/pgp-and-persona.md). Operator-terminal only, same Kart/tty
+    guard as sign-manifest/sign-seed. Requires session_enter(app_id='willow',
+    session_id=...) to already have run for this session_id, as proof the
+    session is live -- but what gets signed is a canonical
+    {app_id, session_id} identity tuple written to a dedicated
+    `<session>.attest.json` sidecar (paths.session_attestation_path), NOT the
+    live `sessions/willow-<id>.json` record itself.
+
+    #313: the session record carries mutable operational state (status,
+    dispatch_id, updated_at) that the server rewrites on every session_bind
+    call -- session_enter, dispatch_accept, session_handoff_write, agent_clear
+    all pass through it. Signing that file directly meant the very next
+    ordinary write self-invalidated the signature, disarming the orchestrator
+    seat until a human could re-attest -- including from inside the closeout
+    (session_handoff_write) that write triggers. The identity tuple this signs
+    instead does not change across the session's lifetime, so normal session
+    writes no longer invalidate the attestation.
+
+    human_session.orchestrator_write_denial verifies this sidecar's signature
+    before dispatch_send/verify_handoff/agent_clear/frank_append/envelope_apply
+    run as app_id=willow, whenever WILLOW_PGP_FINGERPRINT is set."""
     from . import pgp
 
     if os.environ.get("WILLOW_IN_KART", "").strip() or not sys.stdin.isatty():
@@ -5686,15 +5700,28 @@ def _cmd_attest_session(args) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
-    ok, detail = pgp.sign_detached(session_file)
+
+    attest_file = paths.session_attestation_path("willow", session_id)
+    attest_file.parent.mkdir(parents=True, exist_ok=True)
+    attest_data = {
+        "format": "orchestrator_session_attestation_v1",
+        "app_id": "willow",
+        "session_id": session_id,
+        "attested_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    attest_file.write_text(
+        json.dumps(attest_data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    ok, detail = pgp.sign_detached(attest_file)
     if not ok:
         print(f"Error: {detail}", file=sys.stderr)
         raise SystemExit(1)
     print(f"Attested: {detail}")
     print(
-        "Re-run this if the session file changes (e.g. another session_enter "
-        "call rebinds it) -- orchestrator_write_denial denies a session whose "
-        "signature no longer matches its content."
+        "This signs the stable {app_id, session_id} identity, not the session's "
+        "mutable state -- ordinary session writes (session_handoff_write, "
+        "dispatch_accept, agent_clear, ...) will not invalidate it. Re-run this "
+        "only if you want to re-attest (e.g. after rotating your operator key)."
     )
 
 
