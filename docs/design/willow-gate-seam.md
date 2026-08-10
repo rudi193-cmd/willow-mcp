@@ -188,13 +188,22 @@ build, plus one policy call and one upstream bug:
   the funnel; sourcing `tools_used` from `ReceiptLog.tail` reconciles correctly
   AND flags an exit that claims a tool no receipt ever authorized.*
 - **Policy — read-universal does NOT survive the seam.** willow-gate grants read
-  to everyone (even Exiled); willow-mcp fail-closes an unmanifested/unscoped
-  `app_id`, and in the bridge that WINS. Bringing in willow-gate does **not** make
-  willow-mcp reads universal — `store_scope` still confines. State it; don't
-  inherit it by accident.
-- **Upstream bug — `entry_allowed` unenforced in willow-gate.** Level 0 (Exiled)
-  is defined `entry_allowed=False`, but `check_in` never checks it, so an Exiled
-  agent still gets a (read-only) session. Fix upstream in willow-gate.
+  by *construction*, not by tier: `check_in` unions `{READ_TOOL}` into whatever
+  the header declares and `authorize_tool` short-circuits it, so a level whose
+  `allowed_tools` is empty still reads. willow-mcp fail-closes an
+  unmanifested/unscoped `app_id`, and in the bridge that WINS. Bringing in
+  willow-gate does **not** make willow-mcp reads universal — `store_scope` still
+  confines. State it; don't inherit it by accident.
+  **Written upstream (2026-08-10):** willow-gate's README now carries the policy
+  and the `host_acl ∩ tier_ceiling` composition rule, citing this seam as the
+  worked example. The spike's "*even Exiled*" phrasing was imprecise — see the
+  next bullet.
+- ~~**Upstream bug — `entry_allowed` unenforced in willow-gate.**~~ **Fixed
+  upstream (willow-gate#12).** Level 0 is `entry_allowed=False` and `check_in`
+  now refuses it (`willow_gate/__init__.py:280`), with test coverage. Note this
+  also corrects the bullet above: Exiled's `allowed_tools` is `()` *and* it
+  cannot open a session, so read-universal means universal among agents who may
+  **enter** — not universal full stop.
 
 ## H1 prototype — how a call binds to a session (resolved)
 
@@ -433,6 +442,29 @@ gap the review surfaced:
   `WILLOW_MCP_ENFORCE_BINDING=1`. An un-instrumented client still cannot reach a
   gated tool (that is the design), so keep enforcement off until every registered
   agent's harness is signing; observe-only stays the safe default.
+- **No caller in the current fleet can take that step yet (2026-08-10 survey).**
+  The mechanism is complete and proven — `examples/signing_client.py` passes end
+  to end — but every live path into this server is either unable to sign or does
+  not need to:
+  - **IDE seats (Claude Code / Cursor)** cannot emit `_meta.willow_call_credential`
+    and never call `session_bind`. Registering one is strictly negative: it adds
+    no observability (see below) and arms `WILLOW_MCP_ENFORCE_BINDING=1` to deny
+    the operator's own seat.
+  - **`willow-mcp worker`** is in-process, not an MCP client.
+  - **Serve mode** is already bound via OAuth.
+  - **`mcp_federation_client`** is the one genuine `ClientSession` in `src/` — and
+    it does *not* sign. It references `SigningClientSession` only in its module
+    docstring. Instrumenting it is the natural next phase and the only path that
+    gives enforcement a real consumer; it is unexercised today because no
+    downstream server is ratified.
+- **Registration is not the observe-only lever, and the phase list reads as if it
+  were.** `_observe_binding` never consults `is_registered()`: it records a
+  receipt when a per-call credential is present, else when `session_for(app_id)`
+  finds a live check-in. Both require a client that signs or calls `session_bind`.
+  So registering an agent whose client does neither observes *nothing* — Phase 2's
+  "watch the binding land in receipts" needs an instrumented client just as much
+  as Phase 3 does. Registration only decides who gets *enforced* once the switch
+  is on (D3).
 - **A registered agent with an unreadable/short secret fails closed** (not open):
   `_enforce_binding_gate` pairs `agent_registry.load()` with `is_registered()` so a
   broken keystore denies rather than silently downgrading to manifest-only. An
@@ -483,9 +515,22 @@ per-call signature, and that is by design — H1's whole point):
 The `enforce_binding` global row in the gates panel makes the switch's live state
 visible next to `strict_trust_root`.
 
-Before any of this, upstream a fix (or a tracked issue) for willow-gate's
-unenforced `entry_allowed`, and write the read-universal policy call into the
-gate's docs so the seam's read semantics are chosen, not inherited.
+~~Before any of this, upstream a fix (or a tracked issue) for willow-gate's
+unenforced `entry_allowed`~~ — **done (2026-08-10).** `entry_allowed` is
+enforced upstream at `willow_gate/__init__.py:280` (`if not level.entry_allowed`)
+with coverage in `tests/test_willowgate.py`, closing willow-gate#12. Nothing
+blocks the cutover on the willow-gate side.
+
+~~Still open: write the read-universal policy call into the gate's docs so the
+seam's read semantics are chosen, not inherited.~~ — **done (2026-08-10).**
+willow-gate's README now states that `read` is granted by construction rather
+than by tier, that Exiled is withheld by *entry* and not by `allowed_tools`, and
+that an embedder must compose `host_acl(identity) ∩ tier_ceiling(trust_level)`
+and stay fail-closed so the gate can only narrow a host's reads, never widen
+them. This seam is cited there as the worked example.
+
+**Both Phase 5 prerequisites are now closed.** What remains is not a gap in the
+seam but the absence of a caller — see the survey in the residuals above.
 
 @phase constraints
 ## Constraints
