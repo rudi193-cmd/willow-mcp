@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .paths import willow_home
+
 _HOME_VAR = "{{HOME}}"
 
 _DEFAULT_WIRING: dict[str, Any] = {
@@ -41,7 +43,14 @@ def resolve_willow_mcp_python() -> str:
     raw = os.environ.get("WILLOW_MCP_PYTHON", "").strip()
     if raw:
         return expand_home(raw)
+    # Derived from willow_home(), not hardcoded: the 2026-08-10 org-folder move
+    # relocated $WILLOW_HOME out of ~/github/.willow, and the old literal below
+    # then silently lost to `which python3` — a system interpreter with no
+    # willow_mcp installed. That fallback writes a .mcp.json whose server cannot
+    # start, and nothing reports it. The legacy path stays as a back-compat
+    # candidate for installs that have not moved yet.
     candidates = [
+        willow_home() / "venvs" / "willow-mcp" / "bin" / "python",
         Path.home() / "github" / ".willow" / "venvs" / "willow-mcp" / "bin" / "python",
         shutil.which("python3"),
         sys.executable,
@@ -51,7 +60,13 @@ def resolve_willow_mcp_python() -> str:
             continue
         path = Path(str(candidate))
         if path.is_file():
-            return str(path.resolve())
+            # Absolute, NOT resolved. A venv's bin/python is a symlink chain
+            # ending at the system interpreter (bin/python → python3 →
+            # /usr/bin/pythonX.Y), and .resolve() follows it to the end — which
+            # hands back a base interpreter that cannot import willow_mcp. A
+            # venv is identified by the path you invoke, not by the binary
+            # behind it, so the symlink is the answer and must be preserved.
+            return os.path.abspath(str(path))
     return sys.executable
 
 

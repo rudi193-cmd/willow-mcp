@@ -74,7 +74,15 @@ def ensure_registry(*, dry_run: bool = False) -> Path:
     return dest
 
 
-_PRODUCT_PROJECTS = ("willow", "github")
+# 'willow' is deliberately NOT here. willow-mcp ships this seed to every install,
+# so overlaying the seed's 'willow' entry forced one operator's charter-repo disk
+# layout over any local registry that happened to use that project id — and
+# persisted it, so a local correction silently reverted on the next load. The
+# entry's only real job was stripping a project-local WILLOW_STORE_ROOT so
+# charter SOIL stays in the fleet home, and _skip_store_override() already does
+# that at render time, independent of the overlay. 'github' stays: its path is
+# {{HOME}}/github, which carries no layout assumption.
+_PRODUCT_PROJECTS = ("github",)
 
 
 def merge_product_projects_from_seed(registry: dict, *, persist: bool = False) -> dict:

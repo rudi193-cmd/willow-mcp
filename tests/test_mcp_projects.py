@@ -9,7 +9,11 @@ from willow_mcp.mcp_projects import (
     render_project_mcp,
     sync_project,
 )
-from willow_mcp.project_wiring import expand_home, render_claude_permissions
+from willow_mcp.project_wiring import (
+    expand_home,
+    render_claude_permissions,
+    resolve_willow_mcp_python,
+)
 
 
 def test_expand_home():
@@ -124,7 +128,14 @@ def test_render_project_mcp_ignores_charter_local_store(tmp_path, monkeypatch):
     )
 
 
-def test_merge_product_projects_from_seed(tmp_path, monkeypatch):
+def test_local_willow_entry_survives_load(tmp_path, monkeypatch):
+    """A local 'willow' entry is the operator's, not the seed's.
+
+    The seed ships with every willow-mcp install and names one charter-repo
+    layout. It used to be overlaid onto any registry with a 'willow' key and
+    persisted, so an operator whose charter repo lived elsewhere had their
+    path silently rewritten on every load. The registry wins now.
+    """
     wh = tmp_path / ".willow"
     monkeypatch.setenv("WILLOW_HOME", str(wh))
     reg_path = wh / "mcp" / "projects.json"
@@ -135,10 +146,12 @@ def test_merge_product_projects_from_seed(tmp_path, monkeypatch):
                 "version": 1,
                 "projects": {
                     "willow": {
-                        "path": "{{HOME}}/github/willow",
+                        "path": "{{HOME}}/somewhere/else/willow",
                         "agent": "willow",
                         "servers": ["willow-mcp"],
-                        "env": {"WILLOW_STORE_ROOT": "{{HOME}}/github/willow/.willow/store"},
+                        "env": {
+                            "WILLOW_STORE_ROOT": "{{HOME}}/somewhere/else/willow/.willow/store"
+                        },
                     }
                 },
             }
@@ -146,7 +159,30 @@ def test_merge_product_projects_from_seed(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     data = load_registry(bootstrap=False)
-    assert "WILLOW_STORE_ROOT" not in (data["projects"]["willow"].get("env") or {})
+    assert data["projects"]["willow"]["path"] == "{{HOME}}/somewhere/else/willow"
+
+
+def test_project_local_store_root_is_still_stripped_at_render(tmp_path, monkeypatch):
+    """Dropping the seed overlay must not lose the store-root guard.
+
+    Charter SOIL belongs in the fleet home, not in the project tree. That was
+    a side effect of the overlay; _skip_store_override() enforces it directly,
+    so it has to hold for a registry path the seed has never seen.
+    """
+    wh = tmp_path / ".willow"
+    monkeypatch.setenv("WILLOW_HOME", str(wh))
+    monkeypatch.delenv("WILLOW_STORE_ROOT", raising=False)
+
+    entry = {
+        "path": "{{HOME}}/somewhere/else/willow",
+        "agent": "willow",
+        "servers": ["willow-mcp"],
+        "env": {"WILLOW_STORE_ROOT": "{{HOME}}/somewhere/else/willow/.willow/store"},
+    }
+    payload = render_project_mcp("willow", entry)
+    assert payload["mcpServers"]["willow-mcp"]["env"]["WILLOW_STORE_ROOT"] == str(
+        (wh / "store").resolve()
+    )
 
 
 def test_ensure_registry_from_seed(tmp_path, monkeypatch):
@@ -198,3 +234,46 @@ def test_audit_all_skips_symlink_alias_roots(tmp_path, monkeypatch):
 
     issues = audit_all()
     assert issues == []
+
+
+def test_resolve_willow_mcp_python_keeps_the_venv_symlink(tmp_path, monkeypatch):
+    """A venv is the path you invoke, not the binary behind it.
+
+    bin/python is a symlink chain ending at the system interpreter. Resolving
+    it hands back a base Python with no willow_mcp installed, and the .mcp.json
+    that gets written names a server that cannot start — with nothing reporting
+    it. This had no coverage, which is how it survived.
+    """
+    wh = tmp_path / ".willow"
+    monkeypatch.setenv("WILLOW_HOME", str(wh))
+    monkeypatch.delenv("WILLOW_MCP_PYTHON", raising=False)
+
+    real = tmp_path / "usr" / "bin" / "python3.12"
+    real.parent.mkdir(parents=True)
+    real.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    venv_bin = wh / "venvs" / "willow-mcp" / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "python3").symlink_to(real)
+    (venv_bin / "python").symlink_to("python3")
+
+    resolved = resolve_willow_mcp_python()
+    assert resolved == str(venv_bin / "python")
+    assert resolved != str(real)
+
+
+def test_resolve_willow_mcp_python_follows_willow_home(tmp_path, monkeypatch):
+    """The venv candidate tracks $WILLOW_HOME instead of a hardcoded path.
+
+    A hardcoded ~/github/.willow/venvs/... silently lost to `which python3`
+    once $WILLOW_HOME moved, producing a system interpreter.
+    """
+    wh = tmp_path / "relocated" / ".willow"
+    monkeypatch.setenv("WILLOW_HOME", str(wh))
+    monkeypatch.delenv("WILLOW_MCP_PYTHON", raising=False)
+
+    venv_bin = wh / "venvs" / "willow-mcp" / "bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "python").write_text("#!/bin/sh\n", encoding="utf-8")
+
+    assert resolve_willow_mcp_python() == str(venv_bin / "python")
