@@ -53,21 +53,35 @@ def _setup_home() -> tuple[str, bytes]:
     os.environ["WILLOW_HOME"] = home                      # so register writes here
     os.environ.pop("WILLOW_MCP_APPS_ROOT", None)
     out = agent_registry.register_agent("worker", max_trust=3)   # ← operator step
-    print(f"[operator] registered 'worker' at trust ceiling 3; secret minted")
+    print("[operator] registered 'worker' at trust ceiling 3; secret minted")
     return home, bytes.fromhex(out["secret_hex"])
 
 
 async def main() -> int:
     home, secret = _setup_home()
 
+    # Inherit the operator's environment, minus the vars that would make the
+    # throwaway home unusable. WILLOW_PGP_FINGERPRINT is the one that matters:
+    # with it set, the server verifies every manifest under WILLOW_MCP_APPS_ROOT
+    # at boot and REFUSES TO START if any is unsigned — and the demo's manifest is
+    # unsigned by construction (signing it would need the operator's private key,
+    # which a demo must never touch). Inheriting it meant this script failed with
+    # a bare "Connection closed" on exactly the hosts whose setup is most correct,
+    # which is the opposite of what a "prove your setup end to end" demo should do.
+    # Manifest PGP and the binding harness are orthogonal; this demo exercises the
+    # latter.
+    env = {k: v for k, v in os.environ.items() if k != "WILLOW_PGP_FINGERPRINT"}
+    env.update({
+        "WILLOW_HOME": home,
+        "WILLOW_MCP_APPS_ROOT": str(Path(home) / "mcp_apps"),
+        "WILLOW_STORE_ROOT": str(Path(home) / "store"),
+        "WILLOW_MCP_ENFORCE_BINDING": "1",                # ← enforcement ON
+    })
+
     server = StdioServerParameters(
         command=sys.executable,
         args=["-m", "willow_mcp"],                        # default = stdio MCP server
-        env={**os.environ,
-             "WILLOW_HOME": home,
-             "WILLOW_MCP_APPS_ROOT": str(Path(home) / "mcp_apps"),
-             "WILLOW_STORE_ROOT": str(Path(home) / "store"),
-             "WILLOW_MCP_ENFORCE_BINDING": "1"},          # ← enforcement ON
+        env=env,
     )
 
     async with stdio_client(server) as (read, write):

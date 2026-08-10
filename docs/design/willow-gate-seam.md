@@ -433,6 +433,29 @@ gap the review surfaced:
   `WILLOW_MCP_ENFORCE_BINDING=1`. An un-instrumented client still cannot reach a
   gated tool (that is the design), so keep enforcement off until every registered
   agent's harness is signing; observe-only stays the safe default.
+- **No caller in the current fleet can take that step yet (2026-08-10 survey).**
+  The mechanism is complete and proven — `examples/signing_client.py` passes end
+  to end — but every live path into this server is either unable to sign or does
+  not need to:
+  - **IDE seats (Claude Code / Cursor)** cannot emit `_meta.willow_call_credential`
+    and never call `session_bind`. Registering one is strictly negative: it adds
+    no observability (see below) and arms `WILLOW_MCP_ENFORCE_BINDING=1` to deny
+    the operator's own seat.
+  - **`willow-mcp worker`** is in-process, not an MCP client.
+  - **Serve mode** is already bound via OAuth.
+  - **`mcp_federation_client`** is the one genuine `ClientSession` in `src/` — and
+    it does *not* sign. It references `SigningClientSession` only in its module
+    docstring. Instrumenting it is the natural next phase and the only path that
+    gives enforcement a real consumer; it is unexercised today because no
+    downstream server is ratified.
+- **Registration is not the observe-only lever, and the phase list reads as if it
+  were.** `_observe_binding` never consults `is_registered()`: it records a
+  receipt when a per-call credential is present, else when `session_for(app_id)`
+  finds a live check-in. Both require a client that signs or calls `session_bind`.
+  So registering an agent whose client does neither observes *nothing* — Phase 2's
+  "watch the binding land in receipts" needs an instrumented client just as much
+  as Phase 3 does. Registration only decides who gets *enforced* once the switch
+  is on (D3).
 - **A registered agent with an unreadable/short secret fails closed** (not open):
   `_enforce_binding_gate` pairs `agent_registry.load()` with `is_registered()` so a
   broken keystore denies rather than silently downgrading to manifest-only. An
@@ -483,9 +506,14 @@ per-call signature, and that is by design — H1's whole point):
 The `enforce_binding` global row in the gates panel makes the switch's live state
 visible next to `strict_trust_root`.
 
-Before any of this, upstream a fix (or a tracked issue) for willow-gate's
-unenforced `entry_allowed`, and write the read-universal policy call into the
-gate's docs so the seam's read semantics are chosen, not inherited.
+~~Before any of this, upstream a fix (or a tracked issue) for willow-gate's
+unenforced `entry_allowed`~~ — **done (2026-08-10).** `entry_allowed` is
+enforced upstream at `willow_gate/__init__.py:280` (`if not level.entry_allowed`)
+with coverage in `tests/test_willowgate.py`, closing willow-gate#12. Nothing
+blocks the cutover on the willow-gate side.
+
+Still open: write the read-universal policy call into the gate's docs so the
+seam's read semantics are chosen, not inherited.
 
 @phase constraints
 ## Constraints
