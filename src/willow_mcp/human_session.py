@@ -143,28 +143,91 @@ def orchestrator_write_denial(
         )
 
     # P2 (#186): once PGP is enabled, env attestation alone is no longer enough —
-    # the current session must also carry a valid signature over its session file.
-    # No-op (interim env-only) until WILLOW_PGP_FINGERPRINT is set, same opt-in
-    # gate as manifest signing (#183).
+    # the current session must also carry a valid signature over its stable
+    # identity. No-op (interim env-only) until WILLOW_PGP_FINGERPRINT is set,
+    # same opt-in gate as manifest signing (#183).
     from . import pgp
 
     if not pgp.pgp_enabled():
         return None
 
-    from .paths import session_path
+    from .paths import session_attestation_path, session_path
 
     if not session_id:
         return (
-            "orchestrator_session_attestation_required: no active orchestrator "
+            "orchestrator_session_attestation_missing: no active orchestrator "
             "session on record for this process — call "
             "session_enter(app_id='willow', session_id=...) first, then "
             "`willow-mcp attest-session <session_id>` from the operator terminal."
         )
-    ok, detail = pgp.verify_detached(session_path(ORCHESTRATOR_APP_ID, session_id))
+
+    # Live session file must still exist (proof session_enter's binding is on
+    # disk for this id). The sidecar alone is not enough — otherwise deleting
+    # sessions/willow-<id>.json after attest would leave orchestrator writes
+    # armed against a session that is no longer live.
+    live_session = session_path(ORCHESTRATOR_APP_ID, session_id)
+    if not live_session.is_file():
+        return (
+            f"orchestrator_session_attestation_missing: session {session_id!r} "
+            "has no live session file on disk — call "
+            "session_enter(app_id='willow', session_id=...) first, then "
+            f"`willow-mcp attest-session {session_id}` from the operator terminal."
+        )
+
+    # #313: verify against the dedicated attest-session sidecar
+    # (paths.session_attestation_path), not the live session record --
+    # session_bind (session_enter, dispatch_accept, session_handoff_write,
+    # agent_clear, ...) rewrites the latter's status/dispatch_id/updated_at on
+    # every ordinary state change, which self-invalidated a signature over the
+    # session file itself. The sidecar holds only the {app_id, session_id}
+    # tuple attest-session signed and is never touched by those writes.
+    attest_path = session_attestation_path(ORCHESTRATOR_APP_ID, session_id)
+    sig_path = attest_path.parent / f"{attest_path.name}.sig"
+    if not attest_path.is_file() or not sig_path.is_file():
+        # Distinguish "never attested" from "attested, but the signature no
+        # longer verifies" in the top-level reason (#313) -- the operator
+        # response differs: attest for the first time vs re-attest because
+        # something invalidated a prior attestation (tamper, key rotation, a
+        # write path that shouldn't have touched the sidecar but did).
+        # Token rename from orchestrator_session_attestation_required (#186):
+        # parsers that still match the old needle should look for
+        # orchestrator_session_attestation_missing / _invalid instead.
+        return (
+            f"orchestrator_session_attestation_missing: session {session_id!r} "
+            "has never been PGP-attested (no attestation record on file) — run "
+            f"`willow-mcp attest-session {session_id}` from the operator terminal."
+        )
+    ok, detail = pgp.verify_detached(attest_path)
     if not ok:
         return (
-            f"orchestrator_session_attestation_required: session {session_id!r} "
-            f"is not PGP-attested ({detail}) — run "
+            f"orchestrator_session_attestation_invalid: session {session_id!r} "
+            f"was attested but the signature is BAD ({detail}) — the "
+            "attestation was invalidated (tampered sidecar, unexpected signer, "
+            f"or a rotated key). Re-run `willow-mcp attest-session {session_id}` "
+            "from the operator terminal to restore it."
+        )
+
+    # Belt-and-braces: the signature verifies, but also confirm the signed
+    # payload actually names *this* app_id/session_id, not just that some
+    # valid signature exists at this path (session_path's filename sanitizer
+    # truncates/collapses session_id, so two distinct ids could in principle
+    # collide on one file). A mismatch here is the same "invalid" class as a
+    # bad signature -- the content signed off on isn't this session's.
+    import json
+
+    try:
+        payload = json.loads(attest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return (
+            f"orchestrator_session_attestation_invalid: session {session_id!r} "
+            f"attestation sidecar is unreadable ({exc}) — re-run "
             f"`willow-mcp attest-session {session_id}` from the operator terminal."
+        )
+    if payload.get("app_id") != ORCHESTRATOR_APP_ID or payload.get("session_id") != session_id:
+        return (
+            f"orchestrator_session_attestation_invalid: session {session_id!r} "
+            "attestation sidecar signs a different identity than claimed — "
+            f"re-run `willow-mcp attest-session {session_id}` from the operator "
+            "terminal."
         )
     return None

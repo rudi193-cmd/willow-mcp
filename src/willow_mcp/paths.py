@@ -154,6 +154,22 @@ def session_path(app_id: str, session_id: str) -> Path:
     return sessions_dir() / f"{app_id}-{safe_sid}.json"
 
 
+def session_attestation_path(app_id: str, session_id: str) -> Path:
+    """Path to the immutable identity attestation for an orchestrator session
+    (#313). `session_path()` holds mutable operational state (status,
+    dispatch_id, updated_at) that the server rewrites on every session_bind
+    call (session_enter, dispatch_accept, session_handoff_write, agent_clear,
+    ...) -- a detached signature over that file self-invalidates on the very
+    next ordinary write. This sibling file holds only the stable
+    {app_id, session_id} identity tuple attest-session actually needs to
+    vouch for, and is written once, atomically with its .sig, by attest-session
+    -- normal session writes never touch it."""
+    if not _APP_ID_RE.match(app_id or ""):
+        raise ValueError(f"invalid app_id: {app_id!r}")
+    safe_sid = re.sub(r"[^a-zA-Z0-9_\-]", "_", session_id or "")[:64]
+    return sessions_dir() / f"{app_id}-{safe_sid}.attest.json"
+
+
 def handoffs_dir(app_id: str = "") -> Path:
     base = willow_home() / "handoffs"
     if not app_id:
