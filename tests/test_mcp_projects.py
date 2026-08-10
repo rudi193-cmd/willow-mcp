@@ -162,6 +162,49 @@ def test_local_willow_entry_survives_load(tmp_path, monkeypatch):
     assert data["projects"]["willow"]["path"] == "{{HOME}}/somewhere/else/willow"
 
 
+def test_local_github_entry_survives_load(tmp_path, monkeypatch):
+    """Same guarantee for 'github', which outlived the first fix.
+
+    'github' was left in the overlay because its seed path ({{HOME}}/github)
+    carries no layout assumption — but the overlay replaces the whole entry,
+    not just the path, so an operator's profile, env block and wiring keys
+    were still being dropped on every load.
+    """
+    wh = tmp_path / ".willow"
+    monkeypatch.setenv("WILLOW_HOME", str(wh))
+    reg_path = wh / "mcp" / "projects.json"
+    reg_path.parent.mkdir(parents=True)
+    rich = {
+        "path": "{{HOME}}/github",
+        "agent": "willow",
+        "profile": "core",
+        "servers": ["willow-mcp"],
+        "env": {"WILLOW_HANDOFF_PROJECT": "github"},
+        "wiring": {"hooks": False, "active_agent": True, "python": False},
+        "note": "operator's own note",
+    }
+    reg_path.write_text(
+        json.dumps({"version": 1, "projects": {"github": rich}}), encoding="utf-8"
+    )
+    data = load_registry(bootstrap=False)
+    assert data["projects"]["github"] == rich
+
+
+def test_load_registry_does_not_rewrite_the_file(tmp_path, monkeypatch):
+    """Loading is a read. It used to persist the overlay's edits as a side effect."""
+    wh = tmp_path / ".willow"
+    monkeypatch.setenv("WILLOW_HOME", str(wh))
+    reg_path = wh / "mcp" / "projects.json"
+    reg_path.parent.mkdir(parents=True)
+    payload = json.dumps(
+        {"version": 1, "projects": {"github": {"path": "{{HOME}}/github", "agent": "willow"}}}
+    )
+    reg_path.write_text(payload, encoding="utf-8")
+
+    load_registry(bootstrap=False)
+    assert reg_path.read_text(encoding="utf-8") == payload
+
+
 def test_project_local_store_root_is_still_stripped_at_render(tmp_path, monkeypatch):
     """Dropping the seed overlay must not lose the store-root guard.
 
