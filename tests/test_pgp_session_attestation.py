@@ -120,6 +120,21 @@ def test_pgp_enabled_allows_attested_session(home, pgp_env, monkeypatch):
     ) is None
 
 
+def test_attested_session_denied_when_live_session_file_removed(home, pgp_env, monkeypatch):
+    """Sidecar alone is not enough — deleting the live session record must
+    disarm orchestrator writes (proof session_enter's binding is still on disk)."""
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    ds.session_enter("willow", "sess-live")
+    _attest("sess-live")
+    paths.session_path("willow", "sess-live").unlink()
+    reason = hs.orchestrator_write_denial(
+        "willow", "dispatch_send", serve_mode=False, session_id="sess-live"
+    )
+    assert reason is not None
+    assert "orchestrator_session_attestation_missing" in reason
+    assert "no live session file" in reason
+
+
 def test_tampered_attestation_sidecar_is_denied(home, pgp_env, monkeypatch):
     """Signature is bound to the sidecar's bytes -- editing the sidecar in place
     (same shape #183's tampered-manifest test used) must invalidate it, and the
@@ -274,6 +289,55 @@ def test_attest_session_cli_writes_sidecar_not_live_session_file(home, pgp_env, 
     attest_sidecar = paths.session_attestation_path("willow", "sess-cli-4")
     assert attest_sidecar.is_file()
     assert (attest_sidecar.parent / f"{attest_sidecar.name}.sig").is_file()
+
+
+def test_attest_session_cli_rolls_back_sidecar_on_sign_failure(home, pgp_env, monkeypatch):
+    """A failed re-attest must not leave a fresh unsigned sidecar (or clobber
+    a previously good sidecar+sig) on disk."""
+    from willow_mcp import server
+
+    class _Args:
+        session_id = "sess-cli-rollback"
+
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    monkeypatch.setattr(server.sys.stdin, "isatty", lambda: True)
+    monkeypatch.delenv("WILLOW_IN_KART", raising=False)
+    ds.session_enter("willow", "sess-cli-rollback")
+    server._cmd_attest_session(_Args())
+
+    attest_sidecar = paths.session_attestation_path("willow", "sess-cli-rollback")
+    attest_sig = attest_sidecar.parent / f"{attest_sidecar.name}.sig"
+    before_bytes = attest_sidecar.read_text(encoding="utf-8")
+    before_sig = attest_sig.read_bytes()
+
+    monkeypatch.setattr(pgp, "sign_detached", lambda p: (False, "gpg-agent unreachable"))
+    with pytest.raises(SystemExit) as excinfo:
+        server._cmd_attest_session(_Args())
+    assert excinfo.value.code == 1
+    assert attest_sidecar.read_text(encoding="utf-8") == before_bytes
+    assert attest_sig.read_bytes() == before_sig
+
+
+def test_attest_session_cli_removes_fresh_sidecar_when_first_sign_fails(
+    home, pgp_env, monkeypatch,
+):
+    from willow_mcp import server
+
+    class _Args:
+        session_id = "sess-cli-fresh-fail"
+
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    monkeypatch.setattr(server.sys.stdin, "isatty", lambda: True)
+    monkeypatch.delenv("WILLOW_IN_KART", raising=False)
+    ds.session_enter("willow", "sess-cli-fresh-fail")
+    monkeypatch.setattr(pgp, "sign_detached", lambda p: (False, "gpg not found on PATH"))
+
+    with pytest.raises(SystemExit) as excinfo:
+        server._cmd_attest_session(_Args())
+    assert excinfo.value.code == 1
+    attest_sidecar = paths.session_attestation_path("willow", "sess-cli-fresh-fail")
+    assert not attest_sidecar.exists()
+    assert not (attest_sidecar.parent / f"{attest_sidecar.name}.sig").exists()
 
 
 # ── server._gate threading: session_enter records the current session ───────

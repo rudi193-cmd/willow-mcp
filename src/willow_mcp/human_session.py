@@ -151,7 +151,7 @@ def orchestrator_write_denial(
     if not pgp.pgp_enabled():
         return None
 
-    from .paths import session_attestation_path
+    from .paths import session_attestation_path, session_path
 
     if not session_id:
         return (
@@ -159,6 +159,19 @@ def orchestrator_write_denial(
             "session on record for this process — call "
             "session_enter(app_id='willow', session_id=...) first, then "
             "`willow-mcp attest-session <session_id>` from the operator terminal."
+        )
+
+    # Live session file must still exist (proof session_enter's binding is on
+    # disk for this id). The sidecar alone is not enough — otherwise deleting
+    # sessions/willow-<id>.json after attest would leave orchestrator writes
+    # armed against a session that is no longer live.
+    live_session = session_path(ORCHESTRATOR_APP_ID, session_id)
+    if not live_session.is_file():
+        return (
+            f"orchestrator_session_attestation_missing: session {session_id!r} "
+            "has no live session file on disk — call "
+            "session_enter(app_id='willow', session_id=...) first, then "
+            f"`willow-mcp attest-session {session_id}` from the operator terminal."
         )
 
     # #313: verify against the dedicated attest-session sidecar
@@ -176,6 +189,9 @@ def orchestrator_write_denial(
         # response differs: attest for the first time vs re-attest because
         # something invalidated a prior attestation (tamper, key rotation, a
         # write path that shouldn't have touched the sidecar but did).
+        # Token rename from orchestrator_session_attestation_required (#186):
+        # parsers that still match the old needle should look for
+        # orchestrator_session_attestation_missing / _invalid instead.
         return (
             f"orchestrator_session_attestation_missing: session {session_id!r} "
             "has never been PGP-attested (no attestation record on file) — run "

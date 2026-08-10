@@ -5702,7 +5702,14 @@ def _cmd_attest_session(args) -> None:
         raise SystemExit(1)
 
     attest_file = paths.session_attestation_path("willow", session_id)
+    attest_sig = attest_file.parent / f"{attest_file.name}.sig"
     attest_file.parent.mkdir(parents=True, exist_ok=True)
+    # Preserve prior sidecar+sig so a failed re-attest cannot leave an
+    # unsigned (or half-replaced) identity record on disk.
+    previous_attest = (
+        attest_file.read_text(encoding="utf-8") if attest_file.is_file() else None
+    )
+    previous_sig = attest_sig.read_bytes() if attest_sig.is_file() else None
     attest_data = {
         "format": "orchestrator_session_attestation_v1",
         "app_id": "willow",
@@ -5714,6 +5721,15 @@ def _cmd_attest_session(args) -> None:
     )
     ok, detail = pgp.sign_detached(attest_file)
     if not ok:
+        if previous_attest is None:
+            attest_file.unlink(missing_ok=True)
+            attest_sig.unlink(missing_ok=True)
+        else:
+            attest_file.write_text(previous_attest, encoding="utf-8")
+            if previous_sig is not None:
+                attest_sig.write_bytes(previous_sig)
+            else:
+                attest_sig.unlink(missing_ok=True)
         print(f"Error: {detail}", file=sys.stderr)
         raise SystemExit(1)
     print(f"Attested: {detail}")
@@ -5721,7 +5737,9 @@ def _cmd_attest_session(args) -> None:
         "This signs the stable {app_id, session_id} identity, not the session's "
         "mutable state -- ordinary session writes (session_handoff_write, "
         "dispatch_accept, agent_clear, ...) will not invalidate it. Re-run this "
-        "only if you want to re-attest (e.g. after rotating your operator key)."
+        "only if you want to re-attest (e.g. after rotating your operator key). "
+        "Upgrade note (#313): old sessions/willow-<id>.json.sig files are ignored; "
+        "run attest-session once per live orchestrator session after deploying."
     )
 
 
