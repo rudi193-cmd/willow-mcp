@@ -36,7 +36,6 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 
 ### Added
 
-* federate to a remote peer over streamable HTTP ([c967009](https://github.com/rudi193-cmd/willow-mcp/commit/c9670094c407d894762a5c10e343b23e61d69030))
 * federate to a remote peer over streamable HTTP ([7706e75](https://github.com/rudi193-cmd/willow-mcp/commit/7706e75c19d5b7f10a52539f4a4d356da00cb3e4))
 
 ## [2.5.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.4.4...v2.5.0) (2026-08-10)
