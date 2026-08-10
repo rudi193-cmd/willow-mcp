@@ -188,13 +188,22 @@ build, plus one policy call and one upstream bug:
   the funnel; sourcing `tools_used` from `ReceiptLog.tail` reconciles correctly
   AND flags an exit that claims a tool no receipt ever authorized.*
 - **Policy — read-universal does NOT survive the seam.** willow-gate grants read
-  to everyone (even Exiled); willow-mcp fail-closes an unmanifested/unscoped
-  `app_id`, and in the bridge that WINS. Bringing in willow-gate does **not** make
-  willow-mcp reads universal — `store_scope` still confines. State it; don't
-  inherit it by accident.
-- **Upstream bug — `entry_allowed` unenforced in willow-gate.** Level 0 (Exiled)
-  is defined `entry_allowed=False`, but `check_in` never checks it, so an Exiled
-  agent still gets a (read-only) session. Fix upstream in willow-gate.
+  by *construction*, not by tier: `check_in` unions `{READ_TOOL}` into whatever
+  the header declares and `authorize_tool` short-circuits it, so a level whose
+  `allowed_tools` is empty still reads. willow-mcp fail-closes an
+  unmanifested/unscoped `app_id`, and in the bridge that WINS. Bringing in
+  willow-gate does **not** make willow-mcp reads universal — `store_scope` still
+  confines. State it; don't inherit it by accident.
+  **Written upstream (2026-08-10):** willow-gate's README now carries the policy
+  and the `host_acl ∩ tier_ceiling` composition rule, citing this seam as the
+  worked example. The spike's "*even Exiled*" phrasing was imprecise — see the
+  next bullet.
+- ~~**Upstream bug — `entry_allowed` unenforced in willow-gate.**~~ **Fixed
+  upstream (willow-gate#12).** Level 0 is `entry_allowed=False` and `check_in`
+  now refuses it (`willow_gate/__init__.py:280`), with test coverage. Note this
+  also corrects the bullet above: Exiled's `allowed_tools` is `()` *and* it
+  cannot open a session, so read-universal means universal among agents who may
+  **enter** — not universal full stop.
 
 ## H1 prototype — how a call binds to a session (resolved)
 
@@ -512,8 +521,16 @@ enforced upstream at `willow_gate/__init__.py:280` (`if not level.entry_allowed`
 with coverage in `tests/test_willowgate.py`, closing willow-gate#12. Nothing
 blocks the cutover on the willow-gate side.
 
-Still open: write the read-universal policy call into the gate's docs so the
-seam's read semantics are chosen, not inherited.
+~~Still open: write the read-universal policy call into the gate's docs so the
+seam's read semantics are chosen, not inherited.~~ — **done (2026-08-10).**
+willow-gate's README now states that `read` is granted by construction rather
+than by tier, that Exiled is withheld by *entry* and not by `allowed_tools`, and
+that an embedder must compose `host_acl(identity) ∩ tier_ceiling(trust_level)`
+and stay fail-closed so the gate can only narrow a host's reads, never widen
+them. This seam is cited there as the worked example.
+
+**Both Phase 5 prerequisites are now closed.** What remains is not a gap in the
+seam but the absence of a caller — see the survey in the residuals above.
 
 @phase constraints
 ## Constraints
