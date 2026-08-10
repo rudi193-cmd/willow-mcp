@@ -1,0 +1,13 @@
+# systemd --user template for the willow-mcp repo hygiene sweep.
+# Read-only: the sweep never fetches, pulls, or deletes. Type=oneshot because
+# it runs, reports, and exits — the .timer beside it owns the schedule.
+[Unit]
+Description=willow-mcp repo sweep — read-only hygiene report across @ROOT@
+
+[Service]
+Type=oneshot
+WorkingDirectory=@WORKDIR@
+Environment="WILLOW_HOME=@WILLOW_HOME@"
+Environment="WILLOW_STORE_ROOT=@WILLOW_STORE_ROOT@"
+Environment="WILLOW_APP_ID=@APP_ID@"
+ExecStart=@PYTHON@ -m willow_mcp repo-sweep --root @ROOT@ --emit-flags --collection @COLLECTION@

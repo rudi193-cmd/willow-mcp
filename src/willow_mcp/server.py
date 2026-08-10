@@ -5397,6 +5397,47 @@ def _cmd_consent_status(args) -> None:
     }, indent=2))
 
 
+def _cmd_repo_sweep(args) -> None:
+    """Survey every repo under a root and report. Read-only unless --emit-flags."""
+    from . import repo_sweep
+
+    root = Path(args.root).expanduser()
+    surveys = repo_sweep.sweep(root, args.branch_limit, args.max_depth)
+    print(repo_sweep.format_report(root, surveys, as_json=args.as_json))
+    if args.emit_flags:
+        collection = args.collection or repo_sweep.DEFAULT_FLAG_COLLECTION
+        n = repo_sweep.emit_flags(surveys, collection)
+        print(f"\n[repo-sweep] raised {n} SOIL flags in {collection}")
+
+
+def _cmd_repo_sweep_service(args) -> None:
+    """Install, inspect, or uninstall the sweep units without changing live state."""
+    from dataclasses import replace
+
+    from . import repo_sweep_service
+
+    config = repo_sweep_service.default_config()
+    overrides = {}
+    if args.root:
+        overrides["root"] = Path(args.root).expanduser().resolve()
+    if args.oncalendar:
+        overrides["oncalendar"] = args.oncalendar
+    if args.collection:
+        overrides["collection"] = args.collection
+    config = replace(config, **overrides)
+    try:
+        if args.action == "install":
+            result = repo_sweep_service.install_services(config)
+        elif args.action == "status":
+            result = repo_sweep_service.service_status()
+        else:
+            result = repo_sweep_service.uninstall_services()
+    except (RuntimeError, ValueError) as exc:
+        print(json.dumps({"error": str(exc)}, indent=2))
+        raise SystemExit(1)
+    print(json.dumps(result, indent=2))
+
+
 def _cmd_worker_service(args) -> None:
     """Install, inspect, or uninstall worker units without changing live state."""
     from dataclasses import replace
@@ -6484,6 +6525,29 @@ def _main():
         "rotate-agent",
         help="Mint a new secret for a registered agent, keeping its ceiling (operator-only)")
     regagent_rotate_p.add_argument("agent_id")
+    sweep_p = subparsers.add_parser(
+        "repo-sweep",
+        help="Read-only git hygiene report across every repo under a root")
+    sweep_p.add_argument("--root", default=str(Path.home() / "github"))
+    sweep_p.add_argument("--branch-limit", type=int, default=15,
+                         help="local branch count above this is litter (default 15)")
+    sweep_p.add_argument("--max-depth", type=int, default=2,
+                         help="how deep to look for repos; 2 covers the org layout")
+    sweep_p.add_argument("--emit-flags", action="store_true",
+                         help="also raise one SOIL flag per repo with findings")
+    sweep_p.add_argument("--collection", default=None,
+                         help="SOIL collection for flags (default willow_flags)")
+    sweep_p.add_argument("--json", action="store_true", dest="as_json")
+
+    sweep_service_p = subparsers.add_parser(
+        "repo-sweep-service",
+        help="Install/status/uninstall the weekly repo-sweep timer without starting it")
+    sweep_service_p.add_argument("action", choices=["install", "status", "uninstall"])
+    sweep_service_p.add_argument("--root", default=None)
+    sweep_service_p.add_argument("--oncalendar", default=None,
+                                 help="systemd OnCalendar (default 'Mon *-*-* 04:00:00')")
+    sweep_service_p.add_argument("--collection", default=None)
+
     worker_service_p = subparsers.add_parser(
         "worker-service",
         help="Install/status/uninstall standalone fast+batch user units without starting or stopping them",
@@ -6889,6 +6953,12 @@ def _main():
         return
     if args.command == "roster":
         _cmd_roster(args)
+        return
+    if args.command == "repo-sweep":
+        _cmd_repo_sweep(args)
+        return
+    if args.command == "repo-sweep-service":
+        _cmd_repo_sweep_service(args)
         return
     if args.command == "worker-service":
         _cmd_worker_service(args)

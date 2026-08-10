@@ -534,6 +534,41 @@ because you already chose that child's binary and environment. It becomes
 authentication against a peer this process did not start — which needs a
 non-stdio transport this client does not yet implement.
 
+### Repo hygiene sweep
+
+A read-only survey of every git repo under a root — diverged and unpushed
+branches, untracked *source* files, tracked-but-dirty runtime state, branch
+litter, and merged worktrees that are safe to reap. It never fetches, pulls,
+commits, or deletes; cleanup is offered as a report line, never performed.
+
+```console
+$ willow-mcp repo-sweep --root ~/github
+[repo-sweep] 33 repos under /home/you/github, 4 with findings, 29 clean
+
+  willow-memory/.willow (master)
+    - 10 untracked source files: skills/brainstorming.md, skills/debugging.md …
+  safe-app-store-public (master)
+    - 22 tracked files dirty (runtime state in git?)
+```
+
+`--emit-flags` also raises one SOIL flag per repo with findings, into
+`willow_flags` (inside the `willow_*` store_scope, so no manifest change).
+Flag ids are stable per repo, so a weekly run updates rather than accumulates.
+`--json` for machine-readable output; `--max-depth` (default 2) covers both a
+flat `<root>/<repo>` tree and an org-shaped `<root>/<org>/<repo>` one.
+
+To run it weekly — `Mon *-*-* 04:00:00`, `Persistent=true` so a sweep missed
+while the machine was off still runs:
+
+```console
+$ willow-mcp repo-sweep-service install     # writes .service + .timer
+$ systemctl --user enable --now willow-mcp-repo-sweep.timer
+```
+
+Like `worker-service`, the installer only manages unit files and
+`daemon-reload` — it never starts, stops, enables, or disables anything. That
+second line is yours.
+
 ### Running the task worker
 
 `task_submit` only *queues* a task. A worker process executes it, sandboxed with
