@@ -15,7 +15,7 @@ good and the rest are load-bearing morale.
 > itself*. Tags below record where. The takeaway: a good chunk of "willow could
 > do more" was actually "willow already does this." Check `the_grove.py`,
 > `friction_floor.py`, `lineage.py`, `code_graph/`, `forks.py`,
-> `governance_ledger.py`, and `federation` before proposing net-new.
+> `governance_ledger.py`, and `federation` before proposing net-new. A Nestor similarity pass also caught 2 internal duplicates (former #103/#104), now folded into #18/#17.
 
 ---
 
@@ -40,8 +40,8 @@ good and the rest are load-bearing morale.
 14. Drought years: sessions where nothing was learned show as thin rings.
 15. Lightning-strike lessons: mark a ring where a catastrophic mistake taught something.
 16. Cross-Grove grafting: import a lesson-ring from another agent's tree.
-17. The tree drops "leaves" (ephemeral context) every autumn (`context_expire` on a cron). — ✅ **shipped**: willow-mcp `context_expire` already retires ephemeral context (the seasonal/cron flavor is garnish).
-18. Carve initials into the bark. Purely for morale.
+17. The tree drops "leaves" (ephemeral context) every autumn — `context_expire` firing on real seasons. — ✅ **shipped**: willow-mcp `context_expire` already retires ephemeral context (the seasonal/cron flavor is garnish). *(folds in former #104.)*
+18. Carve initials into the bark of a growth ring. Purely for morale — and it survives forever in FRANK. *(folds in former #103.)*
 
 ## 🪺 The Nest & intake
 
@@ -172,8 +172,10 @@ if any of these already ship, that is its own kind of finding.)*
 
 ## The tree, dramatized
 
-103. **Growth rings you can carve initials into.** Purely morale. Survives forever in FRANK.
-104. The Grove **drops leaves in autumn** — `context_expire` fires on real seasons.
+> *Dedup (Nestor similarity pass): former #103 folded into #18, former #104
+> folded into #17 — both were near-duplicates of Grove-section ideas. Numbers
+> retired rather than reused, to keep existing references stable.*
+
 105. **Woodpecker** — a chaos-monkey daemon that pecks a random healthy fork to test resilience.
 106. **Squirrels** bury random records in wrong collections and forget where. You find them in spring.
 107. Lightning-strike rings char black and the tool that caused the disaster is named in the bark forever.
