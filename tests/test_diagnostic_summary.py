@@ -319,3 +319,96 @@ def test_diag_net_lease_reports_key_readable_and_warns(monkeypatch):
     out = server._diag_net_lease("someapp")
     assert out["private_key_readable"] is True
     assert out["status"] == "warn"
+
+
+# ── #332: envelope-registry health surfaces an empty/relocated registry ───────
+
+def _registry_ok():
+    return {"status": "ok", "path": "/x/constitutional/pre-approved.json",
+            "present": True, "active_grants": 3}
+
+
+def _registry_empty():
+    return {"status": "warn", "path": "/x/constitutional/pre-approved.json",
+            "present": True, "active_grants": 0}
+
+
+def _registry_missing():
+    return {"status": "warn", "path": "/x/constitutional/pre-approved.json",
+            "present": False, "active_grants": 0}
+
+
+def test_empty_envelope_registry_is_a_named_degrading_problem():
+    problems = server._derive_problems(
+        _store_ok(), _pg_ok(), _manifest_ok(), "stdio",
+        None, None, None, None, _registry_empty(),
+    )
+    reg = [p for p in problems if p["check"] == "envelope_registry"]
+    assert len(reg) == 1
+    assert reg[0]["severity"] == "warn"
+    assert "#332" in reg[0]["detail"]
+    assert "verb 11" in reg[0]["fix"] or "WILLOW_ENVELOPE_REGISTRY" in reg[0]["fix"]
+    # Degrades, never breaks: a fresh install that has not planted grants yet is
+    # incomplete, not defective.
+    assert server._derive_verdict(problems) == "degraded"
+
+
+def test_missing_envelope_registry_names_seeding_and_planting():
+    problems = server._derive_problems(
+        _store_ok(), _pg_ok(), _manifest_ok(), "stdio",
+        None, None, None, None, _registry_missing(),
+    )
+    reg = next(p for p in problems if p["check"] == "envelope_registry")
+    assert "not found" in reg["detail"]
+
+
+def test_healthy_envelope_registry_produces_no_problem():
+    problems = server._derive_problems(
+        _store_ok(), _pg_ok(), _manifest_ok(), "stdio",
+        None, None, None, None, _registry_ok(),
+    )
+    assert [p for p in problems if p["check"] == "envelope_registry"] == []
+
+
+def test_envelope_registry_arg_is_optional():
+    # Existing callers that do not pass it must be unaffected (no such problem).
+    problems = server._derive_problems(_store_ok(), _pg_ok(), _manifest_ok(), "stdio")
+    assert [p for p in problems if p["check"] == "envelope_registry"] == []
+
+
+def test_diag_envelope_registry_counts_only_usable_grants(monkeypatch, tmp_path):
+    reg = tmp_path / "pre-approved.json"
+    reg.write_text(json.dumps({"active": [{"id": "e1"}, {"id": "e2"}, "garbage", {"no": "id"}]}))
+    monkeypatch.setenv("WILLOW_ENVELOPE_REGISTRY", str(reg))
+    out = server._diag_envelope_registry()
+    assert out == {"status": "ok", "path": str(reg), "present": True, "active_grants": 2}
+
+
+def test_diag_envelope_registry_warns_on_empty_starter(monkeypatch, tmp_path):
+    reg = tmp_path / "pre-approved.json"
+    reg.write_text(json.dumps({"active": [], "pre_approved": [], "proposals": []}))
+    monkeypatch.setenv("WILLOW_ENVELOPE_REGISTRY", str(reg))
+    out = server._diag_envelope_registry()
+    assert out["status"] == "warn"
+    assert out["active_grants"] == 0
+    assert out["present"] is True
+
+
+def test_diag_envelope_registry_warns_when_absent(monkeypatch, tmp_path):
+    monkeypatch.setenv("WILLOW_ENVELOPE_REGISTRY", str(tmp_path / "nope.json"))
+    out = server._diag_envelope_registry()
+    assert out["status"] == "warn"
+    assert out["present"] is False
+
+
+def test_diagnostic_summary_is_registered_and_the_probe_helper_is_not():
+    """Guard against decorator displacement (regression from #332's own fix):
+    _diag_envelope_registry is a PRIVATE helper, not an MCP tool, and
+    diagnostic_summary must stay a registered tool. Inserting the helper between
+    `@mcp.tool()` and `def diagnostic_summary` once moved the decorator onto the
+    helper — the unit suite stayed green because the registered/guarded tool
+    counts balanced, and only the live stdio handshake (fleet-seams) caught it.
+    This asserts the registry directly so the next such slip fails here."""
+    names = {t.name for t in server.mcp._tool_manager.list_tools()}
+    assert "diagnostic_summary" in names, "diagnostic_summary must be a registered MCP tool"
+    assert "_diag_envelope_registry" not in names, "the private probe helper must not be exposed as a tool"

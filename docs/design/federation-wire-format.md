@@ -62,7 +62,7 @@ Verb vocabulary: the 14-verb table is the seed vocabulary. A node MAY implement 
 
 ## 4. Refusal semantics (errno, federated)
 
-Local errno table carries over unchanged (ENOSYS, ENOENT, EACCES, EDQUOT, EEXPIRED, EAMBIG) with routes re-pointed: `trap_to_console` means *the executing node's own console* — never the requester's. Three federation-only additions:
+Local errno table carries over unchanged (ENOSYS, ENOENT, ENOGRANTS, EACCES, EDQUOT, EEXPIRED, EAMBIG) with routes re-pointed: `trap_to_console` means *the executing node's own console* — never the requester's. Three federation-only additions:
 
 | errno | Meaning | Route |
 |---|---|---|
