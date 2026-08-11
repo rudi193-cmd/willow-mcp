@@ -31,6 +31,13 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.9.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.8.0...v2.9.0) (2026-08-11)
+
+
+### Added
+
+* **tool-oracle:** seal the remaining 7 verbs — full 112/112 catalog coverage ([66b0d09](https://github.com/rudi193-cmd/willow-mcp/commit/66b0d09a7ae448d2cdc8ac0144e2e665a08130d9))
+
 ## [2.8.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.7.1...v2.8.0) (2026-08-11)
 
 
