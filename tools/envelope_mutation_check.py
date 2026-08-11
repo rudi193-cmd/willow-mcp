@@ -61,6 +61,18 @@ def _replace_once(source: str, old: str, new: str, mutation_name: str) -> str:
 # (anchor text, replacement, label)
 
 MUTATIONS = [
+    # A registry that loads but holds zero active grants must be refused loudly
+    # as ENOGRANTS, before the per-envelope miss below — this is the #332
+    # runtime guard: a relocated $WILLOW_HOME seeds an empty starter that
+    # shadows the ratified registry, and reported as a generic ENOENT it hid
+    # the outage for ~60 hours. No-op'ing it falls through to "envelope not
+    # active", which the ENOGRANTS test must catch.
+    ('        if not registry.get("active"):\n'
+     '            return {"ok": False, "errno": "ENOGRANTS", "reason": _no_grants_reason()}',
+     '        if False:\n'
+     '            return {"ok": False, "errno": "ENOGRANTS", "reason": _no_grants_reason()}',
+     "an empty registry is refused loudly as ENOGRANTS, not a generic per-envelope miss"),
+
     # A duplicate/absent envelope id must be rejected as ENOENT, not silently
     # resolved to the first match — `len(matches) != 1` is doing two jobs
     # (missing AND ambiguous), and this mutation drops the ambiguous half.

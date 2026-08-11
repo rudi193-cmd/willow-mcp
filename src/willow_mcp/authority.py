@@ -175,6 +175,8 @@ def _missing_envelope_authority(
     verb: str,
     result: dict,
 ) -> str:
+    if errno == "ENOGRANTS":
+        return "registry:no-active-grants"
     if errno == "ENOENT":
         return f"envelope:{envelope_id}"
     if errno == "EACCES":

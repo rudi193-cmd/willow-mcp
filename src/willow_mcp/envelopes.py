@@ -64,6 +64,20 @@ def _granted(grantee, actor: str) -> bool:
     )
 
 
+def _no_grants_reason() -> str:
+    """The loud, actionable message for a registry that loads but holds no
+    active grants — the empty starter seeded when $WILLOW_HOME is relocated and
+    the ratified registry is left behind (#332). Naming the resolved file turns
+    a systemic misconfiguration into a one-line diagnosis instead of a generic
+    per-envelope miss."""
+    return (
+        f"envelope registry holds no active grants: {registry_path()} — an "
+        "unpopulated starter or a registry shadowed by a $WILLOW_HOME relocation. "
+        "Issue grants (verb 11) or point WILLOW_ENVELOPE_REGISTRY at the ratified "
+        "registry."
+    )
+
+
 def _bound_matches(grant, actual) -> bool:
     if isinstance(grant, list):
         if isinstance(actual, list):
@@ -104,6 +118,17 @@ class EnvelopeAuthority:
             registry, verbs = self._registry()
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             return {"ok": False, "errno": "EAMBIG", "reason": str(exc)}
+        # #332 (runtime guard): a registry that loads but carries zero active
+        # grants is refused LOUDLY and distinctly, before the per-envelope miss
+        # below. A functioning system always holds at least the orchestrator
+        # seat's own planting, so "no active grants" is never steady state — it
+        # is a fresh-but-unpopulated starter or, as in #332, the empty starter
+        # seeded at a relocated $WILLOW_HOME shadowing the ratified registry.
+        # Reported as the generic ENOENT ("envelope not active") it read as one
+        # grant expiring and hid the outage for ~60 hours; ENOGRANTS names the
+        # systemic cause and the file, so it surfaces at the first check.
+        if not registry.get("active"):
+            return {"ok": False, "errno": "ENOGRANTS", "reason": _no_grants_reason()}
         matches = [
             row
             for row in registry.get("active") or []

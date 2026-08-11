@@ -48,6 +48,11 @@
       "route": "trap_to_console",
       "note": "Proposed action enqueued via human_required queue with the call args attached."
     },
+    "ENOGRANTS": {
+      "meaning": "The registry loaded but holds zero active grants — systemic, not a per-call miss.",
+      "route": "trap_to_console",
+      "note": "A functioning system always holds at least the orchestrator seat's own planting, so this is never steady state: an unpopulated starter, or (issue #332) the empty starter seeded at a relocated $WILLOW_HOME shadowing the ratified registry. Distinct from ENOENT so the systemic cause surfaces at the first check instead of reading as one grant expiring. The reason names the resolved registry file."
+    },
     "EACCES": {
       "meaning": "A covering envelope exists but grantee or ring does not match.",
       "route": "deny_and_log",

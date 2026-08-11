@@ -148,6 +148,39 @@ def _check_with(tmp_path, monkeypatch, overrides=None, *, call_args=None,
     )
 
 
+def test_check_refuses_empty_registry_loudly(monkeypatch, tmp_path):
+    """#332 runtime guard: a registry that loads but holds zero active grants —
+    the empty starter seeded at a relocated $WILLOW_HOME while the ratified
+    registry is left behind — must be refused as a distinct, loud ENOGRANTS that
+    names the resolved file, not the generic per-envelope ENOENT ("envelope not
+    active") that read as one grant expiring and hid the outage for ~60 hours."""
+    registry, syscalls = _charter(tmp_path)
+    data = json.loads(registry.read_text())
+    data["active"] = []  # the seeded empty-starter shape
+    registry.write_text(json.dumps(data))
+    monkeypatch.setenv("WILLOW_ENVELOPE_REGISTRY", str(registry))
+    monkeypatch.setenv("WILLOW_SYSCALL_TABLE", str(syscalls))
+    result = envelopes.EnvelopeAuthority(_Ledger()).check(
+        "env-dispatch", actor="willow", verb="dispatch",
+        call_args={"to_agents": "hanuman", "task_class": "build"},
+    )
+    assert result["ok"] is False
+    assert result["errno"] == "ENOGRANTS"
+    # The reason must name the resolved registry so the diagnosis is one line.
+    assert str(registry) in result["reason"]
+
+
+def test_empty_registry_errno_is_registered_in_the_syscall_table(monkeypatch, tmp_path):
+    """ENOGRANTS is a governed errno: the enforcer returns it, so the errno
+    registry in the shipped syscall table must define it (route + meaning), the
+    same contract every other errno check() emits already honors."""
+    from willow_mcp import paths
+
+    table = json.loads((paths.bundle_dir() / "constitutional" / "syscall-table.json").read_text())
+    assert "ENOGRANTS" in table["errno"], "check() emits ENOGRANTS; the table must define it"
+    assert table["errno"]["ENOGRANTS"]["route"] == "trap_to_console"
+
+
 def test_check_refuses_duplicate_envelope_id(monkeypatch, tmp_path):
     """Two active rows sharing one id must not silently resolve to the
     first -- that is exactly as forgeable as a missing envelope."""
