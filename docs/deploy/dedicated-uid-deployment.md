@@ -279,6 +279,57 @@ account and still be group/world-writable (ownership alone proves nothing;
 be nominally self-owned while still not self-writable under an unusual
 ACL — so check both, and trust (1) for anything security-relevant.
 
+## Verification checklist — raw OS probes (not just the diagnostic)
+
+`willow-mcp doctor`'s `uid separation:`/`hardened` readout (above) asks
+willow-mcp's own code to report on itself. The commands below ask the kernel
+instead — `sudo -u <account>` as the process being tested, touching the
+actual paths, independent of anything this repo's own tooling claims. Run
+each of the three as the **agent/runtime account under test** (your login
+uid in Shape A; `willow-runtime` in Shape B2 — see the caveat below for
+Shape A/B1, where some of these are *expected* to succeed):
+
+```bash
+# Adjust to your install:
+WILLOW_HOME=/var/lib/willow-mcp
+AGENT_UID=willow-runtime                       # or your own login user (Shape A)
+EGRESS_DIR="${WILLOW_MCP_EGRESS_CONFIG_DIR:-$HOME/.config/willow-mcp/egress}"
+
+# 1. Cannot read the egress private key (B-44/#182)
+sudo -u "$AGENT_UID" cat "$EGRESS_DIR/private.pem"
+# expect: cat: …/private.pem: Permission denied
+
+# 2. Cannot write mcp_apps/ — manifests, leases, "task_net" self-grants (B-32)
+sudo -u "$AGENT_UID" sh -c "echo x > '$WILLOW_HOME/mcp_apps/.probe'"
+# expect: sh: …/.probe: Permission denied
+
+# 3. Cannot write config/ — settings.global.json, consent.json
+sudo -u "$AGENT_UID" sh -c "echo x > '$WILLOW_HOME/config/.probe'"
+# expect: sh: …/.probe: Permission denied
+
+# 4. Cannot read a store .db file, once `repair-runtime-perms` has applied
+#    #232's owner-only 0600 (glob covers every per-collection store.db):
+sudo -u "$AGENT_UID" sh -c "cat '$WILLOW_HOME'/store/*/store.db > /dev/null"
+# expect: cat: …/store.db: Permission denied
+```
+
+Each command should fail with `Permission denied` — a success (the file
+opens or the write lands) means the split has not actually taken hold for
+that account and path; re-run `harden-trust-root`/`repair-runtime-perms` and
+check ownership with `stat` before trusting the diagnostic's summary.
+
+**Shape A / B1 caveat:** probes 2 and 3 are the only ones that mean anything
+in Shape A or B1. In both, the account under test **is** the runtime account
+(Shape A: agent and runtime are literally the same process; B1: runtime IS
+`willow-operator`), so probe 4 (store `.db`) is *expected to succeed* — that
+account legitimately owns `store/` for normal operation — and probe 1 only
+denies in Shape A (B1's account is `willow-operator`, which by definition
+holds the egress key). Only Shape B2, with a real `willow-runtime` account
+distinct from both `willow-operator` and the agent, makes all four probes
+(1, 2, 3, and 4) meaningful in the way the checklist above implies. This
+mirrors the exact same caveat the "Store `.db` files (#232)" section below
+states for `store_db_exposure`/`checks.store_db_perms`.
+
 ## Revisiting strict mode's default-off posture
 
 Not done here, and not proposed here. The issue asks this be revisited
