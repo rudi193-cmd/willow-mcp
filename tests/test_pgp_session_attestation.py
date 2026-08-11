@@ -21,6 +21,7 @@ import subprocess
 import pytest
 
 from willow_mcp import dispatch as ds
+from willow_mcp import handoff as hf
 from willow_mcp import human_session as hs
 from willow_mcp import paths, pgp
 
@@ -197,6 +198,47 @@ def test_attestation_survives_session_handoff_write(home, pgp_env, monkeypatch):
     assert reason is None, reason
 
 
+def test_attestation_survives_handoff_write_v4(home, pgp_env, monkeypatch):
+    """#334: confirm the #313 fix also covers the *dispatch* closeout path.
+
+    session_handoff_write (human closeout, tested above) explicitly calls
+    session_bind at the end, rewriting sessions/willow-{id}.json. The dispatch
+    closeout path (handoff_write_v4) is reached differently: dispatch_accept
+    calls session_bind when a packet is accepted (already covered by
+    test_attestation_survives_session_bind_state_changes), but
+    handoff.handoff_write_v4 itself only writes into the dispatch packet
+    (handoff.json/closeout.md/status.json) -- it never touches
+    sessions/willow-{id}.json or the attestation sidecar. Either way, the
+    attestation must survive a full accept -> closeout round trip on a packet
+    addressed to app_id=willow, the same way it survives the human path."""
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    ds.session_enter("willow", "sess-v4")
+    _attest("sess-v4")
+
+    sent = ds.dispatch_send("hanuman", "willow", "# do the thing\n")
+    assert "error" not in sent
+    dispatch_id = sent["dispatch_id"]
+
+    accepted = ds.dispatch_accept(dispatch_id, "willow", "sess-v4")
+    assert "error" not in accepted, accepted
+
+    # dispatch_accept's session_bind must not have invalidated the attestation.
+    assert hs.orchestrator_write_denial(
+        "willow", "frank_append", serve_mode=False, session_id="sess-v4"
+    ) is None
+
+    result = hf.handoff_write_v4(
+        "willow", dispatch_id, narrative="closing out the dispatch"
+    )
+    assert "error" not in result, result
+    assert result["status"] == "complete"
+
+    reason = hs.orchestrator_write_denial(
+        "willow", "frank_append", serve_mode=False, session_id="sess-v4"
+    )
+    assert reason is None, reason
+
+
 def test_serve_mode_bypasses_attestation_check(home, pgp_env, monkeypatch):
     """Serve mode trusts the confirmed OAuth binding alone -- unchanged by #186."""
     assert hs.orchestrator_write_denial(
@@ -338,6 +380,49 @@ def test_attest_session_cli_removes_fresh_sidecar_when_first_sign_fails(
     attest_sidecar = paths.session_attestation_path("willow", "sess-cli-fresh-fail")
     assert not attest_sidecar.exists()
     assert not (attest_sidecar.parent / f"{attest_sidecar.name}.sig").exists()
+
+
+def test_dispatch_closeout_gate_e2e_ordinary_error_not_attestation(home, pgp_env, monkeypatch):
+    """#334 end-to-end: through the real guarded MCP tools (not the bare
+    dispatch/handoff modules), accept and close out a packet addressed to
+    app_id=willow, then confirm the next attestation-gated call fails for its
+    own ordinary domain reason (no Postgres configured here) rather than
+    orchestrator_session_attestation_missing -- proving handoff_write_v4's
+    write did not clobber the attestation the way #313 describes."""
+    import json
+
+    from willow_mcp import server
+
+    apps = home / "mcp_apps" / "willow"
+    apps.mkdir(parents=True)
+    manifest_path = apps / "manifest.json"
+    manifest_path.write_text(json.dumps({"permissions": ["orchestrator"]}))
+    ok, detail = pgp.sign_detached(manifest_path)
+    assert ok, detail
+
+    monkeypatch.setenv("WILLOW_HUMAN_ORCHESTRATOR", "1")
+    server._set_orchestrator_session("")  # isolate from any earlier test in this process
+    server.session_enter("willow", "sess-v4-e2e")
+    _attest("sess-v4-e2e")
+
+    sent = ds.dispatch_send("hanuman", "willow", "# do the thing\n")
+    assert "error" not in sent
+    dispatch_id = sent["dispatch_id"]
+
+    accepted = server.dispatch_accept("willow", dispatch_id, "sess-v4-e2e")
+    assert "error" not in accepted, accepted
+
+    closed = server.handoff_write_v4(
+        "willow", dispatch_id, narrative="closing out via the guarded tool"
+    )
+    assert "error" not in closed, closed
+    assert closed["status"] == "complete"
+
+    # The attestation-gated call after closeout must fail (if at all) for its
+    # own domain reason -- here, no Postgres configured in this test env --
+    # never orchestrator_session_attestation_missing/_invalid.
+    result = server.frank_append("willow", "proj", "note", {"x": 1})
+    assert "attestation" not in str(result.get("error", ""))
 
 
 # ── server._gate threading: session_enter records the current session ───────

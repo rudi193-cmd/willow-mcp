@@ -19,6 +19,7 @@ from .paths import (
     session_path,
     sessions_dir,
 )
+from . import dispatch_signing
 from .human_session import is_orchestrator_app
 from .registry import persona_context
 from .seed_loader import seed_context
@@ -235,6 +236,12 @@ def dispatch_send(
         "created_at": _utc_now(),
         "status": "pending",
     }
+    # B-52/#241: sign every field above (HMAC-SHA256, runtime-held key --
+    # dispatch_signing.py) so dispatch_read/dispatch_list can tell a packet
+    # this call actually wrote from one hand-planted directly under the
+    # operator-writable dispatch/ tree. Computed last, over the fully
+    # populated dict, so it covers every field including assignment_sha256.
+    meta["signature"] = dispatch_signing.sign_meta(meta)
     status = {
         "status": "pending",
         "updated_at": meta["created_at"],
@@ -321,6 +328,16 @@ def dispatch_read(dispatch_id: str) -> dict:
         return {"error": "not_found", "dispatch_id": dispatch_id}
     if not _meta_is_well_formed(meta):
         return {"error": "malformed_packet", "dispatch_id": dispatch_id}
+    # B-52/#241: a well-formed meta.json can still be a hand-planted forgery
+    # -- verify the HMAC before trusting anything else in it. A present-but-
+    # wrong signature is tamper evidence and always refused; a MISSING
+    # signature (legacy_unsigned -- packets written before signing existed)
+    # is refused only under strict mode, otherwise let through flagged.
+    sig_status = dispatch_signing.signature_status(meta)
+    if sig_status == dispatch_signing.SIG_INVALID:
+        return {"error": "invalid_signature", "dispatch_id": dispatch_id}
+    if sig_status == dispatch_signing.SIG_LEGACY_UNSIGNED and dispatch_signing.strict_mode():
+        return {"error": "unsigned_packet_strict_mode", "dispatch_id": dispatch_id}
     status = _read_json(root / "status.json") or {}
     assignment_path = root / "assignment.md"
     assignment = ""
@@ -339,6 +356,7 @@ def dispatch_read(dispatch_id: str) -> dict:
         "meta": meta,
         "status": status,
         "assignment": assignment,
+        "signature_status": sig_status,
     }
 
 
@@ -375,9 +393,15 @@ def dispatch_list(
     # a symlink (e.g. to redirect future dispatch_send writes elsewhere) --
     # same is_dir()-follows-symlinks trap as any individual packet dir.
     if disp_root.is_symlink() or not disp_root.is_dir():
-        return {"dispatches": [], "total": 0}
+        return {"dispatches": [], "total": 0, "unverified": [], "unverified_total": 0}
 
     rows: list[dict] = []
+    # B-52/#241: packets that fail signature verification are NOT normal
+    # entries -- collected here instead, each carrying `unverified: true` and
+    # a `signature_status` reason, so tampering is surfaced rather than
+    # silently dropped (a caller who only reads `dispatches` never sees a
+    # forged/legacy packet mixed in with trusted ones).
+    unverified: list[dict] = []
     for child in sorted(disp_root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
         # child.is_dir() follows a symlink, so check is_symlink() first --
         # a symlinked entry is refused outright, not silently followed.
@@ -396,7 +420,10 @@ def dispatch_list(
         cur_status = st.get("status") or meta.get("status") or "pending"
         if status and cur_status != status:
             continue
-        rows.append({
+        sig_status = dispatch_signing.signature_status(meta)
+        if sig_status == dispatch_signing.SIG_LEGACY_UNSIGNED and dispatch_signing.strict_mode():
+            continue  # strict mode: hard-reject, not even surfaced as unverified
+        row = {
             "dispatch_id": meta.get("dispatch_id", child.name),
             "from_app": meta.get("from_app"),
             "to_app": meta.get("to_app"),
@@ -405,10 +432,21 @@ def dispatch_list(
             "status": cur_status,
             "created_at": meta.get("created_at"),
             "reply_to": meta.get("reply_to"),
-        })
-        if len(rows) >= limit:
-            break
-    return {"dispatches": rows, "total": len(rows)}
+        }
+        if sig_status == dispatch_signing.SIG_VALID:
+            rows.append(row)
+            if len(rows) >= limit:
+                break
+        else:
+            row["unverified"] = True
+            row["signature_status"] = sig_status
+            unverified.append(row)
+    return {
+        "dispatches": rows,
+        "total": len(rows),
+        "unverified": unverified,
+        "unverified_total": len(unverified),
+    }
 
 
 def dispatch_set_status(dispatch_id: str, status: str, **extra: Any) -> dict:
@@ -436,6 +474,15 @@ def dispatch_set_status(dispatch_id: str, status: str, **extra: Any) -> dict:
     meta = _read_json(meta_path)
     if meta:
         meta["status"] = status
+        # B-52/#241: this is a legitimate mutation of meta.json (only reached
+        # through dispatch_accept/handoff_write_v4/agent_clear -- never a raw
+        # write), so re-sign rather than let a lifecycle transition
+        # self-invalidate the packet's own signature. Any OTHER edit to
+        # meta.json -- one that didn't go through this function -- still
+        # invalidates it, which is exactly the tamper evidence this exists
+        # to catch. A legacy packet with no prior signature is signed for
+        # the first time here, same as dispatch_send would have.
+        meta["signature"] = dispatch_signing.sign_meta(meta)
         _write_json(meta_path, meta)
     _pg_mirror_status(dispatch_id, status)  # best-effort fleet mirror
     return {"dispatch_id": dispatch_id, "status": status}

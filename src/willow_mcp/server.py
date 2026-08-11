@@ -2785,6 +2785,133 @@ def agent_dispatch_result(
     return {"routing_id": routing_id, "status": status} if updated else {"error": "not_found"}
 
 
+# ── Verb-level citation-before-act enforcement (#333) ──────────────────────────
+#
+# Background: envelope use counts are DERIVED by counting `envelope_citation`
+# entries in FRANK, never a stored counter (envelopes.py's own docstring, and
+# the schema note in pre-approved.json: "a stored counter is mutable state an
+# agent could touch, a derived count is not"). That design has a hole: a verb
+# an envelope governs only gets metered if *something* writes the citation
+# first, and until now the only writer was the `envelope_apply` tool — a
+# separate, optional call. An enveloped verb (observed: `dispatch_send`) that
+# simply never calls `envelope_apply` writes no citation and is never charged
+# or denied; the meter reads clean whether the caller complied or bypassed
+# governance entirely. Cite-before-act was discipline, not mechanism.
+#
+# Fix: the verb's own handler resolves its governing envelope and cites it
+# itself, before the act, so citation and act are one indivisible call --- an
+# uncited act becomes impossible rather than merely discouraged.
+#
+# VERB_LEVEL_ENFORCED_VERBS names every syscall-table verb whose MCP tool
+# handler now carries this gate at its own top (currently just "dispatch" —
+# dispatch_send, the bypass the issue observed). Growing this set means
+# wiring `_enveloped_verb_gate` into that verb's own handler the same way;
+# it is not itself an enforcement mechanism, only the roster `envelope_apply`
+# below consults to know which verbs already cite for themselves.
+VERB_LEVEL_ENFORCED_VERBS = frozenset({"dispatch"})
+
+
+def _enveloped_verb_gate(
+    app_id: str, verb: str, call_args: dict, *, project: str, session: str = ""
+) -> Optional[dict]:
+    """Cite-before-act for one verb-governed MCP tool call (#333).
+
+    Resolves the active envelope (if any) governing `verb` for `app_id` and,
+    when one exists, writes its FRANK citation and enforces its quota BEFORE
+    the caller is allowed to proceed — the same indivisible check-then-cite
+    `envelope_apply` already performs, just triggered by the verb's own
+    handler instead of a separate opt-in call.
+
+    Returns ``None`` when the call may proceed: either no envelope governs
+    `verb` for this actor (today's behavior, unmetered — an envelope
+    programme that grants nothing here is not a reason to refuse an act
+    nothing ever governed), or a governing envelope granted the citation.
+    Returns an error dict the caller MUST return immediately, without
+    performing the act, when a governing envelope was FOUND but refused
+    (quota exhausted, bounds mismatch, expired, revoked, ...), when more than
+    one active envelope governs this verb+actor pair (ambiguous — refused
+    rather than guessed), or when a governing envelope was found but
+    Postgres is unreachable to cite it.
+
+    Resolving *whether* the verb is governed needs only the registry file
+    (no Postgres) — see `envelopes.governing_envelope_ids`. Postgres is only
+    required once a governing envelope is actually found, to write the
+    citation and read the derived count; a Postgres-less install with no
+    envelope configured for this verb+actor is unaffected, same as before
+    #333. Once a governing envelope IS found, missing Postgres fails closed
+    (mirrors `envelope_apply`'s own `_postgres_unavailable()` — a citation
+    that cannot be written must not be treated as though it were).
+
+    Backward-compat note: an UNREADABLE registry (missing file, wrong
+    ownership/permissions, malformed JSON — `governing_envelope_ids` raises
+    for all three, same as `EnvelopeAuthority.check()` does for an
+    explicitly-named envelope_id) is treated here as "not governed", NOT as
+    a fail-closed refusal. This is deliberately narrower than `check()`'s own
+    fail-closed stance: `check()` is reached only when a caller already
+    asserts a specific `envelope_id` ought to apply (`envelope_apply`, or
+    this same gate once a match IS found), so refusing on an unreadable
+    registry there is refusing a claim that cannot be verified. This
+    resolution step runs on EVERY call to an enforced verb, for every actor,
+    whether or not they hold — or believe they hold — any envelope at all;
+    treating "the registry itself is missing" as a hard failure here would
+    turn every install that has not configured envelope governance (which is
+    most installs — the shipped default is an empty starter, see
+    envelopes.py's `registry_path` docstring) into one where dispatch_send
+    cannot run at all. An actor that genuinely holds an active "dispatch"
+    grant in a registry that then becomes unreadable degrades to unmetered,
+    exactly the pre-#333 behavior for that actor — not a new hole, since
+    #333 closes the "held a grant, cited nothing" bypass, not "the
+    environment is broken in a way that predates this fix" cases."""
+    try:
+        from .envelopes import governing_envelope_ids
+
+        matches = governing_envelope_ids(verb, app_id)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    if not matches:
+        return None
+    if len(matches) > 1:
+        return {
+            "error": "EAMBIG",
+            "reason": "multiple active envelopes govern this verb for actor",
+            "envelope_ids": matches,
+        }
+    pg = get_pg()
+    if not pg:
+        return _postgres_unavailable()
+    try:
+        from .envelopes import EnvelopeAuthority
+        from .governance_ledger import GovernanceLedger
+
+        result = EnvelopeAuthority(GovernanceLedger(pg)).authorize_and_cite(
+            matches[0],
+            actor=app_id,
+            verb=verb,
+            call_args=call_args,
+            project=project,
+            session=session,
+        )
+    except Exception as exc:
+        return {"error": f"envelope_gate_failed: {exc}"}
+    if result.get("ok"):
+        return None
+    return {
+        "error": result.get("errno", "EAMBIG"),
+        "reason": result.get("reason"),
+        "citation_id": result.get("citation_id"),
+    }
+
+
+# Project used for the FRANK citation a verb-level gate writes on the caller's
+# behalf. Verb-level citations (unlike `envelope_apply`'s, which takes an
+# explicit `project`) have no natural project/workspace of their own — the
+# citation exists to meter and audit the grant, not to file the act under a
+# workspace — so they are recorded under the same fixed "governance" project
+# `GovernanceLedger.rechain()`'s own self-documenting marker rows use for
+# mechanism-level FRANK entries that aren't about any one project.
+_VERB_CITATION_PROJECT = "governance"
+
+
 # ── Dispatch packet stack (filesystem — no Postgres required) ─────────────────
 
 @mcp.tool()
@@ -2805,8 +2932,23 @@ def dispatch_send(
     $WILLOW_HOME/dispatch/. `assignment_md` is the full brief the specialist
     will read; `reply_to` names who verifies the handoff. The packet advances
     pending → working → complete via dispatch_accept and handoff_write_v4.
-    Filesystem-backed — no Postgres required. Returns the new packet's
+    Filesystem-backed unless an authority envelope governs verb "dispatch"
+    for this caller (#333) — then citing that envelope (and its quota) gates
+    the write, Postgres-backed for that one check. Returns the new packet's
     metadata including its dispatch_id."""
+    # #333: cite-before-act. `role` is resolved here with dispatch.py's own
+    # fallback (`role or to_app`, lowercased) so the bounds an envelope is
+    # checked against name the same task_class dispatch.py will actually
+    # record as `role` on the packet — not a value the gate invented.
+    resolved_role = (role or to_app).lower()
+    gate_err = _enveloped_verb_gate(
+        app_id,
+        "dispatch",
+        {"to_agents": to_app, "task_class": resolved_role},
+        project=_VERB_CITATION_PROJECT,
+    )
+    if gate_err:
+        return gate_err
     return dispatch_stack.dispatch_send(
         from_app=app_id,
         to_app=to_app,
@@ -2852,7 +2994,12 @@ def dispatch_list(
     """List dispatch packets newest-first, filtered by any combination of
     to_app / from_app / status ('' = no filter). Returns packet metadata only,
     no assignment bodies — use dispatch_read for one packet's brief.
-    Read-only. Returns {dispatches, total}."""
+    Read-only. Returns {dispatches, total, unverified, unverified_total} --
+    `dispatches` only carries packets whose meta.json HMAC signature
+    verified (B-52, issue #241); a packet with no signature (legacy,
+    pre-dates signing) or a wrong one (tampered/forged) is never mixed into
+    it, instead appearing in `unverified` with `unverified: true` and a
+    `signature_status` of `legacy_unsigned` or `invalid`."""
     return dispatch_stack.dispatch_list(
         to_app=to_app, from_app=from_app, status=status, limit=limit
     )
@@ -3293,7 +3440,20 @@ def envelope_apply(
     BEFORE acting under it: verifies `envelope_id` is active and covers `verb`
     with the given `call_args`, then appends a citation to the FRANK ledger
     recording the use against `project`/`session`. Refuses with the reason
-    when the grant is missing, expired, or out of scope."""
+    when the grant is missing, expired, or out of scope.
+
+    #333 double-charging note: `verb` in VERB_LEVEL_ENFORCED_VERBS (currently
+    just "dispatch") now cites itself from inside its own tool handler
+    (dispatch_send) — that handler is authoritative for the act. Calling
+    envelope_apply first for one of those verbs and then performing the act
+    would charge the grant's quota twice for one real act, so for those verbs
+    this tool is advisory-only: it still runs the full `check()` (so a caller
+    can preflight "would this be granted?" without side effects) but does NOT
+    write a citation — `cited_before_act` comes back False and `note` says so.
+    The verb handler cites exactly once, at the act, regardless of whether
+    envelope_apply was called first. Every other verb is unchanged: still
+    checks AND cites here, since no other verb has a handler-side citation
+    path yet."""
     pg = get_pg()
     if not pg:
         return _postgres_unavailable()
@@ -3301,7 +3461,22 @@ def envelope_apply(
         from .envelopes import EnvelopeAuthority
         from .governance_ledger import GovernanceLedger
 
-        return EnvelopeAuthority(GovernanceLedger(pg)).authorize_and_cite(
+        authority = EnvelopeAuthority(GovernanceLedger(pg))
+        if verb in VERB_LEVEL_ENFORCED_VERBS:
+            result = authority.check(
+                envelope_id, actor=app_id, verb=verb, call_args=call_args
+            )
+            return {
+                **result,
+                "citation_id": None,
+                "cited_before_act": False,
+                "note": (
+                    f"verb {verb!r} cites automatically when its own tool call "
+                    "executes (#333) — envelope_apply is advisory-only here to "
+                    "avoid charging this grant's quota twice for one act."
+                ),
+            }
+        return authority.authorize_and_cite(
             envelope_id,
             actor=app_id,
             verb=verb,

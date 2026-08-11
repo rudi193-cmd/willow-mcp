@@ -57,7 +57,7 @@ log carries a one-line entry and points there rather than duplicating.
 | B-49 | P2 | Documented | gate / binding | Ungated `whoami` leaks any manifest when binding is off — already covered by `docs/design/willow-gate-seam.md` D3's own "CLOSED" section: `_own_identity_denial` gates it exactly when `WILLOW_MCP_ENFORCE_BINDING=1` and the app is registered, no-op otherwise (the accepted trusted-host stdio model, same posture as every other tool). Reconciled, not a new gap | red-team 2026-07-31; `willow-gate-seam.md` D3; issue #237 (closed) |
 | B-50 | P2 | Fixed | deploy / schema_maps | `task_submit` passed the gate then died writing schema maps under `mcp_apps/<app>/schema_maps/` with `EACCES` once `mcp_apps/` was actually trust-root-hardened to the operator uid (B-45/#183's whole point) — the runtime process can never create a subdirectory under a `0755`, operator-owned parent, regardless of what's excluded from any chown sweep. Was a documented, deliberate placement (`schema-adaptation.md` §3.2 original), not an oversight — the two designs (schema_maps-under-mcp_apps, mcp_apps-gets-hardened) simply conflicted once both were actually applied together. Fixed (operator-approved amendment to the LOCKED `product-layout.md`): `schema_maps/<app_id>/` relocated to its own top-level `$WILLOW_HOME` root, sibling to `store/` — a runtime-writable directory that was never under `mcp_apps/` in the first place, so the conflict can't happen | red-team 2026-07-31; same class as B-41 env freeze; issue #238 |
 | B-51 | P0 | Fixed | dispatch / gate | `dispatch_write` granted `verify_handoff` + `agent_clear` to builder seats — same group as `dispatch_send`, so any manifest with `dispatch_write` could self-verify and self-clear its own dispatch with zero orchestrator/human involvement (demonstrated live: `hanuman` forged send → `loki` accept/handoff → `hanuman` `verify_handoff`+`agent_clear`, no `WILLOW_HUMAN_ORCHESTRATOR`, no binding, no PGP). Fixed: `verify_handoff`/`agent_clear` removed from the `dispatch_write` group in `gate.py` — they remain reachable only via `orchestrator`, which is human-attestation-gated (`ORCHESTRATOR_WRITE_TOOLS`). `dispatch_write` still grants `dispatch_send`/`dispatch_accept`/`handoff_write_v4`/`session_handoff_write`, the send/accept/close-out lifecycle a builder legitimately needs over its own work | red-team 2026-07-31; extends B-48; issue #240 |
-| B-52 | P1 | Partial | dispatch / filesystem | **`$WILLOW_HOME/dispatch/` is operator-writable** — a local uid can `mkdir` a packet (`DEADBEEF`) with arbitrary `meta.json`; it appears in `dispatch_list` and can target `to_app=willow` for social engineering at `session_enter` / accept time (recipient check still applies). Not MCP-forged; bypasses all gate logic for packet *existence*. Partial mitigation: `dispatch._meta_is_well_formed()` now rejects a packet missing the `startup_packet_meta_v1` format marker or `dispatch_id`/`from_app`/`to_app`, in both `dispatch_read` and `dispatch_list` — refuses the trivial hand-forged-mkdir case the red-team demonstrated. Not cryptographic and not full closure: real closure needs the same uid separation as #231 | red-team 2026-07-31; issue #241 |
+| B-52 | P1 | Fixed | dispatch / filesystem | **`$WILLOW_HOME/dispatch/` is operator-writable** — a local uid can `mkdir` a packet (`DEADBEEF`) with arbitrary `meta.json`; it appeared in `dispatch_list` and could target `to_app=willow` for social engineering at `session_enter` / accept time (recipient check still applied). Not MCP-forged; bypassed all gate logic for packet *existence*. Fixed: `dispatch_send` now HMAC-SHA256-signs every meta.json field (runtime-held key, `dispatch_signing.py`, custodied via the existing `_SECRET_FILE_NAMES` convention); `dispatch_read`/`dispatch_list` verify it — a packet with no signature (`legacy_unsigned`, pre-fix packets) is excluded from the normal trusted list and surfaced separately with `unverified: true`, hard-rejected only under `WILLOW_MCP_STRICT_TRUST_ROOT=1`; a present-but-wrong signature (`invalid`, forged or tampered) is always refused. Residual, same as every entry in this class: same-uid still means the attacker can read the key too — full closure needs the uid separation of #231 | red-team 2026-07-31; issue #241 |
 | B-53 | P0 | Fixed | human_session / dispatch | `orchestrator_human_required` was incomplete for `app_id=willow`: only `dispatch_send`, `verify_handoff`, `agent_clear`, `frank_append`, `envelope_apply` were in `ORCHESTRATOR_WRITE_TOOLS` — `dispatch_accept` and `handoff_write_v4` were not, even though `session_enter` itself refuses a dispatch_id for `app_id=willow` up front (that guard lived only there). Demonstrated live: stdio `app_id=willow` (no `WILLOW_HUMAN_ORCHESTRATOR`) accepted real packet `96F54DA7` and completed it via `handoff_write_v4`. Fixed: both added to `ORCHESTRATOR_WRITE_TOOLS`; the denial message now names whichever tool was actually called instead of a fixed three-tool list, so it can't drift again as the set grows | red-team 2026-07-31; issue #239 |
 | B-54 | P1 | Fixed | dispatch / ACL | `dispatch_read` / `handoff_read` had no packet-level ACL — any app with `dispatch_read` could read **any** `dispatch_id` (demonstrated: `hanuman` read `A0939A8C` handoff with commit SHAs, PR URLs, CI notes). Gate checked tool permission, not whether the caller was `from_app` / `to_app` / `reply_to`. Fixed: `dispatch.is_dispatch_party()` checks the caller against the packet's own `meta.json`; `server.py`'s `dispatch_read`/`handoff_read` wrappers deny with `not_party_to_dispatch` (no packet content in the denial) unless the caller is a party or the orchestrator | red-team 2026-07-31; issue #242 |
 | B-55 | P1 | Fixed | dispatch / TOCTOU | Pending `assignment.md` was mutable on disk by the operator uid between `dispatch_send` and specialist/orchestrator read (append demonstrated on `96F54DA7`; reverted) — same writable `dispatch/` root as B-52, prompt-injection / instruction-smuggling without touching MCP. Fixed: `dispatch_send` now records a sha256 of `assignment.md` in `meta.json`; `dispatch_read` (and everything that calls it internally — `dispatch_accept`, `handoff_write_v4`) verifies it and returns `assignment_tampered` on mismatch. Not full closure — dispatch/ is still operator-writable (B-52's own residual) — but the tamper is now detected and refused instead of silently trusted | red-team 2026-07-31; issue #243 |
@@ -99,14 +99,6 @@ log carries a one-line entry and points there rather than duplicating.
   by design — do not widen the orchestrator group. Use participant agents with
   gap permissions for repo backlog; fleet governance stays in FRANK/KB. See
   `skills/gaps.md`.
-
-- **B-52 · P1** — **Filesystem dispatch injection.** On this host
-  `~/.willow/dispatch/` is writable by the operator uid; forged packets show up
-  in `dispatch_list` (demo `DEADBEEF`, `to_app=willow`). **Fix direction:**
-  harden-trust-root ownership on `dispatch/` (B-32 class, still open); partial
-  mitigation done — `dispatch._meta_is_well_formed()` rejects a packet missing
-  the format marker or `dispatch_id`/`from_app`/`to_app`, in `dispatch_read`
-  and `dispatch_list` both.
 
 - **B-56 · P0** — **Local egress key exposure** on this host
   (`~/.config/willow-mcp/egress/private.pem` readable by MCP uid). **Fix:** #182
@@ -215,6 +207,53 @@ log carries a one-line entry and points there rather than duplicating.
   but tampering is now detected and refused rather than silently trusted.
   Tested: `tests/test_at_m2_dispatch_lifecycle.py` (tamper detected on direct
   read and blocks accept; an untampered packet still reads fine).
+
+- **B-52 · P1 (2026-08-11)** — **Filesystem dispatch packet injection**
+  (issue #241, red-team 2026-07-31). `$WILLOW_HOME/dispatch/` is
+  operator-writable — a local uid could `mkdir` a packet directory and drop
+  an arbitrary `meta.json`; the earlier partial mitigation
+  (`_meta_is_well_formed()`) rejected only the trivial bare-`{}` case, so a
+  hand-written `meta.json` with the right field names (demo `DEADBEEF`,
+  `to_app=willow`) still showed up in `dispatch_list` indistinguishable from
+  a real packet. Fixed: `dispatch_send` now HMAC-SHA256-signs every
+  meta.json field except the signature itself (`dispatch_signing.py`), keyed
+  by a runtime-held secret. Key custody deliberately reuses the
+  `_SECRET_FILE_NAMES` convention (`trust_root_setup.py`) rather than the
+  egress key's outside-WILLOW_HOME/interactive-CLI-only posture (B-37) —
+  `dispatch_send` itself must be able to sign on every call, so the key is a
+  new top-level `$WILLOW_HOME/dispatch_signing.key`, auto-created 0600 on
+  first use, given the SAME owner-only custody `vault.key` gets under
+  `repair-runtime-perms`/`harden-trust-root`. `dispatch_read` (and
+  `dispatch_accept`/`handoff_write_v4`/`session_enter`, which all call it
+  internally) verifies the signature before trusting anything else in the
+  packet; `dispatch_list` splits its result into `dispatches` (signature
+  verified) and a separate `unverified` array (`unverified: true` +
+  `signature_status`) rather than either silently dropping or silently
+  trusting a bad packet. Legitimate status transitions
+  (`dispatch_accept`/`agent_clear`/etc, via `dispatch_set_status`) re-sign
+  meta.json rather than self-invalidating it; any OTHER edit to meta.json
+  invalidates the signature (`signature_status: invalid`) and is always
+  refused on read, strict mode or not — same posture as B-55's
+  `assignment_tampered`. **Back-compat:** a packet with no `signature` field
+  at all (`legacy_unsigned` — written before this fix, or a forged packet
+  that simply omits the field) is excluded from the normal `dispatches` list
+  and surfaced only in `unverified` by default; under
+  `WILLOW_MCP_STRICT_TRUST_ROOT=1` it is hard-rejected outright (not even
+  listed as unverified) on the theory that a hardened host has no excuse for
+  an unsigned packet still in flight. A legacy packet that goes through a
+  real lifecycle transition (`dispatch_accept`, etc.) is signed going
+  forward rather than staying permanently second-class. **Residual, same
+  class as every other B-3x entry:** on a single-uid host the attacker uid
+  that can hand-write `meta.json` can also read `dispatch_signing.key` (it
+  must be runtime-readable for `dispatch_send` to work) and forge a valid
+  signature too — full closure still needs #231's uid separation; this
+  closes the "bare forgery with no key at all" hole the red-team actually
+  demonstrated, raising the bar rather than claiming the residual doesn't
+  exist. Tested: `tests/test_dispatch_stack.py` (send→read→list round trip
+  verifies; DEADBEEF-style forgery excluded from `dispatches` and flagged
+  `legacy_unsigned`; strict-mode hard-reject; tampering an already-signed
+  meta.json is refused; status transitions re-sign and stay valid; a legacy
+  packet gets signed on its first real lifecycle transition).
 
 - **B-50 · P2 (2026-08-01)** — **`schema_maps/` writes EACCES'd once
   `mcp_apps/` was actually trust-root-hardened** (issue #238, red-team

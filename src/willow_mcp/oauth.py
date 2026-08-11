@@ -298,14 +298,14 @@ def _google_exchange_code(code: str, client_id: str, client_secret: str, redirec
         method="POST",
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310 - "https://oauth2.googleapis.com/token" is a hardcoded string literal above; no request input ever reaches scheme or host
         return json.loads(resp.read())
 
 
 def _google_verify_id_token(id_token: str, client_id: str) -> tuple[str, str]:
     """Verify a Google id_token via the tokeninfo endpoint. Returns (email, sub)."""
     url = "https://oauth2.googleapis.com/tokeninfo?" + urllib.parse.urlencode({"id_token": id_token})
-    with urllib.request.urlopen(url, timeout=10) as resp:
+    with urllib.request.urlopen(url, timeout=10) as resp:  # nosec B310 - base is the hardcoded "https://oauth2.googleapis.com/tokeninfo" literal above; id_token is only ever urlencoded into the query string, never able to change scheme or host
         claims = json.loads(resp.read())
     if claims.get("aud") != client_id:
         raise ValueError(f"id_token audience mismatch: {claims.get('aud')!r}")
@@ -321,7 +321,7 @@ def _apple_fetch_jwks() -> dict:
     now = time.time()
     if _APPLE_JWKS_CACHE and now - _APPLE_JWKS_CACHE[0] < _APPLE_JWKS_TTL:
         return _APPLE_JWKS_CACHE[1]
-    with urllib.request.urlopen("https://appleid.apple.com/auth/keys", timeout=10) as resp:
+    with urllib.request.urlopen("https://appleid.apple.com/auth/keys", timeout=10) as resp:  # nosec B310 - hardcoded https string literal (Apple's JWKS endpoint); no request input reaches this call
         raw = json.loads(resp.read())
     keys = {}
     for jwk in raw.get("keys", []):
@@ -427,7 +427,7 @@ def _apple_exchange_code(code: str, client_id: str, team_id: str, key_id: str,
         method="POST",
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
+    with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310 - "https://appleid.apple.com/auth/token" is a hardcoded string literal above; no request input ever reaches scheme or host
         return json.loads(resp.read())
 
 

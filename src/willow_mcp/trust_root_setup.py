@@ -51,7 +51,18 @@ _TRUST_DIR_NAMES = frozenset({"config", "mcp_apps"})
 # and kart.db are NOT flat top-level files (store.db is nested per-collection
 # under store_root(); kart.db's location depends on WILLOW_STORE_ROOT) so
 # they get their own handling below rather than a name in this set.
-_SECRET_FILE_NAMES = frozenset({"vault.key", "vault.db", "mcp_token.json", "mcp_receipt.db"})
+#
+# B-52/#241 added "dispatch_signing.key": the HMAC secret dispatch_send uses
+# to sign packet meta.json (dispatch_signing.py) and dispatch_read/
+# dispatch_list use to verify it. Same top-level $WILLOW_HOME position and
+# same "server must read it, nothing else ever should" shape as vault.key --
+# unlike the egress key (#182), this one cannot move to the trust owner and
+# stay out of the runtime's write path, because dispatch_send (the runtime,
+# not an interactive operator command) has to sign on every call.
+_SECRET_FILE_NAMES = frozenset({
+    "vault.key", "vault.db", "mcp_token.json", "mcp_receipt.db",
+    "dispatch_signing.key",
+})
 
 
 def default_trust_owner() -> str:

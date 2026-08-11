@@ -49,15 +49,26 @@ jobs:
       # triaged (identifier-only interpolation from constants/confirmed
       # schema mappings/DB introspection, values always bound — see the
       # `# nosec B608` reason on each line) and the 2 HIGH B324 weak-hash
-      # findings were fixed with usedforsecurity=False. No count is repeated
-      # here — see the issue's own point that a stale count is worse than
-      # none. `|| true` still stands: B310 (urllib-scheme audit) and B108
-      # (hardcoded /tmp path) findings remain untriaged and are out of this
-      # issue's scope, so gating on them now would fail CI for reasons this
-      # change didn't address. Once those are triaged/suppressed too, drop
-      # `|| true` so bandit gates and a new drift is caught, not just logged.
-      - name: Bandit (report-only — B608/B324 triaged; B310/B108 still open, see bandit-report.txt)
-        run: bandit -r src -ll -f txt 2>&1 | tee bandit-report.txt || true
+      # findings were fixed with usedforsecurity=False. #318 closed the rest:
+      # every B310 (urllib scheme audit) either got a scoped `# nosec B310 -`
+      # reason (hardcoded https constants, or a path that can't repoint a
+      # fixed host) or a real urlparse().scheme allow-list check ahead of the
+      # open where the host was config-supplied; the B108 hardcoded-/tmp
+      # finding was fixed with tempfile.gettempdir(). No count is repeated in
+      # this name — a stale count is worse than none — and `|| true` is gone:
+      # bandit now gates like every other lint step.
+      #
+      # nest/embed.py and nest/llm.py are excluded here, not nosec'd in place:
+      # both are vendored byte-for-byte from safe-app-store's libs/nest-pipeline
+      # under a CI hash pin (tests/test_nest_pipeline_vendor.py) — "the copy is
+      # NOT a place to edit", inline nosec included, since the pin hashes the
+      # whole module body. Their two B310 sites (OLLAMA_HOST-derived urlopen
+      # calls) are the same ones tests/test_consent_toggles.py already documents
+      # as deliberately policy-free: the gate lives at willow-mcp's own tool
+      # boundary (model_egress.denial(), consulted by nest_scan et al before the
+      # vendored pipeline ever runs), not inside the shared library.
+      - name: Bandit
+        run: bandit -r src -ll -f txt -x src/willow_mcp/nest/embed.py,src/willow_mcp/nest/llm.py 2>&1 | tee bandit-report.txt
 
       - name: Upload bandit report
         if: always()

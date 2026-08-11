@@ -430,7 +430,9 @@ def test_b52_dispatch_root_itself_symlinked_is_refused_by_send_and_list(home, mo
     assert sent.get("error") == "dispatch_root_symlinked"
 
     listed = server.dispatch_list("willow")
-    assert listed == {"dispatches": [], "total": 0}
+    assert listed == {
+        "dispatches": [], "total": 0, "unverified": [], "unverified_total": 0,
+    }
 
 
 # ── B-55/#243: assignment.md tamper detection ────────────────────────────────
