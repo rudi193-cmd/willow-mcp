@@ -181,6 +181,57 @@ def test_empty_registry_errno_is_registered_in_the_syscall_table(monkeypatch, tm
     assert table["errno"]["ENOGRANTS"]["route"] == "trap_to_console"
 
 
+def test_registry_of_all_malformed_active_rows_is_ENOGRANTS_not_a_generic_miss(monkeypatch, tmp_path):
+    """The guard keys on usable grants, not container truthiness: an `active`
+    list that is non-empty but all-malformed (non-dicts, or dicts with no id — a
+    truncated write or bad merge) holds zero usable grants and must be refused as
+    the loud, systemic ENOGRANTS, not the generic per-envelope ENOENT."""
+    registry, syscalls = _charter(tmp_path)
+    data = json.loads(registry.read_text())
+    data["active"] = ["not-a-dict", 42, {"no": "id"}]  # non-empty, zero usable
+    registry.write_text(json.dumps(data))
+    monkeypatch.setenv("WILLOW_ENVELOPE_REGISTRY", str(registry))
+    monkeypatch.setenv("WILLOW_SYSCALL_TABLE", str(syscalls))
+    result = envelopes.EnvelopeAuthority(_Ledger()).check(
+        "env-dispatch", actor="willow", verb="dispatch",
+        call_args={"to_agents": "hanuman", "task_class": "build"},
+    )
+    assert result["errno"] == "ENOGRANTS"
+
+
+def test_a_populated_registry_missing_this_id_is_ENOENT_not_ENOGRANTS(monkeypatch, tmp_path):
+    """The other side of the boundary: a registry that DOES hold a usable grant,
+    just not this envelope_id, is a per-envelope miss (ENOENT), not the systemic
+    ENOGRANTS. ENOGRANTS must not swallow ordinary 'no envelope covers this'."""
+    registry, syscalls = _charter(tmp_path)  # one usable grant, id 'env-dispatch'
+    monkeypatch.setenv("WILLOW_ENVELOPE_REGISTRY", str(registry))
+    monkeypatch.setenv("WILLOW_SYSCALL_TABLE", str(syscalls))
+    result = envelopes.EnvelopeAuthority(_Ledger()).check(
+        "env-does-not-exist", actor="willow", verb="dispatch",
+        call_args={"to_agents": "hanuman", "task_class": "build"},
+    )
+    assert result["errno"] == "ENOENT"
+
+
+def test_every_errno_check_emits_is_registered_in_the_table():
+    """Structural contract, not convention: every errno string EnvelopeAuthority
+    .check() and its helpers can return must be defined in the shipped syscall
+    table's errno registry. Add an errno to the enforcer without registering it
+    and this fails — the mechanism that keeps 'the table documents every failure
+    mode' honest (the #332 lesson: a governed declaration must track the code)."""
+    import re
+    from pathlib import Path
+    from willow_mcp import paths
+
+    src = Path(envelopes.__file__).read_text()
+    emitted = set(re.findall(r'"errno":\s*"([A-Z]+)"', src))
+    assert "ENOGRANTS" in emitted, "sanity: the guard's errno should appear in the source"
+    table = json.loads((paths.bundle_dir() / "constitutional" / "syscall-table.json").read_text())
+    registered = set(table["errno"])
+    missing = emitted - registered
+    assert not missing, f"errno(s) check() emits but the table does not register: {sorted(missing)}"
+
+
 def test_check_refuses_duplicate_envelope_id(monkeypatch, tmp_path):
     """Two active rows sharing one id must not silently resolve to the
     first -- that is exactly as forgeable as a missing envelope."""

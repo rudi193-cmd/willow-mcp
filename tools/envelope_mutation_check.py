@@ -67,11 +67,13 @@ MUTATIONS = [
     # shadows the ratified registry, and reported as a generic ENOENT it hid
     # the outage for ~60 hours. No-op'ing it falls through to "envelope not
     # active", which the ENOGRANTS test must catch.
-    ('        if not registry.get("active"):\n'
+    ('        active_grants = usable_active_grants(registry)\n'
+     '        if not active_grants:\n'
      '            return {"ok": False, "errno": "ENOGRANTS", "reason": _no_grants_reason()}',
+     '        active_grants = usable_active_grants(registry)\n'
      '        if False:\n'
      '            return {"ok": False, "errno": "ENOGRANTS", "reason": _no_grants_reason()}',
-     "an empty registry is refused loudly as ENOGRANTS, not a generic per-envelope miss"),
+     "a registry with no usable active grant is refused loudly as ENOGRANTS, not a generic per-envelope miss"),
 
     # A duplicate/absent envelope id must be rejected as ENOENT, not silently
     # resolved to the first match — `len(matches) != 1` is doing two jobs
