@@ -4,19 +4,29 @@ A running brainstorm of things `willow-mcp` could grow into. Started as a
 "10,000 stupid ideas" exercise; kept because some stupid ideas are secretly
 good and the rest are load-bearing morale.
 
-**Legend:** 🌱 = secretly good / plausibly worth building · everything else is
-here for volume, flavor, and the occasional accidental gem.
+**Legend:**
+- 🌱 = secretly good / plausibly worth building
+- ✅ **shipped** = the idea's essence already exists — location noted inline
+- 🟡 **partial** = the primitive exists but this idea's specific twist doesn't
+- everything else is here for volume, flavor, and the occasional accidental gem.
+
+> **Audit (2026-08):** these ideas were graded against the fleet's repos. ~21
+> of them turned out to already have a real analog — mostly *inside willow-mcp
+> itself*. Tags below record where. The takeaway: a good chunk of "willow could
+> do more" was actually "willow already does this." Check `the_grove.py`,
+> `friction_floor.py`, `lineage.py`, `code_graph/`, `forks.py`,
+> `governance_ledger.py`, and `federation` before proposing net-new.
 
 ---
 
 ## 🌰 Memory & the SOIL store
 
-1. **🌱 Memory decay curves** — records lose "freshness" over time unless re-touched; `store_search` down-ranks stale facts automatically.
-2. **🌱 "Why do I believe this?" trace** — any stored fact can emit the chain of records that produced it (wire lineage into store).
+1. **🌱 Memory decay curves** — records lose "freshness" over time unless re-touched; `store_search` down-ranks stale facts automatically. — ✅ **shipped** in `engram`/`mengram` (decay/TTL: `review_after`, TTL-expiry migrations).
+2. **🌱 "Why do I believe this?" trace** — any stored fact can emit the chain of records that produced it (wire lineage into store). — ✅ **shipped**: willow-mcp `lineage.py` (`lineage_why`); also `engram`/`mengram` provenance fields.
 3. Contradiction detector: flag when two stored records assert opposite things.
 4. Memory "compost" — soft-deleted records break down into aggregate statistics before vanishing.
 5. A `store_diff` between two points in time — "what did I learn this week?"
-6. Déjà vu alarm: warns when you're about to store something you already know.
+6. Déjà vu alarm: warns when you're about to store something you already know. — ✅ **shipped** as memory dedup in `engram` (`idx_obs_dedupe`) / `mengram` (`find_duplicate` + auto-merge).
 7. Memories that get *embarrassed* and hide if you retrieve them too often.
 8. A "SOIL pH" metric that means nothing but appears on every diagnostic.
 9. Store records as haiku. Retrieval only works if you also speak in haiku.
@@ -24,27 +34,27 @@ here for volume, flavor, and the occasional accidental gem.
 
 ## 🌳 The Grove (lessons / rings)
 
-11. **🌱 Growth rings as literal changelog** — one ring per session; ring width = how much was learned.
+11. **🌱 Growth rings as literal changelog** — one ring per session; ring width = how much was learned. — ✅ **shipped**: willow-mcp `src/willow_mcp/the_grove.py` (a lessons-ring store). *(Note: the `willow-grove` repo is docs-only — the code lives here.)*
 12. **🌱 "Lesson regression" tests** — assert the agent still remembers a hard-won lesson; fail CI if a ring is forgotten.
 13. Render the Grove as an actual ASCII tree that gains rings.
 14. Drought years: sessions where nothing was learned show as thin rings.
 15. Lightning-strike lessons: mark a ring where a catastrophic mistake taught something.
 16. Cross-Grove grafting: import a lesson-ring from another agent's tree.
-17. The tree drops "leaves" (ephemeral context) every autumn (`context_expire` on a cron).
+17. The tree drops "leaves" (ephemeral context) every autumn (`context_expire` on a cron). — ✅ **shipped**: willow-mcp `context_expire` already retires ephemeral context (the seasonal/cron flavor is garnish).
 18. Carve initials into the bark. Purely for morale.
 
 ## 🪺 The Nest & intake
 
-19. **🌱 Auto-triage confidence scores** on `nest_intake_scan` so low-confidence items route to `human_required`.
+19. **🌱 Auto-triage confidence scores** on `nest_intake_scan` so low-confidence items route to `human_required`. — ✅ **shipped**: willow-mcp `nest_intake_scan` + `human_required_*`; `willow-nest` classifies + consent-routes + quarantines. (Confidence-scored routing specifically is the remaining twist.)
 20. **🌱 Intake dedup** — collapse near-identical incoming files before they clog the queue.
 21. The Nest gets "hungry" and pings you if intake sits untouched too long.
-22. Cuckoo detection: flag intake items that don't look like they belong.
+22. Cuckoo detection: flag intake items that don't look like they belong. — ✅ **shipped**: `willow-nest` quarantines drops that don't classify into any track.
 23. Nest "eggs" that hatch into tasks on a timer.
 
 ## 🐦 Federation & fleet
 
-24. **🌱 Federation health gossip** — servers periodically share health so `fleet_health` isn't a cold poll.
-25. **🌱 Capability discovery cache** — remember what remote servers can do instead of re-discovering.
+24. **🌱 Federation health gossip** — servers periodically share health so `fleet_health` isn't a cold poll. — 🟡 **partial**: willow-mcp `fleet_health`/`fleet_roster.py` exist (cold poll); periodic gossip is the missing part.
+25. **🌱 Capability discovery cache** — remember what remote servers can do instead of re-discovering. — 🟡 **partial**: willow-mcp `federation_discover` exists; the caching layer is the missing part.
 26. Federated "reputation" — servers that give bad answers get down-ranked.
 27. A fleet-wide "town square" record collection every server can post to.
 28. Servers send each other postcards. The postcard is a health check with a nicer name.
@@ -53,23 +63,23 @@ here for volume, flavor, and the occasional accidental gem.
 
 ## 🍴 Forks
 
-31. **🌱 Auto-fork on risky ops** — spin an isolated fork before a destructive change, auto-join on success.
-32. **🌱 Fork diff summaries** — human-readable "here's what this fork changed vs its parent."
-33. Fork "ancestry portraits" — a lineage tree of every fork ever.
+31. **🌱 Auto-fork on risky ops** — spin an isolated fork before a destructive change, auto-join on success. — 🟡 **partial**: willow-mcp `forks.py` provides `fork_create`/`fork_join`/`fork_merge`; the auto-trigger-on-risk is the missing part.
+32. **🌱 Fork diff summaries** — human-readable "here's what this fork changed vs its parent." — 🟡 **partial**: `forks.py` has `fork_log`/`fork_status`; a human-readable diff summary is the missing part.
+33. Fork "ancestry portraits" — a lineage tree of every fork ever. — 🟡 **partial**: `lineage.py` + `fork_list` hold the ancestry data; the rendered portrait is the missing part.
 34. Forks that refuse to merge if they've "grown apart" (diverged past a threshold).
 35. Speed-dating for forks: auto-pair forks doing similar work and suggest a merge.
 
 ## ⚖️ FRANK ledger & governance
 
-36. **🌱 Tamper-evidence dashboard** — surface `frank_verify` status continuously, not on demand.
+36. **🌱 Tamper-evidence dashboard** — surface `frank_verify` status continuously, not on demand. — 🟡 **partial**: willow-mcp `governance_ledger.py` + `frank_verify` + `frank_head_anchor.py` provide the tamper-evident chain (on-demand); continuous surfacing is the missing part.
 37. **🌱 Policy-as-record** — governance rules stored as versioned records with their own lineage.
-38. Ledger "receipts" that print like a store receipt, itemized.
+38. Ledger "receipts" that print like a store receipt, itemized. — ✅ **shipped**: willow-mcp `receipts.py` (`receipts_tail`, `bound_receipt.py`).
 39. A governance "conscience" tool that second-guesses the last decision.
 40. FRANK issues a fortune-cookie-style aphorism with each verified block.
 
 ## 🤝 Commitments & human-required
 
-41. **🌱 Commitment reminders with escalation** — nudge, then re-nudge, then flag to human.
+41. **🌱 Commitment reminders with escalation** — nudge, then re-nudge, then flag to human. — ✅ **shipped**: willow-mcp `commitment_surface` + `commitment_acknowledge` (multi-stage escalation is the remaining twist).
 42. **🌱 Commitment SLA tracking** — "you said you'd do X, it's overdue."
 43. Broken-promise leaderboard across agents.
 44. Commitments you can co-sign with another agent (shared accountability).
@@ -77,7 +87,7 @@ here for volume, flavor, and the occasional accidental gem.
 
 ## 🔀 Routing & specialists
 
-46. **🌱 Route explainability** — `agent_route` returns *why* it picked that specialist.
+46. **🌱 Route explainability** — `agent_route` returns *why* it picked that specialist. — 🟡 **partial**: willow-mcp `agent_route` + `routing_decisions` exist; returning the *why* is the missing part.
 47. **🌱 Specialist load-aware routing** — don't route to a busy/unhealthy specialist.
 48. Specialist "office hours" — some specialists only available at certain times.
 49. Specialists that refer you to a *better* specialist (warm handoff).
@@ -85,7 +95,7 @@ here for volume, flavor, and the occasional accidental gem.
 
 ## 🕸️ Code graph
 
-51. **🌱 "Blast radius" on save** — auto-run `code_graph_impact` on changed files and warn before commit.
+51. **🌱 "Blast radius" on save** — auto-run `code_graph_impact` on changed files and warn before commit. — ✅ **shipped**: willow-mcp `code_graph/` (`analyze_impact`, `walker.py` "Blast radius"); the auto-on-save hook is garnish.
 52. **🌱 Orphan detector** — surface code nodes nothing references.
 53. **🌱 Graph-aware test selection** — run only tests reachable from the diff.
 54. Code graph "constellation" view mapping modules to actual star patterns.
@@ -99,26 +109,30 @@ here for volume, flavor, and the occasional accidental gem.
 59. Tasks that leave a tip if they run fast. (The tip is a log line. That's it.)
 60. Race two implementations of a task; keep the winner.
 
+> *Substrate note:* the Kart task-queue + bubblewrap sandbox itself is shipped
+> in `kartikeya` (queue/worker/lanes/scheduling) — but none of #56–60's
+> specific enhancements exist there yet.
+
 ## 🔌 Integrations & egress
 
 61. **🌱 Lease expiry warnings** — warn before a net lease lapses mid-task.
-62. **🌱 Egress audit trail** — one queryable log of every outbound call and its three-key justification.
+62. **🌱 Egress audit trail** — one queryable log of every outbound call and its three-key justification. — ✅ **shipped** in `willow-gate`: `custody.py` reconciles declared-vs-observed capabilities and treats file-checkout as egress-class, with export/exfiltrate denials.
 63. A "three keys" visualizer showing which of the trio you're missing.
 64. Egress "dry run" that shows what *would* be sent without sending.
 65. A guilt-o-meter for how much you've hit external APIs today.
 
 ## 🪞 Friction floor / mirror detector
 
-66. **🌱 Sycophancy score** — quantify how much the agent just agreed with the human.
-67. **🌱 "You're mirroring" nudge** injected mid-session, not just after.
+66. **🌱 Sycophancy score** — quantify how much the agent just agreed with the human. — ✅ **shipped**: willow-mcp `friction_floor.py` + `friction.py` (`friction_scan`, the mirror detector).
+67. **🌱 "You're mirroring" nudge** injected mid-session, not just after. — 🟡 **partial**: `friction_floor.py` detects mirroring; mid-session injection is the missing part.
 68. Friction "seismograph" charting disagreement over time.
 69. A devil's-advocate specialist auto-summoned when friction hits zero.
 
 ## 🧬 Cross-cutting / genuinely-maybe-good
 
-70. **🌱 A single `willow_status` home-screen** — Grove rings + Nest depth + fleet health + open commitments + FRANK integrity, one call.
+70. **🌱 A single `willow_status` home-screen** — Grove rings + Nest depth + fleet health + open commitments + FRANK integrity, one call. — 🟡 **partial**: willow-mcp `diagnostic_summary` + `fleet_status` cover much of it; a single unified home-screen call is the missing part.
 71. **🌱 Onboarding "first hour" flow** — a guided `session_enter` for brand-new agents.
-72. **🌱 Time-travel debugging** — reconstruct full agent state at any past receipt.
+72. **🌱 Time-travel debugging** — reconstruct full agent state at any past receipt. — 🟡 **partial**: `lineage.py` + `receipts.py` retain the history; full state reconstruction is the missing part.
 73. **🌱 Dry-run mode for every mutating tool** (`preview=true`).
 74. **🌱 A "memory garbage collector"** report: what's safe to expire and why.
 
@@ -126,7 +140,8 @@ here for volume, flavor, and the occasional accidental gem.
 
 # 🌪️ THE CHAOS CANON
 
-Usefulness is a cage. These are here on purpose.
+Usefulness is a cage. These are here on purpose. *(Not audited for prior art —
+if any of these already ship, that is its own kind of finding.)*
 
 ## Moods, feelings, and the emotional interior of a database
 
