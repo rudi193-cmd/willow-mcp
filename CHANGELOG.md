@@ -36,7 +36,6 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 
 ### Added
 
-* Nestor-backed natural-language tool oracle (nestor_tool_route) ([7ca1805](https://github.com/rudi193-cmd/willow-mcp/commit/7ca18054cc6446e371951d2210b672bf46fade0b))
 * **tool-oracle:** Nestor-backed natural-language tool router ([0aadeb3](https://github.com/rudi193-cmd/willow-mcp/commit/0aadeb34f3eb6f4765e8e933a1eff35a713ba8df))
 
 
