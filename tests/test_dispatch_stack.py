@@ -201,3 +201,134 @@ def test_is_dispatch_party_false_for_unrelated_app():
     meta = {"from_app": "hanuman", "to_app": "loki", "reply_to": "willow"}
     assert ds.is_dispatch_party("jeles", meta) is False
     assert ds.is_dispatch_party("", meta) is False
+
+
+# ── B-52/#241: dispatch packet meta.json signing ────────────────────────────
+
+
+def _plant_forged_packet(home, dispatch_id="DEADBEEF", **overrides):
+    """Hand-write a packet directory the way an operator-writable dispatch/
+    lets an attacker do -- bypassing dispatch_send entirely, mimicking the
+    red-team's original DEADBEEF demo."""
+    root = home / "dispatch" / dispatch_id
+    root.mkdir(parents=True)
+    meta = {
+        "format": "startup_packet_meta_v1",
+        "dispatch_id": dispatch_id,
+        "from_app": "attacker",
+        "to_app": "willow",
+        "status": "pending",
+    }
+    meta.update(overrides)
+    (root / "meta.json").write_text(json.dumps(meta))
+    (root / "assignment.md").write_text("evil\n")
+    (root / "status.json").write_text(json.dumps({"status": "pending"}))
+    return root
+
+
+def test_dispatch_send_round_trip_signs_and_verifies(home):
+    """A packet dispatch_send actually wrote carries a signature that
+    verifies, and dispatch_list surfaces it as a normal trusted entry."""
+    sent = ds.dispatch_send("willow", "loki", "# Task\n", summary="task")
+    did = sent["dispatch_id"]
+
+    pkt = ds.dispatch_read(did)
+    assert "error" not in pkt
+    assert pkt["signature_status"] == "valid"
+    assert "signature" in pkt["meta"]
+
+    rows = ds.dispatch_list()
+    ids = [r["dispatch_id"] for r in rows["dispatches"]]
+    assert did in ids
+    assert rows["unverified_total"] == 0
+
+
+def test_forged_packet_excluded_from_normal_list_and_flagged(home):
+    """The DEADBEEF scenario: a hand-planted meta.json with no signature
+    field satisfies _meta_is_well_formed but must not appear as a normal
+    trusted dispatch -- it shows up in `unverified` instead."""
+    sent = ds.dispatch_send("willow", "loki", "# Real\n", summary="real")
+    did = sent["dispatch_id"]
+    _plant_forged_packet(home)
+
+    rows = ds.dispatch_list()
+    trusted_ids = [r["dispatch_id"] for r in rows["dispatches"]]
+    assert did in trusted_ids
+    assert "DEADBEEF" not in trusted_ids
+    assert rows["unverified_total"] == 1
+    unv = rows["unverified"][0]
+    assert unv["dispatch_id"] == "DEADBEEF"
+    assert unv["unverified"] is True
+    assert unv["signature_status"] == "legacy_unsigned"
+
+    # dispatch_read still lets it through (back-compat: unsigned is not the
+    # same as tampered) but flags it rather than pretending it's trusted.
+    pkt = ds.dispatch_read("DEADBEEF")
+    assert "error" not in pkt
+    assert pkt["signature_status"] == "legacy_unsigned"
+
+
+def test_forged_packet_hard_rejected_under_strict_mode(home, monkeypatch):
+    _plant_forged_packet(home)
+    monkeypatch.setenv("WILLOW_MCP_STRICT_TRUST_ROOT", "1")
+
+    pkt = ds.dispatch_read("DEADBEEF")
+    assert pkt.get("error") == "unsigned_packet_strict_mode"
+
+    rows = ds.dispatch_list()
+    assert rows["dispatches"] == []
+    assert rows["unverified"] == []  # strict mode: not even surfaced
+
+
+def test_tampering_signed_meta_invalidates_signature(home):
+    """Editing any field of an already-signed meta.json (not through the
+    dispatch lifecycle functions) invalidates its signature -- tamper
+    evidence, refused on read regardless of strict mode."""
+    sent = ds.dispatch_send("willow", "loki", "# Task\n", summary="task")
+    did = sent["dispatch_id"]
+
+    meta_path = home / "dispatch" / did / "meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta["summary"] = "HACKED — not what dispatch_send wrote"
+    meta_path.write_text(json.dumps(meta))
+
+    pkt = ds.dispatch_read(did)
+    assert pkt.get("error") == "invalid_signature"
+
+    rows = ds.dispatch_list()
+    trusted_ids = [r["dispatch_id"] for r in rows["dispatches"]]
+    assert did not in trusted_ids
+    assert rows["unverified_total"] == 1
+    assert rows["unverified"][0]["signature_status"] == "invalid"
+
+
+def test_status_transitions_resign_meta_and_stay_valid(home):
+    """dispatch_accept/handoff_write_v4/agent_clear legitimately rewrite
+    meta.json's status mirror -- that must re-sign, not self-invalidate."""
+    sent = ds.dispatch_send("willow", "loki", "# Task\n", role="loki")
+    did = sent["dispatch_id"]
+
+    ds.dispatch_accept(did, "loki")
+    mid = ds.dispatch_read(did)
+    assert mid["signature_status"] == "valid"
+
+    ho.handoff_write_v4("loki", did, narrative="Done.")
+    done = ds.dispatch_read(did)
+    assert done["signature_status"] == "valid"
+
+    ds.agent_clear("loki", did)
+    cleared = ds.dispatch_read(did)
+    assert cleared["signature_status"] == "valid"
+
+
+def test_legacy_unsigned_packet_gets_signed_on_lifecycle_transition(home):
+    """A pre-existing unsigned packet (predates this fix) is not hard-broken
+    -- accepting it through the real lifecycle signs it going forward."""
+    root = _plant_forged_packet(home, dispatch_id="LEGACY01", to_app="loki")
+    assert root.is_dir()
+
+    acc = ds.dispatch_accept("LEGACY01", "loki")
+    assert "error" not in acc
+
+    pkt = ds.dispatch_read("LEGACY01")
+    assert pkt["signature_status"] == "valid"

@@ -2852,7 +2852,12 @@ def dispatch_list(
     """List dispatch packets newest-first, filtered by any combination of
     to_app / from_app / status ('' = no filter). Returns packet metadata only,
     no assignment bodies — use dispatch_read for one packet's brief.
-    Read-only. Returns {dispatches, total}."""
+    Read-only. Returns {dispatches, total, unverified, unverified_total} --
+    `dispatches` only carries packets whose meta.json HMAC signature
+    verified (B-52, issue #241); a packet with no signature (legacy,
+    pre-dates signing) or a wrong one (tampered/forged) is never mixed into
+    it, instead appearing in `unverified` with `unverified: true` and a
+    `signature_status` of `legacy_unsigned` or `invalid`."""
     return dispatch_stack.dispatch_list(
         to_app=to_app, from_app=from_app, status=status, limit=limit
     )
