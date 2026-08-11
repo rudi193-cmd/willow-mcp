@@ -31,6 +31,19 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.8.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.7.1...v2.8.0) (2026-08-11)
+
+
+### Added
+
+* Nestor-backed natural-language tool oracle (nestor_tool_route) ([7ca1805](https://github.com/rudi193-cmd/willow-mcp/commit/7ca18054cc6446e371951d2210b672bf46fade0b))
+* **tool-oracle:** Nestor-backed natural-language tool router ([0aadeb3](https://github.com/rudi193-cmd/willow-mcp/commit/0aadeb34f3eb6f4765e8e933a1eff35a713ba8df))
+
+
+### Build
+
+* allow direct references so the [nestor] git extra resolves ([e6c691c](https://github.com/rudi193-cmd/willow-mcp/commit/e6c691c6e4589adfdc609dba36cbb69a947961d3))
+
 ## [2.7.1](https://github.com/rudi193-cmd/willow-mcp/compare/v2.7.0...v2.7.1) (2026-08-11)
 
 
