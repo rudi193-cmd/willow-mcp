@@ -182,6 +182,13 @@ packages = ["willow-mcp", "jeles", "kartikeya"]
 # resulting workflow runs from failing on versions PyPI already holds.
 source = "vcs"
 
+[tool.hatch.metadata]
+# The optional `nestor` extra pins an unpublished git dependency
+# (nestor @ git+https://github.com/rudi193-cmd/Nestor). Hatchling refuses a
+# direct URL reference unless this is set. Base install is unaffected; only
+# `pip install willow-mcp[nestor]` resolves the git ref.
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/willow_mcp"]
 
