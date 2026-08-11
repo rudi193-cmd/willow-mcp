@@ -31,6 +31,17 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.7.1](https://github.com/rudi193-cmd/willow-mcp/compare/v2.7.0...v2.7.1) (2026-08-11)
+
+
+### Fixed
+
+* **diagnostic:** restore diagnostic_summary's [@mcp](https://github.com/mcp).tool() decorator (fleet-seams) ([47d1ddb](https://github.com/rudi193-cmd/willow-mcp/commit/47d1ddb4ec8497d97a644c850bb63943a5402eef))
+* **governance:** correct verb 13's declared registry_path to the enforced file ([#332](https://github.com/rudi193-cmd/willow-mcp/issues/332)a) ([822c7e1](https://github.com/rudi193-cmd/willow-mcp/commit/822c7e1e1b261e3f880a618c87de029ca345362f))
+* **governance:** make the empty-registry guard proactive and close its coverage gap ([#332](https://github.com/rudi193-cmd/willow-mcp/issues/332)) ([2beda9a](https://github.com/rudi193-cmd/willow-mcp/commit/2beda9a47cd9737f072466064b501a7732b8c7f3))
+* **governance:** pin verb 13's registry_path and refuse an empty registry loudly ([#332](https://github.com/rudi193-cmd/willow-mcp/issues/332)) ([14ebf8f](https://github.com/rudi193-cmd/willow-mcp/commit/14ebf8f8568fdaf388b54b7f9e4740b5bd0c7d77))
+* **governance:** refuse an empty registry loudly as ENOGRANTS ([#332](https://github.com/rudi193-cmd/willow-mcp/issues/332) runtime guard) ([39b5c39](https://github.com/rudi193-cmd/willow-mcp/commit/39b5c39337ae61e600f03c73cadd93bfa8d45f5c))
+
 ## [2.7.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.6.0...v2.7.0) (2026-08-10)
 
 
