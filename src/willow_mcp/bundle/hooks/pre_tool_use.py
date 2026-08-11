@@ -635,7 +635,8 @@ _SEAT_PRIV_RE = re.compile(
     r"envelope_apply|federation_call|fork_write|frank_write|friction_write|full_access|"
     r"gap_promote|gap_purge|gap_write|human_loop_write|integration_call|"
     r"knowledge_curate|knowledge_write|lineage_write|markdownai_directives|markdownai_write|"
-    r"nest_write|schema_admin|store_all|store_write|task_db|task_queue)\b"
+    r"nest_write|schema_admin|store_all|store_write|task_db|task_queue|"
+    r"tool_oracle_route|tool_oracle_seal)\b"
 )
 # `orchestrator`, `context` and `binding` are also write-capable groups, but
 # unlike the names above they are ordinary English words that occur in manifest
@@ -654,7 +655,7 @@ _SEAT_ESCALATION_REASON = (
     "task_queue / dispatch_write / human_loop_write / frank_write / envelope_apply / "
     "fork_write / commitment_write / code_graph_write / agent_dispatch / "
     "integration_call / federation_call / markdownai_write / markdownai_directives / orchestrator / "
-    "context / binding / full_access) or widen store_scope to "
+    "context / binding / tool_oracle_route / tool_oracle_seal / full_access) or widen store_scope to "
     '"*" — "retaking the seat". The SessionStart bootstrap restores every seat to '
     "read-only by default; re-granting write authority is an operator act, not a "
     "self-grant. An agent may REQUEST the seat, never CONFIRM it itself (sudo "
