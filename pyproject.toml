@@ -110,6 +110,26 @@ voice = [
     "sounddevice>=0.4,<1.0",
     "torch>=2.2,<3.0",
 ]
+# The test bootstrap: `pip install -e ".[test]"` reproduces CI's test job from
+# ONE declared place instead of an imperative `pip install` line in tests.yml.
+# pyyaml + jsonschema are what makes this a real dependency group and not just
+# runner packaging: tools/mai_lint.py imports both at module load, so the
+# `test_handoff_write_v4_closeout_is_proper_mai` test (which imports mai_lint)
+# and the mai-lint CI step both need them. Left undeclared, a fresh checkout
+# ran green in CI — where the workflow pip-installed pyyaml by hand — and failed
+# on any developer's machine, which is the exact split this group closes.
+# jsonschema was only ever present transitively (via mcp); named here so the
+# tool that needs it stops relying on someone else's dependency tree.
+# jeles stays named in tests.yml rather than here: it is a runtime dependency
+# `pip install -e "."` already brings, and two test files importorskip on it —
+# see the comment on that step for why it is restated explicitly.
+test = [
+    "pytest",
+    "pytest-timeout",
+    "coverage",
+    "PyYAML>=6.0,<7.0",
+    "jsonschema>=4.0,<5.0",
+]
 
 [project.scripts]
 willow-mcp = "willow_mcp.server:main"

@@ -125,10 +125,14 @@ jobs:
           # 0.0.9 have all shipped, and the published 0.0.9 carries both
           # features. Leaving it meant CI tested a version no user could get,
           # so the pin was never exercised by anything.
-          # pyyaml is declared here, not left to the mai_lint step that also
-          # installs it: tests/test_release_wiring.py importorskips on it, so a
-          # reordering of that step would turn the release-wiring checks into a
-          # silent skip — which is the failure mode those checks exist to catch.
+          # Test deps come from the `test` extra in pyproject.toml, not an
+          # imperative list here: pytest/pytest-timeout/coverage and pyyaml all
+          # live in ONE declared place a developer reproduces with
+          # `pip install -e ".[test]"`. pyyaml matters beyond mai_lint —
+          # tests/test_release_wiring.py importorskips on it, so leaving it out
+          # would turn the release-wiring checks into a silent skip, which is
+          # the failure mode those checks exist to catch. Declaring it in the
+          # extra keeps it installed on every run without a second copy to drift.
           # jeles is a declared runtime dependency now (it backs
           # willow_institutional_search), so `pip install -e "."` brings it. It
           # stays named here anyway: two test files `importorskip` on it, and if
@@ -138,7 +142,7 @@ jobs:
           # cap from pyproject.toml, and a range restated here is a second copy
           # that goes stale silently. It did — this line still said `>=0.5.0`
           # after the real floor moved to 0.5.1 for the egress-guard fix.
-          pip install -e "." pytest pytest-timeout coverage pyyaml jeles
+          pip install -e ".[test]" jeles
 
       - name: Run tests (under coverage)
         # --timeout-method=thread: dumps every thread's stack and exits even
