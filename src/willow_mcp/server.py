@@ -4445,7 +4445,6 @@ def whoami(app_id: str = "") -> dict:
     }
 
 
-@mcp.tool()
 def _diag_envelope_registry() -> dict:
     """The Article III.2 envelope registry: does it resolve to a file holding at
     least one usable active grant? An empty, missing, or all-malformed registry
@@ -4475,6 +4474,7 @@ def _diag_envelope_registry() -> dict:
     }
 
 
+@mcp.tool()
 def diagnostic_summary(app_id: str = "") -> dict:
     """Self-check: is this willow-mcp install wired correctly? Reports the SOIL
     store (path/writable/collections), Postgres (reachable + which database +

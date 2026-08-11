@@ -399,3 +399,16 @@ def test_diag_envelope_registry_warns_when_absent(monkeypatch, tmp_path):
     out = server._diag_envelope_registry()
     assert out["status"] == "warn"
     assert out["present"] is False
+
+
+def test_diagnostic_summary_is_registered_and_the_probe_helper_is_not():
+    """Guard against decorator displacement (regression from #332's own fix):
+    _diag_envelope_registry is a PRIVATE helper, not an MCP tool, and
+    diagnostic_summary must stay a registered tool. Inserting the helper between
+    `@mcp.tool()` and `def diagnostic_summary` once moved the decorator onto the
+    helper — the unit suite stayed green because the registered/guarded tool
+    counts balanced, and only the live stdio handshake (fleet-seams) caught it.
+    This asserts the registry directly so the next such slip fails here."""
+    names = {t.name for t in server.mcp._tool_manager.list_tools()}
+    assert "diagnostic_summary" in names, "diagnostic_summary must be a registered MCP tool"
+    assert "_diag_envelope_registry" not in names, "the private probe helper must not be exposed as a tool"
