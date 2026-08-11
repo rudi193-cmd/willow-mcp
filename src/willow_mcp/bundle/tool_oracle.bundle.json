@@ -1,2443 +1,22 @@
 {
   "counts": {
-    "pairs": 105,
+    "pairs": 112,
     "rejections": 0,
-    "sealed": 105,
-    "servable": 105
+    "sealed": 112,
+    "servable": 112
   },
-  "created_at": "2026-08-11T05:35:16.291717+00:00",
-  "digest": "4a2710c9c5f07efa15d0934a017210e5082bf8a88b5c5edd7c76d7d61aea146b",
+  "created_at": "2026-08-11T06:05:19.712996+00:00",
+  "digest": "0364b809343188536152152e7291c7a0e3c89d1692aa687edb5beb6c210990c8",
   "domain": {
     "source_lang": "tool",
     "target_lang": "tool"
-  },
-  "ledger": {
-    "entries": [
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "ff862c05-f7b7-4bf8-b4a8-55c27baaaaf9",
-        "prev": "genesis",
-        "source_lang": "tool",
-        "source_sha": "bda101f2d17afc55",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.079168+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "agent_clear",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "ff862c05-f7b7-4bf8-b4a8-55c27baaaaf9",
-        "prev": "f477d77adc6490b872e83cb938220867559365c71c4b759e10fd217f1800a96b",
-        "surface": "release a specialist after its handoff has been verified",
-        "surface_sha": "bda101f2d17afc55",
-        "ts": "2026-08-11T05:35:16.080636+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "3c297ec2-0cae-46bd-8c76-4e6144e72d6a",
-        "prev": "d67ae3f6bc74b5925d761bb7f0f257250221e2e23ee5fb00d083a3ed0a46e784",
-        "source_lang": "tool",
-        "source_sha": "dbb10acfe96435d2",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.082051+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "agent_dispatch_result",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "3c297ec2-0cae-46bd-8c76-4e6144e72d6a",
-        "prev": "04998092f3e32037365f5324fa780b3783b4e076450f048665f07fca2bc48236",
-        "surface": "close the loop on an agent_route call",
-        "surface_sha": "dbb10acfe96435d2",
-        "ts": "2026-08-11T05:35:16.082721+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "f431dc08-a35f-4c6b-af30-decb3df3a5d2",
-        "prev": "ab3d6909f51636d6f07bc868517ba9ebd7ba52d33d5ebafa00232825f1109df6",
-        "source_lang": "tool",
-        "source_sha": "b429c8e4c7817869",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.084053+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "agent_route",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "f431dc08-a35f-4c6b-af30-decb3df3a5d2",
-        "prev": "0538a0859be93afe1dbf6dfdc9819fcc878464d866d5d87126f0563610a0db8c",
-        "surface": "record a routing decision \u2014 \"this task goes to that agent\" \u2014 in the fleet's routing_decisi",
-        "surface_sha": "90cdc6127b898719",
-        "ts": "2026-08-11T05:35:16.084631+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "f4da0ac4-8d65-42d2-b5f7-cc1dd5fdf353",
-        "prev": "6a042a4beb74a55babfa2c0c125ad7353b30cb62820baa4932b5ca6111758230",
-        "source_lang": "tool",
-        "source_sha": "2e8fd551e9d83588",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.085858+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "agent_seed_mirror",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "f4da0ac4-8d65-42d2-b5f7-cc1dd5fdf353",
-        "prev": "0d0567f67177bf02b8cc5cb4a8a95531f36c7fdfa0cfdbfdff3d922913dd6c7a",
-        "surface": "mirror a ratified home seed into soil collection willow_agents_seeds (as-5)",
-        "surface_sha": "4f4934f09362335f",
-        "ts": "2026-08-11T05:35:16.086419+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "0d12d896-a5de-416a-837a-572958e408af",
-        "prev": "1a3c15c328ca5e89bc77bcadaab655667c554595229444f41b7413fcd484292c",
-        "source_lang": "tool",
-        "source_sha": "a8c1d75a6d66ccab",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.087487+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "code_graph_explain",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "0d12d896-a5de-416a-837a-572958e408af",
-        "prev": "2295319cc3d1cda5ffcd0065ed0cf33b41866121d20ba57d7924e25677e0be76",
-        "surface": "explain a symbol",
-        "surface_sha": "a8c1d75a6d66ccab",
-        "ts": "2026-08-11T05:35:16.088037+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "e7236bd8-0bfb-4363-8e3d-bb8270c20129",
-        "prev": "b582d7eb9e42f880e24e642beffacf77eb5845f4c34a6edd20539158f9cc9cd2",
-        "source_lang": "tool",
-        "source_sha": "cbcfb2e123bc1d2a",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.089301+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "code_graph_impact",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "e7236bd8-0bfb-4363-8e3d-bb8270c20129",
-        "prev": "65cbcc6b4de60de3d57f314f2bcaa29d0251719117b58eac18a7179f127a7fb8",
-        "surface": "blast radius",
-        "surface_sha": "cbcfb2e123bc1d2a",
-        "ts": "2026-08-11T05:35:16.090078+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "1ca045c3-0edf-41b6-8d08-f1f31781f82d",
-        "prev": "c73d40685726fcf223a74871369aeb206cf69fde5a4aaac0b2e168bc4c995022",
-        "source_lang": "tool",
-        "source_sha": "ee28b2fd8e21cb0b",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.091327+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "code_graph_index",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "1ca045c3-0edf-41b6-8d08-f1f31781f82d",
-        "prev": "8c3282c390c875137be66d4e91c17eb61de47f69ab3f1125cdc62949ed0df4bf",
-        "surface": "index a repository's python + js/ts files into a local sqlite symbol graph (symbols, impor",
-        "surface_sha": "a55f19f135388c38",
-        "ts": "2026-08-11T05:35:16.092076+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "a023501d-0e14-49db-b156-82f1cd619e68",
-        "prev": "e162872581deb62e035d5bb21431813114d89c842df5a44a28ee91c04e97b101",
-        "source_lang": "tool",
-        "source_sha": "1814236f692b1065",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.093622+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "code_graph_search",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "a023501d-0e14-49db-b156-82f1cd619e68",
-        "prev": "9c4402968b13a53025f0850ebb6bb6edece343891463291340cce20e7a0d445c",
-        "surface": "fuzzy symbol search over the graph",
-        "surface_sha": "1814236f692b1065",
-        "ts": "2026-08-11T05:35:16.094211+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "726773e1-f660-4085-b03a-5a1d9ec39d6e",
-        "prev": "b1ed8dc1460d93e55ad05155801a241dce2220a4b0c8ab6cf1632b7f894c1908",
-        "source_lang": "tool",
-        "source_sha": "6dc001177e6f9409",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.095480+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "code_graph_suggest",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "726773e1-f660-4085-b03a-5a1d9ec39d6e",
-        "prev": "00d6989d6b7fa310bf1dfc349981c67dca7c89b75a7d52eb37afa2746062be11",
-        "surface": "suggest the files most relevant to a task description, ranked by keyword overlap with symb",
-        "surface_sha": "b60e8a30959a7ba2",
-        "ts": "2026-08-11T05:35:16.096174+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "6d2a50f8-77b0-4bd9-9094-73b3ccfdc4bb",
-        "prev": "e313935f86b42025cc334750f9a96c65c06c129cce5acc0ef66fd09b960a07ef",
-        "source_lang": "tool",
-        "source_sha": "3448d1a5309d1909",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.097591+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "code_graph_walk",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "6d2a50f8-77b0-4bd9-9094-73b3ccfdc4bb",
-        "prev": "a0c4a96091e28ab4f951e61b0ba1c717d1ed59e65b48dedd5a10daef40c1a7f5",
-        "surface": "bfs from an anchor symbol along import + inherit edges, collecting context until a token b",
-        "surface_sha": "704afa152a81b3f7",
-        "ts": "2026-08-11T05:35:16.098212+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "987744be-2762-4fc7-80e0-fac012e4957c",
-        "prev": "71e7149b79ebced661091c498d2539a050065279b5152785911842a3637f286b",
-        "source_lang": "tool",
-        "source_sha": "cb2cc20d8a5cacb8",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.099495+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "commitment_acknowledge",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "987744be-2762-4fc7-80e0-fac012e4957c",
-        "prev": "313826869acf8840669036de2905d4fe7c4e85e5773276f69af52eb99588a798",
-        "surface": "mark a commitment change as seen by the operator \u2014 the split-stick halves match again",
-        "surface_sha": "a1f189ebf228f899",
-        "ts": "2026-08-11T05:35:16.100184+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "e5967527-4afb-4121-851d-bf02f3afac2f",
-        "prev": "0f0ce7a2d451678c80a8036d156012c5c1914ea19d3126f78e0fa7d1a7859419",
-        "source_lang": "tool",
-        "source_sha": "347772e8ece185ad",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.101405+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "commitment_ingest",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "e5967527-4afb-4121-851d-bf02f3afac2f",
-        "prev": "9b03eaa30f67b7495f2fbdf7315a4a6a39a94dada711a198bf13c69e70cb6c73",
-        "surface": "ingest calendar events into the operator's commitment ledger and persist the result (soil ",
-        "surface_sha": "ad7703d4c49b890e",
-        "ts": "2026-08-11T05:35:16.102054+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "b8c7baf9-9417-471b-b5d8-01f834dd83d7",
-        "prev": "3252b7e72f0930ed3423608d677730d244ca079383720c1eb3487d21c1922145",
-        "source_lang": "tool",
-        "source_sha": "7cb34c2e278e8dd3",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.103478+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "commitment_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "b8c7baf9-9417-471b-b5d8-01f834dd83d7",
-        "prev": "25c602f39e9c12e213c28727d93b35860959eb80df9b3ae5510fd073d68ab058",
-        "surface": "list the operator's persisted commitments as facts only (uid/title/when/who/ state/acknowl",
-        "surface_sha": "8fb7c290e83dbfcc",
-        "ts": "2026-08-11T05:35:16.104068+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "c0291934-0d5a-4b57-a136-a6a562b52fca",
-        "prev": "6b548b262cc74136cd2929bb98664cd0edbfb13829f80fdeb8cfaa99466f5155",
-        "source_lang": "tool",
-        "source_sha": "da6fef76c6e3fa10",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.105187+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "commitment_surface",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "c0291934-0d5a-4b57-a136-a6a562b52fca",
-        "prev": "57573d5f2ab0b9fe9f3faeb56b086ad81ed957236a3e26cbc92353cbae866a12",
-        "surface": "the dew-rule view",
-        "surface_sha": "64d1dfff4bd88ec8",
-        "ts": "2026-08-11T05:35:16.105757+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "9f9ede39-efdd-41ca-8d2d-d661621ab9cf",
-        "prev": "eac7af6f8034a5d9801ffe4d14eddc215fba61d8f4c4823c8b2b46248f80e87f",
-        "source_lang": "tool",
-        "source_sha": "84001be9d740b48d",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.107030+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "context_expire",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "9f9ede39-efdd-41ca-8d2d-d661621ab9cf",
-        "prev": "0b9e872487ccff0d538a6da00ee18ac7ae9566970dc1d78ad88d04def7f03522",
-        "surface": "delete one of your saved contexts immediately, ahead of any ttl",
-        "surface_sha": "cc44e1f4c7b52b73",
-        "ts": "2026-08-11T05:35:16.107581+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "5ee0ae30-478c-433b-8d30-54ed94acf26f",
-        "prev": "70ed993e5d627dff33b81d0df7f2a59e017d0d80ac4b5835c7354ad7d708fe48",
-        "source_lang": "tool",
-        "source_sha": "904a0b19e90991d6",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.109178+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "context_get",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "5ee0ae30-478c-433b-8d30-54ed94acf26f",
-        "prev": "950d99542744f3d7f7dc996d749f3a60e4ba550cb04272c937833630d81d1fc0",
-        "surface": "read a saved context by key",
-        "surface_sha": "904a0b19e90991d6",
-        "ts": "2026-08-11T05:35:16.109755+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "eb97bc49-2b31-46f9-9938-fcd6b57250fa",
-        "prev": "de0f482da882f4dc599481310b287ac7e509aab2f12ad927e395a52de65fe037",
-        "source_lang": "tool",
-        "source_sha": "ac01feb2bfe181ce",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.111338+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "context_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "eb97bc49-2b31-46f9-9938-fcd6b57250fa",
-        "prev": "be4602bf74d3a88cdb0700407aca034e587125fb02965d01ed79be32fe6572b9",
-        "surface": "list your saved context keys with save/expiry times (values omitted \u2014 use context_get)",
-        "surface_sha": "22c0b7458ff0d80c",
-        "ts": "2026-08-11T05:35:16.111851+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "d266fe27-aa94-4abb-9e59-ea8d743a2653",
-        "prev": "77e517dcfaf4fffc8024af5bcd119bb19d82a208a9edd47e7618ced2e624aef0",
-        "source_lang": "tool",
-        "source_sha": "7b7513e336902ece",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.113144+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "context_save",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "d266fe27-aa94-4abb-9e59-ea8d743a2653",
-        "prev": "6eb3316c996070fdfd5c7810a4509c8229268b9b16766687c18dc995e2c42f88",
-        "surface": "save ephemeral working state under `key`, optionally expiring after ttl_seconds (0 = never",
-        "surface_sha": "cf7580cd5833579e",
-        "ts": "2026-08-11T05:35:16.113793+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "fc392440-0651-4010-bdeb-d05d7a68ba4f",
-        "prev": "8fa20329875488bcef8b706f9a4857d159c5d476fa548d64024cc875fe253b5a",
-        "source_lang": "tool",
-        "source_sha": "60578b9bd31fdfee",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.115025+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "diagnostic_summary",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "fc392440-0651-4010-bdeb-d05d7a68ba4f",
-        "prev": "38f44bbc811aef2c0439480594f7b9a524453dd276eb33a045c84ab3b336ec93",
-        "surface": "self-check",
-        "surface_sha": "bae1f5d2681c0f01",
-        "ts": "2026-08-11T05:35:16.115642+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "18b0f734-f477-4131-8311-97634374dfa5",
-        "prev": "7da278402b39812fa474c66de6b49acd4ec69406ebd2ed1d1d9311078b296c1e",
-        "source_lang": "tool",
-        "source_sha": "c118810095277890",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.116853+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "dispatch_accept",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "18b0f734-f477-4131-8311-97634374dfa5",
-        "prev": "234ae8f055731330e903e2fdf1f0b764f34efbe1a8c7e7a35fc88525acc6c20d",
-        "surface": "accept a dispatch packet addressed to you",
-        "surface_sha": "c118810095277890",
-        "ts": "2026-08-11T05:35:16.117491+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "a2275a13-d7de-4043-bd4f-3f9e25a2354b",
-        "prev": "251e2662c0dbe5a6d017ca178b7109b3b95f28004bffa2b403746b766724ce1c",
-        "source_lang": "tool",
-        "source_sha": "bc17470e30657354",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.118810+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "dispatch_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "a2275a13-d7de-4043-bd4f-3f9e25a2354b",
-        "prev": "48b1eeab664928f36e98a76c6bb825c53b741e99506d5fe58f58a11fff80d2c8",
-        "surface": "list dispatch packets newest-first, filtered by any combination of to_app / from_app / sta",
-        "surface_sha": "f11c1e66dc0c99f2",
-        "ts": "2026-08-11T05:35:16.119542+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "68b6c60c-ff4d-4693-a158-7b528aaa6e30",
-        "prev": "a1427791222d2d9d9bfd4e86025c46669cdeafe5e26b7a7b52c549c360460644",
-        "source_lang": "tool",
-        "source_sha": "3b3c88551e1626b3",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.120821+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "dispatch_read",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "68b6c60c-ff4d-4693-a158-7b528aaa6e30",
-        "prev": "d97fb7dc4d99ce4599a82ae2752f594b27c9470a05110f696eeff4e811e0db5d",
-        "surface": "read one dispatch packet by id",
-        "surface_sha": "3b3c88551e1626b3",
-        "ts": "2026-08-11T05:35:16.121372+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "88e8e2de-f0a2-42db-9b0c-19495d9f5fb5",
-        "prev": "d6078c927a345bbe9aeb232c1ed22ff6fb90edd8958c059ae24b643132100eb8",
-        "source_lang": "tool",
-        "source_sha": "63ba5692839c0d27",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.122532+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "dispatch_send",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "88e8e2de-f0a2-42db-9b0c-19495d9f5fb5",
-        "prev": "2f20ab1156384675580abcc14c3757e0e3472ba1e3ebadedee0e6915b3e7f971",
-        "surface": "create a dispatch packet assigning work to another agent",
-        "surface_sha": "63ba5692839c0d27",
-        "ts": "2026-08-11T05:35:16.122978+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "29538715-fc0c-48d3-8236-ce45308e21a5",
-        "prev": "a88cb32615422c6707d327e8bce352bacfd361d946f987cf2b3cbd451defd984",
-        "source_lang": "tool",
-        "source_sha": "b801161967611543",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.124374+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "envelope_apply",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "29538715-fc0c-48d3-8236-ce45308e21a5",
-        "prev": "91959a3bd81a77f938b37241d4f45455912345ab531d4ad66a7f0d3d61782f4d",
-        "surface": "check an authority envelope \u2014 an operator-granted, scoped permission \u2014 before acting under",
-        "surface_sha": "24602fa835619ef7",
-        "ts": "2026-08-11T05:35:16.124919+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "1b0a756b-d0cb-4dd4-8077-b1aa5aabfc31",
-        "prev": "8446e8c7a7b3e84dd66247539f451b4451b952a482c1efc39c374dda20e58f79",
-        "source_lang": "tool",
-        "source_sha": "c9b921ae4bc8667e",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.126153+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "exposure_config_get",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "1b0a756b-d0cb-4dd4-8077-b1aa5aabfc31",
-        "prev": "58e202924a83d484cf2f20c2ff60b3be1c58d3424c2ce9cc3d0485ded56e0947",
-        "surface": "read the standing exposure defaults from $willow_home/config/ exposure.json \u2014 which preset",
-        "surface_sha": "1c56426a193a290c",
-        "ts": "2026-08-11T05:35:16.126629+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "46fe5b61-08a4-4015-9be4-54ff92e02cba",
-        "prev": "329fe4df8563eaaad6f77e84cf3743fef6012b307d3842bac899caedfd3fde40",
-        "source_lang": "tool",
-        "source_sha": "d8cfb18296d046bc",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.127811+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "exposure_slice",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "46fe5b61-08a4-4015-9be4-54ff92e02cba",
-        "prev": "e6e8be1522931edd1eff46c26f1073d078dbdecfabce8165c2abab92d217e9d9",
-        "surface": "resolve and apply an exposure preset for a seed destination (as-8)",
-        "surface_sha": "dbaec68ca2a2f62c",
-        "ts": "2026-08-11T05:35:16.128480+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "2e069d5d-6aae-41bd-82e5-32d86588b451",
-        "prev": "1836bf906038e7a9e62e362f53c524db5dd2b730457ad98e480ce019ecdb02e4",
-        "source_lang": "tool",
-        "source_sha": "bb529fb5aad16ac3",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.129753+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "federation_call",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "2e069d5d-6aae-41bd-82e5-32d86588b451",
-        "prev": "841402dbdfe18d4e28f4813b4e5ea70639a1f3128a4087afa61a66d9f4a9e232",
-        "surface": "call one tool on one ratified downstream mcp server",
-        "surface_sha": "bb529fb5aad16ac3",
-        "ts": "2026-08-11T05:35:16.130319+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "6931f9b7-fae4-4c7b-986d-60ff75286c6d",
-        "prev": "d6167a0404cda80c1c9db02dce2c728cdecd34d74804480205bf5d3870885b41",
-        "source_lang": "tool",
-        "source_sha": "653c7ddcd379aab5",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.131511+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "federation_discover",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "6931f9b7-fae4-4c7b-986d-60ff75286c6d",
-        "prev": "ba0ca97e4944eea7d7cb0b4b38e5693513f8c6705b19633239aa26e0ae6ca85f",
-        "surface": "shadow-it scan",
-        "surface_sha": "ba80b26fb577bd39",
-        "ts": "2026-08-11T05:35:16.132182+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "a614e901-5472-4d55-9b7a-1dafdcb3ae11",
-        "prev": "960727d4945950591dc4544df89ec7f17883bc4c5e591bd0661c822224380d55",
-        "source_lang": "tool",
-        "source_sha": "fab5fe55bbd51fa6",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.133481+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "federation_list_servers",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "a614e901-5472-4d55-9b7a-1dafdcb3ae11",
-        "prev": "b92e799ec2dbadb2a5f756e7a078f32686174ed27206389325ba9c8158d49fbb",
-        "surface": "list every operator-ratified downstream mcp server",
-        "surface_sha": "b601d167397b2996",
-        "ts": "2026-08-11T05:35:16.134110+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "c8f2690b-e749-4961-9147-06c5a19e0aa9",
-        "prev": "6cd6594d7aee995713735e39dcdad16c0740fd52f55d53f8e4182272982a8de1",
-        "source_lang": "tool",
-        "source_sha": "a857cdf858b9db1f",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.135458+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "fleet_health",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "c8f2690b-e749-4961-9147-06c5a19e0aa9",
-        "prev": "c1f4ccb88308586b70566f7b57ca26cd4817f459801520c5e5802e5871f6c1ed",
-        "surface": "fleet health \u2014 task queue counts by status, plus live worker heartbeats",
-        "surface_sha": "3506cb12afe4de18",
-        "ts": "2026-08-11T05:35:16.136000+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "06187aba-90e6-42d9-9bc6-059b2e15b547",
-        "prev": "a79557128882930daf44198aab52f1b2f16e5ff51df2725b67e0f5994537ab72",
-        "source_lang": "tool",
-        "source_sha": "21b8172b90b7df70",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.137509+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "fleet_status",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "06187aba-90e6-42d9-9bc6-059b2e15b547",
-        "prev": "3b4145d6a2b8331bc960df3477e8b5fc0526788c969d6b94b132625e57372cad",
-        "surface": "read the canonical fleet roster (fleet.json) \u2014 every registered agent and its declared sta",
-        "surface_sha": "41eb5412ddf53070",
-        "ts": "2026-08-11T05:35:16.138175+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "0b08ec73-4396-4217-ab1e-8a1c52775fc2",
-        "prev": "02da2466a96d2122d661677a18886863d57d593bbb7132b88a35f9bd15879238",
-        "source_lang": "tool",
-        "source_sha": "97023ab7050f5deb",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.139589+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "fork_create",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "0b08ec73-4396-4217-ab1e-8a1c52775fc2",
-        "prev": "a9964c6bc8ec5e470bbdca787bfe56db27f9b8b5ce1aa7e077ac5dc0ff36f629",
-        "surface": "open a fork \u2014 a named, bounded unit of work (feature branch + pr tracking) recorded in the",
-        "surface_sha": "53f384a0b34f4242",
-        "ts": "2026-08-11T05:35:16.140135+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "7d94320c-0a7d-4f14-8b26-3e1af1039aa2",
-        "prev": "6c41a5ddf7f7009f3affa3fa1a671b4cdfc97bf5021ac3cf9a51f0d3f983e7db",
-        "source_lang": "tool",
-        "source_sha": "ea9b7274347399ca",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.141421+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "fork_join",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "7d94320c-0a7d-4f14-8b26-3e1af1039aa2",
-        "prev": "ce4630222426bbb032949c674953188d9828dbe6cede19f8817f5939cd7745b7",
-        "surface": "register `component` \u2014 an agent, repo, or subsystem name \u2014 as a participant in an open for",
-        "surface_sha": "af0168fee3494ffa",
-        "ts": "2026-08-11T05:35:16.142052+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "a3ce305f-e403-4513-9cb4-33557ce92202",
-        "prev": "452f4565a8cb61a4ae757d9e6f56401f93a3f93f2d727fc6cf2351d2a4fd0945",
-        "source_lang": "tool",
-        "source_sha": "430d712876c78e7f",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.143310+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "fork_log",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "a3ce305f-e403-4513-9cb4-33557ce92202",
-        "prev": "f587170a8ffe464c95334155a8694de7393830d85d9e8a6134e63c22e44f9410",
-        "surface": "append one change entry to an open fork's log",
-        "surface_sha": "91847ba5ad942505",
-        "ts": "2026-08-11T05:35:16.143846+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "c206afdd-a0f8-4540-8f17-b5c918d01751",
-        "prev": "3583b5ff246e0fd34ed86142794da48006a83e390077f20b37e90fa6acfc5ed0",
-        "source_lang": "tool",
-        "source_sha": "e363ef65239778f0",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.145199+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "frank_append",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "c206afdd-a0f8-4540-8f17-b5c918d01751",
-        "prev": "88c8c6ce19095217abb4a7c65cbb0460dfd8dd2231de4669f6d05ed8ec2086b4",
-        "surface": "append one event to the shared frank governance ledger",
-        "surface_sha": "e363ef65239778f0",
-        "ts": "2026-08-11T05:35:16.145904+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "b100a696-2b30-4ff9-b02d-3749aa46a9d5",
-        "prev": "3602a4eb04aef5f23b6ea04a5a8ae42ebe671cf6fdf1402dd6c1364d85657e62",
-        "source_lang": "tool",
-        "source_sha": "6fbeb24ab0b99393",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.147289+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "frank_read",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "b100a696-2b30-4ff9-b02d-3749aa46a9d5",
-        "prev": "81eb049181e5a3530e00cc76011c0527b26b95275abb7679959845d1d1244464",
-        "surface": "read recent entries from the frank governance ledger \u2014 the fleet's hash-chained, postgres-",
-        "surface_sha": "120a64ba962baa98",
-        "ts": "2026-08-11T05:35:16.147844+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "1c2dfb71-489c-4f71-9c03-e6735f9da11b",
-        "prev": "ceda53816706f52cc206f164633f26816d8dddd188f53876a929cc3fcf71e468",
-        "source_lang": "tool",
-        "source_sha": "35f5ff7adb57199a",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.149140+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "frank_verify",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "1c2dfb71-489c-4f71-9c03-e6735f9da11b",
-        "prev": "a979a7dbd86b1438c3ad09b4bfecd584327f2ebdb7f68350e19e3f61f9750267",
-        "surface": "re-hash the entire frank governance chain and verify every prev_hash \u2192 hash link, detectin",
-        "surface_sha": "09d6ae336056d3f2",
-        "ts": "2026-08-11T05:35:16.149653+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "9d12c385-a1ca-43c6-92fb-d392abfe78f9",
-        "prev": "edc2d1006860c27b4f0ab532f0f3242b06dd8a69190c4d58c1fd4164f914a866",
-        "source_lang": "tool",
-        "source_sha": "a5b23517e1bf7332",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.150825+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "friction_flags_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "9d12c385-a1ca-43c6-92fb-d392abfe78f9",
-        "prev": "830f0358f5c7f0ad668c8ad573e56b5db5c83610dc440e2551a12f4a0d3b3f29",
-        "surface": "list recent friction flags recorded by `friction_scan` \u2014 the durable trace of when the rel",
-        "surface_sha": "a667c6db9afde84c",
-        "ts": "2026-08-11T05:35:16.151549+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "71fd213b-06e8-4e14-abde-3e5f88ebb856",
-        "prev": "da17a2601d77d28b17c174b55ddef69ccc79764f242dcc326b0072b87aaf82b2",
-        "source_lang": "tool",
-        "source_sha": "1525a7a8b79a8996",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.153000+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "friction_scan",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "71fd213b-06e8-4e14-abde-3e5f88ebb856",
-        "prev": "e581c57feef95a5102a169ba07f8d88e9b57a7dc1ec11444904eab040ecf50c5",
-        "surface": "scan a transcript window for the mirror failure mode",
-        "surface_sha": "1525a7a8b79a8996",
-        "ts": "2026-08-11T05:35:16.153581+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "eff6d050-e191-4ffa-9204-1977222bcaef",
-        "prev": "6116e2f1861e808e255898f71ba74a82eae3dd79137c2df228df16df1064271b",
-        "source_lang": "tool",
-        "source_sha": "47f8ac0830470bf9",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.154781+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "gap_delete",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "eff6d050-e191-4ffa-9204-1977222bcaef",
-        "prev": "8a25e7ecac7be1fe06b32f0103c621dacb1914554765b74757f91f32cf7d612f",
-        "surface": "soft-delete a single gap by id \u2014 for clearing junk or test entries from the backlog withou",
-        "surface_sha": "2a5fd99ff7799aac",
-        "ts": "2026-08-11T05:35:16.155488+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "d641342d-1d5b-46c7-9f72-990b328fc064",
-        "prev": "529db4b5a183d610a409101139da6c06755bd414e92ed752109a54c9a6b656b2",
-        "source_lang": "tool",
-        "source_sha": "c32c4e35b4946eb5",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.156798+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "gap_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "d641342d-1d5b-46c7-9f72-990b328fc064",
-        "prev": "edf564ca89b5b77e1487b8f6139102509870ddf4f67f1d4816ab4a6d6582ef7c",
-        "surface": "list backlog gaps, most-asked first \u2014 the fleet's shared \"what we don't know yet\" queue",
-        "surface_sha": "fa1cbfcbe8d6ce5c",
-        "ts": "2026-08-11T05:35:16.157354+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "165fbf3d-da5e-4e07-b7fc-2d84e6ed4c6d",
-        "prev": "08dafa8b1b5386e4aeee47b83dc98a9cfd540eab53cce312522048c8f181cc4b",
-        "source_lang": "tool",
-        "source_sha": "e19f8486f3eb380d",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.158599+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "gap_log",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "165fbf3d-da5e-4e07-b7fc-2d84e6ed4c6d",
-        "prev": "d3d588d3724a38d59cfd169887d64c9e461e7bacec09720016bca03af01dcc96",
-        "surface": "log or bump a \"we don't know this yet\" entry",
-        "surface_sha": "55b500c3f54d12fd",
-        "ts": "2026-08-11T05:35:16.159137+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "fde40a66-94d8-4f28-8ed4-8c6007f438a3",
-        "prev": "00a1f5073bc8617f2ac958b0cff986bf0bf840a84f6c1a7429aafa5f22f65af2",
-        "source_lang": "tool",
-        "source_sha": "ffa32b0f05d9e906",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.160296+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "gap_promote",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "fde40a66-94d8-4f28-8ed4-8c6007f438a3",
-        "prev": "1889d83c0a688ec8d27064229d6cf6d5132231bfa68d3b12f4ef805b5e14d96d",
-        "surface": "turn a gap into trusted knowledge",
-        "surface_sha": "ffa32b0f05d9e906",
-        "ts": "2026-08-11T05:35:16.160827+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "71e303f6-42b4-437d-88a3-67fcfc4bae3b",
-        "prev": "b6f75f1391175d232a2296683615406135ab3ef3d7b5de4dcbb3c431326a3a6d",
-        "source_lang": "tool",
-        "source_sha": "59991e3cdf6b5b78",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.162187+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "gap_purge_topic",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "71e303f6-42b4-437d-88a3-67fcfc4bae3b",
-        "prev": "d0baea59230f9ee9d47470366a3a37594a3902bb91c8d4d470f7c5f95131a5a7",
-        "surface": "soft-delete every gap under an exact topic in one call \u2014 bulk cleanup of a junk/test names",
-        "surface_sha": "b48960a44b87850c",
-        "ts": "2026-08-11T05:35:16.162771+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "e98c6c9f-a4b2-45f0-ba50-96dd1c7fc4c1",
-        "prev": "ba549aefa2db8c2d2bdc697f7e890d3beede866f28d1fcce466101c56d307a39",
-        "source_lang": "tool",
-        "source_sha": "910db27586b7f5b3",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.164215+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "gap_resolve",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "e98c6c9f-a4b2-45f0-ba50-96dd1c7fc4c1",
-        "prev": "8e9b1bde4b27cf9b244981e8e1a5489b185ccff9678623121fcb1efe2c5ec9f4",
-        "surface": "mark a gap as being worked or answered \u2014 bookkeeping only, does not write to the knowledge",
-        "surface_sha": "948e39ac76d176c4",
-        "ts": "2026-08-11T05:35:16.164651+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "a65e17a3-dc70-4f95-8d78-1b673f36c66c",
-        "prev": "80f990eb1df95a2d2b3457fa903df9c3ee31ddfc4666614dd2e07cfd8a405802",
-        "source_lang": "tool",
-        "source_sha": "c4067b9b8fffb59c",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.165713+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "handoff_read",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "a65e17a3-dc70-4f95-8d78-1b673f36c66c",
-        "prev": "1adf13841e551daa59a9a1780474dcd4f9db4c54c893fa9e1940cc6e8a59c369",
-        "surface": "read the closeout of a completed dispatch",
-        "surface_sha": "c4067b9b8fffb59c",
-        "ts": "2026-08-11T05:35:16.166262+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "57b9899c-4a1d-432e-b9bd-75716f2dbfff",
-        "prev": "cb5901e78c4e4875b7939b5e3c6b6944e5013c9ba5f2ddb7fe8b5a64b3412b12",
-        "source_lang": "tool",
-        "source_sha": "b3d5a1571f81d6d6",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.167326+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "handoff_write_v4",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "57b9899c-4a1d-432e-b9bd-75716f2dbfff",
-        "prev": "8ed54abbe1dff718863973e3a80ed9fb374ad3501d7c12ea0608614b594c09b0",
-        "surface": "close out a dispatch you accepted",
-        "surface_sha": "b3d5a1571f81d6d6",
-        "ts": "2026-08-11T05:35:16.167813+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "17fad11e-3527-4c37-8431-f2ca458f8557",
-        "prev": "3d6f212487154dc4a2de0dba16888159a4c694d5238cc83dac420611a18c06fb",
-        "source_lang": "tool",
-        "source_sha": "82d5318748473872",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.169151+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "human_attestation_create",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "17fad11e-3527-4c37-8431-f2ca458f8557",
-        "prev": "bc3fe821ac09fc21b1fc0804c641224fc6718d5b89cec8e8e7b3a93aea42cf6f",
-        "surface": "create a durable attestation/rejection/change-request record for a subject (knowledge_atom",
-        "surface_sha": "be59ff5b2248f32f",
-        "ts": "2026-08-11T05:35:16.169723+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "a5762058-3dd9-426c-8736-5d18f2407767",
-        "prev": "aec2e606ea9bb7ad3869d309d14e2d226a400cf79f637b1077cb1bad887f6418",
-        "source_lang": "tool",
-        "source_sha": "1ac094e7324594b3",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.172719+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "human_attestation_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "a5762058-3dd9-426c-8736-5d18f2407767",
-        "prev": "800b92b66e6a0088b5834f49d8989892787d34f78ae03a6f4bd9974c927c956d",
-        "surface": "list durable attestation records (newest first), optionally filtered by subject_id / subje",
-        "surface_sha": "8ab4210a68c19068",
-        "ts": "2026-08-11T05:35:16.173355+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "26e5bbdd-e05a-4cf3-8679-13b203bcc7eb",
-        "prev": "79e9b864343681d8c248e62204639e1b5708cea227992641b04e5b9eb0cc6e73",
-        "source_lang": "tool",
-        "source_sha": "f6088b592b7d44b3",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.174800+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "human_required_enqueue",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "26e5bbdd-e05a-4cf3-8679-13b203bcc7eb",
-        "prev": "f8c9bf94a693cf16ad535dd9986ead9f63aa63d7116b792c3c328bd2f73b0aa5",
-        "surface": "enqueue work that must pause automation until a human acts",
-        "surface_sha": "f6088b592b7d44b3",
-        "ts": "2026-08-11T05:35:16.175464+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "303a172e-757b-4980-81f2-cf7336a428b0",
-        "prev": "439b7bf0229d6ec15f0d23bfcd2a0fb69645736a2007aae36016c44b0661c64b",
-        "source_lang": "tool",
-        "source_sha": "6f4b329f9da8a589",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.177004+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "human_required_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "303a172e-757b-4980-81f2-cf7336a428b0",
-        "prev": "0b79d5b9857099ede2a8f6d8f298da8e35278cf027e6a95c0dc23f6ab11e4ff0",
-        "surface": "list human-required queue items (newest first) with a by-status tally",
-        "surface_sha": "bd934464ce4a4da5",
-        "ts": "2026-08-11T05:35:16.178200+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "a5ded926-0613-4828-b501-72d17578c4a8",
-        "prev": "e4bd5dfa9575ebb5e86d5d759d5ca4cc838ff138f8b910dd0dcb604c212bf7c3",
-        "source_lang": "tool",
-        "source_sha": "0db14fd8a36c1dfe",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.181115+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "human_required_resolve",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "a5ded926-0613-4828-b501-72d17578c4a8",
-        "prev": "59185e2d77d7571b10513454bee80b32e4c11f1eb3f045988dd6074f57e9d206",
-        "surface": "resolve / dismiss / acknowledge a human-required queue item",
-        "surface_sha": "9832917f13fb3794",
-        "ts": "2026-08-11T05:35:16.181691+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "cc6b99e6-ad2f-400b-8e5b-5744970a1df8",
-        "prev": "0c4b83cafdd4ea164ef23639ae0d30e51eba273ad534735e9e8079595eb456a2",
-        "source_lang": "tool",
-        "source_sha": "0cdcc2cbd25aad7f",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.183073+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "integration_call",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "cc6b99e6-ad2f-400b-8e5b-5744970a1df8",
-        "prev": "a6d0eedf2f15f797509b0f988945596663c631c91a4eb96b917ec6676a939599",
-        "surface": "call an external api through a registered integration adapter",
-        "surface_sha": "0cdcc2cbd25aad7f",
-        "ts": "2026-08-11T05:35:16.183631+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "75ce47ba-b5bc-4c4d-889c-7d484bbff67d",
-        "prev": "7a7499b6a26de4ab0360a4858ebb0b1666b61c5dcf68c418441154868123283d",
-        "source_lang": "tool",
-        "source_sha": "cfb9a3c1780dd5d7",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.185206+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "integration_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "75ce47ba-b5bc-4c4d-889c-7d484bbff67d",
-        "prev": "90d0fc2dc3d5f1f4fad2ac48964cb4599e908fc925991fc8e8ce1d3961cae081",
-        "surface": "list every integration adapter \u2014 live and declared stubs \u2014 with status, credential *source",
-        "surface_sha": "43ed2a764074f2dc",
-        "ts": "2026-08-11T05:35:16.185846+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "305eaa30-204c-41d0-8bf3-c66ae84ef499",
-        "prev": "fcded1e85f65bcc008d425c30b39135cc58f75f24a6c8011e71a4ad5aaac5844",
-        "source_lang": "tool",
-        "source_sha": "bb055b50f92a5b25",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.187149+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "integration_status",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "305eaa30-204c-41d0-8bf3-c66ae84ef499",
-        "prev": "9ee09869d667c5ba70f983be54710b4c58a2be27657a00eb2f1ff3979e141047",
-        "surface": "offline readiness readout for one integration",
-        "surface_sha": "bb055b50f92a5b25",
-        "ts": "2026-08-11T05:35:16.187741+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "a4ef42b0-06c1-4eb0-a24a-4bc69f71cc61",
-        "prev": "d7d1d16403535a8e9f54608057c5d553f7e829c8c769ff5762c7a2c461db1660",
-        "source_lang": "tool",
-        "source_sha": "37421ebb691108fd",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.188964+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "kb_at",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "a4ef42b0-06c1-4eb0-a24a-4bc69f71cc61",
-        "prev": "0241ef4a3ff128032e7497c1ee39c7c35398cbd78145de0a77a3fedcb4dfdeb2",
-        "surface": "fetch one knowledge-base atom by its exact id from the fleet postgres \u2014 content, domain, s",
-        "surface_sha": "1755e40f3d15ade9",
-        "ts": "2026-08-11T05:35:16.189426+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "cc632cfd-73f3-4129-937d-151da18847b0",
-        "prev": "4119894d091c8aae48b49e8aa416591c8362c285d3ada9f43798a4b240da66bc",
-        "source_lang": "tool",
-        "source_sha": "9bcfdf7fa0ee0a0a",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.190527+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "kb_ingest",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "cc632cfd-73f3-4129-937d-151da18847b0",
-        "prev": "68565ee30d5a484fcb561a3ca35f842f0e666a9c3f5e31a3fe3e18c684a78885",
-        "surface": "promote a ratified agent_seed slice to postgres kb (source_type",
-        "surface_sha": "a529c56b30f4d2d9",
-        "ts": "2026-08-11T05:35:16.191129+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "73526425-c2c5-4a15-b1e7-42ad717315b8",
-        "prev": "d86221285bca0747ec7011016e4f70f4bc3138090a950d04b57d37569eaed5d4",
-        "source_lang": "tool",
-        "source_sha": "2ce4b80ac3f1fee9",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.192152+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "kb_journal",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "73526425-c2c5-4a15-b1e7-42ad717315b8",
-        "prev": "d27cc408582f7f8600daf8ff71f7e113a407b8711c92b9eb89168e1acb7dbe81",
-        "surface": "append a free-text journal entry to the knowledge base",
-        "surface_sha": "86bfdf1dbd808f66",
-        "ts": "2026-08-11T05:35:16.192689+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "d1758825-50a2-4e1c-9a9f-d69460f62d61",
-        "prev": "e5cf62c8cebb6c00eee6b34d6bb80ef5d5a2ff9c28f202b55b028c6030c5f9df",
-        "source_lang": "tool",
-        "source_sha": "2d9ef57d0dc32c6a",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.194092+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "kb_promote",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "d1758825-50a2-4e1c-9a9f-d69460f62d61",
-        "prev": "d8c768e9973a0111700e94b97d95a233353c8550b6864e7682e6b826b6bea397",
-        "surface": "move an existing knowledge atom to a different domain \u2014 e.g",
-        "surface_sha": "83117c8312afa459",
-        "ts": "2026-08-11T05:35:16.194556+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "6582610c-e5d2-4e2b-b516-4aee1bf82658",
-        "prev": "f4e01d9eac9c067a4a626b61ee1620c17d0555b4b5207a4269763fddf475878c",
-        "source_lang": "tool",
-        "source_sha": "aa349da1ace7f3e1",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.195648+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "kb_startup_continuity",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "6582610c-e5d2-4e2b-b516-4aee1bf82658",
-        "prev": "c42a56e2d29b1d9d832a9c572e17e14092a59037225a89faf1907401eb255576",
-        "surface": "fetch the knowledge atoms marked for session-startup continuity \u2014 domain 'continuity' or t",
-        "surface_sha": "d416fe2b3a90395e",
-        "ts": "2026-08-11T05:35:16.196357+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "b33b3c54-9299-49da-9f78-9e060c7d1fef",
-        "prev": "bcf7ff034f6765cbcb3c68b4f52b31be5309aad15bb1f7a12b961763fd10c7be",
-        "source_lang": "tool",
-        "source_sha": "646a04733c5f3f6d",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.197757+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "knowledge_flag",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "b33b3c54-9299-49da-9f78-9e060c7d1fef",
-        "prev": "ad367daf1b74b006ffac2a8c8e73784b275b4eea3f1cfd4f68d4a4cc59658085",
-        "surface": "attach a visible integrity flag to an existing kb atom (tags only)",
-        "surface_sha": "10b7594412eaa617",
-        "ts": "2026-08-11T05:35:16.198359+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "4f99fbd8-0105-4a17-9230-f8bda6915181",
-        "prev": "08cd4031d30f2a0fad7eddc5226819da1985ca15b758bc61fe279bd02f6e1f2a",
-        "source_lang": "tool",
-        "source_sha": "36728d56f3e2623b",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.199639+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "knowledge_ingest",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "4f99fbd8-0105-4a17-9230-f8bda6915181",
-        "prev": "712f896791a994563f4000705ce14516fe8bd47e0ad19856e71c471dedfcaca2",
-        "surface": "add a knowledge atom to the postgres knowledge base",
-        "surface_sha": "36728d56f3e2623b",
-        "ts": "2026-08-11T05:35:16.200156+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "71a51258-2387-419a-bb12-a3eaa7dbe22d",
-        "prev": "1a3981a150afb0b36bb1d71a3b0cc565b61808a4f3e066fa1ae0e47e61d27e39",
-        "source_lang": "tool",
-        "source_sha": "dad269fbb655534b",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.201460+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "knowledge_retract",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "71a51258-2387-419a-bb12-a3eaa7dbe22d",
-        "prev": "a5d62045db65c04b5e4aad882628fffe83a27a6bdb3aebb7ced58bf9c36132ac",
-        "surface": "tombstone a kb atom in place \u2014 hidden from default search, fetchable by id",
-        "surface_sha": "871cf45e9e6335c5",
-        "ts": "2026-08-11T05:35:16.202012+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "127a844f-7292-48eb-82e4-9afb980a7bab",
-        "prev": "360ccb31799b2248578459e6cbcd025f85f26a625803b0417b828c5ce405ed05",
-        "source_lang": "tool",
-        "source_sha": "b7d67593031a0d8f",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.203268+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "knowledge_search",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "127a844f-7292-48eb-82e4-9afb980a7bab",
-        "prev": "180fdf6eca273696f2b225ef98d73b5856981872a83a09f662c11a904af3c479",
-        "surface": "search the fleet postgres knowledge base by content",
-        "surface_sha": "b7d67593031a0d8f",
-        "ts": "2026-08-11T05:35:16.203739+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "ca700921-3d3d-4fa9-8d60-417bd284d63b",
-        "prev": "80463e0db6474163be5686aa473e91d42bb7d093dcac42d77daa85b60ae81c6c",
-        "source_lang": "tool",
-        "source_sha": "c6fcd2280761fb38",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.205224+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "lineage_link",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "ca700921-3d3d-4fa9-8d60-417bd284d63b",
-        "prev": "24e43f28a86877ac775c6716dd3a0217accdef73d7f6e45af3757a437c8620de",
-        "surface": "add one provenance edge without (re)writing a node \u2014 e.g",
-        "surface_sha": "500f07e126492efb",
-        "ts": "2026-08-11T05:35:16.205795+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "2bac0f97-d2bc-4ac6-9322-867271137045",
-        "prev": "e8059ed6afd07e744c821f3980b50e0b5179df25cf02065780a35b5ae712a014",
-        "source_lang": "tool",
-        "source_sha": "e352d21622f76665",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.207048+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "lineage_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "2bac0f97-d2bc-4ac6-9322-867271137045",
-        "prev": "1741c653ba282b290c16446edd5cfc50c43ca5c4826f65f04ee08f8fc9571feb",
-        "surface": "list recorded lineage atoms (id, title, whether current, tags) \u2014 the index of \"what parts ",
-        "surface_sha": "1f0a4388b2aa9173",
-        "ts": "2026-08-11T05:35:16.207537+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "c665daa9-14a9-4411-b479-b7898c540786",
-        "prev": "71d66b93206dddcd717bfc7d2d711ad28e52eab63747d01dcd05908bf31f2250",
-        "source_lang": "tool",
-        "source_sha": "68481094499efaf0",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.208759+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "lineage_record",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "c665daa9-14a9-4411-b479-b7898c540786",
-        "prev": "cc6ed8f3c993b4bca695e1e1032fa80b6ae34980fa21cd5e913cd4f5db0bab43",
-        "surface": "record a provenance atom \u2014 the \"story of this willow\" as memory an agent can query later",
-        "surface_sha": "a28bfd26c1f33198",
-        "ts": "2026-08-11T05:35:16.209383+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "255785ec-052e-4580-903f-06b3e727c815",
-        "prev": "b354c1405a31bec7aded91d3d6a9d155f68df89830fef155e744e8add23a42bc",
-        "source_lang": "tool",
-        "source_sha": "6eff7ff9c604e863",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.210832+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "lineage_why",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "255785ec-052e-4580-903f-06b3e727c815",
-        "prev": "30c11381fab989d77d2435f324131b2869460b8e2420f4ae0cb86749526968be",
-        "surface": "answer \"why does x exist / where did x come from\" from recorded lineage",
-        "surface_sha": "f451c22ccac1d0b0",
-        "ts": "2026-08-11T05:35:16.211583+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "640eb493-cb3d-4b6a-adf7-75642d0c2f58",
-        "prev": "4125f99781668dce2140accde0a96f892a07b3606e69c8ed2c9736cd454ccf8b",
-        "source_lang": "tool",
-        "source_sha": "7033ef62d802d862",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.212846+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nest_digest",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "640eb493-cb3d-4b6a-adf7-75642d0c2f58",
-        "prev": "b4fda78e8f3bfabe275af1245d14097e579c4d6cda167723724792cc18110d55",
-        "surface": "a one-page markdown map of a seeded nest db \u2014 the walled view",
-        "surface_sha": "8bd2151db665942b",
-        "ts": "2026-08-11T05:35:16.213550+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "ebb7d4fb-043b-4e5d-b725-36e70f92aa98",
-        "prev": "064e31f3455f7a8a66c0e10e819a088ca00c3f604c9f0ec06e91703fa31e8bee",
-        "source_lang": "tool",
-        "source_sha": "5c847f3a6a762c3c",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.214918+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nest_intake_file",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "ebb7d4fb-043b-4e5d-b725-36e70f92aa98",
-        "prev": "efae6ed085c425d10998dc6e0d3b9b639af1d5860baa2aca8ea11fe8d431d045",
-        "surface": "file a staged item",
-        "surface_sha": "5c847f3a6a762c3c",
-        "ts": "2026-08-11T05:35:16.215507+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "5895f9f7-9083-4753-807a-cde34fd58596",
-        "prev": "8bf77cf3dcfff8eaa43e735e019e5c65b37e5aa3e32631f735481b118977e17f",
-        "source_lang": "tool",
-        "source_sha": "143d9f853413a7b0",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.216686+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nest_intake_flags",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "5895f9f7-9083-4753-807a-cde34fd58596",
-        "prev": "c8cd7b710b9e49b42fc12467088974efa70166e5708dfda31fee6b0f8a100bc3",
-        "surface": "list open rule-delta flags \u2014 patterns the classifier got wrong often enough (correction_fl",
-        "surface_sha": "0379a04d76e5b121",
-        "ts": "2026-08-11T05:35:16.217316+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "ba285391-c719-411a-bea0-f4f7403d79f7",
-        "prev": "5d749ea26bed2d94a8a064e3d55feb225a6beb7d706cb3e0ede3d0c8342015b8",
-        "source_lang": "tool",
-        "source_sha": "776dc3500a7e1b4f",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.218615+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nest_intake_queue",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "ba285391-c719-411a-bea0-f4f7403d79f7",
-        "prev": "3d40b44c4f219ac82d11032c33b9664df5af4c046040703bf87c3c5ee721ea77",
-        "surface": "list the pending review queue \u2014 files staged by nest_intake_scan awaiting a confirm/overri",
-        "surface_sha": "252754684039d5ef",
-        "ts": "2026-08-11T05:35:16.219336+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "f7131582-b70f-4001-ae07-d50b9e309bff",
-        "prev": "d1afc7011ce7a6affad22bee920135d9b829a1a20f32aad4857ab88ee1e0ebe6",
-        "source_lang": "tool",
-        "source_sha": "234e1a19b687d0ab",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.220647+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nest_intake_scan",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "f7131582-b70f-4001-ae07-d50b9e309bff",
-        "prev": "fc64998e67ebdf8aa628b30238ff169752585f0c4b75584e26c51ff1b533fc1d",
-        "surface": "scan drop zone(s), classify new files by filename into tracks, and stage a review queue",
-        "surface_sha": "66b1a5d017dc3382",
-        "ts": "2026-08-11T05:35:16.221254+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "7c26ec20-1966-4c63-a4f5-ead2bded6b9a",
-        "prev": "487556933f713ef11ac1ffc87bd181b10860a175e11db12f27fb3a98f55bed32",
-        "source_lang": "tool",
-        "source_sha": "0ecba78907e75b74",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.222572+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nest_intake_skip",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "7c26ec20-1966-4c63-a4f5-ead2bded6b9a",
-        "prev": "534027abb7f8967ea2f2137733f3f07d67026a2fd3eaacfdaef2e9ca7a217852",
-        "surface": "skip a staged item \u2014 leave the file where it is and record the skip (removes it from the p",
-        "surface_sha": "0f294ab62f7dee1c",
-        "ts": "2026-08-11T05:35:16.223164+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "4dc559f9-943a-4ab7-b6ed-6cf574dc80a6",
-        "prev": "03c378f6825543663e889f64935db7ee5dcafc5f21ead0f107d852ae2de49be1",
-        "source_lang": "tool",
-        "source_sha": "b83a4917d7e643a8",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.224566+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nest_promote",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "4dc559f9-943a-4ab7-b6ed-6cf574dc80a6",
-        "prev": "21393a2c4bd7a31ffce3a6c10d31c31696a0b5598e2fb845388a056ba2a9127f",
-        "surface": "promote a nest's structure into the knowledge base",
-        "surface_sha": "d7ab27415974bd65",
-        "ts": "2026-08-11T05:35:16.225329+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "019a2abb-9d90-4d81-b873-a9cd2c5c256d",
-        "prev": "42da52a4b20a8b27778d4cd03d2b120e6c5c9e04b735edab73b3f467392e555c",
-        "source_lang": "tool",
-        "source_sha": "89f6f46746552ef2",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.226630+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nest_scan",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "019a2abb-9d90-4d81-b873-a9cd2c5c256d",
-        "prev": "1a83d4ba1e3d41e34e186efae4a642972d2654bdd5d2f779f883bc18d6ce011c",
-        "surface": "walk a drop folder, extract + classify its files, and write a canonical sqlite nest db",
-        "surface_sha": "1e3d4dd8d1387b9e",
-        "ts": "2026-08-11T05:35:16.227327+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "2e5b1203-c43e-4807-9b08-0ef145964da5",
-        "prev": "f02a88051608914090e0fbc99f461256307669865144f7d7578b8f599c836266",
-        "source_lang": "tool",
-        "source_sha": "c027ac6376126d98",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.228740+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nest_status",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "2e5b1203-c43e-4807-9b08-0ef145964da5",
-        "prev": "be65039a7e8a59b652dd9b484bc1473f31e452bc7c71a2c4f394c3d1d50dfaed",
-        "surface": "counts for a seeded nest db \u2014 sources by status, fragments by type, topical categories by ",
-        "surface_sha": "f3ab9e5af84a700d",
-        "ts": "2026-08-11T05:35:16.229407+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "f0514ff5-b487-41c3-a91c-84f11859c77f",
-        "prev": "fc4bd5c902a2f60997d323cbebd3d166f38c4ddc0a9e8b4952dbdf91b0526682",
-        "source_lang": "tool",
-        "source_sha": "f128653f137cf414",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.230818+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nestor_tool_pending",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "f0514ff5-b487-41c3-a91c-84f11859c77f",
-        "prev": "6821fdeb347b9ae92d68c5ee1c27dcdc61023f005095578d469208f60a27dc61",
-        "surface": "the teach-queue",
-        "surface_sha": "01a69913d05f1a82",
-        "ts": "2026-08-11T05:35:16.231450+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "efb5a1f1-6bc7-43ce-9791-a8544cd6d289",
-        "prev": "1f3d27bce82b7a2c4967b89330f60ddaf63f42bc5f09b88c880fe5720450d75b",
-        "source_lang": "tool",
-        "source_sha": "480c3779712afaf8",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.232724+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nestor_tool_route",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "efb5a1f1-6bc7-43ce-9791-a8544cd6d289",
-        "prev": "8f0c53e279c23a8eb26d7bca4cb85af514a0903572d89816213af41dd565f6e1",
-        "surface": "route a natural-language intent to the willow-mcp verb that serves it",
-        "surface_sha": "90f1941c467991ec",
-        "ts": "2026-08-11T05:35:16.233357+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "488ba2d7-c1e2-46ec-83fb-94a48c629b94",
-        "prev": "9796a08be88698186ac810600987615f8a3e80c88c0b063daec7c197d7ee91dd",
-        "source_lang": "tool",
-        "source_sha": "ad312eedef1864b7",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.234693+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "nestor_tool_seal",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "488ba2d7-c1e2-46ec-83fb-94a48c629b94",
-        "prev": "bd7b0748833c414898c9f60aa77a7c75eb2a2c761dc78b4c2a686457bbec1e3e",
-        "surface": "teach the oracle",
-        "surface_sha": "ad312eedef1864b7",
-        "ts": "2026-08-11T05:35:16.235452+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "61cb4e78-a914-4053-a07a-4ec6a33989c4",
-        "prev": "d99445627e02e1799579a91c3287deffe122807aa93e271a0d3e772bc862d36f",
-        "source_lang": "tool",
-        "source_sha": "dc592b0544abed28",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.236720+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "receipts_tail",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "61cb4e78-a914-4053-a07a-4ec6a33989c4",
-        "prev": "25951c199fceb42a41f9372b4010018abba0bdd28b42ed576be99ff00f0fc3d9",
-        "surface": "return your own most-recent tool-call receipts, newest first",
-        "surface_sha": "35e42cf772ce31be",
-        "ts": "2026-08-11T05:35:16.237381+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "87e05f97-4baa-4efa-bf63-e3fada83d874",
-        "prev": "1f28661c8b439ff1970037c9014c4523a6fb0ef52fd9c2ce478a3fc20de26329",
-        "source_lang": "tool",
-        "source_sha": "c86fd8b7e27c3e66",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.238966+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "schema_confirm_mapping",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "87e05f97-4baa-4efa-bf63-e3fada83d874",
-        "prev": "dbdfe20673771a4dec184bb993b7c2223591e694de75c16f5905b37bddaa275a",
-        "surface": "confirm a table's schema mapping, unlocking write tools for it (knowledge_ingest, kb_journ",
-        "surface_sha": "5760e08ab5594b91",
-        "ts": "2026-08-11T05:35:16.239579+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "f1f0b41c-80ec-483f-9159-7995a88e9156",
-        "prev": "47e44aa25108b1d937d6466799cd2b41f033d66aa7bcf1dfa3148220a4ca0992",
-        "source_lang": "tool",
-        "source_sha": "1dd9bf0f27fe549a",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.240814+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "session_bind",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "f1f0b41c-80ec-483f-9159-7995a88e9156",
-        "prev": "2c4b7bcd7d661e1b1aeea217cb7f75945a850e727ba77601fca8d543d5ae8973",
-        "surface": "open a cryptographically-bound session (check-in)",
-        "surface_sha": "586a77a413885bc1",
-        "ts": "2026-08-11T05:35:16.241444+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "86faee6b-d61e-4a92-8d9e-dc2cf9005850",
-        "prev": "bfbc49179b47320b1dd4977fe2115a05431f0f0a94eb6ca4e742e394640ea148",
-        "source_lang": "tool",
-        "source_sha": "4798a279a1b8d875",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.242678+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "session_enter",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "86faee6b-d61e-4a92-8d9e-dc2cf9005850",
-        "prev": "fa1845eb72d7916fcf809a70e2ccb91bdb230805f4a66e6cad6a209ddb45907a",
-        "surface": "first call of any session",
-        "surface_sha": "4798a279a1b8d875",
-        "ts": "2026-08-11T05:35:16.243331+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "d33e1793-0619-4e79-b445-dba9be204583",
-        "prev": "9889375f981cb3cef6b771cd8b26c23aca566fc05a56e6a75a86f800fbe09c86",
-        "source_lang": "tool",
-        "source_sha": "852ed11f20bb5d51",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.244646+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "session_handoff_write",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "d33e1793-0619-4e79-b445-dba9be204583",
-        "prev": "4c76ab4819acf38576a3cd37d6ed6bb957b990a7ec38e6eec135d1c8306d5bb8",
-        "surface": "close a human-entry session with a project-scoped markdown closeout",
-        "surface_sha": "eb577e1c962240a1",
-        "ts": "2026-08-11T05:35:16.245439+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "2ca86da2-9cb2-4faf-8930-9efbd0cfaafb",
-        "prev": "2cadbe8e2937534333f9f49fdab022953d8d1178194dc4e40084607795f6e67d",
-        "source_lang": "tool",
-        "source_sha": "e5f021907737b361",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.247068+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "session_read",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "2ca86da2-9cb2-4faf-8930-9efbd0cfaafb",
-        "prev": "52a68f8b92852e1c62c20bb8e41a0cfe7363c22526788bd8abdaccb37c196bc8",
-        "surface": "read the thin per-session state file for an app/session pair \u2014 entry mode, bound dispatch,",
-        "surface_sha": "f4f25a6b2baaf764",
-        "ts": "2026-08-11T05:35:16.247683+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "a2fd5f1d-a224-49ce-919a-11ce447de67a",
-        "prev": "61c9a8cfaa408ae7ae2ff3800ab647b94444a9e602eb113b8ed61433089350f4",
-        "source_lang": "tool",
-        "source_sha": "d4245892188f9488",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.249101+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "session_reconcile",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "a2fd5f1d-a224-49ce-919a-11ce447de67a",
-        "prev": "bdf820223f2eeeb7cd15d33a129412d2424307f91c249e6486eef7d2a0742212",
-        "surface": "close a bound session and reconcile what you declare you did against what the receipt log ",
-        "surface_sha": "f0bf841e6f1e630b",
-        "ts": "2026-08-11T05:35:16.249687+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "ec30ffdc-45df-422a-9788-9bdc7eda8016",
-        "prev": "f78883a5327d6b5285c46c8edbbd6a7272ef13f9ccd6662ee8dae9d7b24dff01",
-        "source_lang": "tool",
-        "source_sha": "022c46e98d300786",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.250994+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "specialist_get",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "ec30ffdc-45df-422a-9788-9bdc7eda8016",
-        "prev": "0bf39d9c0fae89ac25d70a76df3f9fadae280e6d29981df2c269e4eb17627352",
-        "surface": "fetch one specialist's registry row by agent_id, including its compiled persona text and p",
-        "surface_sha": "b18becde8be53c0a",
-        "ts": "2026-08-11T05:35:16.251591+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "64fb681f-5fde-49a4-a554-8062f1d2d7be",
-        "prev": "efbddff9a154660a17a1d422d576b94189ec68218ca53785326804f149641583",
-        "source_lang": "tool",
-        "source_sha": "435ba709e3d820e0",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.252805+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "specialist_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "64fb681f-5fde-49a4-a554-8062f1d2d7be",
-        "prev": "fa27e7edfd729712967627bf1e76202d97faaaf909395023c3a5a0596f5c2f39",
-        "surface": "list the specialist registry (config/specialists.json)",
-        "surface_sha": "7208949238de9437",
-        "ts": "2026-08-11T05:35:16.253468+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "99d9138e-1b2a-4a21-864d-f639fae24865",
-        "prev": "696db16bcb6ab12fdc66afdec16c53bdcba147799f6ee3057bba70fd3c7f889f",
-        "source_lang": "tool",
-        "source_sha": "6985d8c76cba653b",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.254709+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "store_collections",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "99d9138e-1b2a-4a21-864d-f639fae24865",
-        "prev": "a8a2a491a1915949f6a09a824ef10143423269357eae1c482d9bee4582b2011b",
-        "surface": "list the soil collections you can see \u2014 every collection under the store, narrowed to your",
-        "surface_sha": "24c0b5ac61634598",
-        "ts": "2026-08-11T05:35:16.255349+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "57e00c65-5513-43f6-b48d-aee68ce59be5",
-        "prev": "c76a1d7045d6e918cc5b60dd24c844bf623803cb3759a0879ba10bfbc376613b",
-        "source_lang": "tool",
-        "source_sha": "ec875c6d9a038f32",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.257166+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "store_delete",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "57e00c65-5513-43f6-b48d-aee68ce59be5",
-        "prev": "0e9e01d27b0284ee420c8881c4e4a70adac1c831a33eaff9900ab1f8c6b023e5",
-        "surface": "soft-delete one record by id",
-        "surface_sha": "bae85d897a999140",
-        "ts": "2026-08-11T05:35:16.257891+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "ecc50409-ea60-4c69-888f-99fd30ce6cad",
-        "prev": "c5da6dba0d78b4ed6b75db5fdf3148b9d88c4c838f9bbf2ca03a2fc4247907c3",
-        "source_lang": "tool",
-        "source_sha": "78bfcb47cee90b2d",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.259233+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "store_get",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "ecc50409-ea60-4c69-888f-99fd30ce6cad",
-        "prev": "c0ad16169537e8c414b30b5da6be1ae26342ad65a301de6e67e22f77e4013015",
-        "surface": "read one record from a soil collection by its exact id",
-        "surface_sha": "78bfcb47cee90b2d",
-        "ts": "2026-08-11T05:35:16.259924+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "6eeb8f20-6aef-4b02-b66e-ddfebd4cc6dd",
-        "prev": "45a220bf8df035d1c3da85769935fb3300a32c3ec77fd82d91a83862d62470df",
-        "source_lang": "tool",
-        "source_sha": "e3b476a58d70d4b8",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.261269+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "store_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "6eeb8f20-6aef-4b02-b66e-ddfebd4cc6dd",
-        "prev": "090ea520565418f6e99359aedfc329349533a50e290f2a913c9d274d3854ea09",
-        "surface": "return every live record in one soil collection, oldest first, each with _id/_created/_upd",
-        "surface_sha": "3ce305305d5a1b57",
-        "ts": "2026-08-11T05:35:16.261946+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "dd495664-86c6-4059-bdca-a99384fa5fe6",
-        "prev": "507bba856206100ac344ef6010912c12e32a2a4526c091b76b81c10c8bd46a01",
-        "source_lang": "tool",
-        "source_sha": "39f122aabfbef6c2",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.263550+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "store_purge_collection",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "dd495664-86c6-4059-bdca-a99384fa5fe6",
-        "prev": "39e457b7bac10242f9baf336196ac17493ea7d885b892e07bc65af871a8354a9",
-        "surface": "soft-delete every record in a collection at once \u2014 a bulk store_delete, for clearing out a",
-        "surface_sha": "d1198ddb3ee3f893",
-        "ts": "2026-08-11T05:35:16.264294+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "2f03d3dd-7d19-4b6e-b790-ba20ca8263e5",
-        "prev": "37accfdc9d233d9a0562a0c8c1d4ad7fc33e7d52997936ee21ed05123820a0a4",
-        "source_lang": "tool",
-        "source_sha": "41fd38da9847c8d3",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.265720+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "store_put",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "2f03d3dd-7d19-4b6e-b790-ba20ca8263e5",
-        "prev": "0b794924a6eed0ffe55f5b518e40a485534f1f4c6be5e363aa6044d2bc0dbfa2",
-        "surface": "write a json record to a named soil collection (created on first write)",
-        "surface_sha": "e6f432c5af462c83",
-        "ts": "2026-08-11T05:35:16.266396+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "c55f02e2-37d6-4c8c-a4f9-14d44ae1aa13",
-        "prev": "d96d53ffde04990ed590b5c729f0187bea58a3f6449cfd1b6e6409e98a568bf3",
-        "source_lang": "tool",
-        "source_sha": "6eb1c125a645123c",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.267718+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "store_search",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "c55f02e2-37d6-4c8c-a4f9-14d44ae1aa13",
-        "prev": "fa44d87d50f687c3924ad58f178b86226d39cb35e0736745d2e4ac2096bf4d8a",
-        "surface": "full-text search one soil collection",
-        "surface_sha": "20b8031f327d1c1c",
-        "ts": "2026-08-11T05:35:16.268509+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "1c7c02a4-1f36-4206-acdd-9684e2047fae",
-        "prev": "169d48fa8e528708171dfc42f98eac883374be20dac7818ee31254ad4f2053c1",
-        "source_lang": "tool",
-        "source_sha": "9865a8eb65e234b8",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.270091+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "store_search_all",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "1c7c02a4-1f36-4206-acdd-9684e2047fae",
-        "prev": "6f505ad7fdeaa80d223074481b4ab4d547c98a3b4afc158943f04ca35ec99b3d",
-        "surface": "token-and search across every soil collection you can see \u2014 all of them, or only your mani",
-        "surface_sha": "d6dcbe75f14d3f71",
-        "ts": "2026-08-11T05:35:16.270663+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "3a9f21d2-f988-45d4-a555-9e722f173119",
-        "prev": "9d86133f699866e11365c42af05d628a9d710892734f6d0704009635936cd421",
-        "source_lang": "tool",
-        "source_sha": "a9fef1c20799ea2d",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.272050+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "store_stats",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "3a9f21d2-f988-45d4-a555-9e722f173119",
-        "prev": "f7d9e964f217877dc3dac481325a7dcfe2da128769c8bd4838c41bf4936f5635",
-        "surface": "per-collection live-record counts for the collections you can see (narrowed to your store_",
-        "surface_sha": "cbb2b5dc1a5de6c1",
-        "ts": "2026-08-11T05:35:16.272713+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "e97c8fa7-fb11-430e-b35a-33391db7f4c2",
-        "prev": "86f50d9854a5a0048339ca80428baf5ecac3fb8602c48f31943b119f9cd30e3d",
-        "source_lang": "tool",
-        "source_sha": "9bfd01c94542cacf",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.274214+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "store_update",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "e97c8fa7-fb11-430e-b35a-33391db7f4c2",
-        "prev": "d6d02973c92f4572825cfed293648a1df73387ac5877ea5b428ee198d560069a",
-        "surface": "replace an existing record's data in-place \u2014 same id, updated_at bumped, audit metadata re",
-        "surface_sha": "e06e2259490690e8",
-        "ts": "2026-08-11T05:35:16.274946+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "13985b15-dec7-42c6-998f-be51fa479279",
-        "prev": "b2a6b749ae05423a33dafb299805c049937b3d4f896d675c43f3def4576495da",
-        "source_lang": "tool",
-        "source_sha": "3591e2aefc6155dc",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.276781+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "task_list",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "13985b15-dec7-42c6-998f-be51fa479279",
-        "prev": "fae791cda0a0ae192e58816845f4b416fd853f5d840355f7baebb4a887d66577",
-        "surface": "list tasks still waiting in the kart queue for one worker `agent` (default 'kart'), oldest",
-        "surface_sha": "142073f3ffd22e29",
-        "ts": "2026-08-11T05:35:16.277508+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "e69ffff5-e215-4e14-9b44-7311bb19a90f",
-        "prev": "9de69ed13e3d7f09da55e0eb66c0e53b4830e7dfb4dc2c8b91abafb7f96dab71",
-        "source_lang": "tool",
-        "source_sha": "b637c181cac2b7af",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.279019+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "task_status",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "e69ffff5-e215-4e14-9b44-7311bb19a90f",
-        "prev": "931b00dc5d9fbbab16a6febc95ea8ecc14bbc902ee21554ad3ce535c8a5570bd",
-        "surface": "poll one task submitted via task_submit",
-        "surface_sha": "b637c181cac2b7af",
-        "ts": "2026-08-11T05:35:16.279653+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "2587f963-b2ed-42fe-a988-561af67b6e8d",
-        "prev": "ff1ab929849e447d92f5570a644eef7f61c1baf45350cdf5aa7e5a846dc03da8",
-        "source_lang": "tool",
-        "source_sha": "4f387e49fd7ade6d",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.281430+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "task_submit",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "2587f963-b2ed-42fe-a988-561af67b6e8d",
-        "prev": "788104bed3bbbd74e5d572e645d9a015771b7473769d718058b50dc816d43d36",
-        "surface": "submit a task to the kart sandboxed execution queue",
-        "surface_sha": "4f387e49fd7ade6d",
-        "ts": "2026-08-11T05:35:16.282087+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "0b763748-f7d3-451b-b0b0-531168791051",
-        "prev": "22cd7aae0e740934d47d0eb525177ff2c33c2509954aacf0748959f01f7de90a",
-        "source_lang": "tool",
-        "source_sha": "7f438b15435f574e",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.283484+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "verify_handoff",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "0b763748-f7d3-451b-b0b0-531168791051",
-        "prev": "c3b5220a11890600b6de0af9caec8b966db611c6ad0a51e32e7d0f353b82a5a5",
-        "surface": "orchestrator-side check of a completed dispatch's handoff",
-        "surface_sha": "d86283405ac4a9a5",
-        "ts": "2026-08-11T05:35:16.284170+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "80e8ac8b-13d3-40fa-b957-44cb4e8553a8",
-        "prev": "dd3560ad478a0db5fd93363313ce5870d2f598e4ba43c7917b26e2c4dc5f9856",
-        "source_lang": "tool",
-        "source_sha": "6b6de17651df4c80",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.285800+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "whoami",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "80e8ac8b-13d3-40fa-b957-44cb4e8553a8",
-        "prev": "2082dd53fb947cb639e35338c0e208857beb0eaf8a5445f2f34189d4a75d0d47",
-        "surface": "report who you are and what you may do",
-        "surface_sha": "6b6de17651df4c80",
-        "ts": "2026-08-11T05:35:16.286532+00:00",
-        "verifier": "willow-build"
-      },
-      {
-        "kind": "seal",
-        "origin": "tool-catalog-v1",
-        "pair_id": "6f5143ab-5a61-4d50-ac81-4def6be66e14",
-        "prev": "9f39174105aac9f22adcd2fb30b2289993b7a2ba1a7576cbdeae0237f60f59d6",
-        "source_lang": "tool",
-        "source_sha": "f0fdd4fe57b9f7d9",
-        "target_lang": "tool",
-        "ts": "2026-08-11T05:35:16.288022+00:00",
-        "upgraded_from": "",
-        "verifier": "willow-build"
-      },
-      {
-        "canonical": "willow_web_search",
-        "domain": "tool",
-        "kind": "entity_seal",
-        "pair_id": "6f5143ab-5a61-4d50-ac81-4def6be66e14",
-        "prev": "0759a51494e2f4207270465469ffd2c5dad8854261bacad0a867d779338c5c89",
-        "surface": "open web search via duckduckgo html (no api key)",
-        "surface_sha": "5544d68a2039792e",
-        "ts": "2026-08-11T05:35:16.288731+00:00",
-        "verifier": "willow-build"
-      }
-    ],
-    "note": "the source instance's chain, for audit; it is not merged on import",
-    "unreadable": []
   },
   "matcher": "StringMatcher",
   "nestor_bundle": 2,
   "pairs": [
     {
-      "created_at": "2026-08-11T05:35:16.287345+00:00",
-      "id": "6f5143ab-5a61-4d50-ac81-4def6be66e14",
+      "created_at": "2026-08-11T06:05:19.707204+00:00",
+      "id": "055e616e-81cd-42c6-bffc-a84fc9778fb5",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2450,8 +29,36 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.285083+00:00",
-      "id": "80e8ac8b-13d3-40fa-b957-44cb4e8553a8",
+      "created_at": "2026-08-11T06:05:19.704700+00:00",
+      "id": "68f196df-21ec-4967-8b70-bef774b500da",
+      "origin": "tool-catalog-v1",
+      "seal_sig": "",
+      "source_lang": "tool",
+      "source_norm": "fetch a url through externalguard not native webfetch",
+      "source_text": "fetch a url through external-guard, not native webfetch",
+      "status": "sealed",
+      "target_lang": "tool",
+      "target_text": "willow_web_fetch",
+      "verifier": "willow-build",
+      "weight": 1.0
+    },
+    {
+      "created_at": "2026-08-11T06:05:19.701281+00:00",
+      "id": "7d6ecbf9-0de6-4996-b658-dcb384b14ce0",
+      "origin": "tool-catalog-v1",
+      "seal_sig": "",
+      "source_lang": "tool",
+      "source_norm": "search named institutional and academic collections arxiv pubmed crossref openalex",
+      "source_text": "search named institutional and academic collections \u2014 arxiv, pubmed, crossref, openalex",
+      "status": "sealed",
+      "target_lang": "tool",
+      "target_text": "willow_institutional_search",
+      "verifier": "willow-build",
+      "weight": 1.0
+    },
+    {
+      "created_at": "2026-08-11T06:05:19.698604+00:00",
+      "id": "edde3d86-ab48-463f-9e25-e7e52c77341d",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2464,8 +71,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.282836+00:00",
-      "id": "0b763748-f7d3-451b-b0b0-531168791051",
+      "created_at": "2026-08-11T06:05:19.696057+00:00",
+      "id": "091b6e7c-2b4b-4399-b9db-025589fca475",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2478,8 +85,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.280703+00:00",
-      "id": "2587f963-b2ed-42fe-a988-561af67b6e8d",
+      "created_at": "2026-08-11T06:05:19.691624+00:00",
+      "id": "49aa8354-ec8c-4650-b43f-4bebcea15be1",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2492,8 +99,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.278364+00:00",
-      "id": "e69ffff5-e215-4e14-9b44-7311bb19a90f",
+      "created_at": "2026-08-11T06:05:19.689117+00:00",
+      "id": "68c6cbe4-fbac-4380-82a0-976885fbb1ba",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2506,8 +113,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.276127+00:00",
-      "id": "13985b15-dec7-42c6-998f-be51fa479279",
+      "created_at": "2026-08-11T06:05:19.686539+00:00",
+      "id": "32cb4fab-18d7-4d81-adae-55cadf86d9d5",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2520,8 +127,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.273552+00:00",
-      "id": "e97c8fa7-fb11-430e-b35a-33391db7f4c2",
+      "created_at": "2026-08-11T06:05:19.684193+00:00",
+      "id": "c73a8646-17e7-408e-8e44-a0af6b9de17c",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2534,8 +141,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.271406+00:00",
-      "id": "3a9f21d2-f988-45d4-a555-9e722f173119",
+      "created_at": "2026-08-11T06:05:19.681419+00:00",
+      "id": "ff93f74b-b3c8-4b8b-a2b0-72ff8b0b2106",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2548,8 +155,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.269502+00:00",
-      "id": "1c7c02a4-1f36-4206-acdd-9684e2047fae",
+      "created_at": "2026-08-11T06:05:19.678972+00:00",
+      "id": "11a60a79-8077-461d-a5b2-738955a906f5",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2562,8 +169,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.267127+00:00",
-      "id": "c55f02e2-37d6-4c8c-a4f9-14d44ae1aa13",
+      "created_at": "2026-08-11T06:05:19.675441+00:00",
+      "id": "5e203c20-7898-4bc0-9b6c-6fd7b7293b88",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2576,8 +183,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.265084+00:00",
-      "id": "2f03d3dd-7d19-4b6e-b790-ba20ca8263e5",
+      "created_at": "2026-08-11T06:05:19.672961+00:00",
+      "id": "88eb3273-8f58-4482-a2e5-db863aae46fd",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2590,8 +197,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.262823+00:00",
-      "id": "dd495664-86c6-4059-bdca-a99384fa5fe6",
+      "created_at": "2026-08-11T06:05:19.670036+00:00",
+      "id": "06468965-c0eb-41d4-82bf-e0d2d2073fe3",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2604,8 +211,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.260649+00:00",
-      "id": "6eeb8f20-6aef-4b02-b66e-ddfebd4cc6dd",
+      "created_at": "2026-08-11T06:05:19.667965+00:00",
+      "id": "a0263199-b690-4129-84d1-34f48037e028",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2618,8 +225,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.258609+00:00",
-      "id": "ecc50409-ea60-4c69-888f-99fd30ce6cad",
+      "created_at": "2026-08-11T06:05:19.665588+00:00",
+      "id": "530a20a9-197c-40b8-9661-56f05aabf254",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2632,8 +239,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.256574+00:00",
-      "id": "57e00c65-5513-43f6-b48d-aee68ce59be5",
+      "created_at": "2026-08-11T06:05:19.663091+00:00",
+      "id": "ccbc63b4-933b-4c47-98ca-b2ad35230ac3",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2646,8 +253,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.254219+00:00",
-      "id": "99d9138e-1b2a-4a21-864d-f639fae24865",
+      "created_at": "2026-08-11T06:05:19.660750+00:00",
+      "id": "1a3e2b2f-8a85-46f9-a4b7-481592323de5",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2660,8 +267,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.252308+00:00",
-      "id": "64fb681f-5fde-49a4-a554-8062f1d2d7be",
+      "created_at": "2026-08-11T06:05:19.657352+00:00",
+      "id": "ebe240c8-5d07-4a30-9805-861a53dae84c",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2674,8 +281,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.250438+00:00",
-      "id": "ec30ffdc-45df-422a-9788-9bdc7eda8016",
+      "created_at": "2026-08-11T06:05:19.655020+00:00",
+      "id": "f0d8abfc-06d4-454c-a895-69bb620811f8",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2688,8 +295,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.248516+00:00",
-      "id": "a2fd5f1d-a224-49ce-919a-11ce447de67a",
+      "created_at": "2026-08-11T06:05:19.652762+00:00",
+      "id": "326dd7f5-029f-41fb-ab75-0c87927d41c9",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2702,8 +309,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.246232+00:00",
-      "id": "2ca86da2-9cb2-4faf-8930-9efbd0cfaafb",
+      "created_at": "2026-08-11T06:05:19.650504+00:00",
+      "id": "41fb9b53-d728-4cbc-81fe-1c1c909f5d70",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2716,8 +323,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.244074+00:00",
-      "id": "d33e1793-0619-4e79-b445-dba9be204583",
+      "created_at": "2026-08-11T06:05:19.647173+00:00",
+      "id": "7bc6f595-a2c5-4099-affe-c53e77ad9c6e",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2730,8 +337,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.242172+00:00",
-      "id": "86faee6b-d61e-4a92-8d9e-dc2cf9005850",
+      "created_at": "2026-08-11T06:05:19.644683+00:00",
+      "id": "0d0116b9-aa15-4454-87cf-a3fee25f5561",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2744,8 +351,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.240319+00:00",
-      "id": "f1f0b41c-80ec-483f-9159-7995a88e9156",
+      "created_at": "2026-08-11T06:05:19.642539+00:00",
+      "id": "5aa1c4d2-0bdf-4963-b4b9-4e4dd573ebfa",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2758,8 +365,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.238262+00:00",
-      "id": "87e05f97-4baa-4efa-bf63-e3fada83d874",
+      "created_at": "2026-08-11T06:05:19.640072+00:00",
+      "id": "015db1ce-8ca2-4a7d-87b4-7d1cb0048005",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2772,8 +379,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.236201+00:00",
-      "id": "61cb4e78-a914-4053-a07a-4ec6a33989c4",
+      "created_at": "2026-08-11T06:05:19.637778+00:00",
+      "id": "7ed91d2a-7038-49a0-b312-a128616d274e",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2786,8 +393,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.234147+00:00",
-      "id": "488ba2d7-c1e2-46ec-83fb-94a48c629b94",
+      "created_at": "2026-08-11T06:05:19.634622+00:00",
+      "id": "414be5f4-f604-4b87-a2bd-f279c8baa5b1",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2800,8 +407,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.232219+00:00",
-      "id": "efb5a1f1-6bc7-43ce-9791-a8544cd6d289",
+      "created_at": "2026-08-11T06:05:19.632562+00:00",
+      "id": "5f4f0c8a-d102-4112-826b-7d3755397131",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2814,8 +421,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.230181+00:00",
-      "id": "f0514ff5-b487-41c3-a91c-84f11859c77f",
+      "created_at": "2026-08-11T06:05:19.630507+00:00",
+      "id": "c675586a-8d19-4014-ac42-f09926ffc47d",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2828,8 +435,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.228115+00:00",
-      "id": "2e5b1203-c43e-4807-9b08-0ef145964da5",
+      "created_at": "2026-08-11T06:05:19.628036+00:00",
+      "id": "5bf993bf-ce7c-4afe-8a33-67f973c943c7",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2842,8 +449,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.226067+00:00",
-      "id": "019a2abb-9d90-4d81-b873-a9cd2c5c256d",
+      "created_at": "2026-08-11T06:05:19.625847+00:00",
+      "id": "5e92a67f-c321-4734-a2b2-ae62baabcee2",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2856,8 +463,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.223957+00:00",
-      "id": "4dc559f9-943a-4ab7-b6ed-6cf574dc80a6",
+      "created_at": "2026-08-11T06:05:19.623308+00:00",
+      "id": "20465bcc-1a2d-443a-9942-17707ff3f5c4",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2870,8 +477,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.222055+00:00",
-      "id": "7c26ec20-1966-4c63-a4f5-ead2bded6b9a",
+      "created_at": "2026-08-11T06:05:19.621084+00:00",
+      "id": "8b476482-85e9-43a5-90cc-9686f4977845",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2884,8 +491,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.220104+00:00",
-      "id": "f7131582-b70f-4001-ae07-d50b9e309bff",
+      "created_at": "2026-08-11T06:05:19.617684+00:00",
+      "id": "c78bc635-5e00-4b86-998f-ac4376093298",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2898,8 +505,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.218049+00:00",
-      "id": "ba285391-c719-411a-bea0-f4f7403d79f7",
+      "created_at": "2026-08-11T06:05:19.614079+00:00",
+      "id": "28e42973-0c0f-4ef3-aeab-3954b4662eb8",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2912,8 +519,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.216232+00:00",
-      "id": "5895f9f7-9083-4753-807a-cde34fd58596",
+      "created_at": "2026-08-11T06:05:19.610505+00:00",
+      "id": "c964600d-a18e-4621-827b-5ad56662e908",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2926,8 +533,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.214353+00:00",
-      "id": "ebb7d4fb-043b-4e5d-b725-36e70f92aa98",
+      "created_at": "2026-08-11T06:05:19.606637+00:00",
+      "id": "33e1c25c-944d-4da4-99eb-dc71a20c2b41",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2940,8 +547,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.212282+00:00",
-      "id": "640eb493-cb3d-4b6a-adf7-75642d0c2f58",
+      "created_at": "2026-08-11T06:05:19.603830+00:00",
+      "id": "1287f087-e7f3-4849-a5ff-a0067674296d",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2954,8 +561,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.210144+00:00",
-      "id": "255785ec-052e-4580-903f-06b3e727c815",
+      "created_at": "2026-08-11T06:05:19.600283+00:00",
+      "id": "00008532-96fd-416f-9862-e44e1e5a9599",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2968,8 +575,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.208217+00:00",
-      "id": "c665daa9-14a9-4411-b479-b7898c540786",
+      "created_at": "2026-08-11T06:05:19.597066+00:00",
+      "id": "55e8763c-9aad-4fad-817e-c913cb33a455",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2982,8 +589,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.206427+00:00",
-      "id": "2bac0f97-d2bc-4ac6-9322-867271137045",
+      "created_at": "2026-08-11T06:05:19.594102+00:00",
+      "id": "052c0ff3-6ceb-48e1-b98a-302d4f7b9c20",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -2996,8 +603,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.204483+00:00",
-      "id": "ca700921-3d3d-4fa9-8d60-417bd284d63b",
+      "created_at": "2026-08-11T06:05:19.590938+00:00",
+      "id": "763f24cb-d2c3-45e2-bb15-31a5912fa270",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3010,8 +617,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.202611+00:00",
-      "id": "127a844f-7292-48eb-82e4-9afb980a7bab",
+      "created_at": "2026-08-11T06:05:19.588451+00:00",
+      "id": "1cb028ae-f546-4266-9e71-a300866cd924",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3024,8 +631,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.200919+00:00",
-      "id": "71a51258-2387-419a-bb12-a3eaa7dbe22d",
+      "created_at": "2026-08-11T06:05:19.583830+00:00",
+      "id": "63d3215e-c003-4c1e-9787-116403bd55ac",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3038,8 +645,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.198985+00:00",
-      "id": "4f99fbd8-0105-4a17-9230-f8bda6915181",
+      "created_at": "2026-08-11T06:05:19.580137+00:00",
+      "id": "8c6d8c2c-10de-4004-9e7f-3443330ef98f",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3052,8 +659,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.197101+00:00",
-      "id": "b33b3c54-9299-49da-9f78-9e060c7d1fef",
+      "created_at": "2026-08-11T06:05:19.576965+00:00",
+      "id": "cc009ac9-3344-4e8a-9dc4-cf9949353bba",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3066,8 +673,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.195190+00:00",
-      "id": "6582610c-e5d2-4e2b-b516-4aee1bf82658",
+      "created_at": "2026-08-11T06:05:19.573984+00:00",
+      "id": "cf4dca5d-9e45-46bd-b4c0-21c983ac914b",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3080,8 +687,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.193426+00:00",
-      "id": "d1758825-50a2-4e1c-9a9f-d69460f62d61",
+      "created_at": "2026-08-11T06:05:19.570492+00:00",
+      "id": "6dcc0c19-1623-4e30-abc7-f3f9113c4875",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3094,8 +701,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.191670+00:00",
-      "id": "73526425-c2c5-4a15-b1e7-42ad717315b8",
+      "created_at": "2026-08-11T06:05:19.567712+00:00",
+      "id": "353c2226-3014-4de6-8c6a-fd13330a6492",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3108,8 +715,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.190030+00:00",
-      "id": "cc632cfd-73f3-4129-937d-151da18847b0",
+      "created_at": "2026-08-11T06:05:19.563798+00:00",
+      "id": "3da693b5-6644-48f9-b21b-ef406b3648f9",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3122,8 +729,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.188447+00:00",
-      "id": "a4ef42b0-06c1-4eb0-a24a-4bc69f71cc61",
+      "created_at": "2026-08-11T06:05:19.561042+00:00",
+      "id": "105290ca-b0a4-49fd-9db8-c7de4451eb92",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3136,8 +743,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.186560+00:00",
-      "id": "305eaa30-204c-41d0-8bf3-c66ae84ef499",
+      "created_at": "2026-08-11T06:05:19.558449+00:00",
+      "id": "6a6d2d00-4745-4aa8-b808-e8c9fc47dfb3",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3150,8 +757,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.184412+00:00",
-      "id": "75ce47ba-b5bc-4c4d-889c-7d484bbff67d",
+      "created_at": "2026-08-11T06:05:19.555299+00:00",
+      "id": "8e4866b8-68f9-45af-b1b3-418a7a785928",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3164,8 +771,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.182353+00:00",
-      "id": "cc6b99e6-ad2f-400b-8e5b-5744970a1df8",
+      "created_at": "2026-08-11T06:05:19.551820+00:00",
+      "id": "af0882e7-8345-42c0-aeff-652d8113782c",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3178,8 +785,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.179161+00:00",
-      "id": "a5ded926-0613-4828-b501-72d17578c4a8",
+      "created_at": "2026-08-11T06:05:19.548822+00:00",
+      "id": "a33dbeec-3c76-4f7c-afc6-927765dfd2ca",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3192,8 +799,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.176162+00:00",
-      "id": "303a172e-757b-4980-81f2-cf7336a428b0",
+      "created_at": "2026-08-11T06:05:19.546321+00:00",
+      "id": "c4c09265-a019-4764-9d02-c719d02577b6",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3206,8 +813,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.174083+00:00",
-      "id": "26e5bbdd-e05a-4cf3-8679-13b203bcc7eb",
+      "created_at": "2026-08-11T06:05:19.544533+00:00",
+      "id": "458b7274-d934-4853-a694-3acb07bed001",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3220,8 +827,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.171850+00:00",
-      "id": "a5762058-3dd9-426c-8736-5d18f2407767",
+      "created_at": "2026-08-11T06:05:19.542574+00:00",
+      "id": "17b01d52-9cef-46a4-b176-d3a7a6208ee0",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3234,8 +841,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.168558+00:00",
-      "id": "17fad11e-3527-4c37-8431-f2ca458f8557",
+      "created_at": "2026-08-11T06:05:19.539788+00:00",
+      "id": "b389070a-6c17-4854-a9e4-bb0ddc4d7e31",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3248,8 +855,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.166835+00:00",
-      "id": "57b9899c-4a1d-432e-b9bd-75716f2dbfff",
+      "created_at": "2026-08-11T06:05:19.537489+00:00",
+      "id": "688c5051-5184-4cf8-a6b6-10594f62bbfe",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3262,8 +869,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.165307+00:00",
-      "id": "a65e17a3-dc70-4f95-8d78-1b673f36c66c",
+      "created_at": "2026-08-11T06:05:19.535415+00:00",
+      "id": "37d91176-067c-48a7-bbe6-6d07fcf4cd01",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3276,8 +883,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.163488+00:00",
-      "id": "e98c6c9f-a4b2-45f0-ba50-96dd1c7fc4c1",
+      "created_at": "2026-08-11T06:05:19.533544+00:00",
+      "id": "0c5754ce-261a-440a-b6d1-dd34aae36792",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3290,8 +897,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.161504+00:00",
-      "id": "71e303f6-42b4-437d-88a3-67fcfc4bae3b",
+      "created_at": "2026-08-11T06:05:19.531577+00:00",
+      "id": "f981c58a-e40c-4686-beae-018ee9e87f17",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3304,8 +911,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.159768+00:00",
-      "id": "fde40a66-94d8-4f28-8ed4-8c6007f438a3",
+      "created_at": "2026-08-11T06:05:19.529155+00:00",
+      "id": "3a35dcc7-9d41-4d45-bcdf-a8efded539dd",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3318,8 +925,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.158011+00:00",
-      "id": "165fbf3d-da5e-4e07-b7fc-2d84e6ed4c6d",
+      "created_at": "2026-08-11T06:05:19.527240+00:00",
+      "id": "b24288cf-368d-4230-8698-cc1c46e64aa4",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3332,8 +939,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.156216+00:00",
-      "id": "d641342d-1d5b-46c7-9f72-990b328fc064",
+      "created_at": "2026-08-11T06:05:19.524877+00:00",
+      "id": "3dcd2bb9-7af1-495a-a533-989612dcbadd",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3346,8 +953,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.154262+00:00",
-      "id": "eff6d050-e191-4ffa-9204-1977222bcaef",
+      "created_at": "2026-08-11T06:05:19.523120+00:00",
+      "id": "05087446-4975-4a76-96ae-aa08da440eb5",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3360,8 +967,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.152359+00:00",
-      "id": "71fd213b-06e8-4e14-abde-3e5f88ebb856",
+      "created_at": "2026-08-11T06:05:19.521487+00:00",
+      "id": "753bbac8-7e0b-4b6c-9b7f-7bc8756874ce",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3374,8 +981,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.150293+00:00",
-      "id": "9d12c385-a1ca-43c6-92fb-d392abfe78f9",
+      "created_at": "2026-08-11T06:05:19.519212+00:00",
+      "id": "c47bb136-ab52-4f98-a367-c72f7556296c",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3388,8 +995,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.148566+00:00",
-      "id": "1c2dfb71-489c-4f71-9c03-e6735f9da11b",
+      "created_at": "2026-08-11T06:05:19.517416+00:00",
+      "id": "bdad20a5-8ff4-4454-aaac-5e9fe2183d3e",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3402,8 +1009,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.146647+00:00",
-      "id": "b100a696-2b30-4ff9-b02d-3749aa46a9d5",
+      "created_at": "2026-08-11T06:05:19.515296+00:00",
+      "id": "318811a0-4b1a-4205-9f1e-8ffff694ddab",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3416,8 +1023,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.144682+00:00",
-      "id": "c206afdd-a0f8-4540-8f17-b5c918d01751",
+      "created_at": "2026-08-11T06:05:19.513054+00:00",
+      "id": "b7b779ef-fa70-4574-9f31-89541d4b5019",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3430,8 +1037,36 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.142703+00:00",
-      "id": "a3ce305f-e403-4513-9cb4-33557ce92202",
+      "created_at": "2026-08-11T06:05:19.510894+00:00",
+      "id": "69717022-1578-47aa-a1ae-664235deaa6a",
+      "origin": "tool-catalog-v1",
+      "seal_sig": "",
+      "source_lang": "tool",
+      "source_norm": "full record for one fork title state participants and change log",
+      "source_text": "full record for one fork: title, state, participants, and change log",
+      "status": "sealed",
+      "target_lang": "tool",
+      "target_text": "fork_status",
+      "verifier": "willow-build",
+      "weight": 1.0
+    },
+    {
+      "created_at": "2026-08-11T06:05:19.508005+00:00",
+      "id": "0226c015-0390-4fbe-b2af-c508989d0e35",
+      "origin": "tool-catalog-v1",
+      "seal_sig": "",
+      "source_lang": "tool",
+      "source_norm": "close an open fork as merged the work landed",
+      "source_text": "close an open fork as merged \u2014 the work landed",
+      "status": "sealed",
+      "target_lang": "tool",
+      "target_text": "fork_merge",
+      "verifier": "willow-build",
+      "weight": 1.0
+    },
+    {
+      "created_at": "2026-08-11T06:05:19.506128+00:00",
+      "id": "51a791cb-d6f4-4656-974a-34d135816ef6",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3444,8 +1079,22 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.140795+00:00",
-      "id": "7d94320c-0a7d-4f14-8b26-3e1af1039aa2",
+      "created_at": "2026-08-11T06:05:19.504266+00:00",
+      "id": "1ddbc980-5c56-432b-9b84-0f770dce7236",
+      "origin": "tool-catalog-v1",
+      "seal_sig": "",
+      "source_lang": "tool",
+      "source_norm": "list forks in one state open merged or deleted",
+      "source_text": "list forks in one state \u2014 open, merged, or deleted",
+      "status": "sealed",
+      "target_lang": "tool",
+      "target_text": "fork_list",
+      "verifier": "willow-build",
+      "weight": 1.0
+    },
+    {
+      "created_at": "2026-08-11T06:05:19.502022+00:00",
+      "id": "602854a3-a710-4527-96c7-226290d6a303",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3458,8 +1107,22 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.138992+00:00",
-      "id": "0b08ec73-4396-4217-ab1e-8a1c52775fc2",
+      "created_at": "2026-08-11T06:05:19.499767+00:00",
+      "id": "91168f89-69a6-4b3a-bee3-b7aa698140d3",
+      "origin": "tool-catalog-v1",
+      "seal_sig": "",
+      "source_lang": "tool",
+      "source_norm": "close an open fork as deleted the work was abandoned",
+      "source_text": "close an open fork as deleted \u2014 the work was abandoned",
+      "status": "sealed",
+      "target_lang": "tool",
+      "target_text": "fork_delete",
+      "verifier": "willow-build",
+      "weight": 1.0
+    },
+    {
+      "created_at": "2026-08-11T06:05:19.497889+00:00",
+      "id": "59a73d91-4f06-462a-9479-7e9fecdeceb3",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3472,8 +1135,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.136670+00:00",
-      "id": "06187aba-90e6-42d9-9bc6-059b2e15b547",
+      "created_at": "2026-08-11T06:05:19.496021+00:00",
+      "id": "eef28d15-8e59-4fb9-b2cb-ad168a4d0d73",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3486,8 +1149,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.134773+00:00",
-      "id": "c8f2690b-e749-4961-9147-06c5a19e0aa9",
+      "created_at": "2026-08-11T06:05:19.493769+00:00",
+      "id": "8f974a54-3155-4508-b754-530e655c894e",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3500,8 +1163,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.132893+00:00",
-      "id": "a614e901-5472-4d55-9b7a-1dafdcb3ae11",
+      "created_at": "2026-08-11T06:05:19.491940+00:00",
+      "id": "f427b16f-e44c-4b62-933f-f51d3658caab",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3514,8 +1177,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.130981+00:00",
-      "id": "6931f9b7-fae4-4c7b-986d-60ff75286c6d",
+      "created_at": "2026-08-11T06:05:19.489427+00:00",
+      "id": "f47cffba-e143-4ca5-8602-1b151486f58e",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3528,8 +1191,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.129183+00:00",
-      "id": "2e069d5d-6aae-41bd-82e5-32d86588b451",
+      "created_at": "2026-08-11T06:05:19.487586+00:00",
+      "id": "94a0f004-53c5-423f-92e3-fdf7018511f6",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3542,8 +1205,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.127260+00:00",
-      "id": "46fe5b61-08a4-4015-9be4-54ff92e02cba",
+      "created_at": "2026-08-11T06:05:19.485874+00:00",
+      "id": "70432cbc-20a7-4f09-96c1-3fa681af734a",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3556,8 +1219,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.125526+00:00",
-      "id": "1b0a756b-d0cb-4dd4-8077-b1aa5aabfc31",
+      "created_at": "2026-08-11T06:05:19.484065+00:00",
+      "id": "7250cefa-788c-41c2-96d5-33ea693c62ae",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3570,8 +1233,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.123686+00:00",
-      "id": "29538715-fc0c-48d3-8236-ce45308e21a5",
+      "created_at": "2026-08-11T06:05:19.481998+00:00",
+      "id": "7283e32b-78cb-4bcb-9bdc-ba33a0d8bcd0",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3584,8 +1247,22 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.121980+00:00",
-      "id": "88e8e2de-f0a2-42db-9b0c-19495d9f5fb5",
+      "created_at": "2026-08-11T06:05:19.480077+00:00",
+      "id": "85a5e234-36df-40e1-8657-8f304c654492",
+      "origin": "tool-catalog-v1",
+      "seal_sig": "",
+      "source_lang": "tool",
+      "source_norm": "diff the current process environment against the snapshot taken at fork_create",
+      "source_text": "diff the current process environment against the snapshot taken at fork_create",
+      "status": "sealed",
+      "target_lang": "tool",
+      "target_text": "env_check",
+      "verifier": "willow-build",
+      "weight": 1.0
+    },
+    {
+      "created_at": "2026-08-11T06:05:19.478226+00:00",
+      "id": "55b9dd63-f2c2-4405-bd6d-09ad5ab6245f",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3598,8 +1275,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.120268+00:00",
-      "id": "68b6c60c-ff4d-4693-a158-7b528aaa6e30",
+      "created_at": "2026-08-11T06:05:19.476619+00:00",
+      "id": "67122514-8150-4cc1-80be-67df860afc4c",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3612,8 +1289,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.118267+00:00",
-      "id": "a2275a13-d7de-4043-bd4f-3f9e25a2354b",
+      "created_at": "2026-08-11T06:05:19.475100+00:00",
+      "id": "37386db6-16f7-40f4-bf38-49237e5c00aa",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3626,8 +1303,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.116429+00:00",
-      "id": "18b0f734-f477-4131-8311-97634374dfa5",
+      "created_at": "2026-08-11T06:05:19.473630+00:00",
+      "id": "f45dcfe4-8598-4e72-b43c-dd1298f4b8b1",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3640,8 +1317,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.114534+00:00",
-      "id": "fc392440-0651-4010-bdeb-d05d7a68ba4f",
+      "created_at": "2026-08-11T06:05:19.472093+00:00",
+      "id": "5e5f4c92-669f-4458-807a-3b40775ac197",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3654,8 +1331,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.112697+00:00",
-      "id": "d266fe27-aa94-4abb-9e59-ea8d743a2653",
+      "created_at": "2026-08-11T06:05:19.470281+00:00",
+      "id": "fd47bf02-be59-46ba-9c4f-eede5f5a609b",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3668,8 +1345,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.110791+00:00",
-      "id": "eb97bc49-2b31-46f9-9938-fcd6b57250fa",
+      "created_at": "2026-08-11T06:05:19.468118+00:00",
+      "id": "20a3d89d-282e-49c1-a6ad-dc8947d527cc",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3682,8 +1359,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.108297+00:00",
-      "id": "5ee0ae30-478c-433b-8d30-54ed94acf26f",
+      "created_at": "2026-08-11T06:05:19.466048+00:00",
+      "id": "d27d75fd-250f-4a48-b62c-a6725127c68f",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3696,8 +1373,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.106506+00:00",
-      "id": "9f9ede39-efdd-41ca-8d2d-d661621ab9cf",
+      "created_at": "2026-08-11T06:05:19.464218+00:00",
+      "id": "51b8a6d6-a568-4676-9db1-ec4ed239104e",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3710,8 +1387,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.104701+00:00",
-      "id": "c0291934-0d5a-4b57-a136-a6a562b52fca",
+      "created_at": "2026-08-11T06:05:19.462243+00:00",
+      "id": "feb641c1-a101-4c2d-a63c-f7e5b55cfbe4",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3724,8 +1401,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.102914+00:00",
-      "id": "b8c7baf9-9417-471b-b5d8-01f834dd83d7",
+      "created_at": "2026-08-11T06:05:19.460681+00:00",
+      "id": "ec874a94-63b3-43f4-a39a-d9904667c732",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3738,8 +1415,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.100953+00:00",
-      "id": "e5967527-4afb-4121-851d-bf02f3afac2f",
+      "created_at": "2026-08-11T06:05:19.458697+00:00",
+      "id": "7b698c3d-2a23-4f5a-a8c6-7f9cc8a44db5",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3752,8 +1429,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.098998+00:00",
-      "id": "987744be-2762-4fc7-80e0-fac012e4957c",
+      "created_at": "2026-08-11T06:05:19.456838+00:00",
+      "id": "b381df6a-4dac-40d6-aa32-e3f3ee6047ec",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3766,8 +1443,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.096852+00:00",
-      "id": "6d2a50f8-77b0-4bd9-9094-73b3ccfdc4bb",
+      "created_at": "2026-08-11T06:05:19.454781+00:00",
+      "id": "0767c762-2019-4939-a8cf-0ceef2006853",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3780,8 +1457,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.094861+00:00",
-      "id": "726773e1-f660-4085-b03a-5a1d9ec39d6e",
+      "created_at": "2026-08-11T06:05:19.452992+00:00",
+      "id": "536655ce-1e46-474a-afba-6c5b34fca384",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3794,8 +1471,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.093023+00:00",
-      "id": "a023501d-0e14-49db-b156-82f1cd619e68",
+      "created_at": "2026-08-11T06:05:19.451251+00:00",
+      "id": "ffc82e20-809d-4f32-bd8f-0d414d153b05",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3808,8 +1485,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.090843+00:00",
-      "id": "1ca045c3-0edf-41b6-8d08-f1f31781f82d",
+      "created_at": "2026-08-11T06:05:19.449150+00:00",
+      "id": "d47e2d25-dc5c-4f3f-8a28-750f91ab65e2",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3822,8 +1499,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.088727+00:00",
-      "id": "e7236bd8-0bfb-4363-8e3d-bb8270c20129",
+      "created_at": "2026-08-11T06:05:19.446462+00:00",
+      "id": "2776e594-840f-4e85-94c1-d8c0f34e8b7b",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3836,8 +1513,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.087045+00:00",
-      "id": "0d12d896-a5de-416a-837a-572958e408af",
+      "created_at": "2026-08-11T06:05:19.444570+00:00",
+      "id": "e34337e5-c45d-46b5-af68-3cf6f7335680",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3850,8 +1527,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.085413+00:00",
-      "id": "f4da0ac4-8d65-42d2-b5f7-cc1dd5fdf353",
+      "created_at": "2026-08-11T06:05:19.442679+00:00",
+      "id": "cf746918-0f81-489c-91ca-cd636b64ddd1",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3864,8 +1541,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.083566+00:00",
-      "id": "f431dc08-a35f-4c6b-af30-decb3df3a5d2",
+      "created_at": "2026-08-11T06:05:19.440545+00:00",
+      "id": "6cd1041f-56b2-4ed9-8ccc-574f9c50c9eb",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3878,8 +1555,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.081495+00:00",
-      "id": "3c297ec2-0cae-46bd-8c76-4e6144e72d6a",
+      "created_at": "2026-08-11T06:05:19.437893+00:00",
+      "id": "54f24daa-4c06-4677-a544-ffedb86dd849",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
@@ -3892,8 +1569,8 @@
       "weight": 1.0
     },
     {
-      "created_at": "2026-08-11T05:35:16.077948+00:00",
-      "id": "ff862c05-f7b7-4bf8-b4a8-55c27baaaaf9",
+      "created_at": "2026-08-11T06:05:19.432436+00:00",
+      "id": "91077939-4f4a-409b-a176-863c9ed5dbe7",
       "origin": "tool-catalog-v1",
       "seal_sig": "",
       "source_lang": "tool",
