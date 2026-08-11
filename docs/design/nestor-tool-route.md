@@ -67,11 +67,11 @@ oracle's answers are auditable like any other served answer in the fleet.
 
 ## The verbs
 
-| verb | posture | gate |
+| verb | posture | ACL group |
 |---|---|---|
-| `nestor_tool_route(app_id, query)` | read-oriented; serves or queues | broad |
-| `nestor_tool_seal(app_id, surface, tool)` | **governance write** — sanctions a phrasing→verb | human / attested only |
-| `nestor_tool_pending(app_id, limit)` | read; the unsealed teach-queue | broad |
+| `nestor_tool_route(app_id, query)` | serves or queues; persists a ledger passage + queue entry | `tool_oracle_route` (write-capable, broadly grantable) |
+| `nestor_tool_seal(app_id, surface, tool)` | **governance write** — sanctions a phrasing→verb | `tool_oracle_seal` (human / attested only) |
+| `nestor_tool_pending(app_id, limit)` | pure read; the unsealed teach-queue | `tool_oracle_read` |
 
 `nestor_tool_seal` grants a phrasing the power to invoke a real verb. It MUST be
 gated to human or attested seats (`human_attestation_*`) — otherwise an agent

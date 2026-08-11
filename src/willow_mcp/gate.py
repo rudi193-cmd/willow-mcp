@@ -158,6 +158,21 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "friction_write": frozenset({
         "friction_scan",
     }),
+    # Nestor tool oracle (docs/design/nestor-tool-route.md) — natural-language
+    # routing to willow verbs. route persists a ledger passage + a teach-queue
+    # entry, so it is write-capable (same reasoning as friction_scan); pending is
+    # a pure read; sealing a phrasing -> verb mapping mints invocation power for
+    # that phrasing, so it is its own group, meant for human/attested seats —
+    # never a plain agent role.
+    "tool_oracle_read": frozenset({
+        "nestor_tool_pending",
+    }),
+    "tool_oracle_route": frozenset({
+        "nestor_tool_route",
+    }),
+    "tool_oracle_seal": frozenset({
+        "nestor_tool_seal",
+    }),
     # Cryptographic identity binding (willow-gate seam, Phase 2). The security is
     # the HMAC signature, not this ACL; the group just lets a manifest opt an app
     # into calling check-in. Registration stays operator/CLI-only.

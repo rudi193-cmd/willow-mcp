@@ -82,6 +82,9 @@ TOOL_CLASS: dict[str, str] = {
     "verify_handoff": WRITE, "agent_clear": WRITE, "session_handoff_write": WRITE,
     "lineage_record": WRITE, "lineage_link": WRITE,
     "friction_scan": WRITE,
+    # nestor_tool_route persists a ledger passage + teach-queue entry; seal writes
+    # a verified pair; pending is a pure read. (docs/design/nestor-tool-route.md)
+    "nestor_tool_route": WRITE, "nestor_tool_seal": WRITE, "nestor_tool_pending": READ,
     "context_save": WRITE, "context_expire": WRITE,
     "frank_append": WRITE,
     # nest_scan writes a local SQLite Nest DB; nest_promote writes structure-only

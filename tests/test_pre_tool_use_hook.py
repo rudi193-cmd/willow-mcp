@@ -934,6 +934,7 @@ _WRITE_CAPABLE_GROUPS = {
     "lineage_write", "markdownai_directives", "markdownai_write", "nest_write",
     "orchestrator",
     "schema_admin", "store_all", "store_write", "task_queue",
+    "tool_oracle_route", "tool_oracle_seal",
 }
 
 # Groups that mutate nothing. `web_read` is deliberately here: willow_web_fetch
@@ -944,7 +945,7 @@ _READ_ONLY_GROUPS = {
     "fleet_read",
     "fork_read", "friction_read", "gap_read", "human_loop_read",
     "integration_read", "knowledge_read", "lineage_read", "markdownai_read",
-    "nest_read", "store_read", "web_read",
+    "nest_read", "store_read", "tool_oracle_read", "web_read",
 }
 
 # Not permission groups — the capability half of the three-key egress gate, which

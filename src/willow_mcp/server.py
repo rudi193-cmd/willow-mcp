@@ -106,7 +106,7 @@ def _read_call_credential() -> Optional[dict]:
     from the `ServerRequestContext` the SDK hands it. SDK 1.x had an ambient
     `mcp.server.lowlevel.server.request_ctx`; 2.0 removed it deliberately and
     injects `Context` into tool functions instead — an injection that does not
-    reach a decorator wrapping 107 tools. See willow_mcp/request_context.py for
+    reach a decorator wrapping 110 tools. See willow_mcp/request_context.py for
     why the replacement is a ContextVar we own rather than one the SDK might
     move again.
     """
@@ -1321,6 +1321,45 @@ def friction_flags_list(app_id: str, limit: int = 20) -> list:
     if not gate.collection_permitted(app_id, _friction.collection):
         return [_collection_denied(app_id, _friction.collection)]
     return _friction.list_flags(limit=limit)
+
+
+# ── Nestor tool oracle (natural-language → willow verb) ──────────────────────────
+
+@mcp.tool()
+@_guarded("nestor_tool_route")
+def nestor_tool_route(app_id: str, query: str) -> dict:
+    """Route a natural-language intent to the willow-mcp verb that serves it.
+    Returns status='served' with the resolved `tool` ONLY when a human-sealed
+    phrasing clears the match threshold; otherwise status='queued' (the intent is
+    logged for a human to seal) — it never guesses a verb. status='unavailable'
+    when the optional Nestor engine isn't installed. Read-oriented, but every
+    route leaves a hash-chained ledger trail like any other served answer.
+    Backed by a signed catalog that is integrity-checked before it is trusted."""
+    from . import tool_oracle
+    return tool_oracle.route(query)
+
+
+@mcp.tool()
+@_guarded("nestor_tool_seal")
+def nestor_tool_seal(app_id: str, surface: str, tool: str) -> dict:
+    """Teach the oracle: sanction that natural-language `surface` maps to willow
+    verb `tool`. This is a GOVERNANCE WRITE — it seals a verified pair (signed,
+    ledgered) that nestor_tool_route will then serve, so the `tool_oracle_seal`
+    group is meant for human/attested seats only: sealing a phrasing mints
+    invocation power for it. The counter-verb to a queued route; your app_id is
+    recorded as the verifier."""
+    from . import tool_oracle
+    return tool_oracle.seal(surface, tool, verifier=app_id)
+
+
+@mcp.tool()
+@_guarded("nestor_tool_pending", list_error=True)
+def nestor_tool_pending(app_id: str, limit: int = 20) -> list:
+    """The teach-queue: natural-language intents nestor_tool_route couldn't serve,
+    newest first, deduped by phrasing — what a human should seal (or reject) so
+    the oracle learns them. Empty when every routed intent has a sealed home."""
+    from . import tool_oracle
+    return tool_oracle.pending(limit=limit)
 
 
 # ── Identity binding (willow-gate seam — check-in / check-out) ───────────────────
