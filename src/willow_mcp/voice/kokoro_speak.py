@@ -17,12 +17,15 @@ import json
 import os
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 import wave
 from typing import Callable
 
 DEFAULT_KOKORO_URL = "http://localhost:5000/v1/audio/speech"
 DEFAULT_KOKORO_VOICE = "am_michael"
+
+_URL_SCHEMES = ("http", "https")
 
 
 class BargeCoordinator:
@@ -92,6 +95,11 @@ class KokoroSpeaker:
         synthesize: Callable[[str], bytes] | None = None,
     ):
         self.url = (url or os.environ.get("WILLOW_KOKORO_URL") or DEFAULT_KOKORO_URL).strip()
+        # WILLOW_KOKORO_URL is an operator/config value, not request input, but
+        # a misconfigured scheme (e.g. file://) must not reach urlopen — fail
+        # fast at construction rather than silently at first synthesis.
+        if urllib.parse.urlparse(self.url).scheme not in _URL_SCHEMES:
+            raise ValueError(f"unsupported scheme for kokoro url: {self.url!r}")
         self.voice = (voice or os.environ.get("WILLOW_KOKORO_VOICE") or DEFAULT_KOKORO_VOICE).strip()
         self.timeout_s = timeout_s
         self._player = player or InterruptiblePlayer()
@@ -115,7 +123,7 @@ class KokoroSpeaker:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:  # nosec B310 - scheme validated in __init__ (http/https only); self.url is an operator/config value, never request input
                 return resp.read()
         except (urllib.error.URLError, TimeoutError) as exc:
             raise RuntimeError(f"kokoro synthesis failed: {exc}") from exc

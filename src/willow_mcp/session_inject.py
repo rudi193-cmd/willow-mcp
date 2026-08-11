@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 import time
 from pathlib import Path
 
 _DEDUP_TTL_SEC = 300
-_MARKER = Path("/tmp/willow-session-inject-marker.json")
+# tempfile.gettempdir(), not a hardcoded "/tmp" literal: honors TMPDIR/TEMP
+# overrides and keeps this portable off Linux, where /tmp is not a given.
+_MARKER = Path(tempfile.gettempdir()) / "willow-session-inject-marker.json"
 
 MAX_CORRECTIONS = 4
 MAX_PREFERENCES = 3

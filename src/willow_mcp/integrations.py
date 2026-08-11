@@ -149,6 +149,14 @@ class BaseAdapter:
         if ".." in path:
             return {"error": "bad_path: dot-dot segments are not allowed"}
 
+        # base_url is a per-adapter class attribute, but 2 live adapters
+        # (jeles, utety) let an operator override it via env var (see class
+        # docstrings below) — so scheme is a config value, not a hardcoded
+        # constant, and gets a real check rather than a blanket nosec.
+        if urllib.parse.urlparse(self.base_url).scheme != "https":
+            return {"error": f"bad_base_url: adapter '{self.name}' base_url "
+                             f"must be https, got {self.base_url!r}"}
+
         url = self.base_url + path
         if params:
             if not isinstance(params, dict):
@@ -178,7 +186,7 @@ class BaseAdapter:
         for attempt in range(_MAX_ATTEMPTS):
             req = urllib.request.Request(url, data=data, headers=headers, method=method)
             try:
-                with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:
+                with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:  # nosec B310 - scheme is enforced to https just above; path is regex-validated (_PATH_RE, no "//" or ".." ) and cannot repoint host
                     raw = resp.read(_MAX_RESPONSE_BYTES + 1)
                     if len(raw) > _MAX_RESPONSE_BYTES:
                         return {"error": f"response_too_large: over {_MAX_RESPONSE_BYTES} bytes"}
