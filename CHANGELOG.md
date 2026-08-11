@@ -31,6 +31,13 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.9.2](https://github.com/rudi193-cmd/willow-mcp/compare/v2.9.1...v2.9.2) (2026-08-11)
+
+
+### Fixed
+
+* **build:** drop the git-pinned nestor extra so PyPI accepts the upload ([e0112c3](https://github.com/rudi193-cmd/willow-mcp/commit/e0112c35c6d66900956f95df2e821ea1a7b4d51a))
+
 ## [2.9.1](https://github.com/rudi193-cmd/willow-mcp/compare/v2.9.0...v2.9.1) (2026-08-11)
 
 
