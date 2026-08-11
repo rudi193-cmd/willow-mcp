@@ -37,12 +37,12 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 ### Fixed
 
 * **#333:** dispatch_send cites its own envelope before acting ([020d8a7](https://github.com/rudi193-cmd/willow-mcp/commit/020d8a7cc5ac9c596c61d09e0f68b4b65de994af))
-* **security:** triage bandit B310/B108 findings, drop bandit || true ([#318](https://github.com/rudi193-cmd/willow-mcp/issues/318)) ([3e209d3](https://github.com/rudi193-cmd/willow-mcp/commit/3e209d310f2d0fe0537c5dd230a2110a0552082b))
+* **security:** triage bandit B310/B108 findings, drop bandit || true (#318) ([3e209d3](https://github.com/rudi193-cmd/willow-mcp/commit/3e209d310f2d0fe0537c5dd230a2110a0552082b))
 
 
 ### Security
 
-* **dispatch:** HMAC-sign packet meta.json to close filesystem injection (B-52, [#241](https://github.com/rudi193-cmd/willow-mcp/issues/241)) ([a65c73b](https://github.com/rudi193-cmd/willow-mcp/commit/a65c73b2963a2f9c0165c31e4eeb25fee61f86f7))
+* **dispatch:** HMAC-sign packet meta.json to close filesystem injection (B-52, #241) ([a65c73b](https://github.com/rudi193-cmd/willow-mcp/commit/a65c73b2963a2f9c0165c31e4eeb25fee61f86f7))
 
 ## [2.9.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.8.0...v2.9.0) (2026-08-11)
 
