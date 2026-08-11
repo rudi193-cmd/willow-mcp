@@ -4082,7 +4082,8 @@ def _diag_env() -> dict:
 
 def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                      worker: dict | None = None, consent: dict | None = None,
-                     net_lease: dict | None = None, severance: dict | None = None) -> list[dict]:
+                     net_lease: dict | None = None, severance: dict | None = None,
+                     envelope_registry: dict | None = None) -> list[dict]:
     """Pure: turn raw check dicts into actionable problems. Unit-tested without
     a live DB — this is where the empty-DB footgun becomes a named diagnosis."""
     from . import gate
@@ -4341,6 +4342,31 @@ def _derive_problems(store: dict, postgres: dict, manifest: dict, mode: str,
                 "detail": (f"severance is asserted but {name} cannot be checked: "
                            f"{surfaces.get(name, {}).get('reason')}"),
                 "fix": "set both WILLOW_MCP_FLEET_HOME and WILLOW_MCP_FLEET_PG_DB, or neither"})
+    # #332: an envelope registry that resolves to no usable active grant means
+    # nothing can be authorized. Warns (degrades) rather than breaks — the same
+    # "present but unpopulated needs the operator to fill it" shape the manifest
+    # empty-permissions case takes, and on a fresh install this is the expected
+    # "now plant your grants" nudge. Either way it surfaces here on day one
+    # instead of being read off a denied act on day three.
+    if envelope_registry and envelope_registry.get("status") == "warn":
+        reg = envelope_registry
+        path = reg.get("path") or "the resolved registry path"
+        if reg.get("error"):
+            detail = f"envelope registry at {path} could not be read: {reg.get('error')}"
+            fix = "repair the registry file, or set WILLOW_ENVELOPE_REGISTRY to your ratified registry"
+        elif not reg.get("present"):
+            detail = (f"envelope registry not found at {path} — no enveloped act can be "
+                      "authorized until it exists and holds grants")
+            fix = ("run willow-mcp-init to seed it then plant grants (verb 11), or set "
+                   "WILLOW_ENVELOPE_REGISTRY to your ratified registry")
+        else:
+            detail = (f"envelope registry at {path} holds no active grants (#332: an unpopulated "
+                      "starter, or a $WILLOW_HOME relocation shadowing the ratified registry with a "
+                      "fresh empty one) — every enveloped act will fail closed")
+            fix = ("plant grants (verb 11) into that file, or point WILLOW_ENVELOPE_REGISTRY at the "
+                   "ratified registry")
+        problems.append({"severity": "warn", "check": "envelope_registry",
+                         "detail": detail, "fix": fix})
     return problems
 
 
@@ -4419,6 +4445,35 @@ def whoami(app_id: str = "") -> dict:
     }
 
 
+def _diag_envelope_registry() -> dict:
+    """The Article III.2 envelope registry: does it resolve to a file holding at
+    least one usable active grant? An empty, missing, or all-malformed registry
+    is the #332 footgun — a $WILLOW_HOME relocation seeds a fresh empty starter
+    that shadows the ratified registry, and every enveloped act then fails
+    closed. Probed here so that loss is visible in the routine self-check, not
+    only at the first denied act (which read as one grant expiring and hid the
+    outage for ~60 hours). Read-only; reports rather than enforces."""
+    from . import envelopes
+
+    try:
+        path = envelopes.registry_path()
+    except Exception as exc:  # resolution itself failed — report, never raise
+        return {"status": "warn", "error": str(exc)}
+    if not path.exists():
+        return {"status": "warn", "path": str(path), "present": False, "active_grants": 0}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        count = len(envelopes.usable_active_grants(data)) if isinstance(data, dict) else 0
+    except Exception as exc:
+        return {"status": "warn", "path": str(path), "present": True, "error": str(exc)}
+    return {
+        "status": "ok" if count > 0 else "warn",
+        "path": str(path),
+        "present": True,
+        "active_grants": count,
+    }
+
+
 @mcp.tool()
 def diagnostic_summary(app_id: str = "") -> dict:
     """Self-check: is this willow-mcp install wired correctly? Reports the SOIL
@@ -4467,10 +4522,11 @@ def diagnostic_summary(app_id: str = "") -> dict:
     severance = _diag_severance(store, postgres, net_lease)
     uid_separation = _diag_uid_separation(eff)
     store_db_perms = _diag_store_db_perms(eff)
+    envelope_registry = _diag_envelope_registry()
     env = _diag_env()
 
     problems = _derive_problems(store, postgres, manifest, mode, worker, consent,
-                                net_lease, severance)
+                                net_lease, severance, envelope_registry)
     verdict = _derive_verdict(problems)
 
     report = {
@@ -4482,7 +4538,8 @@ def diagnostic_summary(app_id: str = "") -> dict:
                    "schema": schema, "manifest": manifest, "identity_bindings": bindings,
                    "worker": worker, "consent": consent, "net_lease": net_lease,
                    "severance": severance, "uid_separation": uid_separation,
-                   "store_db_perms": store_db_perms, "env": env},
+                   "store_db_perms": store_db_perms,
+                   "envelope_registry": envelope_registry, "env": env},
         "problems": problems,
     }
     if redact:

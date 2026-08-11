@@ -13,7 +13,7 @@
     "roster": "fleet.json",
     "charter": "PROTECTED_AGENTS.md"
   },
-  "updated": "2026-07-06",
+  "updated": "2026-08-11",
   "invariants": [
     "Envelopes cite verbs by id; free text never appears on the checking path.",
     "The check is field-by-field validation of call args against envelope bounds. No interpretation. A near-miss is a fault (EAMBIG), not a stretch.",
@@ -47,6 +47,11 @@
       "meaning": "Verb exists; no envelope covers this call.",
       "route": "trap_to_console",
       "note": "Proposed action enqueued via human_required queue with the call args attached."
+    },
+    "ENOGRANTS": {
+      "meaning": "The registry loaded but holds zero active grants — systemic, not a per-call miss.",
+      "route": "trap_to_console",
+      "note": "A functioning system always holds at least the orchestrator seat's own planting, so this is never steady state: an unpopulated starter, or (issue #332) the empty starter seeded at a relocated $WILLOW_HOME shadowing the ratified registry. Distinct from ENOENT so the systemic cause surfaces at the first check instead of reading as one grant expiring. The reason names the resolved registry file."
     },
     "EACCES": {
       "meaning": "A covering envelope exists but grantee or ring does not match.",
@@ -232,12 +237,12 @@
       "verb": "envelope.apply",
       "summary": "The magistrate's own act: match a call against the registry, cite the envelope, record the outcome.",
       "bounds": {
-        "registry_path": "envelopes/pre-approved.json"
+        "registry_path": "${WILLOW_HOME}/constitutional/pre-approved.json"
       },
       "enforcement": "soft",
       "enforced_by": null,
       "min_ring": "OPERATOR",
-      "note": "Self-grounding: the orchestrator seat's license to check at all is itself an envelope over this verb \u2014 the planting. The magistrate matches against the table; it never answers 'does this need a human' (CONST-0-3/CONST-0-6)."
+      "note": "Self-grounding: the orchestrator seat's license to check at all is itself an envelope over this verb \u2014 the planting. The magistrate matches against the table; it never answers 'does this need a human' (CONST-0-3/CONST-0-6). registry_path is documentary: no runtime code parses it \u2014 the enforcer resolves the file itself (envelopes.registry_path). The ${WILLOW_HOME} form declares the single root for a human auditor and is NOT a live template like verb 1's {{HOME}}. It read `envelopes/pre-approved.json` until #332: the pre-migration location, dead since the registry moved to constitutional/, so the governed declaration named one file while enforcement read another, under two natural readings (repo-root vs $WILLOW_HOME). tests/test_envelope_registry_default_path.py binds declaration to enforcement so that audit-time divergence cannot recur; it does not address the runtime relocation incident behind #332 (an ambient $WILLOW_HOME move seeding an empty registry read silently), which is separate work."
     },
     {
       "id": 14,

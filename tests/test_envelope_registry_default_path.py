@@ -7,6 +7,8 @@ the seeding behaviour, since every other envelope test already exercises the
 override path with its own temp registry.
 """
 import json
+import os
+from pathlib import Path
 
 from willow_mcp import envelopes, home_init as hi, paths
 
@@ -83,3 +85,34 @@ def test_seeded_registry_passes_the_fail_closed_ownership_check(home, monkeypatc
 
     paths.trusted_read(envelopes.registry_path())  # raises PermissionError on failure
     paths.trusted_read(envelopes.syscall_path())
+
+
+def test_verb13_declared_registry_path_resolves_to_the_enforced_file(home, monkeypatch):
+    """#332(a): verb 13 (envelope.apply) declares its registry in the syscall
+    table's `bounds.registry_path`. That declaration is the governed, human-read
+    statement of *which file is law*; the enforcer reads `envelopes.registry_path()`.
+    The two must name one file.
+
+    They diverged once already: the declaration kept `envelopes/pre-approved.json`
+    — the pre-migration sibling-repo location — after the registry moved to
+    `$WILLOW_HOME/constitutional/`. The governed table pointed at a dead path
+    while enforcement resolved a live one, and a reader auditing the charter had
+    two natural readings (repo-root vs `$WILLOW_HOME`) naming different files.
+    This binds declaration to enforcement so the next drift fails here."""
+    monkeypatch.delenv("WILLOW_ENVELOPE_REGISTRY", raising=False)
+
+    table = json.loads((paths.bundle_dir() / "constitutional" / "syscall-table.json").read_text())
+    verb13 = next(v for v in table["verbs"] if v["id"] == 13)
+    declared = verb13["bounds"]["registry_path"]
+
+    # The declaration pins the single declared root explicitly — no second
+    # "relative to repo root" reading is possible.
+    assert "${WILLOW_HOME}" in declared, (
+        "verb 13's registry_path must name $WILLOW_HOME as its root, not a bare "
+        "relative path with two natural readings"
+    )
+    resolved = Path(os.path.expandvars(declared)).expanduser()
+    assert resolved == envelopes.registry_path(), (
+        "verb 13's declared registry_path must resolve to the file the enforcer "
+        f"actually reads: declared={resolved}, enforced={envelopes.registry_path()}"
+    )
