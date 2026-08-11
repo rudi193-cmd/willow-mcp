@@ -28,12 +28,20 @@ leases issued, envelope citations (when metering lands, B-35), probe ids.
 
 After sensitive writes elsewhere, `frank_verify` confirms the chain still links.
 
-## Metering note (B-35)
+## Metering note (B-35 / #333)
 
 Envelope `max_count` limits in `$WILLOW_HOME/constitutional/pre-approved.json`
 expect FRANK `envelope_citation` entries to be appended at use time. That
-writer path is still **incomplete** — do not assume counts enforce until
-B-35 closes.
+writer path was previously reachable only via the opt-in `envelope_apply`
+tool: a verb an envelope governed could be exercised through its OWN tool
+without ever citing, so the meter read clean whether the caller complied or
+bypassed governance entirely (#333). Verbs in `VERB_LEVEL_ENFORCED_VERBS`
+(`server.py`; currently just `dispatch` → `dispatch_send`) now cite
+themselves, from inside their own handler, before the act — citation and act
+are one indivisible call, so an uncited act under those verbs is impossible.
+Every other enveloped verb still relies on `envelope_apply` being called
+explicitly — do not assume counts enforce for those until they grow the same
+handler-side gate.
 
 ## Constraints
 

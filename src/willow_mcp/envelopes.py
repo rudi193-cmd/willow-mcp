@@ -105,6 +105,50 @@ def _bound_matches(grant, actual) -> bool:
     return actual == grant
 
 
+def governing_envelope_ids(verb: str, actor: str) -> list[str]:
+    """The active grant id(s), if any, that cover `verb` for `actor` — the
+    resolution step verb-level citation-before-act enforcement (#333) needs
+    BEFORE it can cite anything: which envelope, if any, governs this call.
+
+    Reads only the registry + trust root (no ledger, no Postgres), so an
+    actor with no envelope programme configured for `verb` costs nothing
+    beyond a file read — a verb-level gate built on this never turns an
+    unenveloped install into a hard Postgres dependency (see
+    server._enveloped_verb_gate's docstring).
+
+    Zero matches means `verb` is unenveloped for `actor`: the caller's
+    contract is to proceed exactly as before #333 — an envelope registry
+    that grants nothing for this actor+verb pair is not a reason to refuse
+    an act nothing ever governed. More than one match is a registry that
+    cannot say which grant would be charged; the caller refuses that as
+    ambiguous rather than guessing (the same reasoning EnvelopeAuthority
+    .check() already applies to a duplicate envelope *id* — see its
+    "envelope not active" / len(matches) != 1 guard — applied here to
+    verb+actor instead of id).
+
+    Raises whatever `_load` raises (OSError/PermissionError, ValueError,
+    json.JSONDecodeError) on an unreadable/untrusted/malformed registry — it
+    never conflates "the registry cannot be read" with "nothing governs this
+    verb" by returning `[]` for both. What a caller does with that exception
+    is its own call, not this function's: an explicit, caller-named
+    envelope_id (`EnvelopeAuthority.check()`) fails closed on it, because
+    refusing an unverifiable claim is correct there; an AMBIENT resolution
+    that runs on every call to a verb-level-enforced tool for every actor
+    (`server._enveloped_verb_gate`) instead treats it as "not governed" —
+    see that function's docstring for why turning a missing/misconfigured
+    registry into a hard failure for every install, enveloped or not, would
+    be the wrong tradeoff there."""
+    registry = _load(registry_path())
+    return [
+        row["id"]
+        for row in usable_active_grants(registry)
+        if row.get("verb") == verb
+        and row.get("status") == "active"
+        and not row.get("revoked")
+        and _granted(row.get("grantee"), actor)
+    ]
+
+
 class EnvelopeAuthority:
     def __init__(self, ledger: GovernanceLedger):
         self.ledger = ledger
