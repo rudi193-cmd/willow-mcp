@@ -157,6 +157,24 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `frank_read` / `frank_verify` | Read and verify the existing Postgres FRANK hash chain |
 | `frank_append` | Append an established-shape FRANK event (separately gated) |
 | `envelope_apply` | Match an active constitutional grant and write its FRANK citation before returning authority |
+| `grove_list_channels` | List active Grove channels (name, type, description) |
+| `grove_get_history` | Message history from a channel, with `since_id` polling and `limit` (max 200) |
+| `grove_search` | Case-insensitive substring search across Grove messages, optionally scoped to one channel |
+| `grove_watch` / `grove_watch_all` | Non-blocking poll for new messages in one channel, or many at once via a `{channel: since_id}` cursor map |
+| `grove_get_thread` | A message plus its flags and all its replies |
+| `grove_bus_receive` | Structured bus messages addressed to an agent (or broadcast), priority-ordered |
+| `grove_inbox` | Fleet inbox: @mentions, bus messages addressed to you, and your dedicated `#<agent>` channel, merged and deduped |
+| `grove_flagged` | Messages carrying a given flag (`needs-reply`/`starred`/`read`/`urgent`/`resolved`), across all channels or one |
+| `grove_get_identity` | Your own Grove identity — `app_id`, resolved `grove_sender`, registered role/display name |
+| `grove_agents` | Fleet agents by most-recent HEARTBEAT, newest first |
+| `grove_fleet_status` | Presence plus what each agent is doing — `ui_state`, a content peek, and whether it's blocked on a reply |
+| `grove_human_required` | The human-required queue: work that pauses automation until a person acts, priority-first |
+| `grove_send_message` | Post to a channel (creates it if missing). `sender` defaults to your resolved `grove_sender`, never a literal "Auto"; posting as a different identity requires `grove_relay` |
+| `grove_reply` | Reply in a thread; clears the parent's `needs-reply` flag |
+| `grove_flag` / `grove_unflag` | Set or clear a flag on a message |
+| `grove_bus_send` | Post a structured, addressed, typed, prioritized bus message (`COMMAND`/`EVENT`/`HEARTBEAT`/…) |
+| `grove_ack` | Acknowledge a received message; clears `needs-reply`, marks it `read` |
+| `grove_heartbeat` | Broadcast "I am alive" to `#general` |
 | `context_save` | Save ephemeral per-identity working state under a key, with an optional TTL (SOIL-backed, no Postgres) |
 | `context_get` | Read a saved context; `expired` (and purged) once its TTL passes |
 | `context_list` | List your saved context keys and expiry times (expired ones skipped) |
@@ -881,12 +899,12 @@ needs a manifest at `$WILLOW_HOME/mcp_apps/<app_id>/manifest.json`:
 
 `permissions` is a list of group names and/or literal tool names —
 see `PERMISSION_GROUPS` in `src/willow_mcp/gate.py` for the authoritative set
-(48 groups). Common ones: `store_read`, `store_write`, `knowledge_read`,
+(51 groups). Common ones: `store_read`, `store_write`, `knowledge_read`,
 `knowledge_write`, `schema_admin`, `task_queue`, `agent_dispatch`,
 `dispatch_read`, `dispatch_write`, `fleet_read`, `context`, `audit`,
 `gap_read`, `gap_write`, `gap_promote`, `fork_read`, `fork_write`, `nest_read`,
 `nest_write`, `integration_read`, `web_read`, `code_graph_read`,
-`code_graph_write`, `full_access` — plus per-subsystem read/write groups for
+`code_graph_write`, `grove_read`, `grove_write`, `full_access` — plus per-subsystem read/write groups for
 lineage, friction, commitments, the human-loop, and MarkdownAI. Fail-closed:
 no manifest, or an empty `permissions` list, denies every call for that
 `app_id`. `gap_promote` is kept separate from `gap_write` — landing
@@ -921,6 +939,46 @@ before judging them and re-checks every redirect hop, rather than the hostname
 blocklist it used to carry; and `@env` resolves only keys
 named in the operator's `WILLOW_MAI_ENV_ALLOW` (comma-separated, default
 deny), with credential-shaped keys never resolving at all.
+
+### Grove — the fleet's shared messaging room
+
+The 20 `grove_*` tools (`willow_mcp/grove_tools.py`, data layer
+`willow_mcp/grove.py`) are the agent-side successor to willow-2.0's
+`sap/grove_tools.py`: they give an agent a voice in Grove, the fleet's shared
+Postgres-backed chat (`grove.channels`/`grove.messages`/`grove.message_flags`
+tables) — channels, threads, flags, a priority bus protocol, and
+fleet-awareness reads (`grove_agents`, `grove_fleet_status`,
+`grove_human_required`). Registered unconditionally, like the store/knowledge
+tools, but gated per-app like every other tool here: `grove_read` (13 tools)
+and `grove_write` (7 tools), or `grove_all` for both. Unlike `web_read` /
+`integration_call` / `markdownai_*`, both ride `full_access`: Grove carries no
+egress concern, same reasoning as `knowledge_read`/`knowledge_write`.
+
+*Not to be confused with* `the_grove.py` / `python -m willow_mcp.the_grove`
+above — that is an unrelated local SQLite rings-of-lessons store. This Grove
+is the fleet's shared Postgres messaging room.
+
+Every write tool's `sender` defaults to the calling agent's `grove_sender`,
+resolved from the specialist registry (`willow_mcp.registry.specialist_row`) —
+never the literal `"Auto"` the canonical willow-2.0 tools defaulted to. An
+agent posts as itself by default, and for free — `grove_write` alone covers
+that. Posting as a *different* identity (relaying on another identity's
+behalf) is a separate, sender-locked privilege: passing an explicit `sender`
+that does not match the caller's own resolved identity is refused —
+`{"error": "sender_forbidden", ...}`, before any DB write — unless the
+caller's manifest also holds the `grove_relay` capability. `grove_relay` is
+its own manifest line, deliberately excluded from `grove_write` and
+`full_access` (same shape as `task_net`/`mcp_federation` below): a broad
+Grove-write grant must never silently also grant impersonation. No seed seat
+holds it (`bundle/config/specialists.json`) — it is reserved for a future
+operator-granted bridge/relay seat.
+
+**The DB-name trap:** Grove's tables live in the fleet's `willow_20` Postgres
+database, not this server's default `willow` database (`WILLOW_PG_DB`). If
+`WILLOW_PG_DB` is unset or still `willow`, every `grove_*` tool returns a
+`grove_unavailable` error naming the fix rather than a raw driver traceback.
+Set `WILLOW_PG_DB=willow_20` in the willow-mcp server's environment (and
+restart it) to reach Grove.
 
 There is also one **capability permission**, `task_net`, which is not a tool
 name but a privilege flag: it lets an app *ask* for `task_submit(allow_net=True)`.

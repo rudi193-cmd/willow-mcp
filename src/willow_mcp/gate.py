@@ -115,6 +115,31 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "fleet_read": frozenset({
         "fleet_status", "fleet_health", "frank_read", "frank_verify",
     }),
+    # Grove — the fleet's shared messaging room (willow-2.0's sap/grove_tools.py
+    # successor; see willow_mcp/grove_tools.py). Read/write mirror the
+    # store_read/store_write split above: 13 read tools (channel/message/thread/
+    # flag/bus listing, plus grove_agents/grove_fleet_status/grove_human_required
+    # fleet-awareness reads) and 7 write tools (post/reply/flag/bus-send/ack/
+    # heartbeat). grove_all is the explicit union, same convention as
+    # store_all — not derived, so it stays auditable as a literal set.
+    "grove_read": frozenset({
+        "grove_list_channels", "grove_get_history", "grove_search", "grove_watch",
+        "grove_watch_all", "grove_get_thread", "grove_bus_receive", "grove_inbox",
+        "grove_flagged", "grove_get_identity", "grove_agents", "grove_fleet_status",
+        "grove_human_required",
+    }),
+    "grove_write": frozenset({
+        "grove_send_message", "grove_reply", "grove_flag", "grove_unflag",
+        "grove_bus_send", "grove_ack", "grove_heartbeat",
+    }),
+    "grove_all": frozenset({
+        "grove_list_channels", "grove_get_history", "grove_search", "grove_watch",
+        "grove_watch_all", "grove_get_thread", "grove_bus_receive", "grove_inbox",
+        "grove_flagged", "grove_get_identity", "grove_agents", "grove_fleet_status",
+        "grove_human_required",
+        "grove_send_message", "grove_reply", "grove_flag", "grove_unflag",
+        "grove_bus_send", "grove_ack", "grove_heartbeat",
+    }),
     "frank_write": frozenset({
         "frank_append",
     }),
@@ -341,6 +366,15 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         # Fleet (read-only)
         "fleet_status", "fleet_health",
         "frank_read", "frank_verify",
+        # Grove — the fleet's shared messaging room (read + write; no egress
+        # concern like web_net/integration_net/mcp_federation, so unlike those
+        # this rides full_access, same reasoning as knowledge_read/write above)
+        "grove_list_channels", "grove_get_history", "grove_search", "grove_watch",
+        "grove_watch_all", "grove_get_thread", "grove_bus_receive", "grove_inbox",
+        "grove_flagged", "grove_get_identity", "grove_agents", "grove_fleet_status",
+        "grove_human_required",
+        "grove_send_message", "grove_reply", "grove_flag", "grove_unflag",
+        "grove_bus_send", "grove_ack", "grove_heartbeat",
         # Schema admin
         "schema_confirm_mapping",
         # Session context
@@ -408,6 +442,18 @@ WEB_NET_PERMISSION = "web_net"
 # the three above: a task_net/integration_net/web_net grant must never be read
 # as "and may also fork a downstream MCP server as me".
 MCP_FEDERATION_PERMISSION = "mcp_federation"
+
+# Grove sender lock. `grove_write` lets an app post to the fleet's shared
+# room as *itself* (its resolved `grove_sender`) — that is the tool grant.
+# Posting as a DIFFERENT identity is a distinct, more consequential privilege
+# (forging another agent's orchestrator COMMAND, a fake heartbeat, clearing
+# someone else's needs-reply flag) and must be granted on its own line, same
+# reasoning as NET_PERMISSION/DB_PERMISSION above: deliberately NOT folded
+# into `grove_write` or `full_access`, so a broad grant of either never
+# silently carries impersonation with it. Operator-granted only — no seed
+# seat holds it; an orchestrator posts as itself, relay is reserved for a
+# future bridge seat (docs/design/permissions-matrix.md).
+GROVE_RELAY_PERMISSION = "grove_relay"
 
 
 def federated_tool_permission(server_id: str, tool: str) -> str:
@@ -763,3 +809,21 @@ def permitted(app_id: str, tool_name: str) -> bool:
         return False
 
     return True
+
+
+def grove_relay_permitted(app_id: str) -> bool:
+    """True only if `app_id`'s manifest explicitly lists the `grove_relay`
+    capability (`GROVE_RELAY_PERMISSION`) in its "permissions" — the flag
+    that unlocks posting to Grove as a different identity than the caller's
+    own resolved `grove_sender`.
+
+    Reuses `permitted()` — the same manifest load/expand/deny-overlay path
+    every other gate check goes through — rather than a second read path, so
+    this can never drift from what the gate enforces elsewhere. Same pattern
+    as the capability checks already in this file (e.g.
+    `gate.permitted(app_id, gate.NET_PERMISSION)` in `task_submit`): a
+    capability flag is checked with the identical `permitted()` call as a
+    tool name, since neither `full_access` nor any other group ever lists it
+    (see `GROVE_RELAY_PERMISSION` above — deliberately not a member of
+    `grove_write` or `full_access`)."""
+    return permitted(app_id, GROVE_RELAY_PERMISSION)

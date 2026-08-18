@@ -930,6 +930,7 @@ _WRITE_CAPABLE_GROUPS = {
     "context", "dispatch_write", "envelope_apply", "federation_call", "fork_write",
     "frank_write",
     "friction_write", "full_access", "gap_promote", "gap_purge", "gap_write",
+    "grove_all", "grove_write",
     "human_loop_write", "integration_call", "knowledge_curate", "knowledge_write",
     "lineage_write", "markdownai_directives", "markdownai_write", "nest_write",
     "orchestrator",
@@ -942,16 +943,17 @@ _WRITE_CAPABLE_GROUPS = {
 # gated separately by the web_net capability (covered below), not by this group.
 _READ_ONLY_GROUPS = {
     "audit", "code_graph_read", "commitment_read", "dispatch_read", "federation_read",
-    "fleet_read",
+    "fleet_read", "grove_read",
     "fork_read", "friction_read", "gap_read", "human_loop_read",
     "integration_read", "knowledge_read", "lineage_read", "markdownai_read",
     "nest_read", "store_read", "tool_oracle_read", "web_read",
 }
 
-# Not permission groups — the capability half of the three-key egress gate, which
-# no group implies. All are operator-only. Kept in step with gate.py's
+# Not permission groups — one-off capability flags a manifest lists on their
+# own line (the three-key egress gate's half, plus grove_relay). No group
+# implies any of them. All are operator-only. Kept in step with gate.py's
 # *_PERMISSION capability constants by test_net_capabilities_cover_every_gate_flag.
-_NET_CAPABILITIES = ("task_net", "task_db", "integration_net", "web_net", "mcp_federation")
+_NET_CAPABILITIES = ("task_net", "task_db", "integration_net", "web_net", "mcp_federation", "grove_relay")
 
 
 def _manifest_write(permission):
