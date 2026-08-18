@@ -37,7 +37,6 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 ### Added
 
 * **grove:** add 20 Grove MCP tools — the agent-side successor to willow-2.0's sap/grove_tools.py ([e1a4b74](https://github.com/rudi193-cmd/willow-mcp/commit/e1a4b74695e04c036d8816427ba0df9b4c0f8f38))
-* **grove:** prefix is what surfaces it at the next release. ([e1a4b74](https://github.com/rudi193-cmd/willow-mcp/commit/e1a4b74695e04c036d8816427ba0df9b4c0f8f38))
 
 
 ### Fixed
