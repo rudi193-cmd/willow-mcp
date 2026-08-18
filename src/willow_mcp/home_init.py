@@ -59,7 +59,7 @@ _DEFAULT_ENVELOPES: dict[str, Any] = {
         # (clearing a whole fleet-shared topic) stay off this line.
         "librarian": {"allow_groups": [
             "dispatch_read", "dispatch_write", "knowledge_read",
-            "gap_read", "gap_write",
+            "gap_read", "gap_write", "grove_read", "grove_write",
         ]},
         "operator": {"allow_groups": ["dispatch_read", "fleet_read", "knowledge_read"]},
     },

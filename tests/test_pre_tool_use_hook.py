@@ -930,6 +930,7 @@ _WRITE_CAPABLE_GROUPS = {
     "context", "dispatch_write", "envelope_apply", "federation_call", "fork_write",
     "frank_write",
     "friction_write", "full_access", "gap_promote", "gap_purge", "gap_write",
+    "grove_all", "grove_write",
     "human_loop_write", "integration_call", "knowledge_curate", "knowledge_write",
     "lineage_write", "markdownai_directives", "markdownai_write", "nest_write",
     "orchestrator",
@@ -942,7 +943,7 @@ _WRITE_CAPABLE_GROUPS = {
 # gated separately by the web_net capability (covered below), not by this group.
 _READ_ONLY_GROUPS = {
     "audit", "code_graph_read", "commitment_read", "dispatch_read", "federation_read",
-    "fleet_read",
+    "fleet_read", "grove_read",
     "fork_read", "friction_read", "gap_read", "human_loop_read",
     "integration_read", "knowledge_read", "lineage_read", "markdownai_read",
     "nest_read", "store_read", "tool_oracle_read", "web_read",

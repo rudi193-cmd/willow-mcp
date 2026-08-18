@@ -115,6 +115,31 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "fleet_read": frozenset({
         "fleet_status", "fleet_health", "frank_read", "frank_verify",
     }),
+    # Grove — the fleet's shared messaging room (willow-2.0's sap/grove_tools.py
+    # successor; see willow_mcp/grove_tools.py). Read/write mirror the
+    # store_read/store_write split above: 13 read tools (channel/message/thread/
+    # flag/bus listing, plus grove_agents/grove_fleet_status/grove_human_required
+    # fleet-awareness reads) and 7 write tools (post/reply/flag/bus-send/ack/
+    # heartbeat). grove_all is the explicit union, same convention as
+    # store_all — not derived, so it stays auditable as a literal set.
+    "grove_read": frozenset({
+        "grove_list_channels", "grove_get_history", "grove_search", "grove_watch",
+        "grove_watch_all", "grove_get_thread", "grove_bus_receive", "grove_inbox",
+        "grove_flagged", "grove_get_identity", "grove_agents", "grove_fleet_status",
+        "grove_human_required",
+    }),
+    "grove_write": frozenset({
+        "grove_send_message", "grove_reply", "grove_flag", "grove_unflag",
+        "grove_bus_send", "grove_ack", "grove_heartbeat",
+    }),
+    "grove_all": frozenset({
+        "grove_list_channels", "grove_get_history", "grove_search", "grove_watch",
+        "grove_watch_all", "grove_get_thread", "grove_bus_receive", "grove_inbox",
+        "grove_flagged", "grove_get_identity", "grove_agents", "grove_fleet_status",
+        "grove_human_required",
+        "grove_send_message", "grove_reply", "grove_flag", "grove_unflag",
+        "grove_bus_send", "grove_ack", "grove_heartbeat",
+    }),
     "frank_write": frozenset({
         "frank_append",
     }),
@@ -341,6 +366,15 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
         # Fleet (read-only)
         "fleet_status", "fleet_health",
         "frank_read", "frank_verify",
+        # Grove — the fleet's shared messaging room (read + write; no egress
+        # concern like web_net/integration_net/mcp_federation, so unlike those
+        # this rides full_access, same reasoning as knowledge_read/write above)
+        "grove_list_channels", "grove_get_history", "grove_search", "grove_watch",
+        "grove_watch_all", "grove_get_thread", "grove_bus_receive", "grove_inbox",
+        "grove_flagged", "grove_get_identity", "grove_agents", "grove_fleet_status",
+        "grove_human_required",
+        "grove_send_message", "grove_reply", "grove_flag", "grove_unflag",
+        "grove_bus_send", "grove_ack", "grove_heartbeat",
         # Schema admin
         "schema_confirm_mapping",
         # Session context

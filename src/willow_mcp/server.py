@@ -18,6 +18,12 @@ Tools:
   Registry:        specialist_list, specialist_get, agent_seed_mirror,
                    exposure_config_get, exposure_slice
   Fleet (PG):      fleet_status, fleet_health
+  Grove (PG):      grove_list_channels, grove_get_history, grove_search, grove_watch,
+                   grove_watch_all, grove_get_thread, grove_bus_receive, grove_inbox,
+                   grove_flagged, grove_get_identity, grove_agents, grove_fleet_status,
+                   grove_human_required, grove_send_message, grove_reply, grove_flag,
+                   grove_unflag, grove_bus_send, grove_ack, grove_heartbeat
+                   (grove.* tables live in willow_20 — see grove.py DB-name trap note)
   Context (SQLite):context_save, context_get, context_list, context_expire
   Integrations:    integration_list, integration_status, integration_call
   Federated MCP:   federation_discover, federation_list_servers, federation_call
@@ -493,6 +499,19 @@ if os.environ.get("WILLOW_MCP_MARKDOWNAI", "").strip().lower() in ("1", "true", 
     from willow_mcp.mai import tools as _mai_tools
 
     _mai_tools.register(mcp)
+
+
+# ── Grove tools — agent-side successor to willow-2.0's sap/grove_tools.py ────────
+# 20 grove_* tools (13 read + 7 write) giving agents a voice in the fleet's Grove
+# messaging room. Registered unconditionally, like store/knowledge/task — Grove
+# is a baseline fleet capability, not an opt-in surface like mai. Per-app access
+# is still manifest-gated (grove_read/grove_write in gate.PERMISSION_GROUPS);
+# registering the tools only decides they exist. See willow_mcp/grove_tools.py
+# and willow_mcp/grove.py (data layer) for the DB-name trap: grove.* tables live
+# in the fleet's willow_20 database, not this server's default `willow` database.
+from willow_mcp import grove_tools as _grove_tools
+
+_grove_tools.register(mcp)
 
 
 # ── Gate helper ────────────────────────────────────────────────────────────────

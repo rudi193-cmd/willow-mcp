@@ -464,3 +464,41 @@ Not urgent: nothing observed depends on it, and the anchor from #280 is what
 carries the integrity claim.
 
 *ΔΣ=43*
+
+---
+
+## Addendum — Grove tools, new source files (added this session)
+
+Two new source files: `src/willow_mcp/grove.py` (Postgres data-access layer)
+and `src/willow_mcp/grove_tools.py` (20 `grove_*` MCP tools, `register(mcp)`
+pattern, same as `willow_mcp/mai/tools.py`). Rubric checks, against the same
+`R1`-`R15` table above:
+
+- **R1 (SQL injection):** every query in `grove.py` is parameterized. The one
+  place a query string is built dynamically (`mentions_for_handles`'
+  `" OR ".join(["m.content ILIKE %s"] * len(clean))`) repeats a fixed literal
+  by a caller-controlled *count*, never interpolates caller-controlled
+  *content* — every value stays a bound `%s` param, same pattern as
+  `db.py`'s `Store.search` (`# nosec B608`-commented there; commented the
+  same way here).
+- **R4 (hardcoded credentials):** none; Grove reuses `db.get_pg()`, the same
+  single Unix-socket connection every other tool in this server shares.
+- **R8 (missing auth):** every `grove_*` tool checks `app_id` + the manifest
+  gate (`grove_read`/`grove_write` in `gate.PERMISSION_GROUPS`) before doing
+  anything, fail-closed on an empty or unpermitted `app_id` — same posture as
+  the rest of this server, and the same per-tool `_gate_denied` shape
+  `mai/tools.py` already established for a non-`server.py`-resident tool
+  module.
+- **No new egress surface.** Grove reaches only the Postgres connection this
+  server already holds (no sandbox, no outbound HTTP, no subprocess) — same
+  reasoning that puts `grove_read`/`grove_write` on `full_access` alongside
+  `knowledge_read`/`knowledge_write`, unlike `web_read`/`integration_call`/
+  `mcp_federation`, which stay off it deliberately.
+- **Cross-database confusion, handled by design, not by luck.** Grove's
+  tables (`grove.*`, `public.human_required_queue`) live in the fleet's
+  `willow_20` database; this server defaults `WILLOW_PG_DB=willow`. A
+  connection to the wrong database does not silently return empty results —
+  every `grove.py` function catches `psycopg2.errors.UndefinedTable` and
+  raises `GroveUnavailable` naming the fix (`WILLOW_PG_DB=willow_20`), which
+  `grove_tools.py` surfaces as `{"error": "grove_unavailable", "detail":
+  ...}` rather than a bare driver traceback or a misleadingly-empty list.

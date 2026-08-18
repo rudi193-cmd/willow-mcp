@@ -633,7 +633,7 @@ _KEYSTORE_REASON = (
 _SEAT_PRIV_RE = re.compile(
     r"\b(agent_dispatch|code_graph_write|commitment_write|dispatch_write|"
     r"envelope_apply|federation_call|fork_write|frank_write|friction_write|full_access|"
-    r"gap_promote|gap_purge|gap_write|human_loop_write|integration_call|"
+    r"gap_promote|gap_purge|gap_write|grove_all|grove_write|human_loop_write|integration_call|"
     r"knowledge_curate|knowledge_write|lineage_write|markdownai_directives|markdownai_write|"
     r"nest_write|schema_admin|store_all|store_write|task_db|task_queue|"
     r"tool_oracle_route|tool_oracle_seal)\b"
@@ -653,7 +653,7 @@ _SEAT_ESCALATION_REASON = (
     "(store_write / store_all / knowledge_write / knowledge_curate / lineage_write / schema_admin / "
     "nest_write / gap_write / gap_promote / gap_purge / friction_write / task_db / "
     "task_queue / dispatch_write / human_loop_write / frank_write / envelope_apply / "
-    "fork_write / commitment_write / code_graph_write / agent_dispatch / "
+    "fork_write / commitment_write / code_graph_write / agent_dispatch / grove_write / grove_all / "
     "integration_call / federation_call / markdownai_write / markdownai_directives / orchestrator / "
     "context / binding / tool_oracle_route / tool_oracle_seal / full_access) or widen store_scope to "
     '"*" — "retaking the seat". The SessionStart bootstrap restores every seat to '
