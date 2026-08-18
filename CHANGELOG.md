@@ -31,6 +31,18 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.10.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.9.2...v2.10.0) (2026-08-18)
+
+
+### Added
+
+* **grove:** add 20 Grove MCP tools — the agent-side successor to willow-2.0's sap/grove_tools.py ([e1a4b74](https://github.com/rudi193-cmd/willow-mcp/commit/e1a4b74695e04c036d8816427ba0df9b4c0f8f38))
+
+
+### Fixed
+
+* **grove:** sender lock via grove_relay capability; scope grove_write to the ratified matrix ([b41e6eb](https://github.com/rudi193-cmd/willow-mcp/commit/b41e6ebc93b7cc8f4aaaa6ab4b5e0025d68ed789))
+
 ## [2.9.2](https://github.com/rudi193-cmd/willow-mcp/compare/v2.9.1...v2.9.2) (2026-08-11)
 
 
