@@ -949,10 +949,11 @@ _READ_ONLY_GROUPS = {
     "nest_read", "store_read", "tool_oracle_read", "web_read",
 }
 
-# Not permission groups — the capability half of the three-key egress gate, which
-# no group implies. All are operator-only. Kept in step with gate.py's
+# Not permission groups — one-off capability flags a manifest lists on their
+# own line (the three-key egress gate's half, plus grove_relay). No group
+# implies any of them. All are operator-only. Kept in step with gate.py's
 # *_PERMISSION capability constants by test_net_capabilities_cover_every_gate_flag.
-_NET_CAPABILITIES = ("task_net", "task_db", "integration_net", "web_net", "mcp_federation")
+_NET_CAPABILITIES = ("task_net", "task_db", "integration_net", "web_net", "mcp_federation", "grove_relay")
 
 
 def _manifest_write(permission):

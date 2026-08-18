@@ -23,10 +23,18 @@ willow-mcp's default `willow` database).
 `sender` for every write tool defaults to the calling agent's `grove_sender`
 resolved from the specialist registry (`willow_mcp.registry.specialist_row`),
 never the literal "Auto" the canonical tools defaulted to — an agent posts as
-itself. A caller may still pass `sender` explicitly (e.g. an orchestrator
-relaying on a specialist's behalf); an empty/omitted value falls through to
-the registry lookup, and an app_id with no registry row falls through to the
-app_id itself.
+itself. An empty/omitted `sender` falls through to the registry lookup, and
+an app_id with no registry row falls through to the app_id itself.
+
+Posting as a *different* identity than the caller's own resolved
+`grove_sender` — e.g. an orchestrator relaying on a specialist's behalf — now
+requires the `grove_relay` capability (`gate.GROVE_RELAY_PERMISSION`) in the
+caller's manifest. Without it, a mismatched `sender` is refused before any
+DB write: every write tool returns `{"error": "sender_forbidden", "detail":
+...}` instead of silently posting as the requested identity. `grove_write`
+alone never confers relay — it is granted on its own line, deliberately kept
+out of `grove_write`/`full_access`, so any app_id can be impersonated only by
+an app a human operator has explicitly trusted to relay.
 """
 from __future__ import annotations
 
@@ -72,9 +80,39 @@ def resolve_grove_sender(app_id: str) -> str:
     return app_id
 
 
-def _resolve_sender(app_id: str, sender: str = "") -> str:
+def _sender_forbidden(sender: str, caller: str) -> dict:
+    return {
+        "error": "sender_forbidden",
+        "detail": (
+            f"posting as '{sender}' requires the grove_relay permission; "
+            f"you are '{caller}'"
+        ),
+    }
+
+
+def _resolve_sender_checked(app_id: str, sender: str = "") -> tuple[Optional[str], Optional[dict]]:
+    """Resolve the Grove identity a write should post as, enforcing the
+    sender lock (FIX 1, docs/design/permissions-matrix.md).
+
+    A caller always gets to post as itself for free: an empty/omitted
+    `sender`, or one that already equals the caller's own resolved
+    `grove_sender`, resolves with no extra check. Posting as a genuinely
+    different identity is allowed only when the app manifest holds the
+    `grove_relay` capability (`gate.GROVE_RELAY_PERMISSION`); otherwise it is
+    forbidden.
+
+    Returns `(resolved_sender, None)` on success, or `(None, error_dict)`
+    when the override is forbidden. Every write tool must check the error
+    BEFORE issuing any DB write — this function never writes anything
+    itself, it only decides who is allowed to write as whom.
+    """
+    caller = resolve_grove_sender(app_id)
     explicit = (sender or "").strip()
-    return explicit if explicit else resolve_grove_sender(app_id)
+    if not explicit or explicit == caller:
+        return caller, None
+    if gate.grove_relay_permitted(app_id):
+        return explicit, None
+    return None, _sender_forbidden(explicit, caller)
 
 
 def _pg_unavailable() -> dict:
@@ -490,8 +528,9 @@ def register(mcp: "MCPServer") -> None:
             channel_name: Target channel name.
             content: Message body.
             sender: Display name for the sender. Defaults to your resolved
-                grove_sender (never a literal "Auto") — pass explicitly only
-                to post on another identity's behalf.
+                grove_sender (never a literal "Auto"). Passing a DIFFERENT
+                identity requires the grove_relay permission — otherwise
+                returns sender_forbidden.
         """
         denied = _gate_denied(app_id, "grove_send_message")
         if denied:
@@ -499,7 +538,9 @@ def register(mcp: "MCPServer") -> None:
         pg = get_pg()
         if not pg:
             return _pg_unavailable()
-        who = _resolve_sender(app_id, sender)
+        who, sender_err = _resolve_sender_checked(app_id, sender)
+        if sender_err:
+            return sender_err
         try:
             channels = grove.list_channels(pg)
             ch = grove.find_channel_in(channels, channel_name)
@@ -521,7 +562,7 @@ def register(mcp: "MCPServer") -> None:
             content: Reply body.
             reply_to_id: ID of the message being replied to.
             sender: Display name for the sender. Defaults to your resolved
-                grove_sender.
+                grove_sender. A different identity requires grove_relay.
         """
         denied = _gate_denied(app_id, "grove_reply")
         if denied:
@@ -529,7 +570,9 @@ def register(mcp: "MCPServer") -> None:
         pg = get_pg()
         if not pg:
             return _pg_unavailable()
-        who = _resolve_sender(app_id, sender)
+        who, sender_err = _resolve_sender_checked(app_id, sender)
+        if sender_err:
+            return sender_err
         try:
             channels = grove.list_channels(pg)
             ch = grove.find_channel_in(channels, channel_name)
@@ -550,7 +593,8 @@ def register(mcp: "MCPServer") -> None:
         Args:
             message_id: ID of the message to flag.
             flag: One of: needs-reply, starred, read, urgent, resolved.
-            sender: Who is setting the flag. Defaults to your resolved grove_sender.
+            sender: Who is setting the flag. Defaults to your resolved
+                grove_sender. A different identity requires grove_relay.
         """
         denied = _gate_denied(app_id, "grove_flag")
         if denied:
@@ -558,7 +602,9 @@ def register(mcp: "MCPServer") -> None:
         pg = get_pg()
         if not pg:
             return _pg_unavailable()
-        who = _resolve_sender(app_id, sender)
+        who, sender_err = _resolve_sender_checked(app_id, sender)
+        if sender_err:
+            return sender_err
         try:
             grove.set_flag(pg, message_id=message_id, sender=who, flag=flag)
         except ValueError as e:
@@ -575,7 +621,8 @@ def register(mcp: "MCPServer") -> None:
         Args:
             message_id: ID of the message to unflag.
             flag: Flag to clear.
-            sender: Who is clearing the flag. Defaults to your resolved grove_sender.
+            sender: Who is clearing the flag. Defaults to your resolved
+                grove_sender. A different identity requires grove_relay.
         """
         denied = _gate_denied(app_id, "grove_unflag")
         if denied:
@@ -583,7 +630,9 @@ def register(mcp: "MCPServer") -> None:
         pg = get_pg()
         if not pg:
             return _pg_unavailable()
-        who = _resolve_sender(app_id, sender)
+        who, sender_err = _resolve_sender_checked(app_id, sender)
+        if sender_err:
+            return sender_err
         try:
             cleared = grove.clear_flag(pg, message_id=message_id, sender=who, flag=flag)
         except grove.GroveUnavailable as e:
@@ -602,7 +651,8 @@ def register(mcp: "MCPServer") -> None:
         Args:
             channel_name: Channel to post to.
             content: Message body.
-            sender: Sending agent name. Defaults to your resolved grove_sender.
+            sender: Sending agent name. Defaults to your resolved
+                grove_sender. A different identity requires grove_relay.
             to_agent: Recipient agent name, or '__all__' for broadcast.
             bus_type: COMMAND, RESPONSE, EVENT, INTERRUPT, HEARTBEAT, ACK, DATA, SYNC.
             priority: 0=INTERRUPT, 3=NORMAL, 6=HEARTBEAT, 7=DEBUG.
@@ -615,7 +665,9 @@ def register(mcp: "MCPServer") -> None:
         pg = get_pg()
         if not pg:
             return _pg_unavailable()
-        who = _resolve_sender(app_id, sender)
+        who, sender_err = _resolve_sender_checked(app_id, sender)
+        if sender_err:
+            return sender_err
         try:
             channels = grove.list_channels(pg)
             ch = grove.find_channel_in(channels, channel_name)
@@ -652,6 +704,7 @@ def register(mcp: "MCPServer") -> None:
             correlation_id: The correlation_id from the message you're acking.
             original_id: The id of the message being acknowledged.
             sender: Your agent name. Defaults to your resolved grove_sender.
+                A different identity requires grove_relay.
         """
         denied = _gate_denied(app_id, "grove_ack")
         if denied:
@@ -659,7 +712,9 @@ def register(mcp: "MCPServer") -> None:
         pg = get_pg()
         if not pg:
             return _pg_unavailable()
-        who = _resolve_sender(app_id, sender)
+        who, sender_err = _resolve_sender_checked(app_id, sender)
+        if sender_err:
+            return sender_err
         try:
             channels = grove.list_channels(pg)
             ch = grove.find_channel_in(channels, channel_name)
@@ -685,6 +740,7 @@ def register(mcp: "MCPServer") -> None:
 
         Args:
             sender: Your agent name. Defaults to your resolved grove_sender.
+                A different identity requires grove_relay.
         """
         denied = _gate_denied(app_id, "grove_heartbeat")
         if denied:
@@ -692,7 +748,9 @@ def register(mcp: "MCPServer") -> None:
         pg = get_pg()
         if not pg:
             return _pg_unavailable()
-        who = _resolve_sender(app_id, sender)
+        who, sender_err = _resolve_sender_checked(app_id, sender)
+        if sender_err:
+            return sender_err
         try:
             channels = grove.list_channels(pg)
             ch = grove.find_channel_in(channels, "general")

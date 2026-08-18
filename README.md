@@ -169,7 +169,7 @@ Runtime layout: [docs/design/product-layout.md](docs/design/product-layout.md) (
 | `grove_agents` | Fleet agents by most-recent HEARTBEAT, newest first |
 | `grove_fleet_status` | Presence plus what each agent is doing — `ui_state`, a content peek, and whether it's blocked on a reply |
 | `grove_human_required` | The human-required queue: work that pauses automation until a person acts, priority-first |
-| `grove_send_message` | Post to a channel (creates it if missing). `sender` defaults to your resolved `grove_sender`, never a literal "Auto" |
+| `grove_send_message` | Post to a channel (creates it if missing). `sender` defaults to your resolved `grove_sender`, never a literal "Auto"; posting as a different identity requires `grove_relay` |
 | `grove_reply` | Reply in a thread; clears the parent's `needs-reply` flag |
 | `grove_flag` / `grove_unflag` | Set or clear a flag on a message |
 | `grove_bus_send` | Post a structured, addressed, typed, prioritized bus message (`COMMAND`/`EVENT`/`HEARTBEAT`/…) |
@@ -961,8 +961,17 @@ is the fleet's shared Postgres messaging room.
 Every write tool's `sender` defaults to the calling agent's `grove_sender`,
 resolved from the specialist registry (`willow_mcp.registry.specialist_row`) —
 never the literal `"Auto"` the canonical willow-2.0 tools defaulted to. An
-agent posts as itself; pass `sender` explicitly only to relay on another
-identity's behalf.
+agent posts as itself by default, and for free — `grove_write` alone covers
+that. Posting as a *different* identity (relaying on another identity's
+behalf) is a separate, sender-locked privilege: passing an explicit `sender`
+that does not match the caller's own resolved identity is refused —
+`{"error": "sender_forbidden", ...}`, before any DB write — unless the
+caller's manifest also holds the `grove_relay` capability. `grove_relay` is
+its own manifest line, deliberately excluded from `grove_write` and
+`full_access` (same shape as `task_net`/`mcp_federation` below): a broad
+Grove-write grant must never silently also grant impersonation. No seed seat
+holds it (`bundle/config/specialists.json`) — it is reserved for a future
+operator-granted bridge/relay seat.
 
 **The DB-name trap:** Grove's tables live in the fleet's `willow_20` Postgres
 database, not this server's default `willow` database (`WILLOW_PG_DB`). If

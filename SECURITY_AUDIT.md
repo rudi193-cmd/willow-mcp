@@ -502,3 +502,26 @@ pattern, same as `willow_mcp/mai/tools.py`). Rubric checks, against the same
   raises `GroveUnavailable` naming the fix (`WILLOW_PG_DB=willow_20`), which
   `grove_tools.py` surfaces as `{"error": "grove_unavailable", "detail":
   ...}` rather than a bare driver traceback or a misleadingly-empty list.
+- **P1 — sender impersonation (found this session, fixed same session).**
+  Every write tool's `sender` parameter accepted *any* string with no check
+  against the caller's own identity: any app_id holding `grove_write` could
+  post as literally any other agent — forge an orchestrator's COMMAND bus
+  message, fake another agent's heartbeat, clear a needs-reply flag on
+  someone else's behalf. `grove_write` covering "post as anyone" rather than
+  "post as yourself" collapsed the distinction between an agent having a
+  voice in Grove and an agent being able to speak *as* every other voice in
+  Grove — a strictly larger privilege than the tool grant implied. Fixed by a
+  sender lock: `gate.GROVE_RELAY_PERMISSION` (`"grove_relay"`) is a new
+  capability flag, deliberately excluded from `grove_write` and
+  `full_access` (same shape as `task_net`/`mcp_federation`), checked by
+  `gate.grove_relay_permitted()` — itself just `permitted(app_id,
+  GROVE_RELAY_PERMISSION)`, so it can never drift from the manifest path
+  every other gate check uses. `grove_tools._resolve_sender_checked()` now
+  resolves an empty/self-matching `sender` for free, but a genuinely
+  different `sender` is refused before any DB write — every one of the 7
+  write tools returns `{"error": "sender_forbidden", "detail": "posting as
+  '<sender>' requires the grove_relay permission; you are '<caller>'"}` —
+  unless the caller's manifest explicitly holds `grove_relay`. No seed seat
+  is granted it (`bundle/config/specialists.json`); it is reserved for a
+  future operator-granted bridge/relay seat. See
+  `docs/design/permissions-matrix.md` §1.6 and §3.

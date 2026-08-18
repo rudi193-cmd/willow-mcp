@@ -151,6 +151,37 @@ def test_gate_denies_write_tool_without_grove_write_group(tmp_path, monkeypatch)
     assert "gate denied" in out["error"]
 
 
+@pytest.mark.parametrize("read_only_seat,permissions", [
+    ("skirnir", ["dispatch_read", "context", "grove_read"]),
+    ("vishwakarma", ["dispatch_read", "store_read", "knowledge_read", "grove_read"]),
+])
+def test_gate_denies_write_and_allows_read_for_grove_read_only_seats(
+    tmp_path, monkeypatch, read_only_seat, permissions
+):
+    """(c) skirnir (witness) and vishwakarma (architect) are ratified
+    grove_read-only per docs/design/permissions-matrix.md — the gate must
+    deny a write tool and allow a read tool for both."""
+    apps_root = tmp_path / "mcp_apps"
+    app_dir = apps_root / read_only_seat
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(json.dumps({"permissions": permissions}))
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
+    m = _register()
+
+    out = _call_dict(m, "grove_send_message", {
+        "channel_name": "general", "content": "hi", "app_id": read_only_seat,
+    })
+    assert "error" in out
+    assert "gate denied" in out["error"]
+
+    pg = _FakePg([(["id", "name", "channel_type", "description", "created_at",
+                     "updated_at", "is_archived", "agent_name"], [], 0),
+                  (None, [], 0)])
+    monkeypatch.setattr(grove_tools, "get_pg", lambda: pg)
+    hist = _call_list(m, "grove_get_history", {"channel_name": "general", "app_id": read_only_seat})
+    assert hist == []  # empty result, not a gate-denied error
+
+
 def test_gate_denies_with_no_app_id_at_all():
     m = _register()
     out = _call_list(m, "grove_list_channels", {})
@@ -285,7 +316,33 @@ def test_grove_send_message_uses_resolved_sender_not_literal_auto(monkeypatch):
     assert params[1] != "Auto"
 
 
-def test_grove_send_message_honors_explicit_sender_override(monkeypatch):
+def test_grove_send_message_rejects_mismatched_sender_without_grove_relay(monkeypatch):
+    """FIX 1 (sender lock): without the grove_relay capability, an explicit
+    sender that does not match the caller's own resolved identity is
+    REJECTED with sender_forbidden — no DB write happens at all."""
+    m = _register()
+    pg = _FakePg([])
+    monkeypatch.setattr(grove_tools, "get_pg", lambda: pg)
+    out = _call_dict(m, "grove_send_message", {
+        "channel_name": "general", "content": "hi", "app_id": _APP,
+        "sender": "orchestrator-relay",
+    })
+    assert out["error"] == "sender_forbidden"
+    assert "grove_relay" in out["detail"]
+    assert _APP in out["detail"]
+    # no channel lookup, no INSERT — rejected before any DB access
+    assert pg.calls == []
+
+
+def test_grove_send_message_honors_explicit_sender_override_with_grove_relay(tmp_path, monkeypatch):
+    """With grove_relay granted, the same override succeeds."""
+    apps_root = tmp_path / "mcp_apps"
+    app_dir = apps_root / "relayapp"
+    app_dir.mkdir(parents=True)
+    (app_dir / "manifest.json").write_text(
+        json.dumps({"permissions": ["grove_read", "grove_write", "grove_relay"]})
+    )
+    monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(apps_root))
     m = _register()
     list_cols = ["id", "name", "channel_type", "description", "created_at",
                  "updated_at", "is_archived", "agent_name"]
@@ -295,13 +352,73 @@ def test_grove_send_message_honors_explicit_sender_override(monkeypatch):
         (msg_cols, [(9, 1, "orchestrator-relay", "hi", "text", None, "__all__", "EVENT", 3, None, None, None, _now(), 0)], 0),
     ])
     monkeypatch.setattr(grove_tools, "get_pg", lambda: pg)
-    _call_dict(m, "grove_send_message", {
-        "channel_name": "general", "content": "hi", "app_id": _APP,
+    out = _call_dict(m, "grove_send_message", {
+        "channel_name": "general", "content": "hi", "app_id": "relayapp",
         "sender": "orchestrator-relay",
     })
+    assert out["sent"] is True
     insert_call = [c for c in pg.calls if c[0] and "INSERT INTO grove.messages" in c[0]][0]
     _sql, params = insert_call
     assert params[1] == "orchestrator-relay"
+
+
+def test_grove_write_alone_does_not_confer_relay(monkeypatch):
+    """(d) grove_write is not grove_relay — holding one must not silently
+    grant the other."""
+    from willow_mcp import gate
+    assert not gate.grove_relay_permitted(_APP)  # _APP has grove_write, not grove_relay
+
+
+def test_sender_empty_and_sender_equal_caller_both_resolve_and_write(monkeypatch):
+    """(a) An empty sender and a sender equal to the caller's own resolved
+    identity both write successfully as the caller — no grove_relay needed
+    for either."""
+    m = _register()
+    list_cols = ["id", "name", "channel_type", "description", "created_at",
+                 "updated_at", "is_archived", "agent_name"]
+    msg_cols = grove._MSG_COLUMNS.split(", ")
+
+    # empty sender
+    pg1 = _FakePg([
+        (list_cols, [(1, "general", "group", None, _now(), _now(), False, None)], 0),
+        (msg_cols, [(9, 1, _APP, "hi", "text", None, "__all__", "EVENT", 3, None, None, None, _now(), 0)], 0),
+    ])
+    monkeypatch.setattr(grove_tools, "get_pg", lambda: pg1)
+    out1 = _call_dict(m, "grove_send_message", {"channel_name": "general", "content": "hi", "app_id": _APP})
+    assert out1["sent"] is True
+    insert1 = [c for c in pg1.calls if c[0] and "INSERT INTO grove.messages" in c[0]][0]
+    assert insert1[1][1] == _APP
+
+    # sender explicitly equal to the caller's own resolved identity
+    pg2 = _FakePg([
+        (list_cols, [(1, "general", "group", None, _now(), _now(), False, None)], 0),
+        (msg_cols, [(10, 1, _APP, "hi again", "text", None, "__all__", "EVENT", 3, None, None, None, _now(), 0)], 0),
+    ])
+    monkeypatch.setattr(grove_tools, "get_pg", lambda: pg2)
+    out2 = _call_dict(m, "grove_send_message", {
+        "channel_name": "general", "content": "hi again", "app_id": _APP, "sender": _APP,
+    })
+    assert out2["sent"] is True
+    insert2 = [c for c in pg2.calls if c[0] and "INSERT INTO grove.messages" in c[0]][0]
+    assert insert2[1][1] == _APP
+
+
+def test_mismatched_sender_rejected_across_multiple_write_tools(monkeypatch):
+    """(b) The sender lock applies uniformly — spot-check two more write
+    tools beyond grove_send_message."""
+    m = _register()
+    pg = _FakePg([])
+    monkeypatch.setattr(grove_tools, "get_pg", lambda: pg)
+
+    out_heartbeat = _call_dict(m, "grove_heartbeat", {"app_id": _APP, "sender": "someone-else"})
+    assert out_heartbeat["error"] == "sender_forbidden"
+    assert pg.calls == []
+
+    out_flag = _call_dict(m, "grove_flag", {
+        "message_id": 1, "flag": "starred", "app_id": _APP, "sender": "someone-else",
+    })
+    assert out_flag["error"] == "sender_forbidden"
+    assert pg.calls == []
 
 
 # ── grove_get_identity ───────────────────────────────────────────────────────

@@ -78,6 +78,15 @@ SCHEMA = "grove"
 
 VALID_FLAGS = frozenset({"needs-reply", "starred", "read", "urgent", "resolved"})
 
+# Same set the canonical `grove_db.py` validates against, and the same set
+# `grove.messages.message_type`'s CHECK constraint enforces at the DB layer —
+# checked here too so an invalid value raises a clear ValueError instead of a
+# raw psycopg2 CheckViolation. No `grove_tools.py` write tool exposes
+# `message_type` as a parameter today (every call site uses the "text"
+# default), so this is defense in depth against a future caller, not a fix
+# for an observed bad value.
+VALID_MESSAGE_TYPES = frozenset({"text", "system", "file_share", "reaction"})
+
 BUS_TYPES = frozenset({
     "COMMAND",    # instruct an agent to do something
     "RESPONSE",   # reply to a COMMAND
@@ -214,6 +223,8 @@ def create_channel(pg, *, name: str, channel_type: str = "group",
 
 def send_message(pg, *, channel_id: int, sender: str, content: str,
                   message_type: str = "text", reply_to_id: Optional[int] = None) -> dict:
+    if message_type not in VALID_MESSAGE_TYPES:
+        raise ValueError(f"message_type must be one of {sorted(VALID_MESSAGE_TYPES)}")
     cur = pg.cursor()
     try:
         cur.execute(

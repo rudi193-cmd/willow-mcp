@@ -29,9 +29,10 @@ Seven guards:
   running `willow-mcp grant-net` or `dev-net` (the local/dev one-command
   convenience that grants the same three keys — #287; via Bash *or* smuggled
   into Kart task text), running `willow-mcp allow-permission` to grant an egress
-  capability or a write-capable group (that CLI edits the manifest the path-keyed
-  guard below never sees — #304), or editing a manifest to add an egress
-  capability (`task_net` / `integration_net` / `web_net` / `mcp_federation`) or
+  capability, the Grove relay capability, or a write-capable group (that CLI
+  edits the manifest the path-keyed guard below never sees — #304), or editing
+  a manifest to add an egress capability (`task_net` / `integration_net` /
+  `web_net` / `mcp_federation`), the Grove relay capability (`grove_relay`), or
   any write-capable permission group (blocks).
 
 That third guard is the sudo invariant (FRANK `90e52ab7`) enforced where the
@@ -573,17 +574,22 @@ _ALLOW_PERMISSION_GRANT_RE = re.compile(
 # so the three are safe to name directly.
 _ALLOW_PERMISSION_SEAT_BARE = frozenset({"orchestrator", "context", "binding"})
 _MANIFEST_RE = re.compile(r"mcp_apps/[^/\s\"']+/manifest\.json")
-# The server-process / sandbox egress capabilities. These are NOT permission
-# groups — they are the capability half of the three-key gate (gate.py:326-341)
-# and no group implies them, which is the point: egress "must be granted on its
-# own line". `task_net` was the only one matched here; `integration_net`,
-# `web_net`, and `mcp_federation` authorize egress from the *server* process,
-# which gate.py identifies as the more privileged lane, and were silently
-# absent (mcp_federation — fork/exec of a downstream MCP server, Decision 3 —
-# added when #285 landed the federation lane). test_pre_tool_use_hook.py pins
-# every gate capability flag to this guard or the seat guard, so the next one
-# cannot go missing the same way.
-_NET_CAP_RE = re.compile(r"\b(task_net|integration_net|web_net|mcp_federation)\b")
+# The server-process / sandbox egress capabilities, plus the Grove relay lock.
+# These are NOT permission groups — they are one-off capability flags (gate.py
+# NET_PERMISSION/DB_PERMISSION/INTEGRATION_NET_PERMISSION/WEB_NET_PERMISSION/
+# MCP_FEDERATION_PERMISSION/GROVE_RELAY_PERMISSION) and no group implies them,
+# which is the point: each "must be granted on its own line". `task_net` was
+# the only one matched here; `integration_net`, `web_net`, and `mcp_federation`
+# authorize egress from the *server* process, which gate.py identifies as the
+# more privileged lane, and were silently absent (mcp_federation — fork/exec
+# of a downstream MCP server, Decision 3 — added when #285 landed the
+# federation lane). `grove_relay` unlocks posting to Grove as a different
+# identity than the caller's own — same "operator grants it, agent never
+# self-grants it" shape as the egress lanes, not a heavier privilege than
+# them, just the same class of own-line capability. test_pre_tool_use_hook.py
+# pins every gate capability flag to this guard or the seat guard, so the
+# next one cannot go missing the same way.
+_NET_CAP_RE = re.compile(r"\b(task_net|integration_net|web_net|mcp_federation|grove_relay)\b")
 # Reading a lease or a manifest is not escalation — `net-status` and
 # `diagnostic_summary` both do it, and blocking `cat` would be the false-positive
 # class B-18 removed. Only a command that plausibly *writes* one is the crossing.
@@ -665,11 +671,12 @@ _SEAT_ESCALATION_REASON = (
 _ALLOW_PERMISSION_REASON = (
     "willow-mcp: `willow-mcp allow-permission` is a local, operator-only CLI that "
     "edits the app's manifest — granting an egress capability (task_net / "
-    "integration_net / web_net / mcp_federation) or a write-capable permission "
-    "group (or orchestrator / context / binding) through it is the same self-grant "
-    "the manifest-file guard already refuses, one command deeper (#304). An agent "
-    "may REQUEST standing, never CONFIRM it (sudo invariant, FRANK 90e52ab7). Ask "
-    "the operator to run it. `deny-permission` and granting a read-only group stay "
+    "integration_net / web_net / mcp_federation), the Grove relay capability "
+    "(grove_relay), or a write-capable permission group (or orchestrator / "
+    "context / binding) through it is the same self-grant the manifest-file "
+    "guard already refuses, one command deeper (#304). An agent may REQUEST "
+    "standing, never CONFIRM it (sudo invariant, FRANK 90e52ab7). Ask the "
+    "operator to run it. `deny-permission` and granting a read-only group stay "
     "allowed."
 )
 
