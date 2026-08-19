@@ -104,6 +104,7 @@ _MSG_COLUMNS = (
     "to_agent, bus_type, priority, correlation_id, ttl, "
     "willow_indexed_at, created_at, is_deleted"
 )
+_m_cols = ", ".join(f"m.{c.strip()}" for c in _MSG_COLUMNS.split(","))
 
 
 class GroveUnavailable(Exception):
@@ -227,6 +228,22 @@ def send_message(pg, *, channel_id: int, sender: str, content: str,
         raise ValueError(f"message_type must be one of {sorted(VALID_MESSAGE_TYPES)}")
     cur = pg.cursor()
     try:
+        if reply_to_id is not None:
+            cur.execute(
+                "SELECT id, channel_id FROM grove.messages WHERE id = %s AND is_deleted = 0",  # nosec B608 - every value is a bound param
+                (reply_to_id,),
+            )
+            target = cur.fetchone()
+            if not target:
+                return {"error": "reply_target_not_found", "reply_to_id": reply_to_id}
+            target_channel_id = target[1]
+            if target_channel_id != channel_id:
+                return {
+                    "error": "cross_channel_reply",
+                    "reply_to_id": reply_to_id,
+                    "target_channel_id": target_channel_id,
+                    "message_channel_id": channel_id,
+                }
         cur.execute(
             f"""
             INSERT INTO grove.messages (channel_id, sender, content, message_type, reply_to_id)
@@ -275,27 +292,48 @@ def get_history(pg, channel_id: int, limit: int = 100,
         if since_id is not None:
             cur.execute(
                 f"""
-                SELECT {_MSG_COLUMNS} FROM grove.messages
-                WHERE channel_id = %s AND reply_to_id IS NULL AND is_deleted = 0 AND id > %s
-                ORDER BY id ASC LIMIT %s
+                SELECT {_m_cols}, COALESCE(rc.reply_count, 0) AS reply_count
+                FROM grove.messages m
+                LEFT JOIN (
+                    SELECT reply_to_id, COUNT(*) AS reply_count
+                    FROM grove.messages
+                    WHERE reply_to_id IS NOT NULL AND is_deleted = 0
+                    GROUP BY reply_to_id
+                ) rc ON rc.reply_to_id = m.id
+                WHERE m.channel_id = %s AND m.reply_to_id IS NULL AND m.is_deleted = 0 AND m.id > %s
+                ORDER BY m.id ASC LIMIT %s
                 """,  # nosec B608 - _MSG_COLUMNS is a fixed module-level literal, not input; every value is a bound param
                 (channel_id, since_id, limit),
             )
         elif before_id:
             cur.execute(
                 f"""
-                SELECT {_MSG_COLUMNS} FROM grove.messages
-                WHERE channel_id = %s AND reply_to_id IS NULL AND is_deleted = 0 AND id < %s
-                ORDER BY created_at DESC LIMIT %s
+                SELECT {_m_cols}, COALESCE(rc.reply_count, 0) AS reply_count
+                FROM grove.messages m
+                LEFT JOIN (
+                    SELECT reply_to_id, COUNT(*) AS reply_count
+                    FROM grove.messages
+                    WHERE reply_to_id IS NOT NULL AND is_deleted = 0
+                    GROUP BY reply_to_id
+                ) rc ON rc.reply_to_id = m.id
+                WHERE m.channel_id = %s AND m.reply_to_id IS NULL AND m.is_deleted = 0 AND m.id < %s
+                ORDER BY m.created_at DESC LIMIT %s
                 """,  # nosec B608 - _MSG_COLUMNS is a fixed module-level literal, not input; every value is a bound param
                 (channel_id, before_id, limit),
             )
         else:
             cur.execute(
                 f"""
-                SELECT {_MSG_COLUMNS} FROM grove.messages
-                WHERE channel_id = %s AND reply_to_id IS NULL AND is_deleted = 0
-                ORDER BY created_at DESC LIMIT %s
+                SELECT {_m_cols}, COALESCE(rc.reply_count, 0) AS reply_count
+                FROM grove.messages m
+                LEFT JOIN (
+                    SELECT reply_to_id, COUNT(*) AS reply_count
+                    FROM grove.messages
+                    WHERE reply_to_id IS NOT NULL AND is_deleted = 0
+                    GROUP BY reply_to_id
+                ) rc ON rc.reply_to_id = m.id
+                WHERE m.channel_id = %s AND m.reply_to_id IS NULL AND m.is_deleted = 0
+                ORDER BY m.created_at DESC LIMIT %s
                 """,  # nosec B608 - _MSG_COLUMNS is a fixed module-level literal, not input; every value is a bound param
                 (channel_id, limit),
             )
@@ -307,20 +345,62 @@ def get_history(pg, channel_id: int, limit: int = 100,
         cur.close()
 
 
-def get_thread(pg, parent_id: int) -> list[dict]:
-    """All replies to a message, oldest first."""
+def get_thread(pg, parent_id: int, *, max_depth: int = 50) -> list[dict]:
+    """All replies in a thread (recursive), oldest first, with depth."""
     cur = pg.cursor()
     try:
         cur.execute(
             f"""
-            SELECT {_MSG_COLUMNS} FROM grove.messages
-            WHERE reply_to_id = %s AND is_deleted = 0
+            WITH RECURSIVE thread AS (
+                SELECT {_MSG_COLUMNS}, 1 AS depth
+                FROM grove.messages
+                WHERE reply_to_id = %s AND is_deleted = 0
+                UNION ALL
+                SELECT {_m_cols}, t.depth + 1
+                FROM grove.messages m
+                JOIN thread t ON m.reply_to_id = t.id
+                WHERE m.is_deleted = 0 AND t.depth < %s
+            )
+            SELECT * FROM thread
             ORDER BY created_at ASC
-            """,  # nosec B608 - _MSG_COLUMNS is a fixed module-level literal, not input; every value is a bound param
-            (parent_id,),
+            """,  # nosec B608 - _MSG_COLUMNS is a fixed module-level literal; all values are bound params
+            (parent_id, max_depth),
         )
         colnames = [d[0] for d in cur.description]
         return [dict(zip(colnames, r)) for r in cur.fetchall()]
+    except psycopg2.errors.UndefinedTable as e:
+        raise _translate_missing_table(e) from e
+    finally:
+        cur.close()
+
+
+def get_thread_root(pg, message_id: int, *, max_hops: int = 50) -> Optional[dict]:
+    """Walk reply_to_id upward to find the thread root message."""
+    cur = pg.cursor()
+    try:
+        cur.execute(
+            f"""
+            WITH RECURSIVE chain AS (
+                SELECT {_MSG_COLUMNS}, 0 AS hops
+                FROM grove.messages
+                WHERE id = %s AND is_deleted = 0
+                UNION ALL
+                SELECT {_m_cols}, c.hops + 1
+                FROM grove.messages m
+                JOIN chain c ON c.reply_to_id = m.id
+                WHERE m.is_deleted = 0 AND c.hops < %s
+            )
+            SELECT * FROM chain
+            ORDER BY hops DESC
+            LIMIT 1
+            """,  # nosec B608 - _MSG_COLUMNS is a fixed module-level literal; all values are bound params
+            (message_id, max_hops),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        colnames = [d[0] for d in cur.description]
+        return dict(zip(colnames, row))
     except psycopg2.errors.UndefinedTable as e:
         raise _translate_missing_table(e) from e
     finally:

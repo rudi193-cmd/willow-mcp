@@ -146,6 +146,7 @@ def _msgs_to_dicts(msgs: list[dict]) -> list[dict]:
             "priority": m.get("priority", 3),
             "correlation_id": m.get("correlation_id"),
             "created_at": grove.jsonify(m.get("created_at")),
+            **({"depth": m["depth"]} if "depth" in m else {}),
         }
         for m in msgs
     ]
@@ -211,6 +212,8 @@ def register(mcp: "MCPServer") -> None:
             return [_grove_error(e)]
         return [
             {"id": m["id"], "sender": m["sender"], "content": m["content"],
+             "reply_to_id": m.get("reply_to_id"),
+             "reply_count": m.get("reply_count", 0),
              "created_at": grove.jsonify(m.get("created_at"))}
             for m in msgs
         ]
@@ -584,6 +587,8 @@ def register(mcp: "MCPServer") -> None:
                 return {"error": f"channel '{channel_name}' not found"}
             msg = grove.send_message(pg, channel_id=ch["id"], sender=who,
                                       content=content, reply_to_id=reply_to_id)
+            if "error" in msg:
+                return msg
             grove.clear_flag(pg, message_id=reply_to_id, sender="__system__", flag="needs-reply")
         except grove.GroveUnavailable as e:
             return _grove_error(e)

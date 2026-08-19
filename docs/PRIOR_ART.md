@@ -45,7 +45,7 @@ Seven gaps where popular MCP servers carry shapes willow-mcp does not:
 
 | Gap | Best internal prior art | Best Apache-compatible alternative | Call |
 | --- | --- | --- | --- |
-| Threading / reply-to | Grove `grove_reply`/`grove_get_thread` (1.9 + 2.0, FK-backed `reply_to_id`) | [Monadical-SAS/zulip-mcp](https://github.com/Monadical-SAS/zulip-mcp) (Apache-2.0, topic-based) | **Build** |
+| Threading / reply-to | Grove recursive CTE threading with `get_thread` / `get_thread_root` (2.1, FK-backed `reply_to_id`, depth-aware) | [Monadical-SAS/zulip-mcp](https://github.com/Monadical-SAS/zulip-mcp) (Apache-2.0, topic-based) | **Shipped** |
 | Draft / schedule writes | `*_schedule` condition-gated facades (2.0), law-gazelle drafts (safe-app-store) | Discourse MCP draft tools (licence unconfirmed on wrapper) | **Build** |
 | Staged approval state machines | `gap_*` three-state machine (willow-mcp, shipped PR #54), `mem_binder` (2.0) | [Netflix Conductor](https://github.com/Netflix/conductor) (Apache-2.0) | **Adapt** |
 | Cursor pagination | Grove `since_id` keyset cursor (1.9) | MCP spec itself + SDK (MIT) | **Spec** |
@@ -59,12 +59,15 @@ Seven gaps where popular MCP servers carry shapes willow-mcp does not:
 
 ### How the prior art wires across repos
 
-Threading evolved but never consolidated. `willow-1.9/grove/mcp_local.py`
-defines `grove_reply(channel, content, sender, reply_to_id)` against a
-`messages.reply_to_id BIGINT REFERENCES messages(id)` FK column, and
-`grove_get_thread(message_id)` returns `{parent, flags, replies}`.
-`willow-2.0/sap/grove_tools.py` carries the same two functions byte-for-byte.
-Separately, 2.0's `agent_dispatch` added its own `dispatch_tasks.reply_to` — but
+Threading evolved across 1.9 and 2.0 and has now been consolidated.
+`willow-1.9/grove/mcp_local.py` defined `grove_reply(channel, content, sender,
+reply_to_id)` against a `messages.reply_to_id BIGINT REFERENCES messages(id)` FK
+column, and `grove_get_thread(message_id)` returned `{parent, flags, replies}`.
+In 2.1, `get_thread()` was upgraded to a recursive CTE that returns the full
+reply tree with depth, `get_thread_root()` walks upward to find any reply's root,
+`get_history()` includes per-message `reply_count`, and `send_message()` validates
+`reply_to_id` (target-exists + same-channel check) before INSERT. Separately,
+2.0's `agent_dispatch` added its own `dispatch_tasks.reply_to` — but
 as bare TEXT (no FK, no index), carrying the requesting `app_id` for lineage
 bookkeeping, not for thread retrieval. The two threading models coexist in 2.0
 without interacting. `safe-app-store` carries a third attempt: every app has an
@@ -148,7 +151,7 @@ Eight shapes nobody else builds:
 
 ### The verdict column, unpacked
 
-**Build** (threading, draft/schedule, source verification): the prior art is
+**Build** (draft/schedule, source verification): the prior art is
 internal and the shape is domain-specific enough that no external library
 matches. Re-land from 1.9/2.0 code when a consumer earns the surface.
 
