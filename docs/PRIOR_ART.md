@@ -685,3 +685,121 @@ status propagation.
 
 **Verdict: Adapt.** Adopt Actuator's composite-health-indicator architecture as
 the structural pattern. Keep the metaphor and single-call surface.
+
+## 14. Subject consent
+
+Per-verb-per-resource consent gating on MCP tool execution. Data subjects
+(especially minors) have explicit consent records; guardian consent with
+relationship verification; named-persons-only (L4) policy; fail-closed — tools
+refuse when consent is absent. Withdrawal propagates to disable tool access.
+
+| Alternative | Licence | What it does | Comparison |
+| --- | --- | --- | --- |
+| [Fides](https://github.com/ethyca/fides) | **Apache-2.0** | Privacy engineering: DSR fulfilment, consent propagation, fideslang taxonomy | Enforces consent in data pipelines, not at tool-call boundaries. No minor/guardian flows. Data-category scoping, not per-verb |
+| Microsoft Consent-Package | MIT + CC-BY-SA-4.0 | Proxy/guardian consent, age-gating, granular scoping, revocation, audit trail | Closest consent *model*: has guardian consent for minors, per-category scoping, withdrawal. UI sample — advisory, not fail-closed |
+| [OPA](https://github.com/open-policy-agent/opa) | **Apache-2.0** | General-purpose policy engine, fail-closed capable | Could *implement* consent-as-policy but ships no consent model — no subjects, no guardians, no withdrawal propagation |
+| ScopeGate (alifanov) | MIT | Per-action OAuth scope restriction for AI agent tool calls | Gates tool calls (closest to fail-closed gating), but gates by *operator permission*, not *data-subject consent* |
+| Kantara MVCR | Spec (CC) | Consent receipt JSON schema standard | Data model reference only. No enforcement. Implementations are stubs |
+
+**What's unique:** No surveyed project combines all six properties: (1) consent
+as a fail-closed runtime gate on tool execution, (2) guardian consent with
+relationship verification, (3) named-persons-only subjects, (4) per-verb-per-
+resource scoping, (5) withdrawal propagating to tool-call gates, (6) MCP-native.
+ScopeGate gates tools by operator permissions; nothing gates them by data-subject
+consent.
+
+**Verdict: Compose.** Borrow Microsoft Consent-Package's consent model (MIT) as
+design reference; use OPA (Apache-2.0) if consent predicate evaluation separates
+from the server. The integration — data-subject consent driving fail-closed tool
+gating with guardian verification — is novel. Build it.
+
+## 15. Persistence and provenance
+
+### SOIL (file-per-record persistence)
+
+JSON file per record, directory per collection, app_id partitioning.
+Schema-optional — validated at read, not write. Backs forks, gaps, receipts, KB
+atoms, agent seeds.
+
+| Alternative | Licence | What it does | Comparison |
+| --- | --- | --- | --- |
+| [TinyDB](https://github.com/msiemens/tinydb) | MIT | Pure Python document store, single JSON file | Single file, not file-per-record. No collection dirs, no app_id partitioning. Nearest Python equivalent |
+| [LMDB](https://github.com/jnwatson/py-lmdb) | OpenLDAP (permissive) | Memory-mapped key-value store | Raw bytes, not JSON. No collection structure |
+| [Dolt](https://github.com/dolthub/dolt) | **Apache-2.0** | MySQL-compatible DB with git semantics | Versioning is interesting but the shape is wrong — full relational DB, not file-per-record |
+| [Irmin](https://github.com/mirage/irmin) | ISC | Git-principled distributed store, content-addressed | Closest in spirit — branchable, JSON-native. OCaml, not embeddable in Python |
+| SQLite | Public domain | Embedded relational DB | The standard complement. Gains queries and ACID; loses git-diffable files and directory-as-collection |
+
+**What's unique:** file-per-record + directory-as-collection + app_id
+partitioning + validate-at-read. No surveyed tool replicates the three-axis
+scoping (collection / app_id / record_id) as a filesystem layout. The pattern is
+~200 lines; adopting a heavier tool trades clarity for features SOIL does not
+need.
+
+**Verdict: Keep.** SQLite is the right complement if queries are needed — already
+used that way.
+
+### Lineage (reasoning provenance)
+
+Provenance chains where each record carries a reason/justification, not just what
+changed but why. Records chain backwards through a decision history.
+
+| Alternative | Licence | What it does | Comparison |
+| --- | --- | --- | --- |
+| [OpenLineage](https://github.com/OpenLineage/OpenLineage) | **Apache-2.0** | Standard for data-pipeline lineage: run/job/dataset events | Data-flow lineage (what moved where). No reasoning/justification field |
+| [Marquez](https://github.com/MarquezProject/marquez) | **Apache-2.0** | Reference OpenLineage server, metadata service | Same limitation. Requires a running service |
+| [W3C PROV (prov library)](https://github.com/trungdong/prov) | MIT | Python W3C PROV-DM: entity/activity/agent triples | Closest standard. Models who-did-what but "why" is not first-class — freeform attribute, not enforced or chained |
+| [Apache Atlas](https://github.com/apache/atlas) | **Apache-2.0** | Enterprise metadata governance, Hadoop ecosystem | Data catalog lineage, not decision-trail provenance |
+
+**What's unique:** records *reasoning* provenance — why a change was made — as a
+required chained field, not data-flow lineage. Every surveyed tool tracks what
+changed or what data flowed where. None enforces a chained reasoning trail. §1
+already identifies `lineage_* with "why"` as one of eight shapes nobody else
+builds; this survey confirms it.
+
+**Verdict: Keep.** W3C PROV (MIT) is the export format if interop matters, but
+the internal model — reasoning as a required, chained field — has no external
+equivalent.
+
+---
+
+## Summary
+
+Verdicts across all 22 surveyed systems:
+
+| § | System | Verdict | Compose/Adapt with |
+| --- | --- | --- | --- |
+| 7 | Agent roles (8-layer auth) | **Keep** | Cerbos / OPA if policy grows; SPIFFE if federation |
+| 8 | Voice ingress membrane | **Keep** | Components (openWakeWord, Silero, Whisper, Kokoro) |
+| 9 | Friction floor | **Keep** | NeMo Guardrails as host framework if needed |
+| 9 | External guard | **Adapt** | StackOne Defender (Apache-2.0) |
+| 9 | Secret scan | **Compose** | detect-secrets detectors (Apache-2.0) |
+| 9 | Model egress consent | **Keep** | — |
+| 10 | Exposure membrane | **Keep** | OPA if profiles grow |
+| 10 | Nest content pipeline | **Compose** | Unstructured / Docling + Presidio |
+| 11 | Mem-ratify | **Keep** | — |
+| 11 | Schema profile | **Compose** | OpenMetadata / DataHub |
+| 11 | MarkdownAI | **Keep** | — |
+| 12 | Code graph | **Adapt** | tree-sitter + CodeGraph / code-review-graph |
+| 13 | Commitment membrane | **Keep** | — |
+| 13 | HITL primitives | **Compose** | SPIFFE + Conductor |
+| 13 | Forks | **Keep** | — |
+| 13 | Receipt log | **Compose** | immudb for Merkle verification |
+| 13 | Vault | **Keep** | — |
+| 13 | Gates panel / TUI | **Keep** | — |
+| 13 | Tree view | **Adapt** | Spring Boot Actuator architecture |
+| 14 | Subject consent | **Compose** | OPA + MS Consent-Package model |
+| 15 | SOIL persistence | **Keep** | — |
+| 15 | Lineage (reasoning provenance) | **Keep** | W3C PROV as export format |
+
+**Totals: 13 Keep · 3 Adapt · 6 Compose · 0 Adopt**
+
+The recurring pattern: external tools provide plumbing (extraction, detection,
+policy evaluation, identity). willow-mcp's contribution is the gate — the
+enforcement layer that makes a guarantee mechanical rather than advisory. Nothing
+surveyed replaces a gate; several could back one.
+
+The zero in the Adopt column is not an oversight. §2 recommends adopting MCP
+Resources and Streamable HTTP — protocol features, not system replacements. For
+systems, every external tool is either plumbing to compose behind a gate, or an
+architecture to adapt into willow-mcp's shape. No external system provides the
+gate itself.
