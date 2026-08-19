@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from .db import encode_cursor, decode_cursor
+
 from .paths import (
     dispatch_dir,
     dispatch_root,
@@ -387,13 +389,28 @@ def dispatch_list(
     from_app: str = "",
     status: str = "",
     limit: int = 20,
+    cursor: Optional[str] = None,
 ) -> dict:
     disp_root = dispatch_root()
     # B-52/#241: fail closed if the dispatch root itself has been replaced by
     # a symlink (e.g. to redirect future dispatch_send writes elsewhere) --
     # same is_dir()-follows-symlinks trap as any individual packet dir.
     if disp_root.is_symlink() or not disp_root.is_dir():
-        return {"dispatches": [], "total": 0, "unverified": [], "unverified_total": 0}
+        return {"dispatches": [], "total": 0, "unverified": [], "unverified_total": 0,
+                "next_cursor": None}
+
+    # Decode cursor — it encodes the mtime and dispatch_id of the last packet
+    # returned, so we can resume after it in the mtime-descending walk.
+    after_mtime: Optional[float] = None
+    after_dispatch_id = ""
+    if cursor:
+        decoded = decode_cursor(cursor)
+        parts = decoded.split("\x00", 1)
+        if len(parts) == 2:
+            after_mtime = float(parts[0])
+            after_dispatch_id = parts[1]
+        else:
+            after_mtime = float(parts[0])
 
     rows: list[dict] = []
     # B-52/#241: packets that fail signature verification are NOT normal
@@ -409,6 +426,14 @@ def dispatch_list(
             continue
         if packet_symlink_refused(child):
             continue
+
+        # Skip entries before the cursor position (mtime descending order)
+        if after_mtime is not None:
+            child_mtime = child.stat().st_mtime
+            if (child_mtime > after_mtime or
+                    (child_mtime == after_mtime and child.name >= after_dispatch_id)):
+                continue
+
         meta = _read_json(child / "meta.json")
         st = _read_json(child / "status.json") or {}
         if not meta or not _meta_is_well_formed(meta):
@@ -432,20 +457,36 @@ def dispatch_list(
             "status": cur_status,
             "created_at": meta.get("created_at"),
             "reply_to": meta.get("reply_to"),
+            "_mtime": child.stat().st_mtime,
         }
         if sig_status == dispatch_signing.SIG_VALID:
             rows.append(row)
-            if len(rows) >= limit:
+            if len(rows) > limit:
                 break
         else:
             row["unverified"] = True
             row["signature_status"] = sig_status
             unverified.append(row)
+
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    # Build cursor from the last verified row and strip internal _mtime
+    next_cursor = None
+    if has_more and rows:
+        last = rows[-1]
+        next_cursor = encode_cursor(
+            f"{last['_mtime']}\x00{last['dispatch_id']}"
+        )
+    for row in rows:
+        row.pop("_mtime", None)
+
     return {
         "dispatches": rows,
         "total": len(rows),
         "unverified": unverified,
         "unverified_total": len(unverified),
+        "next_cursor": next_cursor,
     }
 
 

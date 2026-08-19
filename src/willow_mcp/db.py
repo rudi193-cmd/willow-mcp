@@ -1,5 +1,6 @@
 """Database — Postgres (Unix socket) and SQLite store aligned with willow-2.0 WillowStore."""
 
+import base64
 import json
 import os
 import re
@@ -24,6 +25,28 @@ _pg_lock = threading.Lock()
 # path) can't reach the filesystem with an unsanitized collection name just
 # because it bypassed the MCP guard pipeline.
 _COLLECTION_RE = re.compile(r"^[A-Za-z0-9_\-]{1,128}$")
+_FIELD_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
+
+# ── Keyset-cursor helpers ──────────────────────────────────────────────────────
+#
+# Pagination follows the MCP protocol's keyset cursor pattern (PRIOR_ART.md §1,
+# "Cursor pagination" row — verdict: Spec, no library needed).  The cursor
+# encodes the last-seen sort key so a subsequent call can resume from there
+# without offset drift.  Base64-URL encoding keeps the cursor opaque and
+# transport-safe.
+
+def encode_cursor(sort_key: str) -> str:
+    """Encode a sort key (typically an id or timestamp) into an opaque cursor."""
+    return base64.urlsafe_b64encode(sort_key.encode("utf-8")).rstrip(b"=").decode("ascii")
+
+
+def decode_cursor(cursor: str) -> str:
+    """Decode an opaque cursor back to its sort key."""
+    # Re-pad base64 — urlsafe_b64decode is lenient about padding in stdlib but
+    # adding it explicitly avoids surprises across Python versions.
+    padded = cursor + "=" * (-len(cursor) % 4)
+    return base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
 
 
 def _validate_collection(collection: str) -> str:
@@ -221,6 +244,57 @@ class Store:
             results.append(record)
         return results
 
+    def all_paginated(self, collection: str, *,
+                      limit: int = 50, cursor: Optional[str] = None,
+                      ) -> tuple[list[dict], Optional[str]]:
+        """Keyset-paginated variant of ``all()``.
+
+        Sorted by ``created_at ASC`` — the same order ``all()`` uses — with
+        the cursor encoding the ``(created_at, id)`` pair of the last record
+        returned.  Returns ``(items, next_cursor)`` where *next_cursor* is
+        ``None`` when there are no more pages.
+        """
+        limit = max(1, limit)
+        with self._lock:
+            conn = self._conn(collection)
+            if cursor:
+                after = decode_cursor(cursor)
+                # cursor format: "created_at\x00id"
+                parts = after.split("\x00", 1)
+                if len(parts) == 2:
+                    after_ts, after_id = parts
+                else:
+                    after_ts, after_id = parts[0], ""
+                rows = conn.execute(
+                    "SELECT id, data, created_at, updated_at, deviation, action "
+                    "FROM records WHERE deleted = 0 "
+                    "AND (created_at > ? OR (created_at = ? AND id > ?)) "
+                    "ORDER BY created_at, id LIMIT ?",
+                    (after_ts, after_ts, after_id, limit + 1),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, data, created_at, updated_at, deviation, action "
+                    "FROM records WHERE deleted = 0 ORDER BY created_at, id LIMIT ?",
+                    (limit + 1,),
+                ).fetchall()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        results = []
+        for row in rows:
+            record = json.loads(row[1])
+            record["_id"] = row[0]
+            record["_created"] = row[2]
+            record["_updated"] = row[3]
+            record["_deviation"] = row[4]
+            record["_action"] = row[5]
+            results.append(record)
+        next_cursor = None
+        if has_more and results:
+            last = results[-1]
+            next_cursor = encode_cursor(f"{last['_created']}\x00{last['_id']}")
+        return results, next_cursor
+
     def update(self, collection: str, record_id: str, record: dict,
                deviation: float = 0.0) -> Optional[str]:
         now = datetime.now(timezone.utc).isoformat()
@@ -257,6 +331,163 @@ class Store:
             record["_action"] = row[3]
             results.append(record)
         return results
+
+    def search_paginated(self, collection: str, query: str, *,
+                         limit: int = 50, cursor: Optional[str] = None,
+                         ) -> tuple[list[dict], Optional[str]]:
+        """Keyset-paginated variant of ``search()``.
+
+        Sorted by ``id ASC`` — deterministic ordering for keyword hits.
+        Returns ``(items, next_cursor)``.
+        """
+        tokens = query.split()
+        if not tokens:
+            return [], None
+        limit = max(1, limit)
+        conditions = " AND ".join(["data LIKE ?"] * len(tokens))
+        params: list = [f"%{t}%" for t in tokens]
+        where = f"deleted = 0 AND {conditions}"
+        if cursor:
+            after_id = decode_cursor(cursor)
+            where += " AND id > ?"
+            params.append(after_id)
+        with self._lock:
+            conn = self._conn(collection)
+            rows = conn.execute(
+                f"SELECT id, data, deviation, action FROM records "  # nosec B608 - same safety note as search()
+                f"WHERE {where} ORDER BY id LIMIT ?",
+                (*params, limit + 1),
+            ).fetchall()
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        results = []
+        for row in rows:
+            record = json.loads(row[1])
+            record["_id"] = row[0]
+            record["_deviation"] = row[2]
+            record["_action"] = row[3]
+            results.append(record)
+        next_cursor = None
+        if has_more and results:
+            next_cursor = encode_cursor(results[-1]["_id"])
+        return results, next_cursor
+
+    def _json_col_expr(self, field: str) -> str:
+        """Map a logical field name to a SQL expression for query_paginated.
+
+        ``_id`` → ``id``, ``_created`` → ``created_at``,
+        ``_updated`` → ``updated_at``; anything else →
+        ``json_extract(data, '$.field')``.  Field names are validated
+        against ``_FIELD_NAME_RE`` to prevent injection.
+        """
+        if field == "_id":
+            return "id"
+        if field == "_created":
+            return "created_at"
+        if field == "_updated":
+            return "updated_at"
+        if not _FIELD_NAME_RE.match(field):
+            raise ValueError(f"invalid field name for query: {field!r}")
+        return f"json_extract(data, '$.{field}')"
+
+    def query_paginated(self, collection: str, *,
+                        filters: Optional[dict] = None,
+                        sort: Optional[list] = None,
+                        limit: int = 50,
+                        cursor: Optional[str] = None,
+                        ) -> tuple[list[dict], Optional[str]]:
+        """Filtered and sorted keyset pagination via ``json_extract``.
+
+        Pushes filtering, sorting, and cursor comparison into SQL so only
+        the requested page is loaded — unlike ``all()`` which reads every
+        record then slices in Python.
+
+        Parameters
+        ----------
+        filters : dict, optional
+            Equality filters on JSON data fields, e.g. ``{"status": "open"}``.
+        sort : list of (field, direction), optional
+            Sort spec.  Each entry is ``(field_name, "ASC"|"DESC")``.
+            Defaults to ``[("_created", "ASC"), ("_id", "ASC")]``.
+            Special names: ``_id`` → id column, ``_created`` → created_at,
+            ``_updated`` → updated_at; all others use json_extract.
+        limit : int
+            Max records per page (default 50).
+        cursor : str, optional
+            Opaque cursor from a previous call's ``next_cursor``.
+
+        Returns ``(items, next_cursor)`` where *next_cursor* is ``None``
+        when there are no more pages.
+        """
+        limit = max(1, limit)
+        if sort is None:
+            sort = [("_created", "ASC"), ("_id", "ASC")]
+
+        col_exprs = [self._json_col_expr(f) for f, _ in sort]
+
+        where_parts = ["deleted = 0"]
+        params: list = []
+
+        if filters:
+            for field, value in filters.items():
+                where_parts.append(f"{self._json_col_expr(field)} = ?")
+                params.append(value)
+
+        if cursor:
+            cursor_vals = json.loads(decode_cursor(cursor))
+            or_clauses: list[str] = []
+            for i in range(len(sort)):
+                and_parts: list[str] = []
+                for j in range(i):
+                    and_parts.append(f"{col_exprs[j]} = ?")
+                    params.append(cursor_vals[j])
+                _, direction = sort[i]
+                op = "<" if direction.upper() == "DESC" else ">"
+                and_parts.append(f"{col_exprs[i]} {op} ?")
+                params.append(cursor_vals[i])
+                or_clauses.append(f"({' AND '.join(and_parts)})")
+            where_parts.append(f"({' OR '.join(or_clauses)})")
+
+        order_parts = [f"{col_exprs[i]} {sort[i][1].upper()}"
+                       for i in range(len(sort))]
+
+        with self._lock:
+            conn = self._conn(collection)
+            rows = conn.execute(
+                f"SELECT id, data, created_at, updated_at, deviation, action "  # nosec B608 - col_exprs built from _json_col_expr which validates field names against _FIELD_NAME_RE
+                f"FROM records WHERE {' AND '.join(where_parts)} "
+                f"ORDER BY {', '.join(order_parts)} LIMIT ?",
+                (*params, limit + 1),
+            ).fetchall()
+
+        has_more = len(rows) > limit
+        rows = rows[:limit]
+        results = []
+        for row in rows:
+            record = json.loads(row[1])
+            record["_id"] = row[0]
+            record["_created"] = row[2]
+            record["_updated"] = row[3]
+            record["_deviation"] = row[4]
+            record["_action"] = row[5]
+            results.append(record)
+
+        next_cursor = None
+        if has_more and results:
+            last = results[-1]
+            vals = []
+            for field, _ in sort:
+                if field == "_id":
+                    vals.append(last["_id"])
+                elif field == "_created":
+                    vals.append(last["_created"])
+                elif field == "_updated":
+                    vals.append(last["_updated"])
+                else:
+                    vals.append(last.get(field))
+            next_cursor = encode_cursor(json.dumps(vals))
+
+        return results, next_cursor
 
     def list_collections(self, scope: Optional[list] = None) -> list[str]:
         """Every collection under this store root, or only those matching
@@ -297,6 +528,55 @@ class Store:
                 record["_collection"] = col
                 results.append(record)
         return results
+
+    def search_all_paginated(self, query: str, *,
+                             scope: Optional[list] = None,
+                             limit: int = 50,
+                             cursor: Optional[str] = None,
+                             ) -> tuple[list[dict], Optional[str]]:
+        """Keyset-paginated variant of ``search_all()``.
+
+        The cursor encodes ``collection\\x00id`` so the scan can resume from
+        the correct collection and record.  Returns ``(items, next_cursor)``.
+        """
+        limit = max(1, limit)
+        after_col, after_id = "", ""
+        if cursor:
+            decoded = decode_cursor(cursor)
+            parts = decoded.split("\x00", 1)
+            if len(parts) == 2:
+                after_col, after_id = parts
+            else:
+                after_col = parts[0]
+
+        results: list[dict] = []
+        collections = self.list_collections(scope)
+        for col in collections:
+            if after_col and col < after_col:
+                continue
+            items, _ = self.search_paginated(
+                col, query,
+                limit=limit - len(results) + 1,
+                cursor=encode_cursor(after_id) if (col == after_col and after_id) else None,
+            )
+            for record in items:
+                record["_collection"] = col
+                results.append(record)
+                if len(results) > limit:
+                    break
+            # Reset after_id once we've moved past the cursor's collection
+            if col == after_col:
+                after_id = ""
+            if len(results) > limit:
+                break
+
+        has_more = len(results) > limit
+        results = results[:limit]
+        next_cursor = None
+        if has_more and results:
+            last = results[-1]
+            next_cursor = encode_cursor(f"{last['_collection']}\x00{last['_id']}")
+        return results, next_cursor
 
     def delete(self, collection: str, record_id: str) -> bool:
         now = datetime.now(timezone.utc).isoformat()

@@ -94,15 +94,28 @@ def list_gaps(
     topic: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 50,
-) -> list[dict[str, Any]]:
-    """Most-asked first. Filter by topic and/or status (open|resolved|promoted)."""
-    rows = _store.all(_COLLECTION)
+    cursor: Optional[str] = None,
+) -> dict[str, Any]:
+    """Most-asked first. Filter by topic and/or status (open|resolved|promoted).
+
+    Returns ``{items, next_cursor}`` — *next_cursor* is ``None`` when there
+    are no more pages.  Uses SQL-level filtering and keyset pagination via
+    json_extract — only the requested page is loaded from the database.
+    """
+    filters: dict[str, Any] = {}
     if topic:
-        rows = [r for r in rows if r.get("topic") == topic]
+        filters["topic"] = topic
     if status:
-        rows = [r for r in rows if r.get("status") == status]
-    rows.sort(key=lambda r: r.get("asked_count", 0), reverse=True)
-    return rows[: max(0, limit)]
+        filters["status"] = status
+
+    items, next_cursor = _store.query_paginated(
+        _COLLECTION,
+        filters=filters,
+        sort=[("asked_count", "DESC"), ("_id", "ASC")],
+        limit=limit,
+        cursor=cursor,
+    )
+    return {"items": items, "next_cursor": next_cursor}
 
 
 def get(gap_id: str) -> Optional[dict[str, Any]]:

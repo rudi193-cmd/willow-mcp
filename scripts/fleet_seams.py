@@ -162,7 +162,7 @@ def seam_gap_forward() -> Result:
     found = None
     while time.monotonic() < deadline:
         time.sleep(0.5)
-        for row in gaps.list_gaps(topic=topic, limit=10):
+        for row in gaps.list_gaps(topic=topic, limit=10).get("items", []):
             if row.get("question") == question:
                 found = row
                 break

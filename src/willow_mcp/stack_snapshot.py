@@ -142,7 +142,8 @@ def _fetch_open_gaps(limit: int = 5) -> list[str]:
     try:
         from . import gaps
 
-        rows = gaps.list_gaps(status="open", limit=limit)
+        result = gaps.list_gaps(status="open", limit=limit)
+        rows = result.get("items", []) if isinstance(result, dict) else result
         out = []
         for row in rows or []:
             if isinstance(row, dict):
