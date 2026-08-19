@@ -31,6 +31,20 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.12.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.11.0...v2.12.0) (2026-08-19)
+
+
+### Added
+
+* add MCP Resource support for KB atoms and Store records ([82d89cb](https://github.com/rudi193-cmd/willow-mcp/commit/82d89cb324c34fde34c82af10961018889062068))
+* MCP resources, cursor pagination, annotation audit, Nestor analysis ([a96254a](https://github.com/rudi193-cmd/willow-mcp/commit/a96254ae66b57d2a602a9991f72f0af17dad2897))
+
+
+### Fixed
+
+* _guarded error shape for paginated tools + lint ([9848e7b](https://github.com/rudi193-cmd/willow-mcp/commit/9848e7bc26129c600432f970691c2bcd38bd81d3))
+* correct readOnlyHint annotations for 4 tools that modify state ([33dcfe2](https://github.com/rudi193-cmd/willow-mcp/commit/33dcfe29a74073649a9059507687ab4dc8f3afe0))
+
 ## [2.11.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.10.0...v2.11.0) (2026-08-19)
 
 
