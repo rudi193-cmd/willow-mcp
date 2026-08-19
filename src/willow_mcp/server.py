@@ -645,7 +645,9 @@ def _gate(app_id: str, tool_name: str) -> tuple[Optional[str], Optional[dict]]:
 # Canonical fields the `knowledge` read tools speak in — matches the §3.2
 # example exactly. Not every host `knowledge` table will have all of these;
 # unmapped ones are simply omitted from results (§3.3), never crash a read.
-_KNOWLEDGE_FIELDS = ["id", "content", "domain", "source", "tags"]
+from ._kb_sql import KNOWLEDGE_FIELDS as _KNOWLEDGE_FIELDS
+from ._kb_sql import build_select as _build_select
+from ._kb_sql import row_to_dict as _row_to_dict
 
 # Canonical fields the `tasks` tools speak in (§9 step 5). The real production
 # table is named `tasks`, not `kart_task_queue`. The worker-production migration
@@ -683,30 +685,6 @@ _CONFIRMABLE_TABLES: dict[str, list[str]] = {
     "knowledge": _KNOWLEDGE_FIELDS,
     "tasks": _TASK_FIELDS,
 }
-
-
-def _build_select(fields_wanted: list[str], mapping_fields: dict) -> tuple[str, list[str], list[str]]:
-    """From a resolved mapping, build a SELECT column list using only real,
-    confirmed-present columns. Returns (select_clause, present_fields,
-    unmapped_fields) — present_fields is the row-tuple order to zip results
-    against; unmapped_fields is surfaced to the caller per §3.3, never
-    silently dropped."""
-    parts, present, unmapped = [], [], []
-    for field in fields_wanted:
-        col = mapping_fields[field]["column"]
-        if col is None:
-            unmapped.append(field)
-            continue
-        parts.append(f'"{col}" AS "{field}"')
-        present.append(field)
-    return ", ".join(parts), present, unmapped
-
-
-def _row_to_dict(row: tuple, present_fields: list[str], unmapped_fields: list[str]) -> dict:
-    rec = dict(zip(present_fields, row))
-    for field in unmapped_fields:
-        rec[field] = None
-    return rec
 
 
 def _require_confirmed(mapping: dict) -> Optional[dict]:

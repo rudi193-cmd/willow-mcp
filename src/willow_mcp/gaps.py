@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from .db import Store, encode_cursor, decode_cursor
+from .db import Store
 
 _COLLECTION = "gaps"
 _store = Store()
@@ -99,44 +99,22 @@ def list_gaps(
     """Most-asked first. Filter by topic and/or status (open|resolved|promoted).
 
     Returns ``{items, next_cursor}`` — *next_cursor* is ``None`` when there
-    are no more pages.  The cursor encodes the ``(asked_count, _id)`` keyset
-    so the next page resumes correctly even after new gaps are logged.
+    are no more pages.  Uses SQL-level filtering and keyset pagination via
+    json_extract — only the requested page is loaded from the database.
     """
-    rows = _store.all(_COLLECTION)
+    filters: dict[str, Any] = {}
     if topic:
-        rows = [r for r in rows if r.get("topic") == topic]
+        filters["topic"] = topic
     if status:
-        rows = [r for r in rows if r.get("status") == status]
-    rows.sort(key=lambda r: (-r.get("asked_count", 0), r.get("_id", "")))
+        filters["status"] = status
 
-    if cursor:
-        decoded = decode_cursor(cursor)
-        parts = decoded.split("\x00", 1)
-        if len(parts) == 2:
-            after_count, after_id = int(parts[0]), parts[1]
-        else:
-            after_count, after_id = int(parts[0]), ""
-        # Skip past records at or before the cursor position.
-        # Sort is (asked_count DESC, _id ASC) which we encoded as
-        # (-asked_count, _id).  "After" means: asked_count < after_count,
-        # OR (asked_count == after_count AND _id > after_id).
-        filtered = []
-        for r in rows:
-            cnt = r.get("asked_count", 0)
-            rid = r.get("_id", "")
-            if cnt < after_count or (cnt == after_count and rid > after_id):
-                filtered.append(r)
-        rows = filtered
-
-    limit = max(1, limit)
-    has_more = len(rows) > limit
-    items = rows[:limit]
-    next_cursor = None
-    if has_more and items:
-        last = items[-1]
-        next_cursor = encode_cursor(
-            f"{last.get('asked_count', 0)}\x00{last.get('_id', '')}"
-        )
+    items, next_cursor = _store.query_paginated(
+        _COLLECTION,
+        filters=filters,
+        sort=[("asked_count", "DESC"), ("_id", "ASC")],
+        limit=limit,
+        cursor=cursor,
+    )
     return {"items": items, "next_cursor": next_cursor}
 
 

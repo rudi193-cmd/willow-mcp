@@ -134,9 +134,10 @@ class TestStoreCollectionListResource:
 
         fn = registrations["store_collection_list"]
         result = json.loads(fn(collection="items"))
-        assert len(result) == 2
-        values = {r["v"] for r in result}
+        assert result["count"] == 2
+        values = {r["v"] for r in result["records"]}
         assert values == {"a", "b"}
+        assert "truncated" not in result
 
     def test_empty_collection(self, store):
         from willow_mcp.resources import register
@@ -155,7 +156,8 @@ class TestStoreCollectionListResource:
 
         fn = registrations["store_collection_list"]
         result = json.loads(fn(collection="empty"))
-        assert result == []
+        assert result["records"] == []
+        assert result["count"] == 0
 
 
 # ── Registration tests ──────────────────────────────────────────────────────

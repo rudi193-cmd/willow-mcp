@@ -272,6 +272,13 @@ class Lineage:
 
         Returns ``{items, next_cursor}`` where *next_cursor* is ``None``
         when there are no more pages.
+
+        Loads all records via ``store.all()`` then filters in Python.
+        Unlike gaps and forks (which use ``Store.query_paginated``), the
+        ``current_only`` filter depends on ``_superseded_set()`` — a set
+        of atom IDs computed from cross-record ``supersedes`` links that
+        cannot be expressed as a SQL WHERE clause.  Acceptable while
+        lineage collections stay small (hundreds of atoms).
         """
         superseded = self._superseded_set()
         after_id = decode_cursor(cursor) if cursor else ""

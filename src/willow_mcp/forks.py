@@ -18,8 +18,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from .db import encode_cursor, decode_cursor
-
 FORKS_COLLECTION = "forks"
 OPEN = "open"
 MERGED = "merged"
@@ -204,43 +202,26 @@ def list_forks(store, *, status: str = OPEN, limit: int = 50,
     """Paginated fork listing, newest first.
 
     Returns ``{items, next_cursor}`` where *next_cursor* is ``None``
-    when there are no more pages.  The cursor encodes the
-    ``(created_at, fork_id)`` keyset (descending).
+    when there are no more pages.  Uses SQL-level filtering and keyset
+    pagination via json_extract — only the requested page is loaded.
     """
     status = (status or OPEN).strip().lower()
     if status not in STATUSES:
         raise ForkError(f"invalid status {status!r}; expected one of {STATUSES}")
-    rows = [_clean(r) for r in store.all(FORKS_COLLECTION)
-            if isinstance(r, dict) and r.get("fork_id")]
-    rows = [r for r in rows if r.get("status") == status]
-    rows.sort(key=lambda r: r.get("created_at", ""), reverse=True)
 
-    if cursor:
-        decoded = decode_cursor(cursor)
-        parts = decoded.split("\x00", 1)
-        if len(parts) == 2:
-            after_ts, after_fid = parts
-        else:
-            after_ts, after_fid = parts[0], ""
-        # Descending sort: skip while created_at > after_ts, or
-        # created_at == after_ts and fork_id >= after_fid
-        filtered = []
-        for r in rows:
-            ts = r.get("created_at", "")
-            fid = r.get("fork_id", "")
-            if ts < after_ts or (ts == after_ts and fid > after_fid):
-                filtered.append(r)
-        rows = filtered
-
-    limit = max(1, limit)
-    has_more = len(rows) > limit
-    rows = rows[:limit]
+    records, next_cursor = store.query_paginated(
+        FORKS_COLLECTION,
+        filters={"status": status},
+        sort=[("created_at", "DESC"), ("_id", "ASC")],
+        limit=limit,
+        cursor=cursor,
+    )
     items: list[dict] = []
-    for r in rows:
+    for r in records:
         changes = r.get("changes") or []
         participants = r.get("participants") or []
         items.append({
-            "fork_id": r["fork_id"],
+            "fork_id": r.get("fork_id", r.get("_id", "")),
             "title": r.get("title", ""),
             "created_at": r.get("created_at", ""),
             "created_by": r.get("created_by", ""),
@@ -248,12 +229,6 @@ def list_forks(store, *, status: str = OPEN, limit: int = 50,
             "participant_count": len(participants),
             "change_count": len(changes),
         })
-    next_cursor = None
-    if has_more and items:
-        last = items[-1]
-        next_cursor = encode_cursor(
-            f"{last['created_at']}\x00{last['fork_id']}"
-        )
     return {"items": items, "next_cursor": next_cursor}
 
 

@@ -35,43 +35,15 @@ from typing import TYPE_CHECKING
 from .db import Store, get_pg
 from . import schema_profile as sp
 from . import kb_curate as kbc
+from ._kb_sql import KNOWLEDGE_FIELDS as _KNOWLEDGE_FIELDS
+from ._kb_sql import build_select as _build_select
+from ._kb_sql import row_to_dict as _row_to_dict
 
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-
-# Duplicated from server.py to keep this module self-contained (no circular
-# import on _store). The canonical definitions live in server.py; if those
-# change, update these.
-_KNOWLEDGE_FIELDS = ["id", "content", "domain", "source", "tags"]
-
-
-def _build_select(fields_wanted: list[str], mapping_fields: dict) -> tuple[str, list[str], list[str]]:
-    """Build a SELECT clause from a schema-profile field mapping.
-
-    Returns (select_clause, present_fields, unmapped_fields).
-    Mirrors server.py's _build_select exactly.
-    """
-    parts, present, unmapped = [], [], []
-    for f in fields_wanted:
-        col = mapping_fields[f]["column"]
-        if col is not None:
-            parts.append(f'"{col}"')
-            present.append(f)
-        else:
-            unmapped.append(f)
-    return ", ".join(parts), present, unmapped
-
-
-def _row_to_dict(row: tuple, present_fields: list[str], unmapped_fields: list[str]) -> dict:
-    """Convert a DB row into a dict using the schema-profile field names."""
-    rec = dict(zip(present_fields, row))
-    for field in unmapped_fields:
-        rec[field] = None
-    return rec
-
 
 def _postgres_unavailable() -> dict:
     return {
@@ -165,15 +137,20 @@ def register(mcp: "MCPServer", store: Store) -> None:
         name="store_collection_list",
         title="Store Collection Records",
         description=(
-            "List every live record in one SOIL collection, oldest first. "
+            "Up to 200 live records in one SOIL collection, oldest first. "
             "Each record includes _id/_created/_updated metadata. "
-            "Equivalent to store_list, as a URI-addressable MCP resource."
+            "For larger collections, use the store_list tool for full "
+            "paginated access."
         ),
         mime_type="application/json",
     )
     def store_collection_list_resource(collection: str) -> str:
-        records = store.all(collection)
-        return json.dumps(records, default=str)
+        records, next_cursor = store.all_paginated(collection, limit=200)
+        result: dict = {"records": records, "count": len(records)}
+        if next_cursor:
+            result["truncated"] = True
+            result["hint"] = "Collection has more records. Use the store_list tool for paginated access."
+        return json.dumps(result, default=str)
 
     @mcp.resource(
         "store://{collection}/records/{record_id}",
