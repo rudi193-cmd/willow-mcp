@@ -16,7 +16,9 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
+
+from .db import encode_cursor, decode_cursor
 
 FORKS_COLLECTION = "forks"
 OPEN = "open"
@@ -196,7 +198,15 @@ def status(store, *, fork_id: str) -> Optional[dict]:
     return _get(store, fork_id)
 
 
-def list_forks(store, *, status: str = OPEN, limit: int = 100) -> list[dict]:
+def list_forks(store, *, status: str = OPEN, limit: int = 50,
+               cursor: Optional[str] = None,
+               ) -> dict[str, Any]:
+    """Paginated fork listing, newest first.
+
+    Returns ``{items, next_cursor}`` where *next_cursor* is ``None``
+    when there are no more pages.  The cursor encodes the
+    ``(created_at, fork_id)`` keyset (descending).
+    """
     status = (status or OPEN).strip().lower()
     if status not in STATUSES:
         raise ForkError(f"invalid status {status!r}; expected one of {STATUSES}")
@@ -204,11 +214,32 @@ def list_forks(store, *, status: str = OPEN, limit: int = 100) -> list[dict]:
             if isinstance(r, dict) and r.get("fork_id")]
     rows = [r for r in rows if r.get("status") == status]
     rows.sort(key=lambda r: r.get("created_at", ""), reverse=True)
-    out: list[dict] = []
-    for r in rows[:max(0, limit)]:
+
+    if cursor:
+        decoded = decode_cursor(cursor)
+        parts = decoded.split("\x00", 1)
+        if len(parts) == 2:
+            after_ts, after_fid = parts
+        else:
+            after_ts, after_fid = parts[0], ""
+        # Descending sort: skip while created_at > after_ts, or
+        # created_at == after_ts and fork_id >= after_fid
+        filtered = []
+        for r in rows:
+            ts = r.get("created_at", "")
+            fid = r.get("fork_id", "")
+            if ts < after_ts or (ts == after_ts and fid > after_fid):
+                filtered.append(r)
+        rows = filtered
+
+    limit = max(1, limit)
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    items: list[dict] = []
+    for r in rows:
         changes = r.get("changes") or []
         participants = r.get("participants") or []
-        out.append({
+        items.append({
             "fork_id": r["fork_id"],
             "title": r.get("title", ""),
             "created_at": r.get("created_at", ""),
@@ -217,7 +248,13 @@ def list_forks(store, *, status: str = OPEN, limit: int = 100) -> list[dict]:
             "participant_count": len(participants),
             "change_count": len(changes),
         })
-    return out
+    next_cursor = None
+    if has_more and items:
+        last = items[-1]
+        next_cursor = encode_cursor(
+            f"{last['created_at']}\x00{last['fork_id']}"
+        )
+    return {"items": items, "next_cursor": next_cursor}
 
 
 def env_check(store, *, fork_id: str) -> dict:

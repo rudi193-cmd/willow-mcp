@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from .db import Store
+from .db import Store, encode_cursor, decode_cursor
 
 _COLLECTION = "gaps"
 _store = Store()
@@ -94,15 +94,50 @@ def list_gaps(
     topic: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 50,
-) -> list[dict[str, Any]]:
-    """Most-asked first. Filter by topic and/or status (open|resolved|promoted)."""
+    cursor: Optional[str] = None,
+) -> dict[str, Any]:
+    """Most-asked first. Filter by topic and/or status (open|resolved|promoted).
+
+    Returns ``{items, next_cursor}`` — *next_cursor* is ``None`` when there
+    are no more pages.  The cursor encodes the ``(asked_count, _id)`` keyset
+    so the next page resumes correctly even after new gaps are logged.
+    """
     rows = _store.all(_COLLECTION)
     if topic:
         rows = [r for r in rows if r.get("topic") == topic]
     if status:
         rows = [r for r in rows if r.get("status") == status]
-    rows.sort(key=lambda r: r.get("asked_count", 0), reverse=True)
-    return rows[: max(0, limit)]
+    rows.sort(key=lambda r: (-r.get("asked_count", 0), r.get("_id", "")))
+
+    if cursor:
+        decoded = decode_cursor(cursor)
+        parts = decoded.split("\x00", 1)
+        if len(parts) == 2:
+            after_count, after_id = int(parts[0]), parts[1]
+        else:
+            after_count, after_id = int(parts[0]), ""
+        # Skip past records at or before the cursor position.
+        # Sort is (asked_count DESC, _id ASC) which we encoded as
+        # (-asked_count, _id).  "After" means: asked_count < after_count,
+        # OR (asked_count == after_count AND _id > after_id).
+        filtered = []
+        for r in rows:
+            cnt = r.get("asked_count", 0)
+            rid = r.get("_id", "")
+            if cnt < after_count or (cnt == after_count and rid > after_id):
+                filtered.append(r)
+        rows = filtered
+
+    limit = max(1, limit)
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    next_cursor = None
+    if has_more and items:
+        last = items[-1]
+        next_cursor = encode_cursor(
+            f"{last.get('asked_count', 0)}\x00{last.get('_id', '')}"
+        )
+    return {"items": items, "next_cursor": next_cursor}
 
 
 def get(gap_id: str) -> Optional[dict[str, Any]]:

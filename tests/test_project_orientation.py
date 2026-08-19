@@ -76,7 +76,7 @@ def test_alias_collision_fails_closed(tmp_path, monkeypatch):
 def test_identity_gate_runs_before_unknown_alias_error(tmp_path, monkeypatch):
     monkeypatch.setenv("WILLOW_MCP_APPS_ROOT", str(tmp_path / "missing"))
     result = server.store_list(app_id="unknown", collection="unknown/path")
-    assert "gate denied" in result[0]["error"]
+    assert "gate denied" in result["items"][0]["error"]
 
 
 def test_alias_scope_is_enforced_on_physical_target(tmp_path, monkeypatch):
@@ -85,7 +85,7 @@ def test_alias_scope_is_enforced_on_physical_target(tmp_path, monkeypatch):
     result = server.store_list(
         app_id="willow", collection="pm/portfolio"
     )
-    assert "projects_willow_pm_portfolio" in result[0]["error"]
+    assert "projects_willow_pm_portfolio" in result["items"][0]["error"]
 
 
 def test_project_orientation_reads_every_declared_collection(
