@@ -50,7 +50,7 @@ Seven gaps where popular MCP servers carry shapes willow-mcp does not:
 | Staged approval state machines | `gap_*` three-state machine (willow-mcp, shipped PR #54), `mem_binder` (2.0) | [Netflix Conductor](https://github.com/Netflix/conductor) (Apache-2.0) | **Adapt** |
 | Cursor pagination | Grove `since_id` keyset cursor (1.9) | MCP spec itself + SDK (MIT) | **Spec** |
 | Block-level content | None in any version | [Editor.js](https://github.com/codex-team/editor.js) (Apache-2.0, headless block model) | **Adapt** |
-| MCP tool annotations | Full coverage in 2.0; ~5 tools in willow-mcp | MCP spec guidance (blog 2026-03-16) | **Spec** |
+| ~~MCP tool annotations~~ | Full coverage in 2.0; **all 142 tools in willow-mcp** | MCP spec guidance (blog 2026-03-16) | ~~**Spec**~~ done |
 | Source verification | `source_trail_verify` (2.0), `mem_check` (1.9) | [ClaimsMCP](https://github.com/AdamGustavsson/ClaimsMCP) (Apache-2.0, claim extraction) | **Build** |
 
 **Build** = no viable drop-in; build from internal prior art.

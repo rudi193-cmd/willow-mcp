@@ -29,7 +29,7 @@ def _mcp_tool_names() -> set[str]:
     """Every function directly decorated @mcp.tool() in server.py, read from
     source (importing server pulls in a heavy runtime)."""
     src = _SERVER.read_text(encoding="utf-8")
-    return set(re.findall(r"@mcp\.tool\(\)\s*(?:@_guarded\([^\n]*\)\s*)?def\s+([a-zA-Z0-9_]+)", src))
+    return set(re.findall(r"@mcp\.tool\([^)]*\)\s*(?:@_guarded\([^\n]*\)\s*)?def\s+([a-zA-Z0-9_]+)", src))
 
 
 def test_hook_and_bundle_copy_are_byte_identical():

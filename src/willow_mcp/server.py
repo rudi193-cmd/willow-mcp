@@ -1034,13 +1034,25 @@ def _guarded(tool_name: str, *, list_error: bool = False):
 # gate.collection_permitted). Unscoped apps keep today's unrestricted access;
 # this only closes the gap for apps an operator explicitly chooses to confine.
 
+# MCP tool annotations — single import from annotations.py so all three
+# tool-hosting modules share one definition.
+from willow_mcp.annotations import (          # noqa: E402
+    ANNO_READ as _ANNO_READ,
+    ANNO_READ_OPEN as _ANNO_READ_OPEN,
+    ANNO_WRITE as _ANNO_WRITE,
+    ANNO_WRITE_IDEM as _ANNO_WRITE_IDEM,
+    ANNO_DESTRUCTIVE as _ANNO_DESTRUCTIVE,
+    ANNO_WRITE_OPEN as _ANNO_WRITE_OPEN,
+)
+
+
 def _collection_denied(app_id: str, collection: str) -> dict:
     return {"error": (
         f"collection_denied: '{collection}' is outside this app's store_scope "
         f"in $WILLOW_HOME/mcp_apps/{app_id or '<app_id>'}/manifest.json")}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("store_put")
 def store_put(
     app_id: str,
@@ -1062,7 +1074,7 @@ def store_put(
     return {"id": rid, "action": action}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("store_get")
 def store_get(app_id: str, collection: str, record_id: str) -> dict:
     """Read one record from a SOIL collection by its exact ID. Returns the
@@ -1076,7 +1088,7 @@ def store_get(app_id: str, collection: str, record_id: str) -> dict:
     return item or {"error": "not_found"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("store_list", list_error=True)
 def store_list(app_id: str, collection: str) -> list:
     """Return every live record in one SOIL collection, oldest first, each with
@@ -1089,7 +1101,7 @@ def store_list(app_id: str, collection: str) -> list:
     return _store.all(collection)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("store_update")
 def store_update(
     app_id: str,
@@ -1110,7 +1122,7 @@ def store_update(
     return {"id": rid} if rid else {"error": "not_found"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("store_search", list_error=True)
 def store_search(app_id: str, collection: str, query: str) -> list:
     """Full-text search one SOIL collection: the query is split on whitespace
@@ -1123,7 +1135,7 @@ def store_search(app_id: str, collection: str, query: str) -> list:
     return _store.search(collection, query)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_DESTRUCTIVE)
 @_guarded("store_delete")
 def store_delete(app_id: str, collection: str, record_id: str) -> dict:
     """Soft-delete one record by ID: it disappears from get/list/search but is
@@ -1137,7 +1149,7 @@ def store_delete(app_id: str, collection: str, record_id: str) -> dict:
     return {"deleted": deleted}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_DESTRUCTIVE)
 @_guarded("store_purge_collection")
 def store_purge_collection(app_id: str, collection: str, confirm: str = "") -> dict:
     """Soft-delete EVERY record in a collection at once — a bulk store_delete,
@@ -1161,7 +1173,7 @@ def store_purge_collection(app_id: str, collection: str, confirm: str = "") -> d
     return {"purged": purged, "collection": collection}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("store_search_all", list_error=True)
 def store_search_all(app_id: str, query: str) -> list:
     """Token-AND search across every SOIL collection you can see — all of them,
@@ -1172,7 +1184,7 @@ def store_search_all(app_id: str, query: str) -> list:
     return _store.search_all(query, scope=gate.store_scope(app_id))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("store_collections")
 def store_collections(app_id: str) -> dict:
     """List the SOIL collections you can see — every collection under the store,
@@ -1186,7 +1198,7 @@ def store_collections(app_id: str) -> dict:
     return {"collections": names, "count": len(names), "store_scope": scope}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("store_stats")
 def store_stats(app_id: str) -> dict:
     """Per-collection live-record counts for the collections you can see
@@ -1217,7 +1229,7 @@ def _lineage_denied(app_id: str):
     return None
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("lineage_record")
 def lineage_record(
     app_id: str,
@@ -1266,7 +1278,7 @@ def lineage_record(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("lineage_link")
 def lineage_link(app_id: str, from_id: str, to_id: str, relation: str,
                  context: str = "") -> dict:
@@ -1280,7 +1292,7 @@ def lineage_link(app_id: str, from_id: str, to_id: str, relation: str,
     return _lineage.link(from_id, to_id, relation, context)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("lineage_why")
 def lineage_why(app_id: str, query: str) -> dict:
     """Answer "why does X exist / where did X come from" from recorded lineage.
@@ -1296,7 +1308,7 @@ def lineage_why(app_id: str, query: str) -> dict:
     return _lineage.why(query)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("lineage_list")
 def lineage_list(app_id: str, current_only: bool = False) -> list:
     """List recorded lineage atoms (id, title, whether current, tags) — the index
@@ -1310,7 +1322,7 @@ def lineage_list(app_id: str, current_only: bool = False) -> list:
 
 # ── Friction floor (relationship smoke detector) ────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("friction_scan")
 def friction_scan(app_id: str, turns: list, window: int = 4, floor: float = 0.35) -> dict:
     """Scan a transcript window for the mirror failure mode: the agent has stopped
@@ -1331,7 +1343,7 @@ def friction_scan(app_id: str, turns: list, window: int = 4, floor: float = 0.35
     return _friction.scan(turns, window=window, floor=floor)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("friction_flags_list", list_error=True)
 def friction_flags_list(app_id: str, limit: int = 20) -> list:
     """List recent friction flags recorded by `friction_scan` — the durable trace
@@ -1344,7 +1356,7 @@ def friction_flags_list(app_id: str, limit: int = 20) -> list:
 
 # ── Nestor tool oracle (natural-language → willow verb) ──────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("nestor_tool_route")
 def nestor_tool_route(app_id: str, query: str) -> dict:
     """Route a natural-language intent to the willow-mcp verb that serves it.
@@ -1358,7 +1370,7 @@ def nestor_tool_route(app_id: str, query: str) -> dict:
     return tool_oracle.route(query)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("nestor_tool_seal")
 def nestor_tool_seal(app_id: str, surface: str, tool: str) -> dict:
     """Teach the oracle: sanction that natural-language `surface` maps to willow
@@ -1371,7 +1383,7 @@ def nestor_tool_seal(app_id: str, surface: str, tool: str) -> dict:
     return tool_oracle.seal(surface, tool, verifier=app_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("nestor_tool_pending", list_error=True)
 def nestor_tool_pending(app_id: str, limit: int = 20) -> list:
     """The teach-queue: natural-language intents nestor_tool_route couldn't serve,
@@ -1383,7 +1395,7 @@ def nestor_tool_pending(app_id: str, limit: int = 20) -> list:
 
 # ── Identity binding (willow-gate seam — check-in / check-out) ───────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("session_bind")
 def session_bind(app_id: str, header: dict) -> dict:
     """Open a cryptographically-bound session (check-in). Provide a 13-field
@@ -1405,7 +1417,7 @@ def session_bind(app_id: str, header: dict) -> dict:
         return {"error": "bind_refused", "detail": str(e)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("session_reconcile")
 def session_reconcile(app_id: str, session_id: str, exit_declaration: dict) -> dict:
     """Close a bound session and reconcile what you DECLARE you did against what the
@@ -1547,7 +1559,7 @@ def _knowledge_ingest_core(
     return {"id": kid}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("knowledge_ingest")
 def knowledge_ingest(
     app_id: str,
@@ -1589,7 +1601,7 @@ def _nest_db_path(db_path: str) -> Path:
     return paths.willow_home() / "nest" / "seed.db"
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("nest_scan")
 def nest_scan(
     app_id: str,
@@ -1666,7 +1678,7 @@ def nest_scan(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("nest_status")
 def nest_status(app_id: str, db_path: str = "") -> dict:
     """Counts for a seeded Nest DB — sources by status, fragments by type,
@@ -1706,7 +1718,7 @@ def nest_status(app_id: str, db_path: str = "") -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("nest_digest")
 def nest_digest(app_id: str, db_path: str = "") -> dict:
     """A one-page Markdown map of a seeded Nest DB — the WALLED view: category
@@ -1726,7 +1738,7 @@ def nest_digest(app_id: str, db_path: str = "") -> dict:
     return {"status": "ok", "walled": True, "digest": md}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("nest_promote")
 def nest_promote(app_id: str, db_path: str = "", dry_run: bool = False, subject_id: str = "") -> dict:
     """Promote a Nest's STRUCTURE into the knowledge base. Reads structure-only
@@ -1795,7 +1807,7 @@ def nest_promote(app_id: str, db_path: str = "", dry_run: bool = False, subject_
 # KB — that is nest_promote's job, and it is walled). See docs/NEST.md.
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("nest_intake_scan")
 def nest_intake_scan(app_id: str, folder: str = "") -> dict:
     """Scan drop zone(s), classify new files by filename into tracks, and stage a
@@ -1813,7 +1825,7 @@ def nest_intake_scan(app_id: str, folder: str = "") -> dict:
     return {"status": "ok", "newly_staged": len(staged), "items": staged}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("nest_intake_queue")
 def nest_intake_queue(app_id: str) -> dict:
     """List the pending review queue — files staged by nest_intake_scan awaiting a
@@ -1822,7 +1834,7 @@ def nest_intake_queue(app_id: str) -> dict:
     return {"status": "ok", "pending": _intake.get_queue(_store)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_DESTRUCTIVE)
 @_guarded("nest_intake_file")
 def nest_intake_file(app_id: str, item_id: str, override_dest: str = "") -> dict:
     """File a staged item: MOVE the file to its predicted track's destination, or
@@ -1837,7 +1849,7 @@ def nest_intake_file(app_id: str, item_id: str, override_dest: str = "") -> dict
         return {"error": f"nest intake file failed: {type(e).__name__}: {e}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("nest_intake_skip")
 def nest_intake_skip(app_id: str, item_id: str) -> dict:
     """Skip a staged item — leave the file where it is and record the skip
@@ -1846,7 +1858,7 @@ def nest_intake_skip(app_id: str, item_id: str) -> dict:
     return _intake.skip(_store, item_id, app_id=app_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("nest_intake_flags")
 def nest_intake_flags(app_id: str) -> dict:
     """List open rule-delta flags — patterns the classifier got wrong often enough
@@ -1864,7 +1876,7 @@ def nest_intake_flags(app_id: str) -> dict:
 # gap_promote is the one write that reaches the knowledge base, and it does
 # so through the exact same schema-confirmation gate as knowledge_ingest.
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("gap_log")
 def gap_log(app_id: str, topic: str, question: str) -> dict:
     """Log or bump a "we don't know this yet" entry. Repeated asks of the
@@ -1874,7 +1886,7 @@ def gap_log(app_id: str, topic: str, question: str) -> dict:
     return gap_backlog.log(topic, question)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("gap_list", list_error=True)
 def gap_list(
     app_id: str,
@@ -1888,7 +1900,7 @@ def gap_list(
     return gap_backlog.list_gaps(topic=topic, status=status, limit=limit)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("gap_resolve")
 def gap_resolve(app_id: str, gap_id: str, note: str = "") -> dict:
     """Mark a gap as being worked or answered — bookkeeping only, does not
@@ -1897,7 +1909,7 @@ def gap_resolve(app_id: str, gap_id: str, note: str = "") -> dict:
     return gap_backlog.resolve(gap_id, note=note)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_DESTRUCTIVE)
 @_guarded("gap_delete")
 def gap_delete(app_id: str, gap_id: str) -> dict:
     """Soft-delete a single gap by id — for clearing junk or test entries from
@@ -1907,7 +1919,7 @@ def gap_delete(app_id: str, gap_id: str) -> dict:
     return gap_backlog.delete(gap_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_DESTRUCTIVE)
 @_guarded("gap_purge_topic")
 def gap_purge_topic(app_id: str, topic: str, confirm: str = "") -> dict:
     """Soft-delete every gap under an exact topic in ONE call — bulk cleanup of a
@@ -1928,7 +1940,7 @@ def gap_purge_topic(app_id: str, topic: str, confirm: str = "") -> dict:
     return gap_backlog.purge_topic(topic)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("gap_promote")
 def gap_promote(
     app_id: str,
@@ -1977,7 +1989,7 @@ def gap_promote(
     return {"id": result["id"], "gap_id": gap_id, "promoted": True}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("knowledge_search")
 def knowledge_search(
     app_id: str,
@@ -2031,7 +2043,7 @@ def knowledge_search(
 
 # ── Task queue tools ───────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("task_submit")
 def task_submit(
     app_id: str,
@@ -2285,7 +2297,7 @@ def task_submit(
     return {"task_id": task_id, "status": "pending"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("task_status")
 def task_status(app_id: str, task_id: str) -> dict:
     """Poll one task submitted via task_submit. Reads the fleet Postgres queue
@@ -2318,7 +2330,7 @@ def task_status(app_id: str, task_id: str) -> dict:
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("task_list")
 def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
     """List tasks still waiting in the Kart queue for one worker `agent`
@@ -2360,7 +2372,7 @@ def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
 
 # ── Knowledge extension tools ──────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("kb_at")
 def kb_at(app_id: str, atom_id: str) -> dict:
     """Fetch one knowledge-base atom by its exact ID from the fleet Postgres —
@@ -2392,7 +2404,7 @@ def kb_at(app_id: str, atom_id: str) -> dict:
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("knowledge_flag")
 def knowledge_flag(
     app_id: str,
@@ -2438,7 +2450,7 @@ def knowledge_flag(
     return {"id": atom_id, "flagged": True, "severity": severity}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_DESTRUCTIVE)
 @_guarded("knowledge_retract")
 def knowledge_retract(app_id: str, atom_id: str, reason: str) -> dict:
     """Tombstone a KB atom in place — hidden from default search, fetchable by id.
@@ -2475,7 +2487,7 @@ def knowledge_retract(app_id: str, atom_id: str, reason: str) -> dict:
     return {"id": atom_id, "retracted": True}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("kb_promote")
 def kb_promote(app_id: str, atom_id: str, domain: str) -> dict:
     """Move an existing knowledge atom to a different domain — e.g. lift a
@@ -2504,7 +2516,7 @@ def kb_promote(app_id: str, atom_id: str, domain: str) -> dict:
     return {"id": atom_id, "domain": domain} if updated else {"error": "not_found"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("kb_journal")
 def kb_journal(
     app_id: str,
@@ -2553,7 +2565,7 @@ def kb_journal(
     return {"id": kid, "domain": "journal"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("kb_ingest")
 def kb_ingest(
     app_id: str,
@@ -2604,7 +2616,7 @@ def kb_ingest(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("schema_confirm_mapping")
 def schema_confirm_mapping(app_id: str, table: str, overrides: Optional[dict] = None,
                            preview: bool = False) -> dict:
@@ -2639,7 +2651,7 @@ def schema_confirm_mapping(app_id: str, table: str, overrides: Optional[dict] = 
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("kb_startup_continuity")
 def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
     """Fetch the knowledge atoms marked for session-startup continuity —
@@ -2740,7 +2752,7 @@ def kb_startup_continuity(app_id: str, limit: int = 20) -> dict:
 
 # ── Agent dispatch tools ───────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("agent_route")
 def agent_route(
     app_id: str,
@@ -2774,7 +2786,7 @@ def agent_route(
     return {"routing_id": routing_id, "target": target_agent, "status": "routed"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("agent_dispatch_result")
 def agent_dispatch_result(
     app_id: str,
@@ -2933,7 +2945,7 @@ _VERB_CITATION_PROJECT = "governance"
 
 # ── Dispatch packet stack (filesystem — no Postgres required) ─────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("dispatch_send")
 def dispatch_send(
     app_id: str,
@@ -2981,7 +2993,7 @@ def dispatch_send(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("dispatch_read")
 def dispatch_read(app_id: str, dispatch_id: str) -> dict:
     """Read one dispatch packet by ID: its meta (from/to app, role, phase,
@@ -3001,7 +3013,7 @@ def dispatch_read(app_id: str, dispatch_id: str) -> dict:
     return pkt
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("dispatch_list")
 def dispatch_list(
     app_id: str,
@@ -3024,7 +3036,7 @@ def dispatch_list(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("dispatch_accept")
 def dispatch_accept(
     app_id: str,
@@ -3039,7 +3051,7 @@ def dispatch_accept(
     return dispatch_stack.dispatch_accept(dispatch_id, app_id, session_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("handoff_write_v4")
 def handoff_write_v4(
     app_id: str,
@@ -3065,7 +3077,7 @@ def handoff_write_v4(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("handoff_read")
 def handoff_read(app_id: str, dispatch_id: str) -> dict:
     """Read the closeout of a completed dispatch: the structured handoff.json
@@ -3084,7 +3096,7 @@ def handoff_read(app_id: str, dispatch_id: str) -> dict:
     return handoff_stack.handoff_read(dispatch_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("verify_handoff")
 def verify_handoff(app_id: str, dispatch_id: str) -> dict:
     """Orchestrator-side check of a completed dispatch's handoff: confirms the
@@ -3094,7 +3106,7 @@ def verify_handoff(app_id: str, dispatch_id: str) -> dict:
     return handoff_stack.verify_handoff(dispatch_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("agent_clear")
 def agent_clear(
     app_id: str,
@@ -3109,7 +3121,7 @@ def agent_clear(
     return dispatch_stack.agent_clear(target_app, dispatch_id, session_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("session_read")
 def session_read(app_id: str, session_id: str) -> dict:
     """Read the thin per-session state file for an app/session pair — entry
@@ -3118,7 +3130,7 @@ def session_read(app_id: str, session_id: str) -> dict:
     return dispatch_stack.session_read(app_id, session_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE_IDEM)
 @_guarded("session_enter")
 def session_enter(
     app_id: str,
@@ -3199,7 +3211,7 @@ def session_enter(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("session_handoff_write")
 def session_handoff_write(
     app_id: str,
@@ -3230,7 +3242,7 @@ def session_handoff_write(
 
 # ── Specialist registry (desk) ───────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("specialist_list")
 def specialist_list(app_id: str, include_permissions: bool = False) -> dict:
     """List the specialist registry (config/specialists.json): every agent the
@@ -3247,7 +3259,7 @@ def specialist_list(app_id: str, include_permissions: bool = False) -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("specialist_get")
 def specialist_get(app_id: str, agent_id: str, include_permissions: bool = True) -> dict:
     """Fetch one specialist's registry row by agent_id, including its compiled
@@ -3267,7 +3279,7 @@ def specialist_get(app_id: str, agent_id: str, include_permissions: bool = True)
     return row
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("exposure_config_get")
 def exposure_config_get(app_id: str) -> dict:
     """Read the standing exposure defaults from $WILLOW_HOME/config/
@@ -3288,7 +3300,7 @@ def exposure_config_get(app_id: str) -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("exposure_slice")
 def exposure_slice(
     app_id: str,
@@ -3312,7 +3324,7 @@ def exposure_slice(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("agent_seed_mirror")
 def agent_seed_mirror(app_id: str, agent_id: str, slice: str = "") -> dict:
     """Mirror a ratified home seed into SOIL collection willow_agents_seeds (AS-5).
@@ -3330,7 +3342,7 @@ def agent_seed_mirror(app_id: str, agent_id: str, slice: str = "") -> dict:
 
 # ── Fleet read tools ───────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("fleet_status")
 def fleet_status(app_id: str) -> dict:
     """Read the canonical fleet roster (fleet.json) — every registered agent
@@ -3348,7 +3360,7 @@ def fleet_status(app_id: str) -> dict:
         return {"error": f"fleet_unavailable: {e}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("frank_read")
 def frank_read(app_id: str, project: str = "", limit: int = 50) -> dict:
     """Read recent entries from the FRANK governance ledger — the fleet's
@@ -3383,7 +3395,7 @@ def frank_read(app_id: str, project: str = "", limit: int = 50) -> dict:
         cur.close()
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("frank_verify")
 def frank_verify(app_id: str) -> dict:
     """Re-hash the entire FRANK governance chain and verify every prev_hash →
@@ -3422,7 +3434,7 @@ def frank_verify(app_id: str) -> dict:
         return {"error": f"frank_unavailable: {exc}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("frank_append")
 def frank_append(
     app_id: str, project: str, event_type: str, content: dict
@@ -3445,7 +3457,7 @@ def frank_append(
         return {"error": f"frank_append_failed: {exc}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("envelope_apply")
 def envelope_apply(
     app_id: str,
@@ -3507,7 +3519,7 @@ def envelope_apply(
         return {"error": f"envelope_apply_failed: {exc}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("fleet_health")
 def fleet_health(app_id: str) -> dict:
     """Fleet health — task queue counts by status, plus live worker heartbeats.
@@ -3596,7 +3608,7 @@ def _ctx_expired(rec: dict) -> bool:
     return bool(exp) and time.time() > exp
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE_IDEM)
 @_guarded("context_save")
 def context_save(app_id: str, key: str, value: dict, ttl_seconds: int = 0) -> dict:
     """Save ephemeral working state under `key`, optionally expiring after
@@ -3616,7 +3628,7 @@ def context_save(app_id: str, key: str, value: dict, ttl_seconds: int = 0) -> di
     return {"key": key, "expires_at": expires_at}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("context_get")
 def context_get(app_id: str, key: str) -> dict:
     """Read a saved context by key. Returns {error: not_found} if absent, or
@@ -3633,7 +3645,7 @@ def context_get(app_id: str, key: str) -> dict:
             "expires_at": rec.get("_ctx_expires_at")}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("context_list")
 def context_list(app_id: str) -> dict:
     """List your saved context keys with save/expiry times (values omitted —
@@ -3650,7 +3662,7 @@ def context_list(app_id: str) -> dict:
     return {"contexts": out}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_DESTRUCTIVE)
 @_guarded("context_expire")
 def context_expire(app_id: str, key: str) -> dict:
     """Delete one of your saved contexts immediately, ahead of any TTL.
@@ -3668,7 +3680,7 @@ def context_expire(app_id: str, key: str) -> dict:
 # consent.internet, and an unexpired lease. integration_call is additionally
 # kept out of full_access (gate.py), so even the attempt surface is opt-in.
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("integration_list")
 def integration_list(app_id: str) -> dict:
     """List every integration adapter — live and declared stubs — with status,
@@ -3678,7 +3690,7 @@ def integration_list(app_id: str) -> dict:
     return {"integrations": integrations.list_integrations()}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("integration_status")
 def integration_status(app_id: str, name: str) -> dict:
     """Offline readiness readout for one integration: live or stub, credential
@@ -3688,7 +3700,7 @@ def integration_status(app_id: str, name: str) -> dict:
     return integrations.status(app_id, name)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE_OPEN)
 @_guarded("integration_call")
 def integration_call(app_id: str, name: str, method: str, path: str,
                      params: Optional[dict] = None,
@@ -3719,7 +3731,7 @@ def integration_call(app_id: str, name: str, method: str, path: str,
 # where the fourth egress class (`mcp_federation`) plus the per-downstream-tool
 # namespaced grant are enforced, both re-checked from disk at call time.
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("federation_discover")
 def federation_discover(app_id: str, root: Optional[str] = None) -> dict:
     """Shadow-IT scan: `.mcp.json` files under `root` (default: this host's
@@ -3736,7 +3748,7 @@ def federation_discover(app_id: str, root: Optional[str] = None) -> dict:
     return {"root": str(scan_root), "unregistered": [str(p) for p in unmanaged]}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("federation_list_servers")
 def federation_list_servers(app_id: str) -> dict:
     """List every operator-ratified downstream MCP server: id, name, launch
@@ -3747,7 +3759,7 @@ def federation_list_servers(app_id: str) -> dict:
     return {"servers": mcp_federation.list_ratified()}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE_OPEN)
 @_guarded("federation_call")
 def federation_call(app_id: str, server_id: str, tool: str,
                     arguments: Optional[dict] = None) -> dict:
@@ -3787,7 +3799,7 @@ def federation_call(app_id: str, server_id: str, tool: str,
 
 # ── Self-audit ───────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("receipts_tail")
 def receipts_tail(app_id: str, limit: int = 20) -> dict:
     """Return your own most-recent tool-call receipts, newest first: ts, tool,
@@ -4628,7 +4640,7 @@ def _collapse_home(obj):
     return obj
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 def whoami(app_id: str = "") -> dict:
     """Report who you are and what you may do: your app_id, role, the permission
     groups your manifest grants, the resolved set of tools you can actually call
@@ -4707,7 +4719,7 @@ def _diag_envelope_registry() -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 def diagnostic_summary(app_id: str = "") -> dict:
     """Self-check: is this willow-mcp install wired correctly? Reports the SOIL
     store (path/writable/collections), Postgres (reachable + which database +
@@ -4879,7 +4891,7 @@ def _commitment_fact(c) -> dict:
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("commitment_ingest")
 def commitment_ingest(app_id: str, events: Optional[list] = None) -> dict:
     """Ingest calendar events into the operator's commitment ledger and persist the
@@ -4924,7 +4936,7 @@ def commitment_ingest(app_id: str, events: Optional[list] = None) -> dict:
             "total_commitments": len(ledger.commitments)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE_IDEM)
 @_guarded("commitment_acknowledge")
 def commitment_acknowledge(app_id: str, uid: str) -> dict:
     """Mark a commitment change as seen by the operator — the split-stick halves match
@@ -4938,7 +4950,7 @@ def commitment_acknowledge(app_id: str, uid: str) -> dict:
     return {"status": "ok", "uid": uid, "acknowledged": True}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("commitment_surface")
 def commitment_surface(app_id: str, now: str = "", lead_minutes: int = 15) -> dict:
     """The dew-rule view: what — if anything — deserves the operator's attention right
@@ -4963,7 +4975,7 @@ def commitment_surface(app_id: str, now: str = "", lead_minutes: int = 15) -> di
                            for s in surfacings]}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("commitment_list")
 def commitment_list(app_id: str, state: str = "") -> dict:
     """List the operator's persisted commitments as FACTS only (uid/title/when/who/
@@ -5000,7 +5012,7 @@ def _code_graph_db(db_path: str = "") -> Path:
     return paths.willow_home() / "code_graph" / "graph.db"
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("code_graph_index")
 def code_graph_index(app_id: str, repo_root: str, db_path: str = "", force: bool = False) -> dict:
     """Index a repository's Python + JS/TS files into a local SQLite symbol graph
@@ -5020,7 +5032,7 @@ def code_graph_index(app_id: str, repo_root: str, db_path: str = "", force: bool
         return {"error": f"index failed: {type(e).__name__}: {e}"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("code_graph_search")
 def code_graph_search(app_id: str, query: str, kinds: Optional[list] = None,
                       max_results: int = 20, db_path: str = "") -> dict:
@@ -5035,7 +5047,7 @@ def code_graph_search(app_id: str, query: str, kinds: Optional[list] = None,
     return {"query": query, "count": len(results), "results": results}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("code_graph_explain")
 def code_graph_explain(app_id: str, symbol: str, db_path: str = "") -> dict:
     """Explain a symbol: signature, file location, callers (inbound edges), and
@@ -5048,7 +5060,7 @@ def code_graph_explain(app_id: str, symbol: str, db_path: str = "") -> dict:
     return explain_symbol(db, symbol)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("code_graph_walk")
 def code_graph_walk(app_id: str, anchor: str, hop_depth: int = 2,
                     max_tokens: int = 8000, db_path: str = "") -> dict:
@@ -5069,7 +5081,7 @@ def code_graph_walk(app_id: str, anchor: str, hop_depth: int = 2,
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("code_graph_suggest")
 def code_graph_suggest(app_id: str, task: str, max_results: int = 10,
                        db_path: str = "") -> dict:
@@ -5083,7 +5095,7 @@ def code_graph_suggest(app_id: str, task: str, max_results: int = 10,
     return {"task": task[:100], "suggestions": files}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("code_graph_impact")
 def code_graph_impact(app_id: str, file_paths: list, db_path: str = "") -> dict:
     """Blast radius: which files/symbols import from the given files? `file_paths`
@@ -5101,7 +5113,7 @@ def code_graph_impact(app_id: str, file_paths: list, db_path: str = "") -> dict:
 # (web_egress.py). Replaces native IDE WebSearch/WebFetch when the PreToolUse
 # hook is active. Fetch runs external-guard scan + sandwich wrap.
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ_OPEN)
 @_guarded("willow_web_search")
 def willow_web_search(
     app_id: str,
@@ -5131,7 +5143,7 @@ def willow_web_search(
     return {"query": query, "results": hits, "count": len(hits)}
 
 
-@mcp.tool(annotations={"readOnlyHint": True})
+@mcp.tool(annotations=_ANNO_READ_OPEN)
 @_guarded("willow_institutional_search")
 def willow_institutional_search(
     app_id: str,
@@ -5192,7 +5204,7 @@ def willow_institutional_search(
             "count": min(len(hits), max_results)}
 
 
-@mcp.tool(annotations={"readOnlyHint": True})
+@mcp.tool(annotations=_ANNO_READ_OPEN)
 @_guarded("willow_web_fetch")
 def willow_web_fetch(
     app_id: str,
@@ -5217,7 +5229,7 @@ def willow_web_fetch(
 
 # ── forks — bounded work-unit tracking (SOIL-backed) ─────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("fork_create")
 def fork_create(
     app_id: str,
@@ -5242,7 +5254,7 @@ def fork_create(
         return {"error": str(e)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("fork_join")
 def fork_join(app_id: str, fork_id: str, component: str) -> dict:
     """Register `component` — an agent, repo, or subsystem name — as a
@@ -5255,7 +5267,7 @@ def fork_join(app_id: str, fork_id: str, component: str) -> dict:
         return {"error": str(e)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("fork_log")
 def fork_log(
     app_id: str,
@@ -5280,7 +5292,7 @@ def fork_log(
         return {"error": str(e)}
 
 
-@mcp.tool(annotations={"destructiveHint": True})
+@mcp.tool(annotations=_ANNO_DESTRUCTIVE)
 @_guarded("fork_merge")
 def fork_merge(app_id: str, fork_id: str, outcome_note: str = "") -> dict:
     """Close an open fork as MERGED — the work landed. Tallies the fork's
@@ -5291,7 +5303,7 @@ def fork_merge(app_id: str, fork_id: str, outcome_note: str = "") -> dict:
     return forks.merge(_store, fork_id=fork_id, outcome_note=outcome_note)
 
 
-@mcp.tool(annotations={"destructiveHint": True})
+@mcp.tool(annotations=_ANNO_DESTRUCTIVE)
 @_guarded("fork_delete")
 def fork_delete(app_id: str, fork_id: str, reason: str = "") -> dict:
     """Close an open fork as DELETED — the work was abandoned. The fork record
@@ -5302,7 +5314,7 @@ def fork_delete(app_id: str, fork_id: str, reason: str = "") -> dict:
     return forks.delete(_store, fork_id=fork_id, reason=reason)
 
 
-@mcp.tool(annotations={"readOnlyHint": True})
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("fork_status", list_error=False)
 def fork_status(app_id: str, fork_id: str) -> dict:
     """Full record for one fork: title, state (open/merged/deleted),
@@ -5315,7 +5327,7 @@ def fork_status(app_id: str, fork_id: str) -> dict:
     return rec
 
 
-@mcp.tool(annotations={"readOnlyHint": True})
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("fork_list", list_error=True)
 def fork_list(app_id: str, status: str = "open") -> list:
     """List forks in one state — 'open' (default), 'merged', or 'deleted' —
@@ -5328,7 +5340,7 @@ def fork_list(app_id: str, status: str = "open") -> list:
         return [{"error": str(e)}]
 
 
-@mcp.tool(annotations={"readOnlyHint": True})
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("env_check", list_error=False)
 def env_check(app_id: str, fork_id: str) -> dict:
     """Diff the current process environment against the snapshot taken at
@@ -5356,7 +5368,7 @@ def env_check(app_id: str, fork_id: str) -> dict:
 # function. Never reintroduce is_orchestrator_app() as a source of privilege;
 # it answers "what did this call name itself", not "who is calling".
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("human_required_enqueue")
 def human_required_enqueue(app_id: str, kind: str, title: str, summary: str = "",
                            priority: str = "normal", source_ref: str = "",
@@ -5373,7 +5385,7 @@ def human_required_enqueue(app_id: str, kind: str, title: str, summary: str = ""
         return {"error": str(e)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("human_required_resolve")
 def human_required_resolve(app_id: str, item_id: str, status: str = "resolved",
                            note: str = "") -> dict:
@@ -5388,7 +5400,7 @@ def human_required_resolve(app_id: str, item_id: str, status: str = "resolved",
         return {"error": str(e)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("human_required_list")
 def human_required_list(app_id: str, status: str = "open", kind: str = "",
                         limit: int = 20) -> dict:
@@ -5399,7 +5411,7 @@ def human_required_list(app_id: str, status: str = "open", kind: str = "",
     return {"items": items, "count": len(items), "stats": human_loop.queue_stats(_store)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("human_attestation_create")
 def human_attestation_create(app_id: str, subject_id: str,
                              subject_type: str = "knowledge_atom", statement: str = "",
@@ -5426,7 +5438,7 @@ def human_attestation_create(app_id: str, subject_id: str,
         return {"error": str(e)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ANNO_READ)
 @_guarded("human_attestation_list")
 def human_attestation_list(app_id: str, subject_id: str = "", subject_type: str = "",
                            status: str = "", limit: int = 20) -> dict:
