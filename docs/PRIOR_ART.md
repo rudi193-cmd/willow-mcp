@@ -19,7 +19,7 @@ permissive.
 ## 1. MCP tool shapes — the field vs willow-mcp
 
 Surveyed 2026-08-18. The question: what do the most-used MCP servers look like,
-how does `willow-mcp`'s ~110-tool surface compare, and where Apache-compatible
+how does `willow-mcp`'s 144-tool surface compare, and where Apache-compatible
 alternatives exist for the shapes it is missing.
 
 ### The field
@@ -48,9 +48,9 @@ Seven gaps where popular MCP servers carry shapes willow-mcp does not:
 | Threading / reply-to | Grove recursive CTE threading with `get_thread` / `get_thread_root` (2.1, FK-backed `reply_to_id`, depth-aware) | [Monadical-SAS/zulip-mcp](https://github.com/Monadical-SAS/zulip-mcp) (Apache-2.0, topic-based) | **Shipped** |
 | Draft / schedule writes | `*_schedule` condition-gated facades (2.0), law-gazelle drafts (safe-app-store) | Discourse MCP draft tools (licence unconfirmed on wrapper) | **Build** |
 | Staged approval state machines | `gap_*` three-state machine (willow-mcp, shipped PR #54), `mem_binder` (2.0) | [Netflix Conductor](https://github.com/Netflix/conductor) (Apache-2.0) | **Adapt** |
-| Cursor pagination | Grove `since_id` keyset cursor (1.9) | MCP spec itself + SDK (MIT) | **Spec** |
+| ~~Cursor pagination~~ | Grove `since_id` keyset cursor (1.9); keyset-cursor helpers + `*_paginated` methods in `db.py`; `store_list`, `context_list`, `commitment_list`, `fork_list`, `store_search_all` all accept opaque `cursor` param | MCP spec itself + SDK (MIT) | ~~**Spec**~~ **SHIPPED** |
 | Block-level content | None in any version | [Editor.js](https://github.com/codex-team/editor.js) (Apache-2.0, headless block model) | **Adapt** |
-| ~~MCP tool annotations~~ | Full coverage in 2.0; **all 142 tools annotated** (PR #350 — `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`; six shared profiles in `annotations.py`: READ, READ_OPEN, WRITE, WRITE_IDEM, DESTRUCTIVE, WRITE_OPEN) | MCP spec guidance (blog 2026-03-16) | ~~**Spec**~~ **SHIPPED** |
+| ~~MCP tool annotations~~ | Full coverage in 2.0; **all 144 tools annotated** (PR #350 — `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`; six shared profiles in `annotations.py`: READ, READ_OPEN, WRITE, WRITE_IDEM, DESTRUCTIVE, WRITE_OPEN) | MCP spec guidance (blog 2026-03-16) | ~~**Spec**~~ **SHIPPED** |
 | Source verification | `knowledge_verify` / `knowledge_check` (2.1, schema-profile-aware source provenance + health check) | [ClaimsMCP](https://github.com/AdamGustavsson/ClaimsMCP) (Apache-2.0, claim extraction) | **Shipped** |
 
 **Build** = no viable drop-in; build from internal prior art.
@@ -136,8 +136,10 @@ Merkle-tree log from Certificate Transparency) for the `frank_*` shape.
 (TypeScript/Python/C#, all MIT or Apache) implement pagination plumbing. Tool
 annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
 `openWorldHint`) are self-reported hints, advisory-only — now shipped for all
-142 willow-mcp tools (PR #350). Extending pagination to arbitrary tool results
-is an open discussion (issue #799).
+144 willow-mcp tools (PR #350). Extending pagination to arbitrary tool results
+is an open discussion (issue #799). Keyset cursor pagination is shipped for the
+SOIL store, context, commitment, and fork list tools (`db.py` helpers + opaque
+`cursor` / `next_cursor`).
 
 ### Shapes unique to willow-mcp (no external equivalent found)
 
@@ -170,10 +172,14 @@ Source verification followed this path and shipped as `knowledge_verify` /
 mechanism (Conductor, Editor.js), but none is MCP-aware — wrapping it into tools
 is on us. Earn-first: the gap state machine already covers the current case.
 
-**Spec** (pagination, ~~annotations~~): no library needed; follow the protocol.
-Pagination is a keyset cursor mapped to the SDK's opaque `cursor` / `nextCursor`
-plumbing. ~~Annotations were a mechanical sweep across the `@mcp.tool()`
-decorators~~ — **shipped in PR #350**: all 142 tools now carry `readOnlyHint`,
+~~**Spec**~~ (~~pagination~~, ~~annotations~~): no library needed; follow the protocol.
+~~Pagination is a keyset cursor mapped to the SDK's opaque `cursor` / `nextCursor`
+plumbing~~ — **shipped**: `db.py` provides `encode_cursor`/`decode_cursor` helpers
+and `all_paginated`/`search_paginated`/`query_paginated`/`search_all_paginated`
+methods; `store_list`, `context_list`, `commitment_list`, `fork_list`, and
+`store_search_all` all accept an opaque `cursor` parameter and return `next_cursor`.
+~~Annotations were a mechanical sweep across the `@mcp.tool()`
+decorators~~ — **shipped in PR #350**: all 144 tools now carry `readOnlyHint`,
 `destructiveHint`, `idempotentHint`, and `openWorldHint` via six shared constant
 profiles (`READ`, `READ_OPEN`, `WRITE`, `WRITE_IDEM`, `DESTRUCTIVE`,
 `WRITE_OPEN`) extracted to `src/willow_mcp/annotations.py`. Notable finding
@@ -212,7 +218,7 @@ layer is the piece that cannot be composed away.
 
 The MCP Python and TypeScript SDKs (both MIT) ship `InMemoryTransport` /
 `MockTransport` for zero-dependency unit tests. FastMCP's `Client` can connect
-to a server in-process. For willow-mcp's ~110 tools, the combination of
+to a server in-process. For willow-mcp's 144 tools, the combination of
 SDK in-process transport (unit tests) + mcp-assert (conformance) +
 agent-security-harness (security gate) covers the full test surface.
 
@@ -233,18 +239,29 @@ MCP tools operate within.
 ## 2. MCP protocol features beyond tools
 
 Surveyed 2026-08-18 against the 2026-07-28 MCP specification revision.
-willow-mcp's surface is entirely tools today. The protocol offers more.
+~~willow-mcp's surface is entirely tools today.~~ willow-mcp now ships both
+tools and resources; the two highest-priority protocol features (Resources and
+Streamable HTTP) are shipped.
 
-### Resources (adopt — high priority)
+### ~~Resources~~ (~~adopt — high priority~~) **SHIPPED**
 
 URI-addressable read-only data the server exposes via `resources/list` and
 `resources/read`. Clients fetch them into context on demand. Servers can expose
 concrete resources or parameterised URI templates (`kb://{collection}/{id}`)
 following RFC 6570.
 
-willow-mcp's KB atoms are a natural fit: each has a stable identity, is
-read-only from the consumer's perspective, and benefits from URI-addressable
-access. `resources/subscribe` (where supported) would let clients track changes.
+~~willow-mcp's KB atoms are a natural fit~~ — **shipped** in `resources.py`
+(registered on the MCPServer via `_resources.register(mcp, _store)`). Four
+resource URIs:
+
+| URI template | What it returns |
+| --- | --- |
+| `kb://atom/{atom_id}` | One KB atom (content, domain, source, tags) |
+| `store://collections` | All SOIL collection names |
+| `store://{collection}/records` | Up to 200 records in one collection |
+| `store://{collection}/records/{record_id}` | One store record |
+
+`resources/subscribe` (where supported) would let clients track changes.
 The 2026-07-28 spec keeps resources as a first-class non-deprecated primitive.
 
 Prior art: [knowledge-base-mcp-server](https://github.com/jeanibarz/knowledge-base-mcp-server)
@@ -252,7 +269,7 @@ exposes KB documents at `kb://<knowledge-base>/<path>` URIs — the closest
 analogue. Licence unconfirmed; check before depending. The MCP SDKs (MIT) ship
 all resource plumbing.
 
-### Streamable HTTP transport (adopt — high priority)
+### ~~Streamable HTTP transport~~ (~~adopt — high priority~~) **SHIPPED**
 
 The current recommended remote transport, replacing the deprecated HTTP+SSE.
 Single HTTP endpoint for bidirectional communication, supports stateless
@@ -260,9 +277,10 @@ operation behind load balancers. The 2026-07-28 spec goes further: the protocol
 core is now stateless (no `initialize` handshake, no `Mcp-Session-Id`), which
 simplifies horizontal scaling.
 
-willow-mcp is a remote server by nature. Any cross-call state should use
-explicit, server-minted handles passed as tool arguments — which willow-mcp
-already does with `app_id`.
+**Shipped:** `server.py` serves via `mcp.run(transport="streamable-http", ...)`
+in `--serve` mode, and `mcp.run(transport="stdio")` otherwise (SDK 2.x moved
+host/port off the constructor onto the transport). OAuth authentication is wired
+for serve mode via `MCPServer(auth_server_provider=..., auth=AuthSettings(...))`.
 
 | Project | Licence | Notes |
 | --- | --- | --- |
@@ -314,14 +332,14 @@ favour of OpenTelemetry. This is now the canonical observability path.
 | FastMCP (MIT) | MIT | Built-in OTel instrumentation for all MCP operations |
 | [Sentry MCP integration](https://docs.sentry.io/) | BSD-3-Clause | Error tracking with MCP-aware context |
 
-For willow-mcp's ~110 tools, the combination is: `opentelemetry-instrumentation-mcp`
+For willow-mcp's 144 tools, the combination is: `opentelemetry-instrumentation-mcp`
 for automatic span generation per tool call, the OTel Python SDK for export to
 any backend (Jaeger, Grafana, Datadog), and stderr for operator-facing logs.
 This replaces any custom logging willow-mcp currently does.
 
 ## 4. Rate limiting and backpressure
 
-With ~110 tools and multi-tenant dispatch, rate limiting is structural, not
+With 144 tools and multi-tenant dispatch, rate limiting is structural, not
 optional.
 
 | Project | Licence | Notes |
@@ -409,7 +427,7 @@ agent seed as cognitive identity orthogonal to permissions.
 **Gaps vs emerging standards:** static trust (no runtime adaptation), symmetric
 HMAC (no asymmetric federation), no intent-based authorization (field-wide gap).
 ~~No MCP tool annotations emitted despite having `TOOL_CLASS` data~~ — resolved:
-PR #350 added annotations to all 142 tools, informed by the existing `TOOL_CLASS`
+PR #350 added annotations to all 144 tools, informed by the existing `TOOL_CLASS`
 classifications.
 
 **Verdict: Keep.** Compose with Cerbos or OPA if policy complexity grows;
