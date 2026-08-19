@@ -31,6 +31,19 @@ merge-commit title while omitting `0073767`, a genuine fix. The version numbers
 and the tags were right; only the prose was wrong. Corrections are made in a
 `docs:` commit, which is hidden and cuts no release of its own.
 
+## [2.11.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.10.0...v2.11.0) (2026-08-19)
+
+
+### Added
+
+* add MCP tool annotations to all 142 tools ([3592b06](https://github.com/rudi193-cmd/willow-mcp/commit/3592b06c679fa406e41675cc99b2e8bc1f60578b))
+
+
+### Fixed
+
+* update authority-surface test regex for annotated @mcp.tool decorators ([1c8ab98](https://github.com/rudi193-cmd/willow-mcp/commit/1c8ab98249aec0de0a1b2e53213932aa494eda0c))
+* address review — shared annotations module, readOnlyHint on writes, session_enter reclassified ([0561e0f](https://github.com/rudi193-cmd/willow-mcp/commit/0561e0fb6194f19d77c0434d2a03478b35924795))
+
 ## [2.10.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.9.2...v2.10.0) (2026-08-18)
 
 
