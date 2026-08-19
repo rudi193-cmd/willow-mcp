@@ -48,6 +48,12 @@ if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
 
+# MCP tool annotations — applied per-tool so clients can distinguish
+# read-only vs write operations.
+_ANNO_READ = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}
+_ANNO_WRITE = {"destructiveHint": False, "openWorldHint": False}
+
+
 # ── gate + identity helpers ──────────────────────────────────────────────────
 
 def _gate_denied(app_id: str, tool_name: str) -> Optional[str]:
@@ -154,7 +160,7 @@ def register(mcp: "MCPServer") -> None:
 
     # ── Reads (13) ──────────────────────────────────────────────────────────
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_list_channels(app_id: str = "") -> list[dict]:
         """List all active Grove channels (name, type, description). Requires
         grove_read."""
@@ -174,7 +180,7 @@ def register(mcp: "MCPServer") -> None:
             for r in rows
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_get_history(channel_name: str, app_id: str = "",
                            limit: int = 50, since_id: int = 0) -> list[dict]:
         """
@@ -211,7 +217,7 @@ def register(mcp: "MCPServer") -> None:
             for m in msgs
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_search(query: str, app_id: str = "", channel_name: str = "") -> list[dict]:
         """
         Search Grove messages by content. Requires grove_read.
@@ -241,7 +247,7 @@ def register(mcp: "MCPServer") -> None:
             for m in msgs[:50]
         ]
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_watch(channel_name: str, since_id: int, app_id: str = "") -> list[dict]:
         """
         Return any new messages in a channel since since_id. Non-blocking.
@@ -267,7 +273,7 @@ def register(mcp: "MCPServer") -> None:
             return [_grove_error(e)]
         return _msgs_to_dicts(msgs)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_watch_all(cursors: dict, app_id: str = "") -> dict:
         """
         Check multiple channels at once for new messages. Non-blocking.
@@ -299,7 +305,7 @@ def register(mcp: "MCPServer") -> None:
             return _grove_error(e)
         return results
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_get_thread(message_id: int, app_id: str = "") -> dict:
         """
         Get a message and all its replies. Requires grove_read.
@@ -327,7 +333,7 @@ def register(mcp: "MCPServer") -> None:
             "replies": _msgs_to_dicts(replies),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_bus_receive(agent: str, app_id: str = "", channel_name: str = "",
                            since_id: int = 0) -> list[dict]:
         """
@@ -359,7 +365,7 @@ def register(mcp: "MCPServer") -> None:
             return [_grove_error(e)]
         return _msgs_to_dicts(msgs)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_inbox(app_id: str = "", agent: str = "", since_id: int = 0,
                      limit: int = 35) -> list[dict]:
         """
@@ -386,7 +392,7 @@ def register(mcp: "MCPServer") -> None:
             return [_grove_error(e)]
         return grove.jsonify(rows)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_flagged(flag: str, app_id: str = "", channel_name: str = "") -> list[dict]:
         """
         List messages carrying a given flag across all channels (or one
@@ -413,7 +419,7 @@ def register(mcp: "MCPServer") -> None:
             return [_grove_error(e)]
         return _msgs_to_dicts(msgs)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_get_identity(app_id: str = "") -> dict:
         """
         This agent's own Grove identity, resolved from the specialist
@@ -440,7 +446,7 @@ def register(mcp: "MCPServer") -> None:
             "role": (row or {}).get("role", ""),
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_agents(app_id: str = "") -> list[dict]:
         """
         List fleet agents by most-recent HEARTBEAT, newest first. Requires
@@ -462,7 +468,7 @@ def register(mcp: "MCPServer") -> None:
             return [_grove_error(e)]
         return grove.jsonify(rows)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_fleet_status(app_id: str = "", limit: int = 50) -> list[dict]:
         """
         Rich fleet status rows — presence plus what each agent is doing.
@@ -487,7 +493,7 @@ def register(mcp: "MCPServer") -> None:
             return [_grove_error(e)]
         return grove.jsonify(rows)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def grove_human_required(app_id: str = "", limit: int = 30,
                               open_only: bool = True) -> list[dict]:
         """
@@ -517,7 +523,7 @@ def register(mcp: "MCPServer") -> None:
 
     # ── Writes (7) ──────────────────────────────────────────────────────────
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_WRITE)
     def grove_send_message(channel_name: str, content: str, app_id: str = "",
                             sender: str = "") -> dict:
         """
@@ -551,7 +557,7 @@ def register(mcp: "MCPServer") -> None:
             return _grove_error(e)
         return {"id": msg["id"], "channel": ch["name"], "sent": True}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_WRITE)
     def grove_reply(channel_name: str, content: str, reply_to_id: int,
                      app_id: str = "", sender: str = "") -> dict:
         """
@@ -585,7 +591,7 @@ def register(mcp: "MCPServer") -> None:
             return _grove_error(e)
         return {"id": msg["id"], "channel": channel_name, "reply_to_id": reply_to_id, "sent": True}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_WRITE)
     def grove_flag(message_id: int, flag: str, app_id: str = "", sender: str = "") -> dict:
         """
         Set a flag on a message. Requires grove_write.
@@ -613,7 +619,7 @@ def register(mcp: "MCPServer") -> None:
             return _grove_error(e)
         return {"message_id": message_id, "flag": flag, "set": True}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_WRITE)
     def grove_unflag(message_id: int, flag: str, app_id: str = "", sender: str = "") -> dict:
         """
         Clear a flag from a message. Requires grove_write.
@@ -639,7 +645,7 @@ def register(mcp: "MCPServer") -> None:
             return _grove_error(e)
         return {"message_id": message_id, "flag": flag, "cleared": cleared}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_WRITE)
     def grove_bus_send(channel_name: str, content: str, app_id: str = "",
                         sender: str = "", to_agent: str = "__all__",
                         bus_type: str = "EVENT", priority: int = 3,
@@ -692,7 +698,7 @@ def register(mcp: "MCPServer") -> None:
             "correlation_id": correlation_id or None, "sent": True,
         }
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_WRITE)
     def grove_ack(channel_name: str, correlation_id: str, original_id: int,
                   app_id: str = "", sender: str = "") -> dict:
         """
@@ -732,7 +738,7 @@ def register(mcp: "MCPServer") -> None:
             return _grove_error(e)
         return {"id": msg["id"], "acked": original_id, "correlation_id": correlation_id}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_WRITE)
     def grove_heartbeat(app_id: str = "", sender: str = "") -> dict:
         """
         Broadcast a heartbeat — I am alive and on the bus. Requires

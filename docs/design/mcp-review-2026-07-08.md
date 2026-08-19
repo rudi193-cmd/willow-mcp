@@ -127,10 +127,10 @@ filesystem).
 @phase 3-mcp-protocol-hygiene
 ## 3. MCP protocol hygiene
 
-- **No tool annotations** — all 25 tools are bare `@mcp.tool()`
-  (`readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` unset
-  anywhere), so a client can't tell `store_delete` is destructive without
-  reading source.
+- ~~**No tool annotations**~~ — resolved: all 142 tools now carry
+  `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint`
+  annotations derived from `gate.PERMISSION_GROUPS` read/write
+  classification (PR #350).
 - **Inconsistent error shapes** — `knowledge_*`/`task_*` return clean
   `{"error": "..."}`; `fleet_status`/`agent_route`/`agent_dispatch_result`
   (`server.py:942-953, 968-979, 992-1000`) leak raw exception text via ad
@@ -245,11 +245,9 @@ live `information_schema` introspection, never raw caller strings), path
 traversal (collection/table names regex-validated before touching the
 filesystem).
 
-@constraint severity="normal"
-- **No tool annotations** — all 25 tools are bare `@mcp.tool()`
-  (`readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` unset
-  anywhere), so a client can't tell `store_delete` is destructive without
-  reading source.
+@constraint severity="normal" resolved="true"
+- ~~**No tool annotations**~~ — resolved: all 142 tools now carry
+  full MCP annotations (PR #350).
 
 @constraint severity="critical"
 - Some docstrings are excellent — `task_submit`'s states the exact

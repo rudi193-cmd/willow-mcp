@@ -23,6 +23,13 @@ from willow_mcp.mai import parser
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
+# MCP tool annotations — applied per-tool so clients can distinguish
+# read-only, write, and external-facing operations.
+_ANNO_READ = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}
+_ANNO_WRITE = {"destructiveHint": False, "openWorldHint": False}
+_ANNO_WRITE_IDEM = {"destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
+_ANNO_WRITE_OPEN = {"destructiveHint": False, "openWorldHint": True}
+
 _MAI_HEADER = "@markdownai"
 
 
@@ -85,7 +92,7 @@ def _is_markdownai_path(path: Path) -> bool:
 def register(mcp: "MCPServer") -> None:
     """Register all MarkdownAI tools on the provided FastMCP instance."""
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def mai_read_file(
         path: str,
         app_id: str = "",
@@ -142,7 +149,7 @@ def register(mcp: "MCPServer") -> None:
             app_id=app_id,
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_WRITE)
     def mai_write_file(path: str, content: str, cwd: str = "", app_id: str = "") -> dict:
         """
         Write raw content to a MarkdownAI file (no rendering).
@@ -179,7 +186,7 @@ def register(mcp: "MCPServer") -> None:
         except Exception as e:
             return {"ok": False, "error": f"[mai_write_file] {path}: {e}"}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def mai_list_phases(file: str, app_id: str = "") -> list[dict]:
         """List all phases in a MarkdownAI document. Requires markdownai_read (#161)."""
         denied = _gate_denied(app_id, "mai_list_phases")
@@ -192,7 +199,7 @@ def register(mcp: "MCPServer") -> None:
         phases = parser.extract_phases(_markdownai_body(raw))  # #157: strip frontmatter
         return [{"name": p.name, "line": p.line} for p in phases]
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def mai_resolve_phase(file: str, phase: str, app_id: str = "") -> dict:
         """Resolve a named phase in a document — returns its content. Requires markdownai_read (#161)."""
         denied = _gate_denied(app_id, "mai_resolve_phase")
@@ -208,7 +215,7 @@ def register(mcp: "MCPServer") -> None:
             return {"error": f"phase '{phase}' not found", "available": [p.name for p in phases]}
         return {"name": matched.name, "content": matched.content, "line": matched.line}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def mai_next_phase(file: str, current_phase: str, app_id: str = "") -> dict:
         """Get the next phase after current_phase. Requires markdownai_read (#161)."""
         denied = _gate_denied(app_id, "mai_next_phase")
@@ -228,7 +235,7 @@ def register(mcp: "MCPServer") -> None:
         nxt = phases[idx + 1]
         return {"current": current_phase, "next": nxt.name, "line": nxt.line}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def mai_call_macro(file: str, macro: str, args: dict = None, app_id: str = "") -> str:
         """Call a named macro in a document. Requires markdownai_read (#161)."""
         denied = _gate_denied(app_id, "mai_call_macro")
@@ -241,7 +248,7 @@ def register(mcp: "MCPServer") -> None:
         macros = parser.extract_macros(_markdownai_body(raw))  # #157: strip frontmatter
         return parser.call_macro(macros, macro, args or {})
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def mai_get_env(key: str, fallback: str = "", app_id: str = "") -> str:
         """Get an environment variable value.
 
@@ -256,7 +263,7 @@ def register(mcp: "MCPServer") -> None:
             return fallback
         return os.environ.get(key, fallback)
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_WRITE_OPEN)
     def mai_execute_directive(directive: str, app_id: str = "") -> str:
         """
         Execute a MarkdownAI directive string and return its output.
@@ -297,7 +304,7 @@ def register(mcp: "MCPServer") -> None:
             return json.dumps(result, default=str) if not isinstance(result, str) else result
         return f"[mai_execute_directive] unrecognized directive: {directive}"
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_WRITE_IDEM)
     def mai_invalidate_cache(directive: str = "", app_id: str = "") -> dict:
         """Invalidate the directive cache. Pass directive to invalidate a specific entry.
         Requires markdownai_write (#161)."""
@@ -307,7 +314,7 @@ def register(mcp: "MCPServer") -> None:
         parser.invalidate(directive if directive else None)
         return {"invalidated": directive or "all"}
 
-    @mcp.tool()
+    @mcp.tool(annotations=_ANNO_READ)
     def mai_get_constraints(file: str, app_id: str = "") -> list[dict]:
         """Get all @constraint declarations from a MarkdownAI document, sorted by severity.
         Requires markdownai_read (#161)."""
