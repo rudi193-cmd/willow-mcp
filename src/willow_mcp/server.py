@@ -1034,14 +1034,16 @@ def _guarded(tool_name: str, *, list_error: bool = False):
 # gate.collection_permitted). Unscoped apps keep today's unrestricted access;
 # this only closes the gap for apps an operator explicitly chooses to confine.
 
-# MCP tool annotations — applied per-tool so clients can distinguish
-# read-only, write, destructive, and external-facing operations.
-_ANNO_READ = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}
-_ANNO_READ_OPEN = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": True}
-_ANNO_WRITE = {"destructiveHint": False, "openWorldHint": False}
-_ANNO_WRITE_IDEM = {"destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
-_ANNO_DESTRUCTIVE = {"destructiveHint": True, "openWorldHint": False}
-_ANNO_WRITE_OPEN = {"destructiveHint": False, "openWorldHint": True}
+# MCP tool annotations — single import from annotations.py so all three
+# tool-hosting modules share one definition.
+from willow_mcp.annotations import (          # noqa: E402
+    ANNO_READ as _ANNO_READ,
+    ANNO_READ_OPEN as _ANNO_READ_OPEN,
+    ANNO_WRITE as _ANNO_WRITE,
+    ANNO_WRITE_IDEM as _ANNO_WRITE_IDEM,
+    ANNO_DESTRUCTIVE as _ANNO_DESTRUCTIVE,
+    ANNO_WRITE_OPEN as _ANNO_WRITE_OPEN,
+)
 
 
 def _collection_denied(app_id: str, collection: str) -> dict:
@@ -3128,7 +3130,7 @@ def session_read(app_id: str, session_id: str) -> dict:
     return dispatch_stack.session_read(app_id, session_id)
 
 
-@mcp.tool(annotations=_ANNO_READ)
+@mcp.tool(annotations=_ANNO_WRITE_IDEM)
 @_guarded("session_enter")
 def session_enter(
     app_id: str,

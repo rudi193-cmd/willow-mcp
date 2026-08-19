@@ -23,12 +23,13 @@ from willow_mcp.mai import parser
 if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
-# MCP tool annotations — applied per-tool so clients can distinguish
-# read-only, write, and external-facing operations.
-_ANNO_READ = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}
-_ANNO_WRITE = {"destructiveHint": False, "openWorldHint": False}
-_ANNO_WRITE_IDEM = {"destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
-_ANNO_WRITE_OPEN = {"destructiveHint": False, "openWorldHint": True}
+# MCP tool annotations — shared definition in annotations.py.
+from willow_mcp.annotations import (
+    ANNO_READ as _ANNO_READ,
+    ANNO_WRITE as _ANNO_WRITE,
+    ANNO_WRITE_IDEM as _ANNO_WRITE_IDEM,
+    ANNO_WRITE_OPEN as _ANNO_WRITE_OPEN,
+)
 
 _MAI_HEADER = "@markdownai"
 

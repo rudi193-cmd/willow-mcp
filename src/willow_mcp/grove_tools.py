@@ -48,10 +48,8 @@ if TYPE_CHECKING:
     from mcp.server.mcpserver import MCPServer
 
 
-# MCP tool annotations — applied per-tool so clients can distinguish
-# read-only vs write operations.
-_ANNO_READ = {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": False}
-_ANNO_WRITE = {"destructiveHint": False, "openWorldHint": False}
+# MCP tool annotations — shared definition in annotations.py.
+from willow_mcp.annotations import ANNO_READ as _ANNO_READ, ANNO_WRITE as _ANNO_WRITE
 
 
 # ── gate + identity helpers ──────────────────────────────────────────────────
