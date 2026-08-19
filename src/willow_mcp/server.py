@@ -69,6 +69,7 @@ from . import dispatch as dispatch_stack
 from . import handoff as handoff_stack
 from . import gaps as gap_backlog
 from . import kb_curate as kbc
+from . import kb_verify
 from . import postgres_lifecycle
 from . import secret_scan
 
@@ -112,7 +113,7 @@ def _read_call_credential() -> Optional[dict]:
     from the `ServerRequestContext` the SDK hands it. SDK 1.x had an ambient
     `mcp.server.lowlevel.server.request_ctx`; 2.0 removed it deliberately and
     injects `Context` into tool functions instead — an injection that does not
-    reach a decorator wrapping 110 tools. See willow_mcp/request_context.py for
+    reach a decorator wrapping 112 tools. See willow_mcp/request_context.py for
     why the replacement is a ContextVar we own rather than one the SDK might
     move again.
     """
@@ -2048,6 +2049,39 @@ def knowledge_search(
     if unmapped:
         result["_unmapped"] = unmapped
     return result
+
+
+@mcp.tool(annotations=_ANNO_READ)
+@_guarded("knowledge_verify")
+def knowledge_verify(
+    app_id: str,
+    domain: str = "",
+    limit: int = 200,
+) -> dict:
+    """Verify source provenance of knowledge records. Checks each record
+    for a non-empty source field. Returns {outcome, total, sourced, unsourced,
+    unsourced_records, recommendation}. outcome is pass/warn/fail.
+    Requires knowledge_read."""
+    pg = get_pg()
+    if not pg:
+        return _postgres_unavailable()
+    return kb_verify.verify_sources(pg, app_id, domain=domain or None, limit=min(limit, 500))
+
+
+@mcp.tool(annotations=_ANNO_READ)
+@_guarded("knowledge_check")
+def knowledge_check(
+    app_id: str,
+    domain: str = "",
+    limit: int = 200,
+) -> dict:
+    """Health check on knowledge records (mem_check analog). Checks for
+    unsourced records, missing domains, and duplicate content. Returns
+    {flags, recommendation, evidence}. Requires knowledge_read."""
+    pg = get_pg()
+    if not pg:
+        return _postgres_unavailable()
+    return kb_verify.check_health(pg, app_id, domain=domain or None, limit=min(limit, 500))
 
 
 # ── Task queue tools ───────────────────────────────────────────────────────────
