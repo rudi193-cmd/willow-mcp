@@ -50,7 +50,7 @@ Seven gaps where popular MCP servers carry shapes willow-mcp does not:
 | Staged approval state machines | `gap_*` three-state machine (willow-mcp, shipped PR #54), `mem_binder` (2.0) | [Netflix Conductor](https://github.com/Netflix/conductor) (Apache-2.0) | **Adapt** |
 | Cursor pagination | Grove `since_id` keyset cursor (1.9) | MCP spec itself + SDK (MIT) | **Spec** |
 | Block-level content | None in any version | [Editor.js](https://github.com/codex-team/editor.js) (Apache-2.0, headless block model) | **Adapt** |
-| ~~MCP tool annotations~~ | Full coverage in 2.0; **all 142 tools in willow-mcp** | MCP spec guidance (blog 2026-03-16) | ~~**Spec**~~ done |
+| ~~MCP tool annotations~~ | Full coverage in 2.0; **all 142 tools annotated** (PR #350 — `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`; six shared profiles in `annotations.py`: READ, READ_OPEN, WRITE, WRITE_IDEM, DESTRUCTIVE, WRITE_OPEN) | MCP spec guidance (blog 2026-03-16) | ~~**Spec**~~ **SHIPPED** |
 | Source verification | `source_trail_verify` (2.0), `mem_check` (1.9) | [ClaimsMCP](https://github.com/AdamGustavsson/ClaimsMCP) (Apache-2.0, claim extraction) | **Build** |
 
 **Build** = no viable drop-in; build from internal prior art.
@@ -123,8 +123,9 @@ Merkle-tree log from Certificate Transparency) for the `frank_*` shape.
 **Pagination and annotations.** Both are in the MCP spec itself. The MCP SDKs
 (TypeScript/Python/C#, all MIT or Apache) implement pagination plumbing. Tool
 annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`,
-`openWorldHint`) are self-reported hints, advisory-only. Extending pagination to
-arbitrary tool results is an open discussion (issue #799).
+`openWorldHint`) are self-reported hints, advisory-only — now shipped for all
+142 willow-mcp tools (PR #350). Extending pagination to arbitrary tool results
+is an open discussion (issue #799).
 
 ### Shapes unique to willow-mcp (no external equivalent found)
 
@@ -155,10 +156,16 @@ matches. Re-land from 1.9/2.0 code when a consumer earns the surface.
 mechanism (Conductor, Editor.js), but none is MCP-aware — wrapping it into tools
 is on us. Earn-first: the gap state machine already covers the current case.
 
-**Spec** (pagination, annotations): no library needed; follow the protocol.
+**Spec** (pagination, ~~annotations~~): no library needed; follow the protocol.
 Pagination is a keyset cursor mapped to the SDK's opaque `cursor` / `nextCursor`
-plumbing. Annotations are a mechanical sweep across ~110 `@mcp.tool()`
-decorators, with 2.0's coverage as the reference.
+plumbing. ~~Annotations were a mechanical sweep across the `@mcp.tool()`
+decorators~~ — **shipped in PR #350**: all 142 tools now carry `readOnlyHint`,
+`destructiveHint`, `idempotentHint`, and `openWorldHint` via six shared constant
+profiles (`READ`, `READ_OPEN`, `WRITE`, `WRITE_IDEM`, `DESTRUCTIVE`,
+`WRITE_OPEN`) extracted to `src/willow_mcp/annotations.py`. Notable finding
+during the sweep: `session_enter` was reclassified from read to write-idempotent
+because it writes dispatch state. The test regex in `test_authority_surface.py`
+was updated to match the annotated decorator signatures.
 
 ### Integration stubs — compose, don't rebuild
 
@@ -386,8 +393,10 @@ egress as a separately gated lane, dispatch packet signing with party ACLs,
 agent seed as cognitive identity orthogonal to permissions.
 
 **Gaps vs emerging standards:** static trust (no runtime adaptation), symmetric
-HMAC (no asymmetric federation), no MCP tool annotations emitted despite having
-`TOOL_CLASS` data, no intent-based authorization (field-wide gap).
+HMAC (no asymmetric federation), no intent-based authorization (field-wide gap).
+~~No MCP tool annotations emitted despite having `TOOL_CLASS` data~~ — resolved:
+PR #350 added annotations to all 142 tools, informed by the existing `TOOL_CLASS`
+classifications.
 
 **Verdict: Keep.** Compose with Cerbos or OPA if policy complexity grows;
 compose with SPIFFE if federation goes multi-party.

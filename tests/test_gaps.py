@@ -28,7 +28,7 @@ def test_log_creates_open_gap():
 def test_log_repeated_question_bumps_count_not_duplicates():
     gaps.log("t-dedup", "What is the accent color in Nord?")
     gaps.log("t-dedup", "what is the accent color in nord")
-    rows = gaps.list_gaps(topic="t-dedup")
+    rows = gaps.list_gaps(topic="t-dedup")["items"]
     assert len(rows) == 1
     assert rows[0]["asked_count"] == 2
 
@@ -36,15 +36,15 @@ def test_log_repeated_question_bumps_count_not_duplicates():
 def test_log_same_question_different_topic_is_separate():
     gaps.log("t-cross-a", "What is the primary color?")
     gaps.log("t-cross-b", "What is the primary color?")
-    assert len(gaps.list_gaps(topic="t-cross-a")) == 1
-    assert len(gaps.list_gaps(topic="t-cross-b")) == 1
+    assert len(gaps.list_gaps(topic="t-cross-a")["items"]) == 1
+    assert len(gaps.list_gaps(topic="t-cross-b")["items"]) == 1
 
 
 def test_list_gaps_ranks_by_asked_count():
     gaps.log("t-rank", "low priority question")
     for _ in range(3):
         gaps.log("t-rank", "high priority question")
-    rows = gaps.list_gaps(topic="t-rank")
+    rows = gaps.list_gaps(topic="t-rank")["items"]
     assert rows[0]["question"] == "high priority question"
     assert rows[0]["asked_count"] == 3
 
@@ -53,8 +53,8 @@ def test_list_gaps_filters_by_status():
     a = gaps.log("t-status", "What is the accent color in Nord?")
     gaps.log("t-status", "What is the border radius in Grove?")
     gaps.resolve(a["id"])
-    open_rows = gaps.list_gaps(topic="t-status", status="open")
-    resolved_rows = gaps.list_gaps(topic="t-status", status="resolved")
+    open_rows = gaps.list_gaps(topic="t-status", status="open")["items"]
+    resolved_rows = gaps.list_gaps(topic="t-status", status="resolved")["items"]
     assert len(open_rows) == 1
     assert len(resolved_rows) == 1
     assert resolved_rows[0]["question"] == "What is the accent color in Nord?"

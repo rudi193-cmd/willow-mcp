@@ -44,7 +44,9 @@ story, not memory — `record` refuses it.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
+
+from .db import encode_cursor, decode_cursor
 
 NODES = "lineage"
 EDGES = "lineage_edges"
@@ -263,14 +265,37 @@ class Lineage:
         return ". ".join(parts) + "."
 
     # ── list ───────────────────────────────────────────────────────────────────
-    def list_atoms(self, current_only: bool = False) -> list:
+    def list_atoms(self, current_only: bool = False,
+                   limit: int = 50, cursor: Optional[str] = None,
+                   ) -> dict[str, Any]:
+        """Paginated atom index, sorted by id ASC.
+
+        Returns ``{items, next_cursor}`` where *next_cursor* is ``None``
+        when there are no more pages.
+
+        Loads all records via ``store.all()`` then filters in Python.
+        Unlike gaps and forks (which use ``Store.query_paginated``), the
+        ``current_only`` filter depends on ``_superseded_set()`` — a set
+        of atom IDs computed from cross-record ``supersedes`` links that
+        cannot be expressed as a SQL WHERE clause.  Acceptable while
+        lineage collections stay small (hundreds of atoms).
+        """
         superseded = self._superseded_set()
-        out = []
+        after_id = decode_cursor(cursor) if cursor else ""
+        limit = max(1, limit)
+        out: list[dict] = []
         for a in self.store.all(self.collection):
             aid = a.get("id")
             if current_only and aid in superseded:
                 continue
+            if after_id and aid <= after_id:
+                continue
             out.append({"id": aid, "title": a.get("title"),
                         "is_current": aid not in superseded, "tags": a.get("tags", [])})
         out.sort(key=lambda r: r["id"])
-        return out
+        has_more = len(out) > limit
+        items = out[:limit]
+        next_cursor = None
+        if has_more and items:
+            next_cursor = encode_cursor(items[-1]["id"])
+        return {"items": items, "next_cursor": next_cursor}

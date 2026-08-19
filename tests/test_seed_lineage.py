@@ -58,7 +58,7 @@ def test_full_pack_seeds_and_is_queryable(tmp_path, monkeypatch):
     assert "appid-only-binding" in [c["id"] for c in why["supersedes_chain"]]
     assert lin.why("appid-only-binding")["atom"]["is_current"] is False
     # re-seeding does not duplicate (idempotent by slug / composite edge id)
-    before = len(lin.list_atoms())
+    before = len(lin.list_atoms()["items"])
     for atom in pack.ATOMS:
         lin.record(**atom)
-    assert len(lin.list_atoms()) == before
+    assert len(lin.list_atoms()["items"]) == before

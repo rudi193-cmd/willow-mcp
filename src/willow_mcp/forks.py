@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 FORKS_COLLECTION = "forks"
 OPEN = "open"
@@ -196,20 +196,32 @@ def status(store, *, fork_id: str) -> Optional[dict]:
     return _get(store, fork_id)
 
 
-def list_forks(store, *, status: str = OPEN, limit: int = 100) -> list[dict]:
+def list_forks(store, *, status: str = OPEN, limit: int = 50,
+               cursor: Optional[str] = None,
+               ) -> dict[str, Any]:
+    """Paginated fork listing, newest first.
+
+    Returns ``{items, next_cursor}`` where *next_cursor* is ``None``
+    when there are no more pages.  Uses SQL-level filtering and keyset
+    pagination via json_extract — only the requested page is loaded.
+    """
     status = (status or OPEN).strip().lower()
     if status not in STATUSES:
         raise ForkError(f"invalid status {status!r}; expected one of {STATUSES}")
-    rows = [_clean(r) for r in store.all(FORKS_COLLECTION)
-            if isinstance(r, dict) and r.get("fork_id")]
-    rows = [r for r in rows if r.get("status") == status]
-    rows.sort(key=lambda r: r.get("created_at", ""), reverse=True)
-    out: list[dict] = []
-    for r in rows[:max(0, limit)]:
+
+    records, next_cursor = store.query_paginated(
+        FORKS_COLLECTION,
+        filters={"status": status},
+        sort=[("created_at", "DESC"), ("_id", "ASC")],
+        limit=limit,
+        cursor=cursor,
+    )
+    items: list[dict] = []
+    for r in records:
         changes = r.get("changes") or []
         participants = r.get("participants") or []
-        out.append({
-            "fork_id": r["fork_id"],
+        items.append({
+            "fork_id": r.get("fork_id", r.get("_id", "")),
             "title": r.get("title", ""),
             "created_at": r.get("created_at", ""),
             "created_by": r.get("created_by", ""),
@@ -217,7 +229,7 @@ def list_forks(store, *, status: str = OPEN, limit: int = 100) -> list[dict]:
             "participant_count": len(participants),
             "change_count": len(changes),
         })
-    return out
+    return {"items": items, "next_cursor": next_cursor}
 
 
 def env_check(store, *, fork_id: str) -> dict:

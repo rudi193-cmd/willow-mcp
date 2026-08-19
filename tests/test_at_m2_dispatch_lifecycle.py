@@ -432,6 +432,7 @@ def test_b52_dispatch_root_itself_symlinked_is_refused_by_send_and_list(home, mo
     listed = server.dispatch_list("willow")
     assert listed == {
         "dispatches": [], "total": 0, "unverified": [], "unverified_total": 0,
+        "next_cursor": None,
     }
 
 
