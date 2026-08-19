@@ -37,7 +37,6 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 ### Added
 
 * add MCP Resource support for KB atoms and Store records ([82d89cb](https://github.com/rudi193-cmd/willow-mcp/commit/82d89cb324c34fde34c82af10961018889062068))
-* MCP resources, cursor pagination, annotation audit, Nestor analysis ([a96254a](https://github.com/rudi193-cmd/willow-mcp/commit/a96254ae66b57d2a602a9991f72f0af17dad2897))
 
 
 ### Fixed
