@@ -883,7 +883,7 @@ def _check_rate(app_id: str) -> tuple[bool, int]:
 
 # ── Guarded dispatch (Phase 4a+4b+4c combined) ───────────────────────────────
 
-def _guarded(tool_name: str, *, list_error: bool = False):
+def _guarded(tool_name: str, *, list_error: bool = False, paginated: bool = False):
     """Central pipeline: gate -> sanitize -> rate check -> dispatch -> receipt.
 
     Gate runs first (B-16) so an unpermitted caller gets a clean permission
@@ -894,9 +894,10 @@ def _guarded(tool_name: str, *, list_error: bool = False):
     key — an unvalidated app_id string must never reach _check_rate, or a
     caller can grow _buckets unbounded with arbitrary strings (L-DOS-01).
 
-    list_error=True for tools whose declared return type is list (store_list,
-    store_search, store_search_all) so a denial comes back list-wrapped,
-    matching that tool's own success-path shape.
+    list_error=True for tools whose declared return type is list so a denial
+    comes back list-wrapped, matching the tool's own success-path shape.
+    paginated=True for tools that return {items, next_cursor} dicts — errors
+    are wrapped in that same shape so callers see a consistent structure.
     """
     def decorator(fn):
         sig = inspect.signature(fn)
@@ -909,6 +910,8 @@ def _guarded(tool_name: str, *, list_error: bool = False):
             app_id = call_kwargs.get("app_id", "") or _DEFAULT_APP_ID
 
             def _shape(err: dict):
+                if paginated:
+                    return {"items": [err], "next_cursor": None}
                 return [err] if list_error else err
 
             # effective_app_id is the identity gate actually authorized this
@@ -1098,7 +1101,7 @@ def store_get(app_id: str, collection: str, record_id: str) -> dict:
 
 
 @mcp.tool(annotations=_ANNO_READ)
-@_guarded("store_list", list_error=True)
+@_guarded("store_list", paginated=True)
 def store_list(app_id: str, collection: str,
                limit: int = 50, cursor: Optional[str] = None) -> dict:
     """Return live records in one SOIL collection, oldest first, each with
@@ -1136,7 +1139,7 @@ def store_update(
 
 
 @mcp.tool(annotations=_ANNO_READ)
-@_guarded("store_search", list_error=True)
+@_guarded("store_search", paginated=True)
 def store_search(app_id: str, collection: str, query: str,
                  limit: int = 50, cursor: Optional[str] = None) -> dict:
     """Full-text search one SOIL collection: the query is split on whitespace
@@ -1191,7 +1194,7 @@ def store_purge_collection(app_id: str, collection: str, confirm: str = "") -> d
 
 
 @mcp.tool(annotations=_ANNO_READ)
-@_guarded("store_search_all", list_error=True)
+@_guarded("store_search_all", paginated=True)
 def store_search_all(app_id: str, query: str,
                      limit: int = 50, cursor: Optional[str] = None) -> dict:
     """Token-AND search across every SOIL collection you can see — all of them,
@@ -1912,7 +1915,7 @@ def gap_log(app_id: str, topic: str, question: str) -> dict:
 
 
 @mcp.tool(annotations=_ANNO_READ)
-@_guarded("gap_list", list_error=True)
+@_guarded("gap_list", paginated=True)
 def gap_list(
     app_id: str,
     topic: Optional[str] = None,
@@ -5415,7 +5418,7 @@ def fork_status(app_id: str, fork_id: str) -> dict:
 
 
 @mcp.tool(annotations=_ANNO_READ)
-@_guarded("fork_list", list_error=True)
+@_guarded("fork_list", paginated=True)
 def fork_list(app_id: str, status: str = "open",
               limit: int = 50, cursor: Optional[str] = None) -> dict:
     """List forks in one state — 'open' (default), 'merged', or 'deleted' —

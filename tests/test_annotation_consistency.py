@@ -15,7 +15,6 @@ import re
 from pathlib import Path
 
 from willow_mcp import gate
-from willow_mcp.annotations import ANNO_READ, ANNO_READ_OPEN
 
 _ROOT = Path(__file__).resolve().parents[1]
 _SERVER = _ROOT / "src" / "willow_mcp" / "server.py"
