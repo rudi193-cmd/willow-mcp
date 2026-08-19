@@ -1,7 +1,6 @@
 """Tests for _kb_sql.py — shared KB SQL helpers (build_select, row_to_dict)."""
 from __future__ import annotations
 
-import pytest
 from willow_mcp._kb_sql import KNOWLEDGE_FIELDS, build_select, row_to_dict
 
 
