@@ -36,16 +36,15 @@ and the tags were right; only the prose was wrong. Corrections are made in a
 
 ### Added
 
-* **grove:** consolidate threading + test coverage ([316ba03](https://github.com/rudi193-cmd/willow-mcp/commit/316ba03dba6c9574c5d2a04307341dc5921df74b))
-* **grove:** consolidate threading with recursive CTE, upward navigation, and reply validation ([e1370d1](https://github.com/rudi193-cmd/willow-mcp/commit/e1370d10bf239ed399a22887278cca8bda0b0f3e))
 * **kb:** add knowledge source verification and health check tools ([44884bc](https://github.com/rudi193-cmd/willow-mcp/commit/44884bc9dc68db5b3772605e2c117dc210514d80))
+* **grove:** consolidate threading with recursive CTE, upward navigation, and reply validation ([e1370d1](https://github.com/rudi193-cmd/willow-mcp/commit/e1370d10bf239ed399a22887278cca8bda0b0f3e))
 
 
 ### Fixed
 
 * **ci:** add knowledge_verify/check to tier_policy, update tool counts ([4d815d8](https://github.com/rudi193-cmd/willow-mcp/commit/4d815d81f6b2e9da67c5c6d156130a62feb0c1e0))
-* **grove:** address PR review — error guard on send_message, LATERAL join in get_history ([13bd32e](https://github.com/rudi193-cmd/willow-mcp/commit/13bd32e2202b5b051b9c9e3472d67797346a1437))
 * **lint:** remove unused pytest import in test_kb_sql ([eff82e0](https://github.com/rudi193-cmd/willow-mcp/commit/eff82e02bbd0c8bc445498b0a63cda1c79d64006))
+* **grove:** address PR review — error guard on send_message, LATERAL join in get_history ([13bd32e](https://github.com/rudi193-cmd/willow-mcp/commit/13bd32e2202b5b051b9c9e3472d67797346a1437))
 
 ## [2.12.0](https://github.com/rudi193-cmd/willow-mcp/compare/v2.11.0...v2.12.0) (2026-08-19)
 
