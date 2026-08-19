@@ -554,6 +554,8 @@ def register(mcp: "MCPServer") -> None:
             if not ch:
                 ch = grove.create_channel(pg, name=channel_name, channel_type="group")
             msg = grove.send_message(pg, channel_id=ch["id"], sender=who, content=content)
+            if "error" in msg:
+                return msg
         except grove.GroveUnavailable as e:
             return _grove_error(e)
         return {"id": msg["id"], "channel": ch["name"], "sent": True}

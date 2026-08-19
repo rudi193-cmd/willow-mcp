@@ -294,15 +294,14 @@ def get_history(pg, channel_id: int, limit: int = 100,
                 f"""
                 SELECT {_m_cols}, COALESCE(rc.reply_count, 0) AS reply_count
                 FROM grove.messages m
-                LEFT JOIN (
-                    SELECT reply_to_id, COUNT(*) AS reply_count
-                    FROM grove.messages
-                    WHERE reply_to_id IS NOT NULL AND is_deleted = 0
-                    GROUP BY reply_to_id
-                ) rc ON rc.reply_to_id = m.id
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS reply_count
+                    FROM grove.messages r
+                    WHERE r.reply_to_id = m.id AND r.is_deleted = 0
+                ) rc ON true
                 WHERE m.channel_id = %s AND m.reply_to_id IS NULL AND m.is_deleted = 0 AND m.id > %s
                 ORDER BY m.id ASC LIMIT %s
-                """,  # nosec B608 - _MSG_COLUMNS is a fixed module-level literal, not input; every value is a bound param
+                """,  # nosec B608 - _m_cols is a fixed module-level literal; all values are bound params
                 (channel_id, since_id, limit),
             )
         elif before_id:
@@ -310,15 +309,14 @@ def get_history(pg, channel_id: int, limit: int = 100,
                 f"""
                 SELECT {_m_cols}, COALESCE(rc.reply_count, 0) AS reply_count
                 FROM grove.messages m
-                LEFT JOIN (
-                    SELECT reply_to_id, COUNT(*) AS reply_count
-                    FROM grove.messages
-                    WHERE reply_to_id IS NOT NULL AND is_deleted = 0
-                    GROUP BY reply_to_id
-                ) rc ON rc.reply_to_id = m.id
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS reply_count
+                    FROM grove.messages r
+                    WHERE r.reply_to_id = m.id AND r.is_deleted = 0
+                ) rc ON true
                 WHERE m.channel_id = %s AND m.reply_to_id IS NULL AND m.is_deleted = 0 AND m.id < %s
                 ORDER BY m.created_at DESC LIMIT %s
-                """,  # nosec B608 - _MSG_COLUMNS is a fixed module-level literal, not input; every value is a bound param
+                """,  # nosec B608 - _m_cols is a fixed module-level literal; all values are bound params
                 (channel_id, before_id, limit),
             )
         else:
@@ -326,15 +324,14 @@ def get_history(pg, channel_id: int, limit: int = 100,
                 f"""
                 SELECT {_m_cols}, COALESCE(rc.reply_count, 0) AS reply_count
                 FROM grove.messages m
-                LEFT JOIN (
-                    SELECT reply_to_id, COUNT(*) AS reply_count
-                    FROM grove.messages
-                    WHERE reply_to_id IS NOT NULL AND is_deleted = 0
-                    GROUP BY reply_to_id
-                ) rc ON rc.reply_to_id = m.id
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS reply_count
+                    FROM grove.messages r
+                    WHERE r.reply_to_id = m.id AND r.is_deleted = 0
+                ) rc ON true
                 WHERE m.channel_id = %s AND m.reply_to_id IS NULL AND m.is_deleted = 0
                 ORDER BY m.created_at DESC LIMIT %s
-                """,  # nosec B608 - _MSG_COLUMNS is a fixed module-level literal, not input; every value is a bound param
+                """,  # nosec B608 - _m_cols is a fixed module-level literal; all values are bound params
                 (channel_id, limit),
             )
         colnames = [d[0] for d in cur.description]
