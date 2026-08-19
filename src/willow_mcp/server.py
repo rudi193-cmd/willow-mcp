@@ -3096,7 +3096,7 @@ def handoff_read(app_id: str, dispatch_id: str) -> dict:
     return handoff_stack.handoff_read(dispatch_id)
 
 
-@mcp.tool(annotations=_ANNO_READ)
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("verify_handoff")
 def verify_handoff(app_id: str, dispatch_id: str) -> dict:
     """Orchestrator-side check of a completed dispatch's handoff: confirms the
@@ -3324,7 +3324,7 @@ def exposure_slice(
     )
 
 
-@mcp.tool(annotations=_ANNO_READ)
+@mcp.tool(annotations=_ANNO_WRITE_IDEM)
 @_guarded("agent_seed_mirror")
 def agent_seed_mirror(app_id: str, agent_id: str, slice: str = "") -> dict:
     """Mirror a ratified home seed into SOIL collection willow_agents_seeds (AS-5).
@@ -3628,7 +3628,7 @@ def context_save(app_id: str, key: str, value: dict, ttl_seconds: int = 0) -> di
     return {"key": key, "expires_at": expires_at}
 
 
-@mcp.tool(annotations=_ANNO_READ)
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("context_get")
 def context_get(app_id: str, key: str) -> dict:
     """Read a saved context by key. Returns {error: not_found} if absent, or
@@ -3645,7 +3645,7 @@ def context_get(app_id: str, key: str) -> dict:
             "expires_at": rec.get("_ctx_expires_at")}
 
 
-@mcp.tool(annotations=_ANNO_READ)
+@mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("context_list")
 def context_list(app_id: str) -> dict:
     """List your saved context keys with save/expiry times (values omitted —
