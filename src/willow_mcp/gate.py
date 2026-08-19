@@ -67,6 +67,7 @@ PERMISSION_GROUPS: dict[str, frozenset] = {
     "knowledge_read": frozenset({
         "knowledge_search",
         "kb_at", "kb_startup_continuity",
+        "knowledge_verify", "knowledge_check",
     }),
     "knowledge_write": frozenset({
         "knowledge_ingest",

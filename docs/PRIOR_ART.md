@@ -51,7 +51,7 @@ Seven gaps where popular MCP servers carry shapes willow-mcp does not:
 | Cursor pagination | Grove `since_id` keyset cursor (1.9) | MCP spec itself + SDK (MIT) | **Spec** |
 | Block-level content | None in any version | [Editor.js](https://github.com/codex-team/editor.js) (Apache-2.0, headless block model) | **Adapt** |
 | ~~MCP tool annotations~~ | Full coverage in 2.0; **all 142 tools annotated** (PR #350 — `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`; six shared profiles in `annotations.py`: READ, READ_OPEN, WRITE, WRITE_IDEM, DESTRUCTIVE, WRITE_OPEN) | MCP spec guidance (blog 2026-03-16) | ~~**Spec**~~ **SHIPPED** |
-| Source verification | `source_trail_verify` (2.0), `mem_check` (1.9) | [ClaimsMCP](https://github.com/AdamGustavsson/ClaimsMCP) (Apache-2.0, claim extraction) | **Build** |
+| Source verification | `knowledge_verify` / `knowledge_check` (2.1, schema-profile-aware source provenance + health check) | [ClaimsMCP](https://github.com/AdamGustavsson/ClaimsMCP) (Apache-2.0, claim extraction) | **Shipped** |
 
 **Build** = no viable drop-in; build from internal prior art.
 **Adapt** = external alternative exists but needs wrapping.
@@ -94,6 +94,11 @@ returns `{valid, broken_at, count}` (hash-chain walk). `source_trail_verify`
 with one boolean/enum outcome key plus evidence — but the key's *name* differs
 per tool. No shared verdict schema exists to rely on programmatically.
 
+In 2.1, `knowledge_verify` and `knowledge_check` port `source_trail_verify`'s
+provenance check and `mem_check`'s health audit into willow-mcp's
+schema-profile-aware KB surface, returning structured pass/warn/fail verdicts
+with evidence.
+
 ### Apache-compatible alternatives by gap
 
 **Threading.** [Monadical-SAS/zulip-mcp](https://github.com/Monadical-SAS/zulip-mcp)
@@ -117,6 +122,10 @@ serialisable JSON blocks. Usable headless as a pure data model.
 (Apache-2.0) — claim extraction from text, the preprocessing step of a verify
 pipeline. [Loki / OpenFactVerification](https://github.com/Libr-AI/OpenFactVerification)
 — full decompose → query → crawl → verify pipeline; licence unconfirmed.
+willow-mcp now ships its own implementation (`knowledge_verify`,
+`knowledge_check` in `kb_verify.py`, gated behind `knowledge_read`) rather than
+depending on either — neither covers KB health checking (unsourced records,
+missing domains, duplicate content).
 
 **Governance ledger backing.** [immudb](https://github.com/codenotary/immudb)
 (Apache-2.0) — embeddable tamper-proof, cryptographically verified history.
@@ -151,9 +160,11 @@ Eight shapes nobody else builds:
 
 ### The verdict column, unpacked
 
-**Build** (draft/schedule, source verification): the prior art is
+**Build** (draft/schedule): the prior art is
 internal and the shape is domain-specific enough that no external library
 matches. Re-land from 1.9/2.0 code when a consumer earns the surface.
+Source verification followed this path and shipped as `knowledge_verify` /
+`knowledge_check`.
 
 **Adapt** (staged approval, block content): an Apache-2.0 library provides the
 mechanism (Conductor, Editor.js), but none is MCP-aware — wrapping it into tools
