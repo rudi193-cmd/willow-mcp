@@ -16,6 +16,16 @@ concrete claim, checked against one concrete computation — not a general
 number-scanner (dates, ports, versions, and one-off counts in prose are not
 "counts that should track reality" and would just be false-positive noise).
 
+Found live (2026-08-19): docs/PRIOR_ART.md — an uncovered file entirely —
+said "~110 tools" in four places and "142 tools" in two more, describing
+willow-mcp's current tool surface in a document whose surrounding text is a
+dated survey but whose own-server figures are live claims like any other.
+The real number is 144, not 114: registered_tool_count() only reads
+server.py and misses grove_tools.py's 20 tools (registered unconditionally
+via `_grove_tools.register(mcp)`) and mai/tools.py's 10 (gated on
+WILLOW_MCP_MARKDOWNAI=1) — see total_tool_surface_count(), added for claims
+that mean the whole surface rather than server.py's own slice of it.
+
 Add a new entry when the next live claim shows up; don't try to generalize
 ahead of a second real case.
 """
@@ -29,10 +39,42 @@ _SERVER_PY = _REPO / "src" / "willow_mcp" / "server.py"
 
 
 def registered_tool_count() -> int:
-    """Every @mcp.tool(...) registration in server.py — the total tool
-    surface, gated or not."""
+    """Every @mcp.tool(...) registration directly in server.py — NOT the
+    total tool surface despite the old docstring here claiming that: grove
+    tools (registered via `_grove_tools.register(mcp)`, unconditional) and
+    mai tools (via `_mai_tools.register(mcp)`, gated on
+    WILLOW_MCP_MARKDOWNAI=1) live in their own modules and are invisible to
+    this regex, which only reads server.py. Use total_tool_surface_count()
+    for the real total; this one is for claims specifically scoped to
+    server.py's own registrations (tools/README.md's wtool.py line, the
+    `_guarded` counts below — _guarded only wraps server.py tools, grove/mai
+    gate through gate.permitted() directly)."""
     text = _SERVER_PY.read_text(encoding="utf-8")
     return len(re.findall(r"(?m)^@mcp\.tool\(", text))
+
+
+def total_tool_surface_count() -> int:
+    """Every @mcp.tool(...) registration across all three tool-hosting
+    modules — server.py (114) + grove_tools.py (20, unconditional) +
+    mai/tools.py (10, gated on WILLOW_MCP_MARKDOWNAI=1) = 144. This is what
+    `tools/list` actually returns at runtime with mai enabled, and what
+    tests/test_annotation_consistency.py's _all_tool_annotations() counts.
+
+    Found (2026-08-19): PRIOR_ART.md's survey prose said "~110 tools" in
+    four places and "142 tools" in two more, both stale — the real total
+    had moved to 144 (114 + 20 grove + 10 mai) and nothing checked either
+    number. registered_tool_count() alone can't be the ground truth for
+    these claims: it only sees server.py and would have silently pinned the
+    lint to the wrong (114) total."""
+    total = 0
+    for rel in (
+        "src/willow_mcp/server.py",
+        "src/willow_mcp/grove_tools.py",
+        "src/willow_mcp/mai/tools.py",
+    ):
+        text = (_REPO / rel).read_text(encoding="utf-8")
+        total += len(re.findall(r"@mcp\.tool\(", text))
+    return total
 
 
 def guarded_tool_count() -> int:
@@ -108,6 +150,20 @@ _LIVE_COUNT_CLAIMS = [
      "the N willow-mcp tools", registered_tool_count),
     ("README.md", r"\((\d+) groups\)",
      "(N groups)", permission_group_count),
+    ("docs/PRIOR_ART.md", r"`willow-mcp`'s (\d+)-tool surface",
+     "`willow-mcp`'s N-tool surface", total_tool_surface_count),
+    ("docs/PRIOR_ART.md", r"all (\d+) tools annotated",
+     "all N tools annotated", total_tool_surface_count),
+    ("docs/PRIOR_ART.md", r"(\d+) willow-mcp tools \(PR #350\)",
+     "N willow-mcp tools (PR #350)", total_tool_surface_count),
+    ("docs/PRIOR_ART.md", r"all (\d+) tools now carry",
+     "all N tools now carry", total_tool_surface_count),
+    ("docs/PRIOR_ART.md", r"willow-mcp's (\d+) tools",
+     "willow-mcp's N tools", total_tool_surface_count),
+    ("docs/PRIOR_ART.md", r"With (\d+) tools and multi-tenant",
+     "With N tools and multi-tenant", total_tool_surface_count),
+    ("docs/PRIOR_ART.md", r"annotations to all (\d+) tools",
+     "annotations to all N tools", total_tool_surface_count),
 ]
 
 
