@@ -347,3 +347,332 @@ pgvector. Alternatives if the graph dimension grows:
 Apache AGE is the highest-leverage option: it adds `MATCH (a)-[:CITES]->(b)`
 queries to the Postgres willow-mcp already uses, without a second database.
 The `knowledge_edges` table and `lineage_*` tools would benefit directly.
+
+## 7. Agent roles and authorization
+
+willow-mcp implements an eight-layer authorization system. The layers compose
+multiplicatively (intersection, not union):
+
+1. **Specialist registry** — six named agents + one human-only orchestrator seat,
+   each with `permissions`, `deny_tools`, `store_scope`
+2. **Manifest ACL** — per-app_id `manifest.json` with ~40 permission groups
+   expanding to tool frozensets; `deny_tools` overrides; fail-closed
+3. **Trust tier ceiling** — five tiers (Exiled → Elder), each unlocking a tool
+   class (read/query/write/execute/admin); effective = manifest ∩ tier
+4. **Cryptographic binding** — HMAC-SHA256 per-agent secrets, claimed trust
+   capped at registered ceiling
+5. **Envelope authority** — constitutional governance envelopes gating specific
+   verbs on specific resources
+6. **Dispatch routing** — HMAC-signed packets with party ACLs
+7. **Egress gating** — `task_net`, `integration_net`, `web_net`,
+   `mcp_federation` deliberately excluded from `full_access`
+8. **Agent seed** — cognitive identity (persona, voice, correction patterns)
+   orthogonal to permissions
+
+No multi-agent framework has comparable runtime enforcement. CrewAI, LangGraph,
+OpenAI Agents SDK, and AutoGen all treat roles as prompt-shaping strings with no
+runtime gating.
+
+| Alternative | Licence | What it does | Comparison |
+| --- | --- | --- | --- |
+| [Cerbos](https://github.com/cerbos/cerbos) | **Apache-2.0** | External PDP, YAML policies, sub-ms decisions. FastMCP integration exists | Could back manifest ACL as external PDP; does not provide tier ceilings, HMAC binding, or envelope authority |
+| [OPA](https://github.com/open-policy-agent/opa) | **Apache-2.0** | Rego policy engine. OPA MCP server exists | More powerful than Cerbos but steeper curve. Same gap: no agent identity binding |
+| [SPIFFE/SPIRE](https://github.com/spiffe/spire) | **Apache-2.0** | Cryptographic workload identity, X.509 SVIDs, automatic rotation | Replaces HMAC with asymmetric identity for federation. Single-operator HMAC is fine; SPIFFE is the upgrade path for multi-party trust |
+| CoSAI Agentic IAM | OASIS spec (open) | Extends IAM to non-human principals, recommends PKI-bound agent identity | Validates willow-mcp's architecture. Identifies two open problems: intent-based authorization and semantic mosaic effect |
+| Google A2A | Apache-2.0 (protocol) | Agent Cards + OAuth 2.0 mutual auth | Addresses cross-org federation. No mandate for card verification |
+
+**What's unique:** multiplicative layer composition, deny-tools override,
+egress as a separately gated lane, dispatch packet signing with party ACLs,
+agent seed as cognitive identity orthogonal to permissions.
+
+**Gaps vs emerging standards:** static trust (no runtime adaptation), symmetric
+HMAC (no asymmetric federation), no MCP tool annotations emitted despite having
+`TOOL_CLASS` data, no intent-based authorization (field-wide gap).
+
+**Verdict: Keep.** Compose with Cerbos or OPA if policy complexity grows;
+compose with SPIFFE if federation goes multi-party.
+
+## 8. Voice ingress membrane
+
+State-machine-driven voice pipeline where the wake-word gate IS the consent
+boundary. Pre-wake audio never reaches the transcriber. Receipts record facts
+(armed/disarmed), never audio. Components: openWakeWord, Silero VAD, Faster
+Whisper, Kokoro TTS, barge-in detection.
+
+| Alternative | Licence | Consent boundary? | Receipts? |
+| --- | --- | --- | --- |
+| [Home Assistant Assist + Wyoming](https://github.com/home-assistant) | **Apache-2.0** | Implicit — streaming starts after wake word. No state-machine consent model | No |
+| [OVOS (OpenVoiceOS)](https://github.com/OpenVoiceOS) | **Apache-2.0** | Privacy by architecture (all local), but no explicit consent gate | No |
+| [Rhasspy](https://github.com/rhasspy/rhasspy3) | MIT | Local-only = implicit privacy. No consent state machine | No |
+| [Picovoice Porcupine](https://github.com/Picovoice/porcupine) | Apache-2.0 (SDK); **proprietary** (engine, requires AccessKey) | On-device but phones home since v2.0 | No |
+| [Pipecat](https://github.com/pipecat-ai/pipecat) | BSD-2-Clause | No consent model. Best barge-in support (<250ms) | No |
+
+**What's unique:** (1) wake-word gate as consent boundary with explicit state
+machine (armed → listening → processing → idle), (2) receipts record facts never
+audio, (3) barge-in as state-machine event with consent implications.
+
+**Component licences:** openWakeWord code Apache-2.0 (pretrained models
+CC BY-NC-SA — custom-train to avoid), Silero VAD MIT, Faster Whisper MIT,
+Kokoro TTS Apache-2.0.
+
+**Verdict: Keep** (compose for components). The consent-boundary architecture
+and receipt system have no external equivalent.
+
+## 9. Safety machinery
+
+### Friction floor (sycophancy detection)
+
+Deterministic, model-free, lexicon-based scanner running outside the model it
+watches. Detects when an agent mirrors the user while the user escalates.
+"A mirror cannot audit itself."
+
+| Alternative | Licence | Deterministic? | Runtime? | Sycophancy-specific? |
+| --- | --- | --- | --- | --- |
+| [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) | **Apache-2.0** | Mixed (Colang rules + LLM calls) | Yes | No built-in sycophancy detector |
+| [Guardrails AI](https://github.com/guardrails-ai/guardrails) | **Apache-2.0** | Validator-dependent | Yes | No sycophancy validator in Hub |
+| LLM Guard (Protect AI) | MIT | Scanner-dependent | Yes | No. **Archived July 2026** |
+| AlignmentCheck (Meta) | MIT | No (few-shot LLM) | Yes | Goal hijacking, not sycophancy |
+| Cascading Linear Features (research) | Paper | Requires white-box model access | Potentially | Yes, but not applicable to API models |
+
+**Nothing else does deterministic runtime sycophancy detection without invoking
+another LLM.** The research field has benchmarks (lechmazur, SycEval, ELEPHANT)
+and mechanistic probes, but every runtime detector is LLM-as-judge — itself
+susceptible to sycophancy.
+
+**Verdict: Keep.** NeMo Guardrails (Apache-2.0) could host Friction Floor as a
+custom Colang rail if a broader guardrails framework is needed, but the detection
+logic has no external equivalent.
+
+### External guard (indirect prompt injection)
+
+Pattern-based scanner for prompt injection in fetched web content. Scans
+response bodies before they enter agent context.
+
+| Alternative | Licence | Scans tool responses? | Notes |
+| --- | --- | --- | --- |
+| [StackOne Defender](https://github.com/nichochar/defender) | **Apache-2.0** | **Yes** — built for it | Two-tier: pattern (~1ms) + classifier (~4ms), 22MB, CPU-only, 90.8% accuracy |
+| [Rebuff](https://github.com/protectai/rebuff) | **Apache-2.0** | Input-focused | Heuristics + LLM + canary tokens |
+| [prompt-armor](https://github.com/prompt-security/prompt-armor) | **Apache-2.0** | Input-focused | Shannon entropy, delimiter injection, offline |
+| Lakera Guard | **Proprietary** (Check Point) | Yes | SaaS-only, not self-hostable |
+
+StackOne Defender is the direct match — Apache-2.0, purpose-built for indirect
+prompt injection in tool responses, lightweight.
+
+**Verdict: Adapt.** Evaluate StackOne Defender as the detection engine; keep
+willow-mcp's integration layer (scan-before-context-entry).
+
+### Secret scan (egress credential redaction)
+
+Scans every MCP tool response for leaked credentials and redacts before egress.
+
+| Alternative | Licence | Scans what | Runtime? |
+| --- | --- | --- | --- |
+| [detect-secrets](https://github.com/Yelp/detect-secrets) | **Apache-2.0** | Git commits/files, 27 detectors, plugin architecture | No (pre-commit/CI) |
+| [TruffleHog](https://github.com/trufflesecurity/trufflehog) | **AGPL-3.0** — excluded | Git repos, S3, Slack, 800+ secret types | No |
+| [Gitleaks](https://github.com/gitleaks/gitleaks) | MIT | Git repos | No (pre-commit/CI) |
+| [git-secrets](https://github.com/awslabs/git-secrets) | **Apache-2.0** | Git commits | No (git hooks) |
+
+Every maintained scanner targets git history. None operates as an inline filter
+on MCP tool responses. detect-secrets' 27 detector plugins could be extracted
+and run against arbitrary strings with modest adaptation.
+
+**Verdict: Compose.** Keep inline scanning architecture; adopt detect-secrets'
+detector plugins (Apache-2.0) as the pattern library.
+
+### Model egress consent gate
+
+Verifies Ollama host resolves to loopback before allowing model calls without
+`cloud_llm` consent.
+
+No external tool verifies local-inference locality from the client side. The
+2026 security literature documents the problem extensively but solutions are all
+advisory (checklists, configuration guides) or infrastructural (firewalls).
+
+**Verdict: Keep.** Simple, correct, novel, too small for an external dependency.
+
+## 10. Privacy boundaries
+
+### Exposure membrane
+
+Per-destination slicing of agent persona data. Preset profiles: telemetry
+(nothing), voice_only (register + voice rules), work_context (+ active work),
+full_seed (everything).
+
+The pattern is well-established (OAuth scopes, OIDC claims, ABAC). The
+application to agent persona data is novel. OPA (Apache-2.0) could back the
+policy rules if profile complexity grows, but four presets do not need a policy
+engine.
+
+**Verdict: Keep.**
+
+### Nest content pipeline
+
+Document ingestion with a mechanical wall: promotion carries structure but never
+content, enforced in three places. Cheapest-tier-first classification cascade
+(regex → local embeddings → local LLM). Self-learning centroid adaptation.
+
+| Alternative | Licence | What it does | Comparison |
+| --- | --- | --- | --- |
+| [Unstructured](https://github.com/Unstructured-IO/unstructured) | **Apache-2.0** | Document extraction from 25+ formats | Extraction only; no classification cascade, no content wall |
+| [Docling](https://github.com/DS4SD/docling) (IBM) | MIT | PDF/DOCX to structured output, layout-aware | Extraction only |
+| [Apache Tika](https://tika.apache.org/) | **Apache-2.0** | Format detection + text extraction | Extraction only, heavier runtime |
+| [Presidio](https://github.com/microsoft/presidio) | MIT | PII detection and anonymisation | PII audit layer; does not enforce a content/structure wall |
+
+**Verdict: Compose.** Use Unstructured or Docling for extraction, Presidio for
+PII audit. Keep the cheapest-tier-first cascade, the content/structure wall, and
+the self-learning centroids — nothing external provides any of these.
+
+## 11. Knowledge governance
+
+### Mem-ratify (epistemic tier promotion)
+
+Contested → Frontier → Canonical with independent-witness quorum and stepwise
+enforcement. Pure stdlib, fail-closed, off-by-default enforcement.
+
+No external software implements epistemic tier promotion as a mechanically
+enforced gate. Wikidata statement ranks (Normal/Preferred/Deprecated) are the
+closest shipped system but lack quorum and stepwise enforcement. Cochrane GRADE
+is advisory, not fail-closed.
+
+**Verdict: Keep.** Genuinely novel.
+
+### Schema profile
+
+Introspect database columns, propose semantic mapping with confidence tiers
+(exact/alias/unmapped), require human confirmation before write tools activate.
+
+| Alternative | Licence | What it does | Comparison |
+| --- | --- | --- | --- |
+| [OpenMetadata](https://github.com/open-metadata/OpenMetadata) | **Apache-2.0** | Metadata discovery, column profiling, lineage | Raw introspection; no semantic mapping with confidence tiers |
+| [DataHub](https://github.com/datahub-project/datahub) | **Apache-2.0** | Metadata platform, schema discovery | Same gap |
+| [Data Contract CLI](https://github.com/datacontract/datacontract-cli) | MIT | Schema contracts as reviewable artifacts | Format reference; no heuristic mapping |
+| [Airbyte](https://github.com/airbytehq/airbyte) | MIT / Elv2 | Schema detection for source connectors | Detects schema, does not map meaning |
+
+**Verdict: Compose.** Use OpenMetadata or DataHub for introspection. Keep the
+semantic mapping with confidence tiers and the human gate — no surveyed tool
+maps column meaning with graded confidence.
+
+### MarkdownAI (mai)
+
+Directive-based document format (`@markdownai v1.0`) with `@db`, `@http`,
+`@env`, `@render`, `@if/@endif`, `@constraint`, `@define-concept`. A reactive
+document engine executed within MCP.
+
+No external system matches. MDX mixes React components into Markdown (different
+paradigm). Observable notebooks are dataflow DAGs (different execution model).
+Jupyter is a kernel-based notebook (not directive-based). Notion/Coda are
+proprietary doc-database hybrids.
+
+**Verdict: Keep.** Nothing to adopt or wrap.
+
+## 12. Developer tooling
+
+### Code graph
+
+Python/JS call-graph indexer using stdlib `ast` + `sqlite3`. Token-budgeted
+context walks, blast-radius analysis, fuzzy symbol search.
+
+| Alternative | Licence | Notes |
+| --- | --- | --- |
+| [CodeGraph](https://github.com/nicholaschenai/codegraph) | MIT | 19 languages, MCP-native, benchmarked 35% cost reduction |
+| [code-review-graph](https://github.com/nichochar/code-review-graph) | MIT | 24k stars, 25+ MCP tools, blast-radius analysis |
+| tree-sitter | MIT | Multi-language AST parsing, 100+ grammars |
+| Sourcegraph / SCIP | Apache-2.0 (SCIP) | Production code intelligence |
+
+The agentic code-context space matured fast in 2026. Both CodeGraph and
+code-review-graph are further along with MCP-native support.
+
+**Verdict: Adapt.** Adopt tree-sitter for parsing breadth; wrap one of the
+MCP-native graph tools rather than maintaining a parallel stdlib-only
+implementation — unless zero-dependency is a hard constraint.
+
+## 13. Operational infrastructure
+
+### Commitment membrane
+
+Calendar-backed commitment tracking with tamper-evident ledger. Three
+disciplines: receipt-not-recording, states-not-deletions, no-new-authority.
+A "dew rule" for surfacing.
+
+Calendar AI tools (Clockwise, Reclaim.ai, Motion) are architecturally opposed —
+they all create authority (schedule meetings, block time). Commitment-contract
+tools (Beeminder, StickK) lack calendar backing and tamper evidence. No external
+tool enforces the three disciplines.
+
+**Verdict: Keep.**
+
+### Human-in-the-loop primitives
+
+Two-part system: (a) attention queue with priority and kind-based routing,
+(b) durable attestation where `attested_by` is unforgeable. Plus a human-only
+orchestrator seat that agents cannot assume.
+
+| Alternative | Licence | Comparison |
+| --- | --- | --- |
+| [Temporal](https://github.com/temporalio/temporal) human tasks | MIT | Durable workflow with human steps; no attention queue or unforgeable attestation |
+| [Netflix Conductor](https://github.com/Netflix/conductor) human tasks | **Apache-2.0** | Pause/resume with human-task states; no kind-based routing |
+| [SPIFFE/SPIRE](https://github.com/spiffe/spire) | **Apache-2.0** | Could back unforgeable `attested_by` with X.509 SVIDs |
+
+**Verdict: Compose.** Use SPIFFE for identity backing if attestation needs
+asymmetric verification. Consider Conductor for durable orchestration. Keep the
+attention queue and human-only seat — nothing provides kind-based routing with a
+seat agents cannot assume.
+
+### Forks (branch-scoped work tracking)
+
+Branch as bounded work unit with append-only change log of atoms, tasks, threads,
+and KB changes. SOIL-backed.
+
+No external tool treats a branch this way. Changesets (MIT) is the closest
+structural analogue but its domain is package versioning.
+
+**Verdict: Keep.**
+
+### Receipt log
+
+Append-only, hash-chained SQLite audit trail recording every tool call
+(ok/denied/rate_limited/error) with process-safe chaining and graduated
+announcement volume.
+
+| Alternative | Licence | Comparison |
+| --- | --- | --- |
+| [immudb](https://github.com/codenotary/immudb) | **Apache-2.0** | Merkle-tree verification; could strengthen tamper evidence |
+| [Bifrost](https://github.com/bifrost-mcp/bifrost) | **Apache-2.0** | MCP-specific audit fields |
+| [Trillian](https://github.com/google/trillian) | **Apache-2.0** | Certificate Transparency Merkle-tree log |
+
+**Verdict: Compose.** Keep the embedded SQLite log with four-outcome model.
+Study immudb for Merkle-tree verification to strengthen tamper evidence.
+
+### Vault
+
+Fernet-encrypted SQLite secret store with auto-generated keys at 0600
+permissions.
+
+Every Apache-compatible secret manager (Conjur, Infisical, OpenBao) requires
+infrastructure willow-mcp should not acquire. The Fernet+SQLite design is
+correct for a single-process server.
+
+**Verdict: Keep.** Revisit if willow-mcp runs multi-instance.
+
+### Gates panel / TUI
+
+Live authorization-state dashboard across four output surfaces (static panel,
+curses TUI, HTML, JSON API). Shows every gate with actionable rows.
+
+Authorization tools (IAM Access Analyzer, OPA Playground) manage policies. The
+Gates Panel visualizes live authorization state — different problem. The gate
+taxonomy is domain-specific.
+
+**Verdict: Keep.**
+
+### Tree view (system health)
+
+Single-call whole-system health aggregation using arboreal metaphors
+(trunk/sap/canopy/roots/rings/leaves/litter/stomata). Degradation-aware.
+
+Spring Boot Actuator (Apache-2.0) provides the best structural reference:
+composite health indicators aggregating multiple subsystem checks with
+status propagation.
+
+**Verdict: Adapt.** Adopt Actuator's composite-health-indicator architecture as
+the structural pattern. Keep the metaphor and single-call surface.
