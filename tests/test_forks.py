@@ -47,7 +47,7 @@ def test_fork_create_join_log_merge(mk_app):
     assert logged["logged"] is True
 
     listed = _fn(server.fork_list)(app_id=app, status="open")
-    assert any(r["fork_id"] == fid for r in listed)
+    assert any(r["fork_id"] == fid for r in listed["items"])
 
     st = _fn(server.fork_status)(app_id=app, fork_id=fid)
     assert st["status"] == "open"

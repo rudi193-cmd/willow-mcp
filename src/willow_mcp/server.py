@@ -59,7 +59,7 @@ from typing import Any, Optional
 from mcp.server.mcpserver import MCPServer
 from psycopg2.extras import Json
 
-from .db import Store, get_pg
+from .db import Store, get_pg, encode_cursor, decode_cursor
 from .gate import log_manifest_verify_sweep, permitted, resolve_collection_alias
 from .identity_binding import resolve_app_id
 from .receipts import ReceiptLog
@@ -1099,15 +1099,19 @@ def store_get(app_id: str, collection: str, record_id: str) -> dict:
 
 @mcp.tool(annotations=_ANNO_READ)
 @_guarded("store_list", list_error=True)
-def store_list(app_id: str, collection: str) -> list:
-    """Return every live record in one SOIL collection, oldest first, each with
-    _id/_created/_updated metadata. Unfiltered and unpaginated — prefer
-    store_search once a collection grows large, and store_collections to
-    discover collection names. Read-only; confined to your store_scope."""
+def store_list(app_id: str, collection: str,
+               limit: int = 50, cursor: Optional[str] = None) -> dict:
+    """Return live records in one SOIL collection, oldest first, each with
+    _id/_created/_updated metadata.  Paginated: returns ``{items, next_cursor}``
+    — pass the returned ``next_cursor`` as ``cursor`` to fetch the next page
+    (``next_cursor`` is ``null`` on the last page).  ``limit`` caps page size
+    (default 50).  Use store_search for filtered results, store_collections
+    to discover collection names. Read-only; confined to your store_scope."""
     from . import gate
     if not gate.collection_permitted(app_id, collection):
-        return [_collection_denied(app_id, collection)]
-    return _store.all(collection)
+        return {"items": [_collection_denied(app_id, collection)], "next_cursor": None}
+    items, next_cursor = _store.all_paginated(collection, limit=limit, cursor=cursor)
+    return {"items": items, "next_cursor": next_cursor}
 
 
 @mcp.tool(annotations=_ANNO_WRITE)
@@ -1133,15 +1137,19 @@ def store_update(
 
 @mcp.tool(annotations=_ANNO_READ)
 @_guarded("store_search", list_error=True)
-def store_search(app_id: str, collection: str, query: str) -> list:
+def store_search(app_id: str, collection: str, query: str,
+                 limit: int = 50, cursor: Optional[str] = None) -> dict:
     """Full-text search one SOIL collection: the query is split on whitespace
     and EVERY token must appear somewhere in a record's JSON (AND logic,
-    substring match). Returns matching records with _id metadata; an empty
-    query returns []. Read-only; confined to your store_scope."""
+    substring match).  Paginated: returns ``{items, next_cursor}`` — pass the
+    returned ``next_cursor`` as ``cursor`` to fetch the next page.  An empty
+    query returns ``{items: [], next_cursor: null}``.  Read-only; confined to
+    your store_scope."""
     from . import gate
     if not gate.collection_permitted(app_id, collection):
-        return [_collection_denied(app_id, collection)]
-    return _store.search(collection, query)
+        return {"items": [_collection_denied(app_id, collection)], "next_cursor": None}
+    items, next_cursor = _store.search_paginated(collection, query, limit=limit, cursor=cursor)
+    return {"items": items, "next_cursor": next_cursor}
 
 
 @mcp.tool(annotations=_ANNO_DESTRUCTIVE)
@@ -1184,13 +1192,19 @@ def store_purge_collection(app_id: str, collection: str, confirm: str = "") -> d
 
 @mcp.tool(annotations=_ANNO_READ)
 @_guarded("store_search_all", list_error=True)
-def store_search_all(app_id: str, query: str) -> list:
+def store_search_all(app_id: str, query: str,
+                     limit: int = 50, cursor: Optional[str] = None) -> dict:
     """Token-AND search across every SOIL collection you can see — all of them,
     or only your manifest's store_scope if one is set. Each hit carries a
-    _collection field naming where it was found. Use when you don't know which
-    collection holds the data; prefer store_search when you do. Read-only."""
+    _collection field naming where it was found.  Paginated: returns
+    ``{items, next_cursor}`` — pass the returned ``next_cursor`` as ``cursor``
+    to fetch the next page.  Use when you don't know which collection holds
+    the data; prefer store_search when you do. Read-only."""
     from . import gate
-    return _store.search_all(query, scope=gate.store_scope(app_id))
+    items, next_cursor = _store.search_all_paginated(
+        query, scope=gate.store_scope(app_id), limit=limit, cursor=cursor,
+    )
+    return {"items": items, "next_cursor": next_cursor}
 
 
 @mcp.tool(annotations=_ANNO_READ)
@@ -1319,14 +1333,16 @@ def lineage_why(app_id: str, query: str) -> dict:
 
 @mcp.tool(annotations=_ANNO_READ)
 @_guarded("lineage_list")
-def lineage_list(app_id: str, current_only: bool = False) -> list:
+def lineage_list(app_id: str, current_only: bool = False,
+                 limit: int = 50, cursor: Optional[str] = None) -> dict:
     """List recorded lineage atoms (id, title, whether current, tags) — the index
-    of "what parts of this willow have a recorded story". Pass current_only=True
-    to hide atoms that a later `supersedes` edge has retired."""
+    of "what parts of this willow have a recorded story". Paginated: returns
+    ``{items, next_cursor}``.  Pass current_only=True to hide atoms that a
+    later ``supersedes`` edge has retired."""
     denied = _lineage_denied(app_id)
     if denied:
-        return [denied]
-    return _lineage.list_atoms(current_only=current_only)
+        return {"items": [denied], "next_cursor": None}
+    return _lineage.list_atoms(current_only=current_only, limit=limit, cursor=cursor)
 
 
 # ── Friction floor (relationship smoke detector) ────────────────────────────────
@@ -1902,11 +1918,14 @@ def gap_list(
     topic: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 50,
-) -> list:
+    cursor: Optional[str] = None,
+) -> dict:
     """List backlog gaps, most-asked first — the fleet's shared "what we don't
-    know yet" queue. Filter by `topic` and/or `status` (open | resolved |
-    promoted); asked_count shows demand for each answer. Read-only."""
-    return gap_backlog.list_gaps(topic=topic, status=status, limit=limit)
+    know yet" queue.  Paginated: returns ``{items, next_cursor}`` — pass the
+    returned ``next_cursor`` as ``cursor`` to fetch the next page.  Filter by
+    ``topic`` and/or ``status`` (open | resolved | promoted); asked_count shows
+    demand for each answer. Read-only."""
+    return gap_backlog.list_gaps(topic=topic, status=status, limit=limit, cursor=cursor)
 
 
 @mcp.tool(annotations=_ANNO_WRITE)
@@ -2341,11 +2360,14 @@ def task_status(app_id: str, task_id: str) -> dict:
 
 @mcp.tool(annotations=_ANNO_READ)
 @_guarded("task_list")
-def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
+def task_list(app_id: str, agent: str = "kart", limit: int = 10,
+              cursor: Optional[str] = None) -> dict:
     """List tasks still waiting in the Kart queue for one worker `agent`
-    (default 'kart'), oldest first, task text truncated to 80 chars. Answers
-    "what is queued to run" — use task_status for one task's full detail.
-    Requires the fleet Postgres. Read-only."""
+    (default 'kart'), oldest first, task text truncated to 80 chars.  Paginated:
+    returns ``{pending, next_cursor}`` — pass the returned ``next_cursor`` as
+    ``cursor`` to fetch the next page.  Answers "what is queued to run" — use
+    task_status for one task's full detail.  Requires the fleet Postgres.
+    Read-only."""
     pg = get_pg()
     if not pg:
         return _postgres_unavailable()
@@ -2359,21 +2381,39 @@ def task_list(app_id: str, agent: str = "kart", limit: int = 10) -> dict:
     if id_col is None or status_col is None or agent_col is None:
         return {"error": "schema_unusable: 'tasks' table has no mappable 'task_id', 'status', or 'agent' column"}
 
+    sort_col = fields["created_at"]["column"] or id_col
     listed_fields = ["task_id", "task", "submitted_by", "created_at"]
     select_clause, present, unmapped = _build_select(listed_fields, fields)
     cur = pg.cursor()
-    cur.execute(
-        f'SELECT {select_clause} FROM tasks WHERE "{status_col}" = \'pending\' AND "{agent_col}" = %s '  # nosec B608 - select_clause/status_col/agent_col/created_at column come from the confirmed schema_profile field mapping, not request input; agent/limit are bound params
-        f'ORDER BY "{fields["created_at"]["column"] or id_col}" LIMIT %s',
-        (agent, limit)
-    )
+    if cursor:
+        after_val = decode_cursor(cursor)
+        cur.execute(
+            f'SELECT {select_clause} FROM tasks WHERE "{status_col}" = \'pending\' AND "{agent_col}" = %s '  # nosec B608 - column names come from confirmed schema_profile mapping
+            f'AND "{sort_col}" > %s '
+            f'ORDER BY "{sort_col}" LIMIT %s',
+            (agent, after_val, limit + 1)
+        )
+    else:
+        cur.execute(
+            f'SELECT {select_clause} FROM tasks WHERE "{status_col}" = \'pending\' AND "{agent_col}" = %s '  # nosec B608 - select_clause/status_col/agent_col/created_at column come from the confirmed schema_profile field mapping, not request input; agent/limit are bound params
+            f'ORDER BY "{sort_col}" LIMIT %s',
+            (agent, limit + 1)
+        )
     rows = cur.fetchall()
     cur.close()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
     pending = [_row_to_dict(r, present, unmapped) for r in rows]
     for p in pending:
         if p.get("task"):
             p["task"] = p["task"][:80]
-    result = {"pending": pending}
+    next_cursor = None
+    if has_more and pending:
+        # Use the sort column value from the last row as the cursor key
+        last = pending[-1]
+        cursor_val = str(last.get("created_at") or last.get("task_id", ""))
+        next_cursor = encode_cursor(cursor_val)
+    result = {"pending": pending, "next_cursor": next_cursor}
     if unmapped:
         result["_unmapped"] = unmapped
     return result
@@ -3030,18 +3070,22 @@ def dispatch_list(
     from_app: str = "",
     status: str = "",
     limit: int = 20,
+    cursor: Optional[str] = None,
 ) -> dict:
     """List dispatch packets newest-first, filtered by any combination of
-    to_app / from_app / status ('' = no filter). Returns packet metadata only,
-    no assignment bodies — use dispatch_read for one packet's brief.
-    Read-only. Returns {dispatches, total, unverified, unverified_total} --
-    `dispatches` only carries packets whose meta.json HMAC signature
-    verified (B-52, issue #241); a packet with no signature (legacy,
-    pre-dates signing) or a wrong one (tampered/forged) is never mixed into
-    it, instead appearing in `unverified` with `unverified: true` and a
-    `signature_status` of `legacy_unsigned` or `invalid`."""
+    to_app / from_app / status ('' = no filter).  Paginated: returns
+    ``{dispatches, total, unverified, unverified_total, next_cursor}`` — pass
+    the returned ``next_cursor`` as ``cursor`` to fetch the next page.
+    Returns packet metadata only, no assignment bodies — use dispatch_read
+    for one packet's brief.  Read-only. ``dispatches`` only carries packets
+    whose meta.json HMAC signature verified (B-52, issue #241); a packet with
+    no signature (legacy, pre-dates signing) or a wrong one (tampered/forged)
+    is never mixed into it, instead appearing in ``unverified`` with
+    ``unverified: true`` and a ``signature_status`` of ``legacy_unsigned`` or
+    ``invalid``."""
     return dispatch_stack.dispatch_list(
-        to_app=to_app, from_app=from_app, status=status, limit=limit
+        to_app=to_app, from_app=from_app, status=status, limit=limit,
+        cursor=cursor,
     )
 
 
@@ -3656,19 +3700,32 @@ def context_get(app_id: str, key: str) -> dict:
 
 @mcp.tool(annotations=_ANNO_WRITE)
 @_guarded("context_list")
-def context_list(app_id: str) -> dict:
+def context_list(app_id: str, limit: int = 50,
+                 cursor: Optional[str] = None) -> dict:
     """List your saved context keys with save/expiry times (values omitted —
-    use context_get). Expired entries are skipped and purged."""
+    use context_get).  Paginated: returns ``{contexts, next_cursor}`` — pass
+    the returned ``next_cursor`` as ``cursor`` to fetch the next page.
+    Expired entries are skipped and purged."""
     coll = _ctx_collection(app_id)
+    after_key = decode_cursor(cursor) if cursor else ""
     out = []
     for rec in _store.all(coll):
         key = rec.get("_ctx_key") or rec.get("_id")
         if _ctx_expired(rec):
             _store.delete(coll, key)
             continue
+        if after_key and key <= after_key:
+            continue
         out.append({"key": key, "saved_at": rec.get("_ctx_saved_at"),
                     "expires_at": rec.get("_ctx_expires_at")})
-    return {"contexts": out}
+    out.sort(key=lambda r: r["key"])
+    limit = max(1, limit)
+    has_more = len(out) > limit
+    items = out[:limit]
+    next_cursor = None
+    if has_more and items:
+        next_cursor = encode_cursor(items[-1]["key"])
+    return {"contexts": items, "next_cursor": next_cursor}
 
 
 @mcp.tool(annotations=_ANNO_DESTRUCTIVE)
@@ -4986,9 +5043,12 @@ def commitment_surface(app_id: str, now: str = "", lead_minutes: int = 15) -> di
 
 @mcp.tool(annotations=_ANNO_READ)
 @_guarded("commitment_list")
-def commitment_list(app_id: str, state: str = "") -> dict:
+def commitment_list(app_id: str, state: str = "",
+                    limit: int = 50, cursor: Optional[str] = None) -> dict:
     """List the operator's persisted commitments as FACTS only (uid/title/when/who/
-    state/acknowledged/history length) — never the event body. Read-only. `state`
+    state/acknowledged/history length) — never the event body.  Paginated: returns
+    ``{status, count, commitments, next_cursor}`` — pass the returned
+    ``next_cursor`` as ``cursor`` to fetch the next page.  Read-only. ``state``
     filters to ACTIVE or WITHDRAWN (case-insensitive); omit for all."""
     want = state.strip().upper()
     if want and want not in ("ACTIVE", "WITHDRAWN"):
@@ -4997,7 +5057,25 @@ def commitment_list(app_id: str, state: str = "") -> dict:
     rows = [_commitment_fact(c) for c in ledger.commitments.values()
             if not want or c.state.name == want]
     rows.sort(key=lambda r: r["when"])
-    return {"status": "ok", "count": len(rows), "commitments": rows}
+    if cursor:
+        after_when = decode_cursor(cursor)
+        # Cursor encodes "when\x00uid" for tie-breaking
+        parts = after_when.split("\x00", 1)
+        if len(parts) == 2:
+            aw, au = parts
+        else:
+            aw, au = parts[0], ""
+        rows = [r for r in rows
+                if r["when"] > aw or (r["when"] == aw and r.get("uid", "") > au)]
+    limit = max(1, limit)
+    has_more = len(rows) > limit
+    items = rows[:limit]
+    next_cursor = None
+    if has_more and items:
+        last = items[-1]
+        next_cursor = encode_cursor(f"{last['when']}\x00{last.get('uid', '')}")
+    return {"status": "ok", "count": len(items), "commitments": items,
+            "next_cursor": next_cursor}
 
 
 # ── code_graph — a local, budget-aware symbol graph (willow-2.0 port) ───────────
@@ -5338,15 +5416,18 @@ def fork_status(app_id: str, fork_id: str) -> dict:
 
 @mcp.tool(annotations=_ANNO_READ)
 @_guarded("fork_list", list_error=True)
-def fork_list(app_id: str, status: str = "open") -> list:
+def fork_list(app_id: str, status: str = "open",
+              limit: int = 50, cursor: Optional[str] = None) -> dict:
     """List forks in one state — 'open' (default), 'merged', or 'deleted' —
-    as summary records, so you can find in-flight work units. Use fork_status
-    for one fork's full change log. Read-only."""
+    as summary records, so you can find in-flight work units.  Paginated:
+    returns ``{items, next_cursor}`` — pass the returned ``next_cursor`` as
+    ``cursor`` to fetch the next page.  Use fork_status for one fork's full
+    change log. Read-only."""
     from . import forks
     try:
-        return forks.list_forks(_store, status=status)
+        return forks.list_forks(_store, status=status, limit=limit, cursor=cursor)
     except forks.ForkError as e:
-        return [{"error": str(e)}]
+        return {"items": [{"error": str(e)}], "next_cursor": None}
 
 
 @mcp.tool(annotations=_ANNO_READ)

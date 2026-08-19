@@ -198,5 +198,5 @@ def test_no_tags_no_siblings(lin):
 
 def test_list_current_only_hides_superseded(lin):
     _seed_supersession(lin)
-    assert {a["id"] for a in lin.list_atoms()} == {"old", "new"}
-    assert {a["id"] for a in lin.list_atoms(current_only=True)} == {"new"}
+    assert {a["id"] for a in lin.list_atoms()["items"]} == {"old", "new"}
+    assert {a["id"] for a in lin.list_atoms(current_only=True)["items"]} == {"new"}

@@ -160,7 +160,7 @@ def test_store_delete_is_durable_through_store_put(app_id):
 
     assert "error" in server.store_get(app_id=app_id, collection="col", record_id=rid)
     assert all(r.get("v") != "ATTACKER"
-               for r in server.store_list(app_id=app_id, collection="col"))
+               for r in server.store_list(app_id=app_id, collection="col")["items"])
 
 
 def test_guarded_denies_unpermitted_app_id(tmp_path, monkeypatch):
@@ -264,15 +264,15 @@ def test_store_get_denied_outside_scope(scoped_app_id):
 
 def test_store_list_denied_outside_scope_is_list_shaped(scoped_app_id):
     result = server.store_list(app_id=scoped_app_id, collection="agents")
-    assert isinstance(result, list)
-    assert len(result) == 1
-    assert "collection_denied" in result[0]["error"]
+    assert isinstance(result, dict)
+    assert len(result["items"]) == 1
+    assert "collection_denied" in result["items"][0]["error"]
 
 
 def test_store_search_denied_outside_scope_is_list_shaped(scoped_app_id):
     result = server.store_search(app_id=scoped_app_id, collection="agents", query="x")
-    assert isinstance(result, list)
-    assert "collection_denied" in result[0]["error"]
+    assert isinstance(result, dict)
+    assert "collection_denied" in result["items"][0]["error"]
 
 
 def test_store_update_denied_outside_scope(scoped_app_id):
@@ -301,10 +301,10 @@ def test_store_search_all_confines_to_scope(scoped_app_id):
     server.store_put(app_id="unscopedadmin", collection="agents", record={"content": "b24marker findme"})
 
     scoped_results = server.store_search_all(app_id=scoped_app_id, query="b24marker")
-    assert {r.get("_collection") for r in scoped_results} == {"b24_scoped_notes"}
+    assert {r.get("_collection") for r in scoped_results["items"]} == {"b24_scoped_notes"}
 
     unscoped_results = server.store_search_all(app_id="unscopedadmin", query="b24marker")
-    assert {r.get("_collection") for r in unscoped_results} == {"b24_scoped_notes", "agents"}
+    assert {r.get("_collection") for r in unscoped_results["items"]} == {"b24_scoped_notes", "agents"}
 
 
 def test_store_put_unscoped_app_unaffected(app_id):
@@ -1458,10 +1458,11 @@ def test_task_list_filters_by_status_and_agent(app_id, monkeypatch):
 
     assert result["pending"][0]["task_id"] == "T1"
     assert len(result["pending"][0]["task"]) == 80  # truncated
+    assert result["next_cursor"] is None  # single row, no more pages
     select_sql, params = fake.executed[-1]
     assert '"status" = \'pending\'' in select_sql
     assert '"agent" = %s' in select_sql
-    assert params == ("kart", 5)
+    assert params == ("kart", 6)  # limit + 1 for has_more detection
 
 
 def test_fleet_health_counts_by_mapped_status_column(app_id, monkeypatch, tmp_path):
@@ -1568,8 +1569,8 @@ def test_gap_log_and_list_round_trip(app_id):
     logged = server.gap_log(app_id=app_id, topic="t-server", question="What is the accent color?")
     assert logged["status"] == "open"
 
-    rows = server.gap_list(app_id=app_id, topic="t-server")
-    assert any(r["question"] == "What is the accent color?" for r in rows)
+    result = server.gap_list(app_id=app_id, topic="t-server")
+    assert any(r["question"] == "What is the accent color?" for r in result["items"])
 
 
 def test_gap_resolve_marks_bookkeeping_status(app_id):
@@ -1632,8 +1633,8 @@ def test_gap_promote_writes_knowledge_and_closes_gap(app_id, monkeypatch):
     insert_sql, params = fake.executed[-1]
     assert insert_sql.startswith("INSERT INTO knowledge")
 
-    rows = server.gap_list(app_id=app_id, topic="t-server-promote-3", status="promoted")
-    assert rows and rows[0]["promoted_to"] == result["id"]
+    gap_result = server.gap_list(app_id=app_id, topic="t-server-promote-3", status="promoted")
+    assert gap_result["items"] and gap_result["items"][0]["promoted_to"] == result["id"]
 
 
 def test_gap_promote_missing_gap_errors(app_id, monkeypatch):
@@ -1876,13 +1877,13 @@ def test_store_purge_collection_soft_deletes_all(tmp_path, monkeypatch):
                      {"permissions": ["full_access"], "store_scope": ["purge_uniq_*"]})
     for i in range(3):
         server.store_put(app_id=app, collection="purge_uniq_c", record={"i": i})
-    assert len(server.store_list(app_id=app, collection="purge_uniq_c")) == 3
+    assert len(server.store_list(app_id=app, collection="purge_uniq_c")["items"]) == 3
 
     result = server.store_purge_collection(app_id=app, collection="purge_uniq_c",
                                            confirm="purge_uniq_c")
     assert result == {"purged": 3, "collection": "purge_uniq_c"}
     # gone from reads (soft-delete: invisible to list/search)
-    assert server.store_list(app_id=app, collection="purge_uniq_c") == []
+    assert server.store_list(app_id=app, collection="purge_uniq_c")["items"] == []
 
 
 def test_store_purge_collection_requires_confirm(tmp_path, monkeypatch):
@@ -1901,7 +1902,7 @@ def test_store_purge_collection_requires_confirm(tmp_path, monkeypatch):
     result = server.store_purge_collection(app_id=app, collection="pc_x")  # no confirm
     assert result["error"] == "confirm_required"
     # nothing purged — record still there
-    assert len(server.store_list(app_id=app, collection="pc_x")) == 1
+    assert len(server.store_list(app_id=app, collection="pc_x")["items"]) == 1
 
 
 def test_store_purge_collection_denied_outside_scope(tmp_path, monkeypatch):
@@ -1976,13 +1977,13 @@ def test_store_stats_requires_store_read(tmp_path, monkeypatch):
 def test_gap_delete_removes_from_list(app_id):
     logged = server.gap_log(app_id=app_id, topic="gd_uniq", question="junk fixture q")
     gid = logged["id"]
-    assert any(g.get("_id") == gid for g in server.gap_list(app_id=app_id, topic="gd_uniq"))
+    assert any(g.get("_id") == gid for g in server.gap_list(app_id=app_id, topic="gd_uniq")["items"])
 
     res = server.gap_delete(app_id=app_id, gap_id=gid)
     assert res["deleted"] is True
     assert res["id"] == gid
     # gone from the backlog view (soft-deleted, but invisible to list)
-    assert not any(g.get("_id") == gid for g in server.gap_list(app_id=app_id, topic="gd_uniq"))
+    assert not any(g.get("_id") == gid for g in server.gap_list(app_id=app_id, topic="gd_uniq")["items"])
 
 
 def test_gap_delete_not_found(app_id):
@@ -2017,7 +2018,7 @@ def test_gap_purge_topic_purges_and_protects_promoted(app_id):
     res = server.gap_purge_topic(app_id=app_id, topic="pt_uniq", confirm="pt_uniq")
     assert res["purged"] == 2
     assert res["skipped_promoted"] == 1
-    ids = {g.get("_id") for g in server.gap_list(app_id=app_id, topic="pt_uniq")}
+    ids = {g.get("_id") for g in server.gap_list(app_id=app_id, topic="pt_uniq")["items"]}
     assert g1 not in ids and g2 not in ids   # junk gone
     assert gp in ids                          # promoted survives, protected
 
@@ -2026,7 +2027,7 @@ def test_gap_purge_topic_requires_confirm(app_id):
     server.gap_log(app_id=app_id, topic="pt_confirm", question="x")
     res = server.gap_purge_topic(app_id=app_id, topic="pt_confirm")
     assert res["error"] == "confirm_required"
-    assert len(server.gap_list(app_id=app_id, topic="pt_confirm")) == 1  # untouched
+    assert len(server.gap_list(app_id=app_id, topic="pt_confirm")["items"]) == 1  # untouched
 
 
 def test_gap_purge_topic_needs_its_own_group_not_gap_write(tmp_path, monkeypatch):
