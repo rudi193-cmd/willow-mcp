@@ -55,17 +55,10 @@ def registered_tool_count() -> int:
 
 def total_tool_surface_count() -> int:
     """Every @mcp.tool(...) registration across all three tool-hosting
-    modules — server.py (114) + grove_tools.py (20, unconditional) +
-    mai/tools.py (10, gated on WILLOW_MCP_MARKDOWNAI=1) = 144. This is what
-    `tools/list` actually returns at runtime with mai enabled, and what
-    tests/test_annotation_consistency.py's _all_tool_annotations() counts.
-
-    Found (2026-08-19): PRIOR_ART.md's survey prose said "~110 tools" in
-    four places and "142 tools" in two more, both stale — the real total
-    had moved to 144 (114 + 20 grove + 10 mai) and nothing checked either
-    number. registered_tool_count() alone can't be the ground truth for
-    these claims: it only sees server.py and would have silently pinned the
-    lint to the wrong (114) total."""
+    modules — server.py, grove_tools.py (unconditional), and mai/tools.py
+    (gated on WILLOW_MCP_MARKDOWNAI=1). This is what `tools/list` returns
+    at runtime with mai enabled, and what
+    tests/test_annotation_consistency.py's _all_tool_annotations() counts."""
     total = 0
     for rel in (
         "src/willow_mcp/server.py",
@@ -73,7 +66,7 @@ def total_tool_surface_count() -> int:
         "src/willow_mcp/mai/tools.py",
     ):
         text = (_REPO / rel).read_text(encoding="utf-8")
-        total += len(re.findall(r"@mcp\.tool\(", text))
+        total += len(re.findall(r"(?m)^\s*@mcp\.tool\(", text))
     return total
 
 
@@ -150,6 +143,8 @@ _LIVE_COUNT_CLAIMS = [
      "the N willow-mcp tools", registered_tool_count),
     ("README.md", r"\((\d+) groups\)",
      "(N groups)", permission_group_count),
+    ("docs/design/nestor-tool-route.md", r"exposes (\d+) tools",
+     "exposes N tools", total_tool_surface_count),
     ("docs/PRIOR_ART.md", r"`willow-mcp`'s (\d+)-tool surface",
      "`willow-mcp`'s N-tool surface", total_tool_surface_count),
     ("docs/PRIOR_ART.md", r"all (\d+) tools annotated",
