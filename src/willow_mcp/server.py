@@ -514,6 +514,15 @@ from willow_mcp import grove_tools as _grove_tools
 _grove_tools.register(mcp)
 
 
+# ── MCP Resources — URI-addressable read-only data (2026-07-28 spec) ──────────
+# KB atoms and Store records exposed as MCP Resources: clients fetch them into
+# context on demand via resources/list and resources/read. See resources.py
+# header and docs/PRIOR_ART.md "Resources (adopt — high priority)".
+from willow_mcp import resources as _resources
+
+_resources.register(mcp, _store)
+
+
 # ── Gate helper ────────────────────────────────────────────────────────────────
 
 def _resolve_serve_identity() -> tuple[Optional[str], Optional[dict]]:
