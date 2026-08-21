@@ -18,11 +18,36 @@ from .project_wiring import (
     resolve_willow_mcp_python,
 )
 
+#: MCP servers this renderer can materialize besides willow-mcp itself. A name
+#: outside this table raises in `_static_server_block` rather than rendering a
+#: block nobody can launch.
+#:
+#: These are launched by the IDE directly and are NOT manifest-gated: they get
+#: no WILLOW_APP_ID, so willow-mcp's permission groups, store_scope and PGP
+#: signature check do not apply. That is the existing shape — codebase-memory-mcp
+#: has no manifest in mcp_apps/ — and it is worth knowing before adding a server
+#: that reaches the network or holds a key.
 _STATIC_SERVERS: dict[str, dict[str, Any]] = {
     "codebase-memory-mcp": {
         "type": "stdio",
         "command": "${HOME}/.local/bin/codebase-memory-mcp",
         "args": [],
+    },
+    # Nestor's verified corpus over stdio: the model may ask and propose, and
+    # cannot seal. Sealing is a human at `nestor.ui`. --read-only is belt to
+    # that braces.
+    #
+    # NESTOR_DB is load-bearing here, not decoration. `nestor` resolves its
+    # store from $NESTOR_DB, then $NESTOR_HOME/keep, then a CWD-RELATIVE
+    # default — so unpinned, every project would serve a different and usually
+    # empty corpus resolved from wherever the IDE started the process, and each
+    # one would look healthy. The per-project `server_env` supplies the pin;
+    # nestor raises PinRefused on a bad one rather than falling back, so a typo
+    # fails loudly instead of forking the corpus.
+    "nestor": {
+        "type": "stdio",
+        "command": "${HOME}/github/Die-Namic-Systems/nestor/.venv/bin/nestor",
+        "args": ["serve", "--read-only"],
     },
 }
 
